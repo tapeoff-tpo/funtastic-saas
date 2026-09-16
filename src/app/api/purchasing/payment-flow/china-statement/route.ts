@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data)
   } catch (error) {
     return NextResponse.json({
-      error: error instanceof Error ? error.message : '중국 정산내역을 불러오지 못했습니다.',
+      error: error instanceof Error ? error.message : '중국 입금내역을 불러오지 못했습니다.',
     }, { status: 400 })
   }
 }
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   const body = importSchema.safeParse(await request.json().catch(() => null))
   if (!body.success) {
-    return NextResponse.json({ error: '중국 정산내역의 날짜·금액·총합을 확인해주세요.' }, { status: 400 })
+    return NextResponse.json({ error: '중국 입금내역의 날짜·금액·총합을 확인해주세요.' }, { status: 400 })
   }
 
   try {
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result)
   } catch (error) {
     return NextResponse.json({
-      error: error instanceof Error ? error.message : '중국 정산내역을 저장하지 못했습니다.',
+      error: error instanceof Error ? error.message : '중국 입금내역을 저장하지 못했습니다.',
     }, { status: 400 })
   }
 }

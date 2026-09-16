@@ -30,7 +30,7 @@ export async function DELETE(
     return NextResponse.json(result)
   } catch (error) {
     return NextResponse.json({
-      error: error instanceof Error ? error.message : '중국 정산내역을 취소하지 못했습니다.',
+      error: error instanceof Error ? error.message : '중국 입금내역을 취소하지 못했습니다.',
     }, { status: 400 })
   }
 }

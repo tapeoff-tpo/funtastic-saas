@@ -224,7 +224,7 @@ export async function voidLatestChinaFundStatementBatch(input: {
       )
       .limit(1)
 
-    if (!latest) throw new Error('취소할 중국 정산내역이 없습니다.')
+    if (!latest) throw new Error('취소할 중국 입금내역이 없습니다.')
     if (latest.importBatchId !== input.importBatchId) {
       throw new Error('원장 연결을 보호하기 위해 가장 최근에 입력한 묶음부터 취소할 수 있습니다.')
     }
@@ -346,8 +346,8 @@ export async function getChinaFundStatementEntries(input: {
 }
 
 export function normalizeStatementEntries(entries: ChinaFundStatementInputRow[]) {
-  if (entries.length === 0) throw new Error('저장할 중국 정산내역이 없습니다.')
-  if (entries.length > 500) throw new Error('중국 정산내역은 한 번에 최대 500건까지 저장할 수 있습니다.')
+  if (entries.length === 0) throw new Error('저장할 중국 입금내역이 없습니다.')
+  if (entries.length > 500) throw new Error('중국 입금내역은 한 번에 최대 500건까지 저장할 수 있습니다.')
 
   const normalized = entries.map((entry, index) => {
     if (!isCalendarDate(entry.occurredOn)) {

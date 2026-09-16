@@ -20,7 +20,7 @@ export function ChinaFundStatementPanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [sourceLabel, setSourceLabel] = useState('중국 정산표 직접 입력')
+  const [sourceLabel, setSourceLabel] = useState('중국 입금현황 직접 입력')
   const [pasteText, setPasteText] = useState('')
   const [saving, setSaving] = useState(false)
   const parsed = useMemo(() => parseChinaFundStatementText(pasteText), [pasteText])
@@ -43,10 +43,10 @@ export function ChinaFundStatementPanel() {
         cache: 'no-store',
       })
       const body = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(body.error ?? '중국 정산내역을 불러오지 못했습니다.')
+      if (!response.ok) throw new Error(body.error ?? '중국 입금내역을 불러오지 못했습니다.')
       setData(body as ChinaFundStatementList)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '중국 정산내역을 불러오지 못했습니다.')
+      setError(loadError instanceof Error ? loadError.message : '중국 입금내역을 불러오지 못했습니다.')
     } finally {
       setLoading(false)
     }
@@ -71,7 +71,7 @@ export function ChinaFundStatementPanel() {
         }),
       })
       const body = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(body.error ?? '중국 정산내역을 저장하지 못했습니다.')
+      if (!response.ok) throw new Error(body.error ?? '중국 입금내역을 저장하지 못했습니다.')
 
       const duplicateCount = Number(body.duplicateCount ?? 0)
       toast.success(
@@ -84,7 +84,7 @@ export function ChinaFundStatementPanel() {
       setShowEntries(true)
       await loadEntries()
     } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : '중국 정산내역을 저장하지 못했습니다.')
+      toast.error(saveError instanceof Error ? saveError.message : '중국 입금내역을 저장하지 못했습니다.')
     } finally {
       setSaving(false)
     }
@@ -97,29 +97,29 @@ export function ChinaFundStatementPanel() {
   }
 
   async function voidImportBatch(importBatchId: string) {
-    if (!window.confirm('가장 최근에 입력한 중국 정산내역 묶음 전체를 취소할까요? 취소 후 다시 입력할 수 있습니다.')) return
+    if (!window.confirm('가장 최근에 입력한 중국 입금내역 묶음 전체를 취소할까요? 취소 후 다시 입력할 수 있습니다.')) return
     setLoading(true)
     try {
       const response = await fetch(`/api/purchasing/payment-flow/china-statement/${importBatchId}`, {
         method: 'DELETE',
       })
       const body = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(body.error ?? '중국 정산내역을 취소하지 못했습니다.')
+      if (!response.ok) throw new Error(body.error ?? '중국 입금내역을 취소하지 못했습니다.')
       toast.success(`${Number(body.voidedCount ?? 0).toLocaleString('ko-KR')}건을 취소했습니다.`)
       await loadEntries(from, to, 1)
     } catch (voidError) {
-      setError(voidError instanceof Error ? voidError.message : '중국 정산내역을 취소하지 못했습니다.')
+      setError(voidError instanceof Error ? voidError.message : '중국 입금내역을 취소하지 못했습니다.')
       setLoading(false)
     }
   }
 
   return (
-    <section className="space-y-3 border-t pt-4" aria-label="중국 정산원장">
+    <section className="space-y-3 border-t pt-4" aria-label="중국 입금현황">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">중국 정산원장</h3>
+          <h3 className="text-sm font-semibold">중국 입금현황</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            중국 표의 부호를 그대로 저장합니다. +는 중국 선결제, -는 우리 입금이며 기존 자동 발주차감과 합산하지 않습니다.
+            중국 입금표의 부호를 그대로 저장합니다. +는 중국 선결제, -는 우리 입금이며 기존 자동 발주차감과 합산하지 않습니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -128,14 +128,14 @@ export function ChinaFundStatementPanel() {
               render={(props) => (
                 <Button {...props} type="button" size="sm" variant="outline">
                   <Plus />
-                  정산내역 입력
+                  입금내역 입력
                 </Button>
               )}
             />
             <Dialog.Portal>
               <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
               <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
-                <Dialog.Title className="text-base font-semibold">중국 정산내역 입력</Dialog.Title>
+                <Dialog.Title className="text-base font-semibold">중국 입금내역 입력</Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm text-muted-foreground">
                   엑셀에서 날짜·금액·총합 세 열을 복사해 그대로 붙여넣으세요. 총합 계산이 맞는 행만 저장됩니다.
                 </Dialog.Description>
@@ -151,7 +151,7 @@ export function ChinaFundStatementPanel() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="china-statement-paste">정산표 붙여넣기</Label>
+                    <Label htmlFor="china-statement-paste">입금현황 붙여넣기</Label>
                     <textarea
                       id="china-statement-paste"
                       value={pasteText}
@@ -236,7 +236,7 @@ export function ChinaFundStatementPanel() {
           {data ? (
             <>
               <div className="grid gap-2 sm:grid-cols-3">
-                <StatementSummary label="현재 중국 기준 총합" value={currentBalanceLabel(data.currentBalanceCny)} detail={data.currentBalanceAsOf ? `${data.currentBalanceAsOf} 기준` : '등록 내역 없음'} />
+                <StatementSummary label="현재 중국 잔액" value={currentBalanceLabel(data.currentBalanceCny)} detail={data.currentBalanceAsOf ? `${data.currentBalanceAsOf} 기준` : '등록 내역 없음'} />
                 <StatementSummary label="조회기간 중국 선결제" value={`+${formatCny(data.periodAdvanceCny)} 元`} detail="우리 미지급 증가" />
                 <StatementSummary label="조회기간 우리 입금" value={`-${formatCny(data.periodRemittanceCny)} 元`} detail="우리 미지급 감소" />
               </div>
@@ -254,7 +254,7 @@ export function ChinaFundStatementPanel() {
                   </thead>
                   <tbody>
                     {data.entries.length === 0 ? (
-                      <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">선택한 기간의 정산내역이 없습니다.</td></tr>
+                      <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">선택한 기간의 입금내역이 없습니다.</td></tr>
                     ) : data.entries.map((entry) => (
                       <tr key={entry.id} className="border-t">
                         <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{entry.occurredOn}</td>
@@ -292,7 +292,7 @@ export function ChinaFundStatementPanel() {
                 </div>
               </div>
             </>
-          ) : loading ? <p className="py-6 text-center text-sm text-muted-foreground">정산내역을 불러오는 중입니다.</p> : null}
+          ) : loading ? <p className="py-6 text-center text-sm text-muted-foreground">입금내역을 불러오는 중입니다.</p> : null}
         </div>
       ) : null}
     </section>

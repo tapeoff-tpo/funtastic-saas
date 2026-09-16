@@ -849,7 +849,7 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
           <h3 className="text-sm font-semibold">{owner.displayName}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {showSaveButton
-              ? '이 표 안에서 여러 상품을 추가하고 한 번에 저장할 수 있습니다. 긴 텍스트는 셀 높이가 자동으로 늘어납니다.'
+              ? '이 표 안에서 여러 상품을 추가하고 한 번에 저장할 수 있습니다. 상품명과 옵션은 긴 내용에 맞춰 높이가 늘어납니다.'
               : '메인 위쪽의 전체 변경사항 저장으로 모든 등록자 표를 함께 저장합니다.'}
           </p>
         </div>
@@ -938,13 +938,11 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Input
+                    <SingleLineCellInput
                       type="url"
                       value={row.chinaPurchaseUrl}
-                      onChange={(event) => updateRow(row.clientId, { chinaPurchaseUrl: event.target.value })}
+                      onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })}
                       placeholder="https://detail.1688.com/..."
-                      title={row.chinaPurchaseUrl || undefined}
-                      className="h-8 min-w-0 px-1.5 text-xs"
                     />
                   </TableCell>
                   <TableCell>
@@ -955,11 +953,11 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                   <TableCell><ShippingCostCell row={row} onChange={(patch) => updateRow(row.clientId, patch)} /></TableCell>
                   <TableCell><NumericCell value={row.exchangeRateKrw} onChange={(value) => updateRow(row.clientId, { exchangeRateKrw: value })} placeholder="원/¥" decimal /></TableCell>
                   <TableCell><div className="min-h-8 rounded-md border bg-muted/40 px-2 py-1.5 text-right font-semibold">{won(calculatedCost)}</div></TableCell>
-                  <TableCell><AutoGrowTextarea value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
+                  <TableCell><SingleLineCellInput type="url" value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
                   <TableCell><NumericCell value={row.domesticSalePrice} onChange={(value) => updateRow(row.clientId, { domesticSalePrice: value })} placeholder="원" /></TableCell>
-                  <TableCell><AutoGrowTextarea value={row.detailPageUrl} onChange={(value) => updateRow(row.clientId, { detailPageUrl: value })} placeholder="상세페이지 참고 URL" /></TableCell>
-                  <TableCell><AutoGrowTextarea value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
-                  <TableCell><AutoGrowTextarea value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
+                  <TableCell><SingleLineCellInput type="url" value={row.detailPageUrl} onChange={(value) => updateRow(row.clientId, { detailPageUrl: value })} placeholder="상세페이지 참고 URL" /></TableCell>
+                  <TableCell><SingleLineCellInput value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
+                  <TableCell><SingleLineCellInput value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
                   {showOwnerColumn ? (
                     <TableCell>
                       <select value={row.ownerOperatorId ?? ''} onChange={(event) => updateRow(row.clientId, { ownerOperatorId: event.target.value || null })} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
@@ -1102,7 +1100,9 @@ function ReadOnlyLink({ value, label }: { value: string | null | undefined; labe
         <span className="truncate">{label}</span>
       </a>
     </div>
-  ) : <ReadOnlyText value={value} />
+  ) : value ? (
+    <span className="block truncate leading-5" title={value}>{value}</span>
+  ) : <span className="text-muted-foreground">-</span>
 }
 
 function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourcingReviewStatus; passedNewProductId: string | null }) {
@@ -1187,6 +1187,24 @@ function effectiveUnitShippingCny(row: Pick<DraftRow, 'shippingChargeType' | 'sh
   if (row.shippingChargeType === 'unit') return fee
   const quantity = numberValue(row.shippingBundleQuantity)
   return fee != null && quantity != null && quantity > 0 ? fee / quantity : null
+}
+
+function SingleLineCellInput({ value, onChange, placeholder, type = 'text' }: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  type?: 'text' | 'url'
+}) {
+  return (
+    <Input
+      type={type}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      title={value || undefined}
+      className="h-8 min-w-0 px-1.5 text-xs"
+    />
+  )
 }
 
 function AutoGrowTextarea({ value, onChange, placeholder }: {

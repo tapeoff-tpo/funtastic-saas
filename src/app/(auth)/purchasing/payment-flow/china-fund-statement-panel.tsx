@@ -330,7 +330,7 @@ export function ChinaFundStatementPanel() {
             />
             <Dialog.Portal>
               <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-              <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
+              <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(960px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
                 <Dialog.Title className="text-base font-semibold">중국 입금내역 입력</Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm text-muted-foreground">
                   표에 날짜와 금액을 입력하세요. 날짜는 달력에서 고르고 거래 후 총합은 자동 계산됩니다. 중복 행은 자동으로 제외됩니다.

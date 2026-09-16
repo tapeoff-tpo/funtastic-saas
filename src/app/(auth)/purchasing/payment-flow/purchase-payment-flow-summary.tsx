@@ -30,12 +30,24 @@ export function PurchasePaymentFlowSummaryPanel({
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="발주금액 분류">
-        <PurchaseFlowCard label="발주금액 총액" view="total" summary={summary.total} description="현재 진행 중 발주" active={activeView === 'total'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="구매 전 단계의 발주요청 건" active={activeView === 'purchase_before'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="결제 대기 (미결제 잔액)" view="outstanding" summary={summary.outstanding} description="대량결제대기를 제외한 주문서번호 미등록 건" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="구매 완료" view="purchase_completed" summary={summary.purchaseCompleted} description="주문서번호 등록 완료" active={activeView === 'purchase_completed'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="대량결제대기 잔금" view="bulk_pending" summary={summary.bulkPending} description="누적 선금을 제외한 남은 결제액" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} />
+      <div className="space-y-2" aria-label="발주 단계별 금액">
+        <p className="text-xs font-medium text-muted-foreground">발주 단계별 금액 · 발주 화면과 같은 상태 기준</p>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <PurchaseFlowCard label="발주금액 총액" view="total" summary={summary.total} description="현재 진행 중 발주 전체" active={activeView === 'total'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="발주 화면의 발주요청과 동일" active={activeView === 'purchase_before'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="구매완료" view="purchase_completed" summary={summary.purchaseCompleted} description="발주 화면의 구매완료와 동일" active={activeView === 'purchase_completed'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="중국창고도착" view="china_arrived" summary={summary.chinaArrived} description="발주 화면의 중국창고도착과 동일" active={activeView === 'china_arrived'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="중국출고요청" view="outbound_requested" summary={summary.outboundRequested} description="발주 화면의 중국출고요청과 동일" active={activeView === 'outbound_requested'} search={search} pageSize={pageSize} sort={sort} order={order} />
+        </div>
+      </div>
+
+      <div className="space-y-2" aria-label="주문번호 및 대량결제 확인">
+        <p className="text-xs font-medium text-muted-foreground">주문번호·대량결제 확인 · 발주 단계와 별도</p>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <PurchaseFlowCard label="주문서번호 등록" view="order_number_registered" summary={summary.orderNumberRegistered} description="자동 발주 차감 대상 · 단계와 별도" active={activeView === 'order_number_registered'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="주문서번호 미등록" view="outstanding" summary={summary.outstanding} description="대량결제대기를 제외한 주문번호 확인 필요 건" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} />
+          <PurchaseFlowCard label="대량결제대기 잔금" view="bulk_pending" summary={summary.bulkPending} description="누적 선금을 제외한 남은 결제액" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} />
+        </div>
       </div>
 
       {search ? (
@@ -43,7 +55,7 @@ export function PurchasePaymentFlowSummaryPanel({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        결제 대기와 대량결제대기는 서로 겹치지 않습니다. 발주요청과 구매 완료는 진행 단계 기준이라 결제 구분과는 별도로 확인하며, 장부의 누적 차감액과도 집계 범위가 다릅니다.
+        주문서번호 미등록과 대량결제대기는 서로 겹치지 않습니다. 주문서번호 미등록은 결제 상태가 아니라 번호 입력 여부를 확인하는 목록이며, 장부의 누적 차감액과도 집계 범위가 다릅니다.
       </p>
     </section>
   )

@@ -67,14 +67,22 @@ export type PurchasePaymentFlowSummary = {
   total: PurchaseCostSummary
   purchaseBefore: PurchaseCostSummary
   purchaseCompleted: PurchaseCostSummary
+  chinaArrived: PurchaseCostSummary
+  outboundRequested: PurchaseCostSummary
+  orderNumberRegistered: PurchaseCostSummary
   outstanding: PurchaseCostSummary
   bulkPending: PurchaseCostSummary
 }
 
 export const PURCHASE_PAYMENT_FLOW_VIEWS = [
   'total',
+  // Kept for existing payment-flow URLs. This is the operational `purchased`
+  // status, not a supplier-order-number bucket.
   'purchase_before',
   'purchase_completed',
+  'china_arrived',
+  'outbound_requested',
+  'order_number_registered',
   'outstanding',
   'bulk_pending',
 ] as const
@@ -95,8 +103,11 @@ export type PurchasePaymentFlowSort = (typeof PURCHASE_PAYMENT_FLOW_SORTS)[numbe
 export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
   total: '발주금액 총액',
   purchase_before: '발주요청',
-  purchase_completed: '구매 완료',
-  outstanding: '결제 대기 (미결제 잔액)',
+  purchase_completed: '구매완료',
+  china_arrived: '중국창고도착',
+  outbound_requested: '중국출고요청',
+  order_number_registered: '주문서번호 등록',
+  outstanding: '주문서번호 미등록',
   bulk_pending: '대량결제대기 잔금',
 }
 
@@ -247,6 +258,9 @@ export async function getPurchasePaymentFlowData(
       total: summary.total,
       purchaseBefore: summary.purchase_before,
       purchaseCompleted: summary.purchase_completed,
+      chinaArrived: summary.china_arrived,
+      outboundRequested: summary.outbound_requested,
+      orderNumberRegistered: summary.order_number_registered,
       outstanding: summary.outstanding,
       bulkPending: summary.bulk_pending,
     },
@@ -338,8 +352,11 @@ export function isPurchasePaymentFlowViewItem(
     ?? Boolean(item.supplierOrderNumber?.trim())
 
   if (view === 'total') return true
-  if (view === 'purchase_completed') return hasSupplierOrderNumber
-  if (view === 'purchase_before') return item.status === 'purchased' && !hasSupplierOrderNumber
+  if (view === 'purchase_before') return item.status === 'purchased'
+  if (view === 'purchase_completed') return item.status === 'purchase_completed'
+  if (view === 'china_arrived') return item.status === 'china_arrived'
+  if (view === 'outbound_requested') return item.status === 'outbound_requested'
+  if (view === 'order_number_registered') return hasSupplierOrderNumber
   if (view === 'bulk_pending') return item.bulkPaymentPending === true
   return !hasSupplierOrderNumber && item.bulkPaymentPending !== true
 }
@@ -444,6 +461,12 @@ export function getPurchasePaymentFlowViewSummary(
       return summary.purchaseBefore
     case 'purchase_completed':
       return summary.purchaseCompleted
+    case 'china_arrived':
+      return summary.chinaArrived
+    case 'outbound_requested':
+      return summary.outboundRequested
+    case 'order_number_registered':
+      return summary.orderNumberRegistered
     case 'outstanding':
       return summary.outstanding
     case 'bulk_pending':
@@ -504,6 +527,9 @@ function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGrou
     total: summaries.total,
     purchaseBefore: summaries.purchase_before,
     purchaseCompleted: summaries.purchase_completed,
+    chinaArrived: summaries.china_arrived,
+    outboundRequested: summaries.outbound_requested,
+    orderNumberRegistered: summaries.order_number_registered,
     outstanding: summaries.outstanding,
     bulkPending: summaries.bulk_pending,
   }
@@ -550,8 +576,13 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, s
 
   if (view === 'purchase_before') {
     conditions.push(eq(purchaseRequestItems.status, 'purchased'))
-    conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
   } else if (view === 'purchase_completed') {
+    conditions.push(eq(purchaseRequestItems.status, 'purchase_completed'))
+  } else if (view === 'china_arrived') {
+    conditions.push(eq(purchaseRequestItems.status, 'china_arrived'))
+  } else if (view === 'outbound_requested') {
+    conditions.push(eq(purchaseRequestItems.status, 'outbound_requested'))
+  } else if (view === 'order_number_registered') {
     conditions.push(hasSupplierOrderNumber)
   } else if (view === 'outstanding') {
     conditions.push(sql`NOT (${hasSupplierOrderNumber})`)

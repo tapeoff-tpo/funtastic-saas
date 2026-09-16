@@ -102,11 +102,14 @@ describe('purchase payment flow views', () => {
     supplierOrderNumber: '3316362603001063953',
   }
 
-  it('exposes order-number views plus the independent bulk-payment view', () => {
+  it('exposes stage views separately from order-number and bulk-payment views', () => {
     expect(PURCHASE_PAYMENT_FLOW_VIEWS).toEqual([
       'total',
       'purchase_before',
       'purchase_completed',
+      'china_arrived',
+      'outbound_requested',
+      'order_number_registered',
       'outstanding',
       'bulk_pending',
     ])
@@ -118,7 +121,27 @@ describe('purchase payment flow views', () => {
     expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_completed')).toBe(false)
   })
 
-  it('classifies ordinary non-bulk active statuses by whether an order number exists', () => {
+  it('classifies each operational stage by status regardless of order-number registration', () => {
+    const stageViews = [
+      ['purchased', 'purchase_before'],
+      ['purchase_completed', 'purchase_completed'],
+      ['china_arrived', 'china_arrived'],
+      ['outbound_requested', 'outbound_requested'],
+    ] as const
+
+    for (const [status, view] of stageViews) {
+      for (const supplierOrderNumber of [null, '3316362603001063953']) {
+        const item = { status, supplierOrderNumber }
+        expect(isPurchasePaymentFlowViewItem(item, view)).toBe(true)
+        expect(isPurchasePaymentFlowViewItem(item, 'total')).toBe(true)
+      }
+    }
+
+    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'purchase_completed')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'china_arrived')).toBe(false)
+  })
+
+  it('groups all active stages by order-number registration separately from operational stages', () => {
     const activeStatuses = [
       'purchased',
       'purchase_completed',
@@ -127,16 +150,14 @@ describe('purchase payment flow views', () => {
     ] as const
 
     for (const status of activeStatuses) {
-      const completed = { status, supplierOrderNumber: '3316362603001063953' }
-      expect(isPurchasePaymentFlowViewItem(completed, 'purchase_completed')).toBe(true)
-      expect(isPurchasePaymentFlowViewItem(completed, 'outstanding')).toBe(false)
+      const registered = { status, supplierOrderNumber: '3316362603001063953' }
+      expect(isPurchasePaymentFlowViewItem(registered, 'order_number_registered')).toBe(true)
+      expect(isPurchasePaymentFlowViewItem(registered, 'outstanding')).toBe(false)
 
-      const outstanding = { status, supplierOrderNumber: null }
-      expect(isPurchasePaymentFlowViewItem(outstanding, 'purchase_completed')).toBe(false)
-      expect(isPurchasePaymentFlowViewItem(outstanding, 'outstanding')).toBe(true)
+      const unregistered = { status, supplierOrderNumber: null }
+      expect(isPurchasePaymentFlowViewItem(unregistered, 'order_number_registered')).toBe(false)
+      expect(isPurchasePaymentFlowViewItem(unregistered, 'outstanding')).toBe(true)
     }
-
-    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'purchase_completed')).toBe(true)
   })
 
   it('treats null, empty, and whitespace-only order numbers as outstanding', () => {
@@ -148,10 +169,10 @@ describe('purchase payment flow views', () => {
   })
 
   it.each(['웨이신', '알리페이', 'wechat', 'ssj', '신성진'])(
-    'treats the text order reference %s as purchase completed',
+    'treats the text order reference %s as order-number registered',
     (supplierOrderNumber) => {
-      const item = { status: 'purchase_completed' as const, supplierOrderNumber }
-      expect(isPurchasePaymentFlowViewItem(item, 'purchase_completed')).toBe(true)
+      const item = { status: 'china_arrived' as const, supplierOrderNumber }
+      expect(isPurchasePaymentFlowViewItem(item, 'order_number_registered')).toBe(true)
       expect(isPurchasePaymentFlowViewItem(item, 'outstanding')).toBe(false)
     },
   )
@@ -191,7 +212,7 @@ describe('purchase payment flow views', () => {
     expect(isPurchasePaymentFlowViewItem({
       status: 'purchase_completed',
       hasSupplierOrderNumber: true,
-    }, 'purchase_completed')).toBe(true)
+    }, 'order_number_registered')).toBe(true)
     expect(isPurchasePaymentFlowViewItem({
       status: 'purchase_completed',
       hasSupplierOrderNumber: false,
@@ -208,15 +229,21 @@ describe('purchase payment flow views', () => {
       total: { itemCount: 1, totalCostYuan: 1, totalCostKrw: 1, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       purchaseBefore: { itemCount: 2, totalCostYuan: 2, totalCostKrw: 2, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       purchaseCompleted: { itemCount: 3, totalCostYuan: 3, totalCostKrw: 3, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      outstanding: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      bulkPending: { itemCount: 5, totalCostYuan: 5, totalCostKrw: 5, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      chinaArrived: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      outboundRequested: { itemCount: 5, totalCostYuan: 5, totalCostKrw: 5, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      orderNumberRegistered: { itemCount: 6, totalCostYuan: 6, totalCostKrw: 6, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      outstanding: { itemCount: 7, totalCostYuan: 7, totalCostKrw: 7, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      bulkPending: { itemCount: 8, totalCostYuan: 8, totalCostKrw: 8, missingYuanCostCount: 0, missingKrwCostCount: 0 },
     }
 
     expect(getPurchasePaymentFlowViewSummary(summary, 'total').itemCount).toBe(1)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_before').itemCount).toBe(2)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_completed').itemCount).toBe(3)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(4)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'bulk_pending').itemCount).toBe(5)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'china_arrived').itemCount).toBe(4)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'outbound_requested').itemCount).toBe(5)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'order_number_registered').itemCount).toBe(6)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(7)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'bulk_pending').itemCount).toBe(8)
   })
 })
 

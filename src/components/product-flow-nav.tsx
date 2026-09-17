@@ -10,6 +10,8 @@ const RELATED_WORK = [
   { href: '/purchasing/orders', label: '발주·입고' },
   { href: '/purchasing/payment-flow', label: '발주금액' },
   { href: '/purchasing/raw-data', label: '발주 로우데이터' },
+  { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)' },
+  { href: '/purchasing/china-shipments', label: '중국출고' },
   { href: '/analytics/price-table', label: '판매가' },
   { href: '/operations/marketplace-registration', label: '상품등록' },
 ]

@@ -13,6 +13,8 @@ import {
   uniqueIndex,
   index,
   date,
+  check,
+  foreignKey,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
@@ -887,6 +889,356 @@ export const chinaWarehouseInventoryMovements = pgTable(
     uniqueIndex('china_warehouse_movements_item_type').on(table.purchaseRequestItemId, table.movementType),
     index('china_warehouse_movements_inventory_created').on(table.inventoryId, table.createdAt),
     index('china_warehouse_movements_user_created').on(table.userId, table.createdAt),
+  ],
+)
+
+// Isolated SaaS China inventory and outbound workflow.
+// These tables deliberately do not reference the Ecount/raw-data purchase or
+// China warehouse tables so the SaaS workflow can be developed in parallel.
+export const saasChinaInventory = pgTable(
+  'saas_china_inventory',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    warehouseCode: varchar('warehouse_code', { length: 100 }).notNull().default('default'),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
+    optionName: varchar('option_name', { length: 200 }),
+    onHandQuantity: integer('on_hand_quantity').notNull().default(0),
+    reservedQuantity: integer('reserved_quantity').notNull().default(0),
+    availableQuantity: integer('available_quantity').notNull().default(0),
+    lastReceivedAt: timestamp('last_received_at', { withTimezone: true }),
+    lastOutboundAt: timestamp('last_outbound_at', { withTimezone: true }),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Allows children to prove the inventory row belongs to their workspace.
+    uniqueIndex('saas_china_inventory_id_user').on(table.id, table.userId),
+    uniqueIndex('saas_china_inventory_user_warehouse_sku_option').on(
+      table.userId,
+      table.warehouseCode,
+      table.sku,
+      table.optionKey,
+    ),
+    index('saas_china_inventory_user_sku').on(table.userId, table.sku),
+    index('saas_china_inventory_user_warehouse_available').on(
+      table.userId,
+      table.warehouseCode,
+      table.sku,
+    ).where(sql`${table.availableQuantity} > 0`),
+    check('saas_china_inventory_on_hand_nonnegative', sql`${table.onHandQuantity} >= 0`),
+    check('saas_china_inventory_reserved_nonnegative', sql`${table.reservedQuantity} >= 0`),
+    check('saas_china_inventory_available_nonnegative', sql`${table.availableQuantity} >= 0`),
+    check(
+      'saas_china_inventory_available_matches_balance',
+      sql`${table.availableQuantity} = ${table.onHandQuantity} - ${table.reservedQuantity}`,
+    ),
+  ],
+)
+
+export const saasChinaInventoryMovements = pgTable(
+  'saas_china_inventory_movements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    inventoryId: uuid('inventory_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    movementType: varchar('movement_type', { length: 40 }).notNull(),
+    onHandDelta: integer('on_hand_delta').notNull().default(0),
+    reservedDelta: integer('reserved_delta').notNull().default(0),
+    onHandBefore: integer('on_hand_before').notNull(),
+    reservedBefore: integer('reserved_before').notNull(),
+    onHandAfter: integer('on_hand_after').notNull(),
+    reservedAfter: integer('reserved_after').notNull(),
+    sourceKey: varchar('source_key', { length: 255 }),
+    note: text('note'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'saas_china_inventory_movements_inventory_workspace_fkey',
+      columns: [table.inventoryId, table.userId],
+      foreignColumns: [saasChinaInventory.id, saasChinaInventory.userId],
+    }).onDelete('restrict'),
+    uniqueIndex('saas_china_inventory_movements_user_source_key').on(
+      table.userId,
+      table.sourceKey,
+    ),
+    index('saas_china_inventory_movements_inventory_occurred').on(
+      table.inventoryId,
+      table.occurredAt,
+    ),
+    index('saas_china_inventory_movements_user_occurred').on(table.userId, table.occurredAt),
+    check(
+      'saas_china_inventory_movements_type_check',
+      sql`${table.movementType} IN (
+        'opening_balance',
+        'arrival',
+        'manual_adjustment',
+        'shipment_reservation',
+        'shipment_release',
+        'shipment_dispatch'
+      )`,
+    ),
+    check(
+      'saas_china_inventory_movements_has_delta',
+      sql`${table.onHandDelta} <> 0 OR ${table.reservedDelta} <> 0`,
+    ),
+    check(
+      'saas_china_inventory_movements_balances_nonnegative',
+      sql`${table.onHandBefore} >= 0
+        AND ${table.reservedBefore} >= 0
+        AND ${table.onHandAfter} >= 0
+        AND ${table.reservedAfter} >= 0`,
+    ),
+    check(
+      'saas_china_inventory_movements_on_hand_balance',
+      sql`${table.onHandAfter} = ${table.onHandBefore} + ${table.onHandDelta}`,
+    ),
+    check(
+      'saas_china_inventory_movements_reserved_balance',
+      sql`${table.reservedAfter} = ${table.reservedBefore} + ${table.reservedDelta}`,
+    ),
+    check(
+      'saas_china_inventory_movements_reserved_within_on_hand',
+      sql`${table.reservedBefore} <= ${table.onHandBefore}
+        AND ${table.reservedAfter} <= ${table.onHandAfter}`,
+    ),
+  ],
+)
+
+export const chinaOutboundShipments = pgTable(
+  'china_outbound_shipments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    shipmentNo: varchar('shipment_no', { length: 100 }).notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('draft'),
+    originWarehouseCode: varchar('origin_warehouse_code', { length: 100 }).notNull().default('default'),
+    destinationName: text('destination_name'),
+    destinationAddress: text('destination_address'),
+    forwarderName: varchar('forwarder_name', { length: 200 }),
+    externalReference: varchar('external_reference', { length: 200 }),
+    plannedOutboundDate: date('planned_outbound_date'),
+    dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    memo: text('memo'),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Allows children to prove they belong to the same workspace as a shipment.
+    uniqueIndex('china_outbound_shipments_id_user').on(table.id, table.userId),
+    uniqueIndex('china_outbound_shipments_user_shipment_no').on(table.userId, table.shipmentNo),
+    index('china_outbound_shipments_user_status_created').on(
+      table.userId,
+      table.status,
+      table.createdAt,
+    ),
+    index('china_outbound_shipments_user_planned_outbound').on(
+      table.userId,
+      table.plannedOutboundDate,
+    ),
+    check(
+      'china_outbound_shipments_status_check',
+      sql`${table.status} IN ('draft', 'packing', 'ready', 'dispatched', 'cancelled')`,
+    ),
+  ],
+)
+
+// A shipment line is the inventory reservation created when a user selects a
+// SaaS China stock row for outbound work. Box items allocate that reservation.
+export const chinaOutboundShipmentItems = pgTable(
+  'china_outbound_shipment_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    shipmentId: uuid('shipment_id').notNull(),
+    inventoryId: uuid('inventory_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
+    optionName: varchar('option_name', { length: 200 }),
+    reservedQuantity: integer('reserved_quantity').notNull(),
+    packedQuantity: integer('packed_quantity').notNull().default(0),
+    dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),
+    sortOrder: integer('sort_order').notNull().default(0),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'china_outbound_shipment_items_shipment_workspace_fkey',
+      columns: [table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundShipments.id, chinaOutboundShipments.userId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'china_outbound_shipment_items_inventory_workspace_fkey',
+      columns: [table.inventoryId, table.userId],
+      foreignColumns: [saasChinaInventory.id, saasChinaInventory.userId],
+    }).onDelete('restrict'),
+    uniqueIndex('china_outbound_shipment_items_id_shipment_user').on(
+      table.id,
+      table.shipmentId,
+      table.userId,
+    ),
+    uniqueIndex('china_outbound_shipment_items_shipment_inventory').on(
+      table.shipmentId,
+      table.inventoryId,
+    ),
+    index('china_outbound_shipment_items_inventory').on(table.inventoryId),
+    index('china_outbound_shipment_items_user_inventory').on(table.userId, table.inventoryId),
+    index('china_outbound_shipment_items_shipment_sort').on(table.shipmentId, table.sortOrder),
+    check('china_outbound_shipment_items_reserved_positive', sql`${table.reservedQuantity} > 0`),
+    check(
+      'china_outbound_shipment_items_packed_within_reserved',
+      sql`${table.packedQuantity} >= 0 AND ${table.packedQuantity} <= ${table.reservedQuantity}`,
+    ),
+    check(
+      'china_outbound_shipment_items_dispatched_within_packed',
+      sql`${table.dispatchedQuantity} >= 0 AND ${table.dispatchedQuantity} <= ${table.packedQuantity}`,
+    ),
+    check('china_outbound_shipment_items_sort_nonnegative', sql`${table.sortOrder} >= 0`),
+  ],
+)
+
+export const chinaOutboundPallets = pgTable(
+  'china_outbound_pallets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    shipmentId: uuid('shipment_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    palletNo: varchar('pallet_no', { length: 100 }).notNull(),
+    labelCode: varchar('label_code', { length: 200 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
+    widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
+    heightCm: numeric('height_cm', { precision: 12, scale: 2 }),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'china_outbound_pallets_shipment_workspace_fkey',
+      columns: [table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundShipments.id, chinaOutboundShipments.userId],
+    }).onDelete('cascade'),
+    uniqueIndex('china_outbound_pallets_id_shipment_user').on(
+      table.id,
+      table.shipmentId,
+      table.userId,
+    ),
+    uniqueIndex('china_outbound_pallets_shipment_pallet_no').on(table.shipmentId, table.palletNo),
+    index('china_outbound_pallets_shipment_sort').on(table.shipmentId, table.sortOrder),
+    index('china_outbound_pallets_user_shipment').on(table.userId, table.shipmentId),
+    check('china_outbound_pallets_sort_nonnegative', sql`${table.sortOrder} >= 0`),
+    check(
+      'china_outbound_pallets_measurements_nonnegative',
+      sql`(${table.grossWeightKg} IS NULL OR ${table.grossWeightKg} >= 0)
+        AND (${table.lengthCm} IS NULL OR ${table.lengthCm} >= 0)
+        AND (${table.widthCm} IS NULL OR ${table.widthCm} >= 0)
+        AND (${table.heightCm} IS NULL OR ${table.heightCm} >= 0)`,
+    ),
+  ],
+)
+
+export const chinaOutboundBoxes = pgTable(
+  'china_outbound_boxes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    shipmentId: uuid('shipment_id').notNull(),
+    palletId: uuid('pallet_id'),
+    userId: uuid('user_id').notNull(),
+    boxNo: varchar('box_no', { length: 100 }).notNull(),
+    labelCode: varchar('label_code', { length: 200 }),
+    status: varchar('status', { length: 30 }).notNull().default('open'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
+    widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
+    heightCm: numeric('height_cm', { precision: 12, scale: 2 }),
+    sealedAt: timestamp('sealed_at', { withTimezone: true }),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'china_outbound_boxes_shipment_workspace_fkey',
+      columns: [table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundShipments.id, chinaOutboundShipments.userId],
+    }).onDelete('cascade'),
+    // A pallet cannot be deleted while a box is still mapped to it.
+    foreignKey({
+      name: 'china_outbound_boxes_pallet_shipment_workspace_fkey',
+      columns: [table.palletId, table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundPallets.id, chinaOutboundPallets.shipmentId, chinaOutboundPallets.userId],
+    }).onDelete('restrict'),
+    uniqueIndex('china_outbound_boxes_id_shipment_user').on(
+      table.id,
+      table.shipmentId,
+      table.userId,
+    ),
+    uniqueIndex('china_outbound_boxes_shipment_box_no').on(table.shipmentId, table.boxNo),
+    index('china_outbound_boxes_shipment_sort').on(table.shipmentId, table.sortOrder),
+    index('china_outbound_boxes_user_shipment').on(table.userId, table.shipmentId),
+    index('china_outbound_boxes_pallet').on(table.palletId),
+    check('china_outbound_boxes_status_check', sql`${table.status} IN ('open', 'sealed')`),
+    check('china_outbound_boxes_sort_nonnegative', sql`${table.sortOrder} >= 0`),
+    check(
+      'china_outbound_boxes_measurements_nonnegative',
+      sql`(${table.grossWeightKg} IS NULL OR ${table.grossWeightKg} >= 0)
+        AND (${table.lengthCm} IS NULL OR ${table.lengthCm} >= 0)
+        AND (${table.widthCm} IS NULL OR ${table.widthCm} >= 0)
+        AND (${table.heightCm} IS NULL OR ${table.heightCm} >= 0)`,
+    ),
+  ],
+)
+
+export const chinaOutboundBoxItems = pgTable(
+  'china_outbound_box_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    boxId: uuid('box_id').notNull(),
+    shipmentId: uuid('shipment_id').notNull(),
+    shipmentItemId: uuid('shipment_item_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    quantity: integer('quantity').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'china_outbound_box_items_box_shipment_workspace_fkey',
+      columns: [table.boxId, table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundBoxes.id, chinaOutboundBoxes.shipmentId, chinaOutboundBoxes.userId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'china_outbound_box_items_shipment_item_workspace_fkey',
+      columns: [table.shipmentItemId, table.shipmentId, table.userId],
+      foreignColumns: [
+        chinaOutboundShipmentItems.id,
+        chinaOutboundShipmentItems.shipmentId,
+        chinaOutboundShipmentItems.userId,
+      ],
+    }).onDelete('cascade'),
+    uniqueIndex('china_outbound_box_items_box_shipment_item').on(
+      table.boxId,
+      table.shipmentItemId,
+    ),
+    index('china_outbound_box_items_shipment_user').on(table.shipmentId, table.userId),
+    index('china_outbound_box_items_shipment_item').on(table.shipmentItemId),
+    check('china_outbound_box_items_quantity_positive', sql`${table.quantity} > 0`),
+    check('china_outbound_box_items_sort_nonnegative', sql`${table.sortOrder} >= 0`),
   ],
 )
 

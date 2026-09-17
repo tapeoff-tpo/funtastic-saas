@@ -154,6 +154,8 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/raw-data', label: '발주 로우데이터', icon: FileSpreadsheet },
       { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
+      { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
+      { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
       { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
     ],

@@ -10,6 +10,8 @@ const LANGUAGE_EVENT = 'funtastic-purchasing-language-change'
 
 const PURCHASING_PATHS = [
   '/purchasing/china-inventory',
+  '/purchasing/saas-china-inventory',
+  '/purchasing/china-shipments',
   '/purchasing/orders',
   '/purchasing/payment-flow',
   '/purchasing/purchases',
@@ -62,6 +64,8 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '보기': '查看',
   '품목': '品项',
   '중국재고': '中国库存',
+  '중국재고(SaaS)': '中国库存(SaaS)',
+  '중국출고': '中国出库',
   '발주검토': '采购审核',
   '구매/입고지연': '采购/入库延迟',
   '검색': '搜索',
@@ -226,6 +230,8 @@ const SAFE_INLINE_LABELS = new Set([
   '발주',
   '품목',
   '중국재고',
+  '중국재고(SaaS)',
+  '중국출고',
   '발주검토',
   '구매/입고지연',
   '발주요청',

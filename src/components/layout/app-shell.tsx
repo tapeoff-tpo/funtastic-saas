@@ -81,7 +81,8 @@ export function AppShell({ children }: AppShellProps) {
             <p className="truncate px-2 text-center text-sm font-semibold text-gray-900">
               {getRouteLabel(pathname)}
             </p>
-            <span className="text-center text-[10px] font-semibold text-gray-400">F</span>
+            {/* 메뉴 버튼과 같은 폭의 빈 자리로 제목을 항상 화면 가운데에 맞춘다. */}
+            <span aria-hidden="true" className="h-10 w-10" />
           </header>
           <div className="hidden md:block">
             <TabBar />

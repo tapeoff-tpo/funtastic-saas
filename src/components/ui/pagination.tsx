@@ -23,7 +23,7 @@ export function PageSizeSelector({
   className?: string
 }) {
   return (
-    <div className={`flex items-center gap-2 text-sm text-muted-foreground ${className}`}>
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground ${className}`}>
       <span>페이지당</span>
       <select
         value={pageSize}
@@ -77,9 +77,13 @@ export function Pagination({
   for (let i = windowStart; i <= windowEnd; i++) pages.push(i)
 
   return (
-    <div className={`flex items-center gap-4 py-2 text-sm ${hidePageSize ? 'justify-end' : 'justify-between'}`}>
+    <div
+      className={`flex min-w-0 flex-col gap-2 py-2 text-sm sm:flex-row sm:items-center ${
+        hidePageSize ? 'sm:justify-end' : 'sm:justify-between'
+      }`}
+    >
       {!hidePageSize && (
-        <div className="flex items-center gap-2 text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
           <span>페이지당</span>
           <select
             value={pageSize}
@@ -95,7 +99,32 @@ export function Pagination({
         </div>
       )}
 
-      <div className="flex items-center gap-1">
+      {/* 작은 화면에서는 현재 페이지와 앞/뒤 이동만 노출해 버튼이 겹치지 않게 한다. */}
+      <div className="flex items-center gap-1 sm:hidden">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="cursor-pointer rounded border px-3 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label="이전 페이지"
+        >
+          이전
+        </button>
+        <span className="min-w-[5.5rem] text-center tabular-nums text-muted-foreground">
+          {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="cursor-pointer rounded border px-3 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label="다음 페이지"
+        >
+          다음
+        </button>
+      </div>
+
+      <div className="hidden items-center gap-1 sm:flex">
         <button
           type="button"
           onClick={() => onPageChange(Math.max(1, windowStart - 1))}

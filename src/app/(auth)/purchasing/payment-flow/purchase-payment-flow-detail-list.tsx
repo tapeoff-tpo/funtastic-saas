@@ -64,7 +64,7 @@ export function PurchasePaymentFlowDetailList({
             <p className="mt-1 text-xs text-muted-foreground">발주 단계와 별도로 주문서번호가 있는 현재 발주입니다. 이 목록은 자동 발주 차감 대상이며, 이전 발주까지 포함한 실제 차감 기록은 아래 거래내역에서 확인할 수 있습니다.</p>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
           {view === 'outstanding' ? <PurchasePaymentFlowBulkActions /> : null}
           <PurchaseBulkPaymentDialog />
           <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
@@ -72,7 +72,7 @@ export function PurchasePaymentFlowDetailList({
             {search ? <input type="hidden" name="search" value={search} /> : null}
             {sort ? <input type="hidden" name="sort" value={sort} /> : null}
             {sort ? <input type="hidden" name="order" value={order} /> : null}
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
               <span>목록 보기</span>
               <select
                 name="pageSize"
@@ -83,7 +83,7 @@ export function PurchasePaymentFlowDetailList({
                 {[10, 50, 100, 200].map((size) => <option key={size} value={size}>{size}개</option>)}
               </select>
             </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
               <span>페이지</span>
               <input
                 name="page"
@@ -208,9 +208,9 @@ export function PurchasePaymentFlowDetailList({
       )}
 
       {totalPages > 1 ? (
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm">
-          <span className="text-xs text-muted-foreground">{pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건</span>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 border-t px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span className="whitespace-nowrap text-xs text-muted-foreground">{pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건</span>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
             <PageLink view={view} search={search} page={page - 1} pageSize={pageSize} sort={sort} order={order} disabled={page <= 1}>이전</PageLink>
             <span className="text-xs tabular-nums text-muted-foreground">{page.toLocaleString('ko-KR')} / {totalPages.toLocaleString('ko-KR')}</span>
             <PageLink view={view} search={search} page={page + 1} pageSize={pageSize} sort={sort} order={order} disabled={page >= totalPages}>다음</PageLink>

@@ -44,7 +44,7 @@ export default async function SaasChinaInventoryPage() {
         </div>
         <Link
           href="/purchasing/china-shipments"
-          className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:w-auto"
         >
           중국출고 작업하기
         </Link>

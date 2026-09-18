@@ -307,7 +307,7 @@ export function CompletedOutboundDateFilter({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center gap-2">
       <details ref={menuRef} className="relative">
         <summary className="flex h-8 cursor-pointer list-none items-center gap-1 rounded-md border border-input bg-background px-2 text-xs marker:content-none hover:bg-muted">
           <span className="max-w-44 truncate">{selectedLabel}</span>
@@ -545,10 +545,9 @@ export function PurchaseRequestCreateDialog() {
   const initialSku = searchParams.get('purchaseSku') ?? ''
   const initialName = searchParams.get('purchaseName') ?? ''
   const initialOption = searchParams.get('purchaseOption') ?? ''
-
-  useEffect(() => {
-    if (initialSku && initialName) setOpen(true)
-  }, [initialName, initialSku])
+  const initialDialogKey = initialSku && initialName ? `${initialSku}\u0000${initialName}\u0000${initialOption}` : ''
+  const [dismissedInitialDialogKey, setDismissedInitialDialogKey] = useState('')
+  const shouldOpenFromSearch = Boolean(initialDialogKey && dismissedInitialDialogKey !== initialDialogKey)
 
   function addPurchaseRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -583,9 +582,10 @@ export function PurchaseRequestCreateDialog() {
 
   return (
     <Dialog.Root
-      open={open}
+      open={open || shouldOpenFromSearch}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen)
+        if (!nextOpen && initialDialogKey) setDismissedInitialDialogKey(initialDialogKey)
         if (nextOpen) setError(null)
       }}
     >
@@ -982,7 +982,7 @@ export function PurchasePaymentFlowBulkActions() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center gap-2">
       <Button
         type="button"
         size="sm"

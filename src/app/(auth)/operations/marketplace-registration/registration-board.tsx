@@ -193,8 +193,8 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
             </Button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative w-full sm:w-64">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center lg:flex-nowrap">
+          <div className="relative col-span-2 min-w-0 sm:w-64">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -203,11 +203,11 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
               className="pl-8"
             />
           </div>
-          <Button type="button" variant="outline" onClick={syncProducts} disabled={syncPending}>
+          <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={syncProducts} disabled={syncPending}>
             <RefreshCw className={cn(syncPending && 'animate-spin')} />
             {syncPending ? '동기화 중' : 'B2B 동기화'}
           </Button>
-          <Button type="button" variant="outline" onClick={syncSalesCodes} disabled={salesCodePending}>
+          <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={syncSalesCodes} disabled={salesCodePending}>
             <RefreshCw className={cn(salesCodePending && 'animate-spin')} />
             {salesCodePending ? 'SKU 매칭 중' : '재고 SKU 매칭'}
           </Button>
@@ -217,12 +217,12 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
 
       <div className="grid min-h-[620px] xl:grid-cols-[minmax(680px,1fr)_430px]">
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
-          <div className="grid grid-cols-[52px_minmax(240px,1fr)_100px_90px_110px_28px] items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+          <div className="grid grid-cols-[52px_minmax(0,1fr)_28px] items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground xl:grid-cols-[52px_minmax(240px,1fr)_100px_90px_110px_28px]">
             <span>이미지</span>
             <span>상품</span>
-            <span>판매가</span>
-            <span>옵션·매칭</span>
-            <span>등록 준비</span>
+            <span className="hidden xl:block">판매가</span>
+            <span className="hidden xl:block">옵션·매칭</span>
+            <span className="hidden xl:block">등록 준비</span>
             <span />
           </div>
           <div className="max-h-[720px] overflow-y-auto">
@@ -235,26 +235,34 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                   type="button"
                   onClick={() => setSelectedCode(row.productCode)}
                   className={cn(
-                    'grid w-full grid-cols-[52px_minmax(240px,1fr)_100px_90px_110px_28px] items-center gap-3 border-b px-3 py-2 text-left transition-colors hover:bg-muted/40',
+                    'grid w-full grid-cols-[52px_minmax(0,1fr)_28px] items-center gap-3 border-b px-3 py-2 text-left transition-colors hover:bg-muted/40 xl:grid-cols-[52px_minmax(240px,1fr)_100px_90px_110px_28px]',
                     isSelected && 'bg-blue-50/70 hover:bg-blue-50',
                   )}
                 >
                   <ProductImage row={row} className="size-11 rounded border" />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">{row.productName}</span>
-                    <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-mono">{row.salesCodes[0] || '판매코드 미매칭'}</span>
+                    <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground xl:hidden">
+                      B2B {row.productCode}{row.salesCodes[0] ? ` · ${row.salesCodes[0]}` : ''}
+                    </span>
+                    <span className="mt-0.5 hidden min-w-0 items-center gap-2 text-xs text-muted-foreground xl:flex">
+                      <span className="truncate font-mono">{row.salesCodes[0] || '판매코드 미매칭'}</span>
                       {row.salesCodes.length > 1 ? <span>외 {row.salesCodes.length - 1}개</span> : null}
                       <span>B2B {row.productCode}</span>
-                      <span>{row.sourceCategoryName || '카테고리 없음'}</span>
+                      <span className="truncate">{row.sourceCategoryName || '카테고리 없음'}</span>
+                    </span>
+                    <span className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium xl:hidden ${
+                      isReady ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      {isReady ? '등록 준비' : '정보 필요'}
                     </span>
                   </span>
-                  <span className="text-sm font-medium tabular-nums">{formatPrice(row.price)}</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="hidden text-sm font-medium tabular-nums xl:block">{formatPrice(row.price)}</span>
+                  <span className="hidden text-xs text-muted-foreground xl:block">
                     <span className="block">옵션 {row.options.length}개</span>
                     <span className="block">코드 {row.matchedSalesCodes}개</span>
                   </span>
-                  <span>
+                  <span className="hidden xl:block">
                     <Badge
                       variant="outline"
                       className={isReady

@@ -144,8 +144,8 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
 
   return (
     <div className="overflow-hidden rounded-md border bg-card">
-      <div className="grid grid-cols-[130px_minmax(220px,1fr)_170px_36px] border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-        <span>상품코드</span><span>상품 / 옵션</span><span>등록된 몰</span><span />
+      <div className="grid grid-cols-[minmax(0,1fr)_28px] border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]">
+        <span className="hidden lg:block">상품코드</span><span>상품 / 옵션</span><span className="hidden lg:block">등록된 몰</span><span />
       </div>
       {rows.map((row) => {
         const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
@@ -159,14 +159,19 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
             <button
               type="button"
               onClick={() => setOpenRow(open ? null : row.id)}
-              className="grid w-full grid-cols-[130px_minmax(220px,1fr)_170px_36px] items-center px-3 py-2.5 text-left text-sm hover:bg-muted/30"
+              className="grid w-full grid-cols-[minmax(0,1fr)_28px] items-center px-3 py-2.5 text-left text-sm hover:bg-muted/30 lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]"
             >
-              <span className="font-mono text-xs font-medium">{row.productCode || '-'}</span>
+              <span className="hidden font-mono text-xs font-medium lg:block">{row.productCode || '-'}</span>
               <span className="min-w-0 pr-4">
                 <span className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
-                {row.optionName ? <span className="block truncate text-xs text-muted-foreground">{row.optionName}</span> : null}
+                {row.optionName || row.productCode ? (
+                  <span className="block truncate text-xs text-muted-foreground">
+                    <span className="font-mono lg:hidden">{row.productCode || '-'}</span>
+                    {row.optionName ? <><span className="lg:hidden"> · </span>{row.optionName}</> : null}
+                  </span>
+                ) : null}
               </span>
-              <span className="flex min-w-0 flex-wrap gap-1">
+              <span className="hidden min-w-0 flex-wrap gap-1 lg:flex">
                 {registrations.length ? registrations.slice(0, 3).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
                 {registrations.length > 3 ? <span className="text-xs text-muted-foreground">+{registrations.length - 3}</span> : null}
               </span>

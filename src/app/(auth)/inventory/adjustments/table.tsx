@@ -86,12 +86,12 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
   }
 
   return (
-    <div className="space-y-2">
-      <div className="grid gap-2 rounded-md border bg-white p-3 md:grid-cols-[110px_120px_130px_130px_130px_1fr_auto]">
+    <div className="min-w-0 space-y-2">
+      <div className="grid grid-cols-2 gap-2 rounded-md border bg-white p-3 md:grid-cols-[110px_120px_130px_130px_130px_1fr_auto]">
         <select
           value={filters.movement}
           onChange={(event) => updateFilter({ movement: event.target.value })}
-          className="rounded-md border px-2 py-1.5 text-sm"
+          className="min-w-0 rounded-md border px-2 py-1.5 text-sm"
         >
           <option value="all">전체</option>
           <option value="incoming">입고</option>
@@ -100,7 +100,7 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
         <select
           value={filters.status}
           onChange={(event) => updateFilter({ status: event.target.value })}
-          className="rounded-md border px-2 py-1.5 text-sm"
+          className="min-w-0 rounded-md border px-2 py-1.5 text-sm"
         >
           <option value="all">전표 전체</option>
           <option value="pending">미확정</option>
@@ -109,7 +109,7 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
         <select
           value={filters.dateField}
           onChange={(event) => updateFilter({ dateField: event.target.value })}
-          className="rounded-md border px-2 py-1.5 text-sm"
+          className="min-w-0 rounded-md border px-2 py-1.5 text-sm"
         >
           <option value="movement">입출고일</option>
           <option value="incoming">입고일</option>
@@ -120,19 +120,19 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
           type="date"
           value={filters.dateFrom ?? ''}
           onChange={(event) => updateFilter({ dateFrom: event.target.value || null })}
-          className="rounded-md border px-2 py-1.5 text-sm"
+          className="min-w-0 rounded-md border px-2 py-1.5 text-sm"
         />
         <input
           type="date"
           value={filters.dateTo ?? ''}
           onChange={(event) => updateFilter({ dateTo: event.target.value || null })}
-          className="rounded-md border px-2 py-1.5 text-sm"
+          className="min-w-0 rounded-md border px-2 py-1.5 text-sm"
         />
-        <div className="flex gap-2">
+        <div className="col-span-2 flex min-w-0 flex-col gap-2 sm:flex-row md:col-span-1">
           <select
             value={filters.warehouseZone ?? ''}
             onChange={(event) => updateFilter({ warehouseZone: event.target.value || null })}
-            className="w-32 rounded-md border px-2 py-1.5 text-sm"
+            className="w-full min-w-0 rounded-md border px-2 py-1.5 text-sm sm:w-32"
           >
             <option value="">창고 전체</option>
             {warehouseZones.map((zone) => (
@@ -158,14 +158,14 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
             search: null,
             warehouseZone: null,
           })}
-          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+          className="col-span-2 w-full rounded-md border px-3 py-1.5 text-sm hover:bg-muted md:col-span-1 md:w-auto"
         >
           초기화
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-muted/10 py-1.5">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-col gap-2 border-y bg-muted/10 py-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <button
             type="button"
             disabled={page <= 1}
@@ -193,10 +193,10 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="grid grid-cols-2 gap-1 sm:flex sm:items-center">
           <Link
             href="/api/inventory/adjustments/template"
-            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+            className="rounded-md border px-3 py-1 text-center text-xs font-medium hover:bg-muted"
           >
             엑셀양식 다운로드
           </Link>
@@ -211,7 +211,7 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
           <button
             type="button"
             onClick={() => setBulkOpen(true)}
-            className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            className="col-span-2 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 sm:col-auto"
           >
             대량등록
           </button>

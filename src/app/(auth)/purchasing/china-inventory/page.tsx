@@ -42,14 +42,14 @@ export default async function ChinaInventoryPage({
             Ecount 중국재고 원본의 합계와 창고별 수량을 나누어 조회합니다. 중국출고 후 국내 입고 전 수량은 발주 탭의 중국출고요청으로 관리합니다.
           </p>
         </div>
-        <form className="flex items-center gap-2" action="/purchasing/china-inventory">
+        <form className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center" action="/purchasing/china-inventory">
           <input
             name="search"
             defaultValue={search ?? ''}
             placeholder="품목코드, 상품명, 옵션"
-            className="h-8 w-64 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-64"
           />
-          <Button type="submit" variant="outline">검색</Button>
+          <Button type="submit" variant="outline" className="w-full sm:w-auto">검색</Button>
         </form>
       </header>
 
@@ -59,7 +59,44 @@ export default async function ChinaInventoryPage({
           <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="space-y-2 p-3 md:hidden">
+          {items.length === 0 ? (
+            <p className="px-3 py-12 text-center text-sm text-muted-foreground">조건에 맞는 중국창고 재고가 없습니다.</p>
+          ) : items.map((item) => {
+            const locations = warehouseNames.filter((warehouseName) => (item.warehouseQuantities[warehouseName] ?? 0) > 0)
+            return (
+              <article key={item.id} className="rounded-lg border bg-background p-3">
+                <div className="min-w-0">
+                  <p className="truncate whitespace-nowrap text-sm font-medium tabular-nums">{item.sku}</p>
+                  <p className="mt-1 truncate text-sm font-medium">{item.productName}</p>
+                  <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.optionName || '-'}</p>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 divide-x rounded-md border bg-muted/20 text-center">
+                  <MobileStockMetric label="총 재고" value={item.totalQuantity} />
+                  <MobileStockMetric label="가용 재고" value={item.availableQuantity} emphasis />
+                </dl>
+                {locations.length > 0 ? (
+                  <div className="mt-3 rounded-md bg-muted/20 px-3 py-2 text-xs">
+                    <p className="font-medium text-muted-foreground">위치별 재고</p>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                      {locations.map((warehouseName) => (
+                        <span key={warehouseName} className="whitespace-nowrap tabular-nums">
+                          {warehouseName} {item.warehouseQuantities[warehouseName].toLocaleString('ko-KR')}개
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
+                  <p>최근 입고 {formatDateTime(item.lastArrivedAt)}</p>
+                  <p>최근 중국출고요청 {formatDateTime(item.lastOutboundRequestedAt)}</p>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[1500px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
@@ -113,7 +150,7 @@ export default async function ChinaInventoryPage({
       </section>
 
       {totalPages > 1 ? (
-        <nav className="flex items-center justify-end gap-2">
+        <nav className="flex w-full items-center justify-between gap-2 sm:justify-end">
           <Button
             render={<Link href={pageHref({ page: Math.max(1, page - 1), search })} />}
             variant="outline"
@@ -158,4 +195,13 @@ function formatDateTime(value: string | Date | null) {
     timeStyle: 'short',
     timeZone: 'Asia/Seoul',
   }).format(date)
+}
+
+function MobileStockMetric({ label, value, emphasis = false }: { label: string; value: number; emphasis?: boolean }) {
+  return (
+    <div className="px-2 py-2">
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className={`mt-0.5 text-sm font-semibold tabular-nums ${emphasis ? 'text-emerald-700' : ''}`}>{value.toLocaleString('ko-KR')}개</dd>
+    </div>
+  )
 }

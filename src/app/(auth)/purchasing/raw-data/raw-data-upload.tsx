@@ -374,12 +374,12 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         ref={uploadSectionRef}
         className={`rounded-lg border bg-background p-4 transition-shadow ${isDraggingFiles ? 'ring-2 ring-primary/30' : ''}`}
       >
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
             <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본, 단종상품은 품목코드·품목명·옵션 목록만 넣으세요.</p>
           </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
+          <span className="shrink-0 rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail, uploadRule, templateHref }, index) => {
@@ -432,15 +432,15 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         </div>
       </section>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" disabled={isPending || selectedFiles.length === 0} onClick={() => submit('preview')}>
+      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={isPending || selectedFiles.length === 0} onClick={() => submit('preview')}>
           {isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}미리보기·검증
         </Button>
-        <Button type="button" disabled={isPending || !isVerified} onClick={() => submit('apply')}>
+        <Button type="button" className="w-full sm:w-auto" disabled={isPending || !isVerified} onClick={() => submit('apply')}>
           {isPending ? <Loader2 className="animate-spin" /> : <Upload />}최종 반영
         </Button>
-        {message ? <span className="text-sm text-emerald-700">{message}</span> : null}
-        {error ? <span className="text-sm text-destructive">{error}</span> : null}
+        {message ? <span className="break-words text-sm text-emerald-700">{message}</span> : null}
+        {error ? <span className="break-words text-sm text-destructive">{error}</span> : null}
       </div>
 
       {preview ? <Preview summary={preview} kinds={previewKinds} /> : null}

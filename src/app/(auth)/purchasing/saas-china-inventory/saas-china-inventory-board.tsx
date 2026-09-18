@@ -143,7 +143,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           <button
             type="button"
             onClick={() => setShowReceive((open) => !open)}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted sm:w-auto"
           >
             <Plus className="size-4" />
             {showReceive ? '입고 입력 닫기' : '재고 추가'}
@@ -196,9 +196,9 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{item.productName}</p>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                  <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
                 </div>
-                <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{item.warehouseCode}</span>
+                <span className="max-w-[42%] shrink-0 truncate rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground" title={item.warehouseCode}>{item.warehouseCode}</span>
               </div>
               <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
                 <StockMetric label="현재고" value={item.onHandQuantity} />

@@ -371,13 +371,13 @@ export function InventoryTable({
   return (
     <div className="space-y-2">
       <form onSubmit={(event) => { event.preventDefault(); submitSearch() }} className="rounded-md border bg-muted/30 p-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <label className="flex items-center gap-1 text-xs">
+        <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center md:gap-x-3 md:gap-y-1.5">
+          <label className="flex min-w-0 items-center gap-1 text-xs">
             <span className="text-muted-foreground">창고</span>
             <select
               value={filters.warehouseZone ?? ''}
               onChange={(event) => void setFilters({ warehouseZone: event.target.value || null, page: 1, searched: '1' })}
-              className="rounded-md border bg-white px-2 py-1 text-xs"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs md:w-auto md:flex-none"
             >
               <option value="">전체</option>
               {warehouseZones.map((zone) => (
@@ -385,38 +385,38 @@ export function InventoryTable({
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1 text-xs">
+          <label className="flex min-w-0 items-center gap-1 text-xs">
             <span className="text-muted-foreground">상품명</span>
             <input
               type="text"
               placeholder="상품명 검색"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              className="w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground md:w-[180px] md:flex-none"
             />
           </label>
-          <label className="flex items-center gap-1 text-xs">
-            <span className="text-muted-foreground">상품코드</span>
+          <label className="flex min-w-0 items-center gap-1 text-xs">
+            <span className="shrink-0 text-muted-foreground">상품코드</span>
             <input
               type="text"
               placeholder="상품코드 검색"
               value={productCodeInput}
               onChange={(event) => setProductCodeInput(event.target.value)}
-              className="w-[140px] rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none"
             />
           </label>
-          <label className="flex items-center gap-1 text-xs">
-            <span className="text-muted-foreground">옵션명</span>
+          <label className="flex min-w-0 items-center gap-1 text-xs">
+            <span className="shrink-0 text-muted-foreground">옵션명</span>
             <input
               type="text"
               placeholder="옵션/SKU"
               value={optionCodeInput}
               onChange={(event) => setOptionCodeInput(event.target.value)}
-              className="w-[140px] rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none"
             />
           </label>
-          <label className="flex items-center gap-1 text-xs">
-            <span className="text-muted-foreground">현재고</span>
+          <label className="flex min-w-0 items-center gap-1 text-xs">
+            <span className="shrink-0 text-muted-foreground">현재고</span>
             <input
               type="number"
               min={0}
@@ -424,15 +424,15 @@ export function InventoryTable({
               placeholder="N"
               value={maxStockInput}
               onChange={(event) => setMaxStockInput(event.target.value)}
-              className="w-[70px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
+              className="w-[52px] shrink-0 rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground md:w-[70px]"
             />
-            <span className="text-muted-foreground">개 이하</span>
+            <span className="shrink-0 whitespace-nowrap text-muted-foreground">개 이하</span>
           </label>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="flex items-center justify-end gap-1 md:ml-auto">
             <button
               type="submit"
               disabled={isPending}
-              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {isPending ? '검색중...' : '검색'}
             </button>
@@ -440,7 +440,7 @@ export function InventoryTable({
               <button
                 type="button"
                 onClick={handleResetFilters}
-                className="rounded-md border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
+                className="shrink-0 whitespace-nowrap rounded-md border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
               >
                 초기화
               </button>
@@ -449,52 +449,98 @@ export function InventoryTable({
         </div>
       </form>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-muted/10 py-1.5">
-        <div className="min-w-0 flex-1">
-          {searched && (
-            <Pagination
-              page={page}
-              pageSize={pageSize}
-              total={total}
-              onPageChange={(nextPage) => void setPage(nextPage)}
-              onPageSizeChange={(nextPageSize) => void setPageSize(nextPageSize)}
-            />
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <select value={dlYear} onChange={(event) => setDlYear(Number(event.target.value))} className="rounded border px-1.5 py-1 text-xs">
+      <div className="border-y bg-muted/10 py-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 lg:flex-1">
+            {searched && (
+              <>
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground lg:hidden">
+                  <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                    <span>페이지당</span>
+                    <select
+                      value={pageSize}
+                      onChange={(event) => {
+                        void setPageSize(Number(event.target.value))
+                        void setPage(1)
+                      }}
+                      className="rounded border bg-white px-1.5 py-1 text-xs"
+                    >
+                      {[25, 50, 100, 200, 500, 1000].map((size) => (
+                        <option key={size} value={size}>{size}</option>
+                      ))}
+                    </select>
+                    <span>건</span>
+                  </label>
+                  <span className="whitespace-nowrap">총 {formatNumber(total)}건</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => void setPage(Math.max(1, page - 1))}
+                    disabled={page <= 1}
+                    className="rounded border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    이전
+                  </button>
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">
+                    {page} / {Math.max(1, pageCount)} 페이지
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void setPage(Math.min(Math.max(1, pageCount), page + 1))}
+                    disabled={page >= Math.max(1, pageCount)}
+                    className="rounded border px-2.5 py-1 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    다음
+                  </button>
+                </div>
+                <div className="hidden lg:block">
+                  <Pagination
+                    page={page}
+                    pageSize={pageSize}
+                    total={total}
+                    onPageChange={(nextPage) => void setPage(nextPage)}
+                    onPageSizeChange={(nextPageSize) => void setPageSize(nextPageSize)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 lg:flex-nowrap">
+          <select value={dlYear} onChange={(event) => setDlYear(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
             {yearOptions.map((year) => <option key={year} value={year}>{year}년</option>)}
           </select>
-          <select value={dlMonth} onChange={(event) => setDlMonth(Number(event.target.value))} className="rounded border px-1.5 py-1 text-xs">
+          <select value={dlMonth} onChange={(event) => setDlMonth(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
             {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
               <option key={month} value={month}>{month}월</option>
             ))}
           </select>
-          <button type="button" onClick={() => downloadExcel(true)} disabled={selectedCount === 0} className="hidden rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex">
+          <button type="button" onClick={() => downloadExcel(true)} disabled={selectedCount === 0} className="hidden whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex">
             선택 다운({selectedCount})
           </button>
-          <button type="button" onClick={() => downloadExcel(false)} className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
+          <button type="button" onClick={() => downloadExcel(false)} className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
             일괄 다운
           </button>
           {mode === 'inventory' && (
-            <button type="button" onClick={() => setExcelDialogOpen(true)} className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
+            <button type="button" onClick={() => setExcelDialogOpen(true)} className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
               엑셀 업로드
             </button>
           )}
           {mode === 'adjustments' ? (
             <>
-              <a href="/api/inventory/adjustments/template" className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
+              <a href="/api/inventory/adjustments/template" className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
                 엑셀양식 다운로드
               </a>
-              <button type="button" onClick={() => setBulkAdjustmentOpen(true)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+              <button type="button" onClick={() => setBulkAdjustmentOpen(true)} className="shrink-0 whitespace-nowrap rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">
                 대량등록
               </button>
             </>
           ) : (
-            <button type="button" onClick={() => setAdjustDialog({ open: true, mode: 'set' })} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+            <button type="button" onClick={() => setAdjustDialog({ open: true, mode: 'set' })} className="shrink-0 whitespace-nowrap rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">
               재고 등록
             </button>
           )}
+          </div>
         </div>
       </div>
 

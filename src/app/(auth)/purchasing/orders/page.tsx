@@ -239,17 +239,17 @@ export async function PurchasingOrdersView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <PurchaseOrderRetentionCleanup />
       <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {description}
           </p>
         </div>
-        <form className="flex items-center gap-2" action={basePath}>
+        <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
           {selectedOutboundDates.map((date) => <input key={date} type="hidden" name="outboundDate" value={date} />)}
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
@@ -261,9 +261,9 @@ export async function PurchasingOrdersView({
             name="search"
             defaultValue={search ?? ''}
             placeholder="품목코드, 상품명, 주문번호"
-            className="h-8 w-64 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:w-64 md:flex-none"
           />
-          <Button type="submit" variant="outline">검색</Button>
+          <Button type="submit" variant="outline" className="shrink-0">검색</Button>
         </form>
       </header>
 
@@ -364,7 +364,7 @@ export async function PurchasingOrdersView({
       </section>
 
       {overdueOnly ? (
-        <nav className="flex flex-wrap gap-2" aria-label="지연 상태 필터">
+        <nav className="flex max-w-full gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0" aria-label="지연 상태 필터">
           {[
             { status: undefined, label: '전체', count: overdueTotalCount },
             { status: 'purchased' as const, label: '발주요청 지연', count: overduePurchaseRequestCount },
@@ -386,7 +386,7 @@ export async function PurchasingOrdersView({
               <Link
                 key={item.status ?? 'all'}
                 href={href}
-                className={`inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm ${
+                className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-sm ${
                   active ? 'border-foreground bg-foreground text-background' : 'border-border bg-background hover:bg-muted'
                 }`}
               >
@@ -399,7 +399,7 @@ export async function PurchasingOrdersView({
           })}
         </nav>
       ) : showStatusTabs ? (
-      <nav className="flex flex-wrap gap-2">
+      <nav className="flex max-w-full gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0">
         {allowedStatuses.map((item) => {
           const active = item === status
           const href = purchaseOrdersHref({
@@ -417,7 +417,7 @@ export async function PurchasingOrdersView({
             <Link
               key={item}
               href={href}
-              className={`inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm ${
+              className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-sm ${
                 active ? 'border-foreground bg-foreground text-background' : 'border-border bg-background hover:bg-muted'
               }`}
             >
@@ -432,13 +432,13 @@ export async function PurchasingOrdersView({
       ) : null}
 
       <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={nextStatus}>
-        <section className="overflow-hidden rounded-md border bg-background">
+        <section className="min-w-0 overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-sm font-semibold">{listLabel} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
               {status === 'completed' ? (
                 <CompletedOutboundDateFilter
                   dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
@@ -469,8 +469,8 @@ export async function PurchasingOrdersView({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full table-auto text-left text-sm">
+          <div className="max-w-full overflow-x-auto overscroll-x-contain">
+            <table className="min-w-[1040px] w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
@@ -746,7 +746,7 @@ export async function PurchasingOrdersView({
             <div className="text-xs text-muted-foreground">
               {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
             </div>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:w-auto md:flex-nowrap">
               <PurchasePaginationControls
                 key={`${page}-${pageSize}`}
                 basePath={basePath}
@@ -775,7 +775,7 @@ export async function PurchasingOrdersView({
                   pageSize,
                 })}
                 aria-disabled={page <= 1}
-                className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-medium ${
+                className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
                   page <= 1
                     ? 'pointer-events-none border-border bg-muted text-muted-foreground'
                     : 'border-border bg-background hover:bg-muted'
@@ -797,7 +797,7 @@ export async function PurchasingOrdersView({
                   pageSize,
                 })}
                 aria-disabled={page >= totalPages}
-                className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-medium ${
+                className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
                   page >= totalPages
                     ? 'pointer-events-none border-border bg-muted text-muted-foreground'
                     : 'border-border bg-background hover:bg-muted'

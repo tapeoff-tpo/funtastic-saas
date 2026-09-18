@@ -145,68 +145,74 @@ export function DataTable({
   }, [selectedIds, visibleOrdersById])
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       {/* Action bar + toolbar merged — ShippingActions + 선택 카운트 + 열 표시 in one row */}
-      <div className="flex flex-wrap items-center gap-2">
-        <ShippingActions
-          selectedOrderIds={selectedIds}
-          selectedOrders={selectedOrders}
-          allOrders={data}
-          stage={stage}
-          showMappingAction={showMappingAction}
-          showAllMappingsAction={showAllMappingsAction}
-          showConfirmMappedAction={showConfirmMappedAction}
-        />
-        <ShipAllCurrentOrdersButton
-          onChanged={() => {
-            setRowSelection({})
-            router.refresh()
-          }}
-        />
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="col-span-2 min-w-0">
+          <ShippingActions
+            selectedOrderIds={selectedIds}
+            selectedOrders={selectedOrders}
+            allOrders={data}
+            stage={stage}
+            showMappingAction={showMappingAction}
+            showAllMappingsAction={showAllMappingsAction}
+            showConfirmMappedAction={showConfirmMappedAction}
+          />
+        </div>
+        <div className="min-w-0">
+          <ShipAllCurrentOrdersButton
+            onChanged={() => {
+              setRowSelection({})
+              router.refresh()
+            }}
+          />
+        </div>
         {selectedCount > 0 && (
-          <span className="text-sm text-muted-foreground">
+          <span className="col-span-2 text-sm text-muted-foreground">
             {selectedCount}건 선택됨
           </span>
         )}
-        <button
-          type="button"
-          disabled={selectedCount === 0 || deletePending}
-          onClick={() => {
-            if (selectedCount === 0) return
-            // 1차 확인 — 단순 confirm
-            if (
-              !confirm(
-                `선택한 ${selectedCount}건의 주문을 삭제하시겠습니까?\n\n` +
-                  `※ 관련 송장/클레임 정보도 함께 삭제됩니다.\n` +
-                  `※ 재고 변동 이력은 보존됩니다.`,
-              )
-            ) {
-              return
-            }
-            // 2차 확인 — 되돌릴 수 없음을 명시
-            if (!confirm(`정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
-              return
-            }
-            startDelete(async () => {
-              const result = await bulkDeleteOrdersAction(selectedIds)
-              if (result.errors.length > 0) {
-                alert(`삭제 실패: ${result.errors.join('\n')}`)
+        <div className="min-w-0">
+          <button
+            type="button"
+            disabled={selectedCount === 0 || deletePending}
+            onClick={() => {
+              if (selectedCount === 0) return
+              // 1차 확인 — 단순 confirm
+              if (
+                !confirm(
+                  `선택한 ${selectedCount}건의 주문을 삭제하시겠습니까?\n\n` +
+                    `※ 관련 송장/클레임 정보도 함께 삭제됩니다.\n` +
+                    `※ 재고 변동 이력은 보존됩니다.`,
+                )
+              ) {
                 return
               }
-              alert(`${result.deleted}건 삭제 완료`)
-              setRowSelection({})
-              router.refresh()
-            })
-          }}
-          className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {deletePending ? '삭제 중...' : `주문 삭제${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-        </button>
-        <div className="relative">
+              // 2차 확인 — 되돌릴 수 없음을 명시
+              if (!confirm(`정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+                return
+              }
+              startDelete(async () => {
+                const result = await bulkDeleteOrdersAction(selectedIds)
+                if (result.errors.length > 0) {
+                  alert(`삭제 실패: ${result.errors.join('\n')}`)
+                  return
+                }
+                alert(`${result.deleted}건 삭제 완료`)
+                setRowSelection({})
+                router.refresh()
+              })
+            }}
+            className="w-full rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {deletePending ? '삭제 중...' : `주문 삭제${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+          </button>
+        </div>
+        <div className="relative min-w-0">
           <button
             type="button"
             onClick={() => setShowColumnToggle((v) => !v)}
-            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+            className="w-full rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
           >
             열 표시
           </button>
@@ -230,22 +236,26 @@ export function DataTable({
             </div>
           )}
         </div>
-        <ManualStatusChangeButton
-          selectedIds={selectedIds}
-          selectedOrders={selectedOrders}
-          canUnlockOrderSnapshots={canUnlockOrderSnapshots}
-          onChanged={() => {
-            setRowSelection({})
-            router.refresh()
-          }}
-        />
-        <ManualInvoiceButton
-          selectedOrders={selectedOrders}
-          onChanged={() => {
-            setRowSelection({})
-            router.refresh()
-          }}
-        />
+        <div className="min-w-0">
+          <ManualStatusChangeButton
+            selectedIds={selectedIds}
+            selectedOrders={selectedOrders}
+            canUnlockOrderSnapshots={canUnlockOrderSnapshots}
+            onChanged={() => {
+              setRowSelection({})
+              router.refresh()
+            }}
+          />
+        </div>
+        <div className="min-w-0">
+          <ManualInvoiceButton
+            selectedOrders={selectedOrders}
+            onChanged={() => {
+              setRowSelection({})
+              router.refresh()
+            }}
+          />
+        </div>
         <PageSizeSelector
           pageSize={pageSize}
           total={total}
@@ -256,7 +266,7 @@ export function DataTable({
           onPageChange={(p) => {
             void setPage(p)
           }}
-          className="ml-auto"
+          className="col-span-2 w-full justify-between sm:ml-auto sm:w-auto sm:justify-start"
         />
       </div>
 

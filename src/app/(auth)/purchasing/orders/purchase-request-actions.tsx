@@ -1007,6 +1007,66 @@ export function PurchasePaymentFlowBulkActions() {
   )
 }
 
+/** Payment-only completion for the bulk-payment balance list. */
+export function PurchaseBulkPaymentCompletionActions() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+
+  function completeSelectedBulkPayment() {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    if (!window.confirm(
+      `선택한 ${ids.length.toLocaleString('ko-KR')}건을 결제 완료 처리할까요?\n발주 단계·재고·선금 내역은 바뀌지 않고, 결제 대기 목록에서만 제외됩니다.`,
+    )) return
+
+    startTransition(async () => {
+      try {
+        const response = await fetch('/api/purchasing/purchase-requests/bulk-payment-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        })
+        const body = await response.json().catch(() => ({}))
+        const completedCount = Number(body.completedCount ?? 0)
+        const ineligibleCount = Number(body.ineligibleCount ?? 0)
+        const missingCount = Number(body.missingCount ?? 0)
+        if (!response.ok) {
+          toast.error(body.error ?? '대량결제 결제 완료 처리에 실패했습니다.')
+          return
+        }
+
+        context.clear()
+        if (completedCount > 0) {
+          toast.success(`${completedCount.toLocaleString('ko-KR')}건을 결제 완료 처리했습니다.`, ineligibleCount > 0
+            ? { description: `이미 완료됐거나 대량결제대기 상태가 아닌 ${ineligibleCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+            : missingCount > 0
+              ? { description: `이미 없어진 ${missingCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+              : { description: '발주 단계·재고·선금 내역은 유지하고 결제 대기 목록에서만 제외했습니다.' })
+        } else {
+          toast.info('결제 완료 처리할 대량결제 항목을 찾지 못했습니다.')
+        }
+        router.refresh()
+      } catch {
+        toast.error('대량결제 결제 완료 처리 중 연결 오류가 발생했습니다.')
+      }
+    })
+  }
+
+  return (
+    <Button
+      type="button"
+      size="sm"
+      onClick={completeSelectedBulkPayment}
+      disabled={isPending || selectedCount === 0}
+    >
+      {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+      선택 {selectedCount.toLocaleString('ko-KR')}건 결제 완료
+    </Button>
+  )
+}
+
 function useBulkSelection() {
   const context = useContext(BulkSelectionContext)
   if (!context) throw new Error('Purchase bulk selection context is missing.')

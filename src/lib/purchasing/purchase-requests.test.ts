@@ -177,17 +177,33 @@ describe('purchase payment flow views', () => {
     },
   )
 
-  it('ignores the old manual payment status when classifying the amount', () => {
+  it('keeps paid items out of payment queues without changing their operational stage', () => {
     expect(isPurchasePaymentFlowViewItem({
       status: 'china_arrived',
       supplierOrderNumber: null,
       paymentStatus: 'paid',
-    }, 'outstanding')).toBe(true)
+    }, 'outstanding')).toBe(false)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'china_arrived',
+      supplierOrderNumber: null,
+      paymentStatus: 'paid',
+    }, 'china_arrived')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      supplierOrderNumber: null,
+      paymentStatus: 'paid',
+      bulkPaymentPending: true,
+    }, 'bulk_pending')).toBe(false)
     expect(isPurchasePaymentFlowViewItem({
       status: 'purchase_completed',
       supplierOrderNumber: '3316362603001063953',
-      paymentStatus: 'pending',
+      paymentStatus: 'before_outbound',
     }, 'purchase_completed')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      supplierOrderNumber: null,
+      paymentStatus: 'before_outbound',
+    }, 'outstanding')).toBe(true)
   })
 
   it('keeps manually marked bulk payments out of ordinary outstanding', () => {

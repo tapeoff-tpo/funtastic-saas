@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  PurchaseBulkPaymentCompletionActions,
   PurchaseBulkSelectionProvider,
   PurchasePaymentFlowBulkActions,
   PurchaseQuantityField,
@@ -31,6 +32,16 @@ function renderActions() {
     <PurchaseBulkSelectionProvider ids={[itemId]} nextStatus={null}>
       <PurchaseRowCheckbox id={itemId} />
       <PurchasePaymentFlowBulkActions />
+    </PurchaseBulkSelectionProvider>,
+  )
+  fireEvent.click(screen.getByRole('checkbox', { name: '발주 항목 선택' }))
+}
+
+function renderBulkPaymentCompletionActions() {
+  render(
+    <PurchaseBulkSelectionProvider ids={[itemId]} nextStatus={null}>
+      <PurchaseRowCheckbox id={itemId} />
+      <PurchaseBulkPaymentCompletionActions />
     </PurchaseBulkSelectionProvider>,
   )
   fireEvent.click(screen.getByRole('checkbox', { name: '발주 항목 선택' }))
@@ -81,6 +92,27 @@ describe('PurchasePaymentFlowBulkActions', () => {
         body: JSON.stringify({ ids: [itemId] }),
       }),
     ))
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+  })
+
+  it('marks selected bulk-payment rows paid without using the lifecycle completion endpoint', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ completedCount: 1, ineligibleCount: 0, missingCount: 0 }),
+    } as Response)
+    renderBulkPaymentCompletionActions()
+
+    fireEvent.click(screen.getByRole('button', { name: '선택 1건 결제 완료' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/purchasing/purchase-requests/bulk-payment-complete',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ids: [itemId] }),
+      }),
+    ))
+    expect(confirm).toHaveBeenCalledOnce()
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
   })
 

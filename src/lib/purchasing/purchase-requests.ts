@@ -114,8 +114,8 @@ export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, 
   china_arrived: '중국창고도착',
   outbound_requested: '중국출고요청',
   order_number_registered: '주문서번호 등록',
-  outstanding: '주문서번호 미등록',
-  bulk_pending: '대량결제대기 잔금',
+  outstanding: '일반 결제대기',
+  bulk_pending: '대량결제 잔금',
 }
 
 type PurchaseCostRow = {
@@ -175,6 +175,7 @@ export async function getPurchasePaymentFlowSummary(
     .select({
       status: purchaseRequestItems.status,
       hasSupplierOrderNumber,
+      paymentStatus: purchaseRequestItems.paymentStatus,
       bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
       itemCount: count(),
       totalCostYuan: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostYuan}, 0)), 0)`,
@@ -211,7 +212,12 @@ export async function getPurchasePaymentFlowSummary(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
     ))
-    .groupBy(purchaseRequestItems.status, hasSupplierOrderNumber, purchaseRequestItems.bulkPaymentPending)
+    .groupBy(
+      purchaseRequestItems.status,
+      hasSupplierOrderNumber,
+      purchaseRequestItems.paymentStatus,
+      purchaseRequestItems.bulkPaymentPending,
+    )
 
   return summarizePurchasePaymentFlowGroups(summaryRows)
 }
@@ -364,8 +370,9 @@ export function isPurchasePaymentFlowViewItem(
   if (view === 'china_arrived') return item.status === 'china_arrived'
   if (view === 'outbound_requested') return item.status === 'outbound_requested'
   if (view === 'order_number_registered') return hasSupplierOrderNumber
-  if (view === 'bulk_pending') return item.bulkPaymentPending === true
-  return !hasSupplierOrderNumber && item.bulkPaymentPending !== true
+  const isPaid = item.paymentStatus === 'paid'
+  if (view === 'bulk_pending') return item.bulkPaymentPending === true && !isPaid
+  return !hasSupplierOrderNumber && item.bulkPaymentPending !== true && !isPaid
 }
 
 export function filterPurchasePaymentFlowItems(
@@ -486,6 +493,7 @@ export function getPurchasePaymentFlowViewSummary(
 type PurchasePaymentFlowSummaryGroup = {
   status: PurchaseRequestStatus
   hasSupplierOrderNumber: boolean
+  paymentStatus: string | null
   bulkPaymentPending: boolean
   itemCount: number | string
   totalCostYuan: number | string
@@ -594,8 +602,10 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, s
   } else if (view === 'outstanding') {
     conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
     conditions.push(sql`${purchaseRequestItems.bulkPaymentPending} IS NOT TRUE`)
+    conditions.push(sql`COALESCE(${purchaseRequestItems.paymentStatus}, 'pending') <> 'paid'`)
   } else if (view === 'bulk_pending') {
     conditions.push(eq(purchaseRequestItems.bulkPaymentPending, true))
+    conditions.push(sql`COALESCE(${purchaseRequestItems.paymentStatus}, 'pending') <> 'paid'`)
   }
 
   if (search?.trim()) {
@@ -1460,6 +1470,74 @@ export async function updatePurchaseRequestBulkPaymentDeposit(input: {
       .returning({ id: purchaseRequestItems.id })
 
     return row ?? null
+  })
+}
+
+/**
+ * Marks the selected bulk-payment rows as paid without advancing the purchase
+ * lifecycle or touching either China or domestic inventory. The payment-flow
+ * lists use this state to hide an already-settled bulk balance.
+ */
+export async function completeBulkPaymentPurchaseRequestItems(input: {
+  userId: string
+  ids: string[]
+}) {
+  const ids = Array.from(new Set(input.ids))
+  if (ids.length === 0) {
+    return { completedIds: [], ineligibleIds: [], missingIds: [] }
+  }
+
+  await ensurePurchasePaymentTrackingSchema()
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const workspaceRows = await tx
+      .select({
+        id: purchaseRequestItems.id,
+        status: purchaseRequestItems.status,
+        bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+      })
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        inArray(purchaseRequestItems.id, ids),
+      ))
+
+    const workspaceIds = new Set(workspaceRows.map((row) => row.id))
+    const eligibleIds = workspaceRows
+      .filter((row) => (
+        ACTIVE_PURCHASE_PAYMENT_STATUSES.includes(row.status as (typeof ACTIVE_PURCHASE_PAYMENT_STATUSES)[number])
+        && row.bulkPaymentPending
+      ))
+      .map((row) => row.id)
+
+    const completedRows = eligibleIds.length === 0
+      ? []
+      : await tx
+        .update(purchaseRequestItems)
+        .set({
+          paymentStatus: 'paid',
+          // Keep an existing paid-at timestamp when this is only clearing a
+          // stale bulk-pending marker from a previously paid item.
+          paymentPaidAt: sql`COALESCE(${purchaseRequestItems.paymentPaidAt}, now())`,
+          bulkPaymentPending: false,
+          bulkPaymentDueDate: null,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          inArray(purchaseRequestItems.id, eligibleIds),
+          inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+          eq(purchaseRequestItems.bulkPaymentPending, true),
+        ))
+        .returning({ id: purchaseRequestItems.id })
+
+    const completedIds = new Set(completedRows.map((row) => row.id))
+    return {
+      completedIds: [...completedIds],
+      ineligibleIds: [...workspaceIds].filter((id) => !completedIds.has(id)),
+      missingIds: ids.filter((id) => !workspaceIds.has(id)),
+    }
   })
 }
 

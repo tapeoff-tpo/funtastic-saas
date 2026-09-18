@@ -71,10 +71,10 @@ export function PurchasePaymentFlowSummaryPanel({
       {shouldShowAttentionSummary ? (
         <div className="space-y-2" aria-labelledby="purchase-attention-summary-heading">
           <h4 id="purchase-attention-summary-heading" className="text-xs font-medium text-muted-foreground">
-            확인 필요 · 진행 중 발주에 포함된 항목
+            결제 대기 · 진행 중 발주에 포함된 항목
           </h4>
           <div className="grid gap-3 sm:grid-cols-2">
-            {(summary.outstanding.itemCount > 0 || activeView === 'outstanding') ? <PurchaseFlowCard label="주문번호 확인 필요" view="outstanding" summary={summary.outstanding} description="대량결제를 제외한 주문번호 미입력 건" tone="warning" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} /> : null}
+            {(summary.outstanding.itemCount > 0 || activeView === 'outstanding') ? <PurchaseFlowCard label="일반 결제대기" view="outstanding" summary={summary.outstanding} description="주문번호 미등록 · 대량결제대기 제외" tone="warning" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} /> : null}
             {(summary.bulkPending.itemCount > 0 || activeView === 'bulk_pending') ? <PurchaseFlowCard label="대량결제 잔금" view="bulk_pending" summary={summary.bulkPending} description="해당 발주의 누적 선금을 제외한 남은 결제액" tone="warning" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} /> : null}
           </div>
         </div>
@@ -92,7 +92,7 @@ export function PurchasePaymentFlowSummaryPanel({
 
       {shouldShowAttentionSummary ? (
         <p className="text-xs text-muted-foreground">
-          “확인 필요” 금액은 총액에 더하는 별도 금액이 아닙니다. 같은 진행 발주 중에서 주문번호나 대량결제 잔금 확인이 필요한 항목만 따로 보여줍니다.
+          결제 대기 금액은 총액에 더하는 별도 금액이 아닙니다. 같은 진행 발주 중에서 일반 결제대기나 대량결제 잔금 확인이 필요한 항목만 따로 보여줍니다.
         </p>
       ) : null}
     </section>

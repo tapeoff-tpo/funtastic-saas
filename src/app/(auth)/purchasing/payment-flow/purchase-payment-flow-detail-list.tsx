@@ -10,6 +10,7 @@ import { PaymentFlowPendingLink } from './payment-flow-pending-link'
 import { PaymentFlowProductSearch } from './payment-flow-product-search'
 import { BulkPaymentDepositDialog } from './bulk-payment-deposit-dialog'
 import {
+  PurchaseBulkPaymentCompletionActions,
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
   PurchasePaymentFlowBulkActions,
@@ -41,7 +42,7 @@ export function PurchasePaymentFlowDetailList({
 }) {
   const label = PURCHASE_PAYMENT_FLOW_VIEW_LABELS[view]
   const heading = view === 'outstanding'
-    ? '주문서번호 미등록 목록'
+    ? '일반 결제대기 목록'
     : view === 'order_number_registered'
       ? '주문서번호 등록 목록'
     : `${label} 발주 목록`
@@ -59,14 +60,16 @@ export function PurchasePaymentFlowDetailList({
             {search ? `“${search}” 검색 결과 ` : '총 '}{total.toLocaleString('ko-KR')}건 · {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} 표시
           </p>
           {view === 'outstanding' ? (
-            <p className="mt-1 text-xs text-muted-foreground">발주 단계와 별도로 주문서번호가 비어 있고 대량결제대기가 아닌 건입니다. 이전 발주까지 포함한 실제 차감 기록은 아래 거래내역에서 확인할 수 있습니다.</p>
+            <p className="mt-1 text-xs text-muted-foreground">주문서번호가 없고 대량결제대기가 아닌 일반 결제대기 발주입니다. 결제 완료 처리한 건은 이 목록에 표시하지 않습니다.</p>
+          ) : view === 'bulk_pending' ? (
+            <p className="mt-1 text-xs text-muted-foreground">선금을 제외한 남은 결제액입니다. 결제 완료 처리하면 발주 단계·재고·선금 내역은 유지한 채 이 목록과 일반 결제대기 목록에서 제외됩니다.</p>
           ) : view === 'order_number_registered' ? (
             <p className="mt-1 text-xs text-muted-foreground">발주 단계와 별도로 주문서번호가 있는 현재 발주입니다. 이 목록은 자동 발주 차감 대상이며, 이전 발주까지 포함한 실제 차감 기록은 아래 거래내역에서 확인할 수 있습니다.</p>
           ) : null}
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
           {view === 'outstanding' ? <PurchasePaymentFlowBulkActions /> : null}
-          <PurchaseBulkPaymentDialog />
+          {view === 'bulk_pending' ? <PurchaseBulkPaymentCompletionActions /> : <PurchaseBulkPaymentDialog />}
           <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="view" value={view} />
             {search ? <input type="hidden" name="search" value={search} /> : null}

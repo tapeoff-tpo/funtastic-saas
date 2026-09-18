@@ -1836,6 +1836,8 @@ export async function syncEcountPurchasingSnapshot(input: {
         sku: purchaseRequestItems.sku,
         purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
         supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+        paymentStatus: purchaseRequestItems.paymentStatus,
+        paymentPaidAt: purchaseRequestItems.paymentPaidAt,
         bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
         bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
         bulkPaymentDepositCny: purchaseRequestItems.bulkPaymentDepositCny,
@@ -2317,8 +2319,24 @@ function bulkPaymentIdentityKeys(item: BulkPaymentIdentity) {
     .filter((key): key is string => Boolean(key))
 }
 
+type BulkPaymentOverride =
+  | {
+    kind: 'paid'
+    paidAt: Date | null
+  }
+  | {
+    kind: 'pending'
+    dueDate: string | null
+    depositCny: string | number | null
+    depositKrw: string | number | null
+    depositPaidAt: string | null
+    depositMemo: string | null
+  }
+
 /** @internal Exported for regression coverage of raw-refresh persistence. */
 export function collectBulkPaymentOverrides(rows: Array<BulkPaymentIdentity & {
+  paymentStatus?: string | null
+  paymentPaidAt?: Date | null
   bulkPaymentPending: boolean
   bulkPaymentDueDate: string | null
   bulkPaymentDepositCny?: string | number | null
@@ -2326,24 +2344,24 @@ export function collectBulkPaymentOverrides(rows: Array<BulkPaymentIdentity & {
   bulkPaymentDepositPaidAt?: string | null
   bulkPaymentDepositMemo?: string | null
 }>) {
-  const overrides = new Map<string, {
-    dueDate: string | null
-    depositCny: string | number | null
-    depositKrw: string | number | null
-    depositPaidAt: string | null
-    depositMemo: string | null
-  }>()
+  const overrides = new Map<string, BulkPaymentOverride>()
   for (const row of rows) {
-    if (!row.bulkPaymentPending) continue
+    if (row.paymentStatus !== 'paid' && !row.bulkPaymentPending) continue
     for (const key of bulkPaymentIdentityKeys(row)) {
       if (!overrides.has(key)) {
-        overrides.set(key, {
-          dueDate: row.bulkPaymentDueDate,
-          depositCny: row.bulkPaymentDepositCny ?? 0,
-          depositKrw: row.bulkPaymentDepositKrw ?? 0,
-          depositPaidAt: row.bulkPaymentDepositPaidAt ?? null,
-          depositMemo: row.bulkPaymentDepositMemo ?? null,
-        })
+        overrides.set(key, row.paymentStatus === 'paid'
+          ? {
+            kind: 'paid',
+            paidAt: row.paymentPaidAt ?? null,
+          }
+          : {
+            kind: 'pending',
+            dueDate: row.bulkPaymentDueDate,
+            depositCny: row.bulkPaymentDepositCny ?? 0,
+            depositKrw: row.bulkPaymentDepositKrw ?? 0,
+            depositPaidAt: row.bulkPaymentDepositPaidAt ?? null,
+            depositMemo: row.bulkPaymentDepositMemo ?? null,
+          })
       }
     }
   }
@@ -2353,13 +2371,7 @@ export function collectBulkPaymentOverrides(rows: Array<BulkPaymentIdentity & {
 /** @internal Exported for regression coverage of raw-refresh persistence. */
 export function applyBulkPaymentOverride(
   row: PurchaseRequestItemInsert,
-  overrides: Map<string, {
-    dueDate: string | null
-    depositCny: string | number | null
-    depositKrw: string | number | null
-    depositPaidAt: string | null
-    depositMemo: string | null
-  }>,
+  overrides: Map<string, BulkPaymentOverride>,
 ): PurchaseRequestItemInsert {
   for (const key of bulkPaymentIdentityKeys({
     sku: row.sku,
@@ -2368,6 +2380,13 @@ export function applyBulkPaymentOverride(
   })) {
     if (!overrides.has(key)) continue
     const override = overrides.get(key)!
+    if (override.kind === 'paid') {
+      return {
+        ...row,
+        paymentStatus: 'paid',
+        paymentPaidAt: override.paidAt,
+      }
+    }
     return {
       ...row,
       bulkPaymentPending: true,

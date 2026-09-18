@@ -69,6 +69,33 @@ describe('bulk payment override persistence', () => {
     expect(next.bulkPaymentPending).toBeUndefined()
     expect(next.bulkPaymentDueDate).toBeUndefined()
   })
+
+  it('carries a manually completed bulk payment across an Ecount stage replacement', () => {
+    const paidAt = new Date('2026-09-18T08:30:00.000Z')
+    const overrides = collectBulkPaymentOverrides([{
+      sku: '112194-0001',
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: null,
+      paymentStatus: 'paid',
+      paymentPaidAt: paidAt,
+      bulkPaymentPending: false,
+      bulkPaymentDueDate: null,
+    }])
+    const next = applyBulkPaymentOverride({
+      userId: 'workspace-user',
+      rowNumber: 1,
+      status: 'china_arrived',
+      sku: '112194-0001',
+      productName: '히카리 슬림형 쌀통',
+      requestedQuantity: 100,
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: '3316362603001063953',
+    }, overrides)
+
+    expect(next.paymentStatus).toBe('paid')
+    expect(next.paymentPaidAt).toEqual(paidAt)
+    expect(next.bulkPaymentPending).toBeUndefined()
+  })
 })
 
 describe('SaaS China raw snapshot safeguard', () => {

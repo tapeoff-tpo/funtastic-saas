@@ -56,6 +56,19 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
     ))
   }, [items, search])
 
+  const warehouseSummaries = useMemo(() => {
+    const summaries = new Map<string, { itemCount: number; onHandQuantity: number }>()
+    for (const item of items) {
+      const current = summaries.get(item.warehouseCode) ?? { itemCount: 0, onHandQuantity: 0 }
+      current.itemCount += 1
+      current.onHandQuantity += item.onHandQuantity
+      summaries.set(item.warehouseCode, current)
+    }
+    return [...summaries.entries()]
+      .map(([warehouseCode, value]) => ({ warehouseCode, ...value }))
+      .sort((left, right) => left.warehouseCode.localeCompare(right.warehouseCode, 'ko-KR'))
+  }, [items])
+
   function receiveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     startTransition(async () => {
@@ -67,7 +80,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
         toast.error(result.error)
         return
       }
-      toast.success('SaaS 중국재고에 테스트 입고를 반영했습니다.')
+      toast.success('SaaS 중국재고에 입고를 반영했습니다.')
       setReceiveForm(emptyReceiveForm)
       setShowReceive(false)
       router.refresh()
@@ -103,10 +116,28 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
         <SummaryCard label="작업 가능" value={summary.availableQuantity} description="새 출고작업에 선택할 수 있는 수량" emphasis />
       </section>
 
+      {warehouseSummaries.length > 0 ? (
+        <section className="rounded-lg border bg-card p-4">
+          <div className="mb-3">
+            <h2 className="font-semibold">창고별 현재고</h2>
+            <p className="mt-1 text-xs text-muted-foreground">엑셀의 창고 열을 각각 나누어 표시합니다.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {warehouseSummaries.map((warehouse) => (
+              <div key={warehouse.warehouseCode} className="rounded-md border bg-muted/20 px-3 py-2">
+                <p className="truncate text-xs font-medium text-muted-foreground" title={warehouse.warehouseCode}>{warehouse.warehouseCode}</p>
+                <p className="mt-1 font-semibold tabular-nums">{warehouse.onHandQuantity.toLocaleString('ko-KR')}개</p>
+                <p className="text-xs text-muted-foreground">{warehouse.itemCount.toLocaleString('ko-KR')}개 품목</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="rounded-lg border bg-card">
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-semibold">테스트 재고 입고</h2>
+            <h2 className="font-semibold">수동 재고 입고</h2>
             <p className="mt-1 text-xs text-muted-foreground">실제 Ecount 중국재고에는 영향을 주지 않습니다.</p>
           </div>
           <button
@@ -115,7 +146,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
             className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"
           >
             <Plus className="size-4" />
-            {showReceive ? '입고 입력 닫기' : '테스트 재고 추가'}
+            {showReceive ? '입고 입력 닫기' : '재고 추가'}
           </button>
         </div>
         {showReceive ? (
@@ -127,7 +158,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
               <input value={receiveForm.sku} onChange={(event) => setReceiveForm((form) => ({ ...form, sku: event.target.value }))} required className={inputClass} placeholder="SKU" />
             </Field>
             <Field label="상품명">
-              <input value={receiveForm.productName} onChange={(event) => setReceiveForm((form) => ({ ...form, productName: event.target.value }))} required className={inputClass} placeholder="테스트 상품" />
+              <input value={receiveForm.productName} onChange={(event) => setReceiveForm((form) => ({ ...form, productName: event.target.value }))} required className={inputClass} placeholder="상품명" />
             </Field>
             <Field label="옵션명">
               <input value={receiveForm.optionName} onChange={(event) => setReceiveForm((form) => ({ ...form, optionName: event.target.value }))} className={inputClass} placeholder="선택" />
@@ -161,7 +192,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">중국창고</th>
+                <th className="px-3 py-2 font-medium">창고</th>
                 <th className="px-3 py-2 font-medium">품목</th>
                 <th className="px-3 py-2 text-right font-medium">현재고</th>
                 <th className="px-3 py-2 text-right font-medium">출고 예약</th>
@@ -172,7 +203,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
             </thead>
             <tbody>
               {filteredItems.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 테스트 재고를 먼저 추가해주세요.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</td></tr>
               ) : filteredItems.map((item) => (
                 <tr key={item.id} className="border-t">
                   <td className="px-3 py-2 font-medium">{item.warehouseCode}</td>

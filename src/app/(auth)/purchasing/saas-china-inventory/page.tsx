@@ -39,7 +39,7 @@ export default async function SaasChinaInventoryPage() {
             <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">개발용 독립 재고</span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            기존 중국재고·Ecount 로우데이터와 합산하지 않습니다. 여기 등록한 재고만 중국출고 작업에서 선택할 수 있습니다.
+            엑셀 원본 재고를 창고별로 따로 보관합니다. 기존 중국재고·Ecount 로우데이터와는 합산하지 않으며, 중국출고 작업에서는 중국창고 재고만 선택합니다.
           </p>
         </div>
         <Link

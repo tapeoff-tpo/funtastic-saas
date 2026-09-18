@@ -24,13 +24,19 @@ export default async function ChinaShipmentsPage({
   const params = await searchParams
   const selectedShipmentId = parseShipmentId(stringParam(params.shipment))
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [{ items: inventoryItems, summary }, shipments, detail] = await Promise.all([
+  const [{ items: inventoryItems }, shipments, detail] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
     listChinaOutboundShipments(workspaceUserId),
     selectedShipmentId ? getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId: selectedShipmentId }) : Promise.resolve(null),
   ])
 
-  const stockItems: ChinaShipmentStockItem[] = inventoryItems.map((item) => ({
+  const chinaWarehouseItems = inventoryItems.filter((item) => item.warehouseCode === '중국창고')
+  const chinaWarehouseSummary = chinaWarehouseItems.reduce((result, item) => ({
+    onHandQuantity: result.onHandQuantity + item.onHandQuantity,
+    reservedQuantity: result.reservedQuantity + item.reservedQuantity,
+    availableQuantity: result.availableQuantity + item.availableQuantity,
+  }), { onHandQuantity: 0, reservedQuantity: 0, availableQuantity: 0 })
+  const stockItems: ChinaShipmentStockItem[] = chinaWarehouseItems.map((item) => ({
     id: item.id,
     warehouseCode: item.warehouseCode,
     sku: item.sku,
@@ -68,7 +74,7 @@ export default async function ChinaShipmentsPage({
 
       <ChinaShipmentsBoard
         inventoryItems={stockItems}
-        inventorySummary={summary}
+        inventorySummary={chinaWarehouseSummary}
         shipments={shipmentItems}
         selectedShipment={detail ? toShipmentDetailView(detail) : null}
       />

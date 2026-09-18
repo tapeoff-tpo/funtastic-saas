@@ -2,7 +2,7 @@
 
 import { type FormEvent, type ReactNode, type TransitionStartFunction, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Archive, Box, Check, Container, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
+import { Archive, ArrowDownUp, Box, Check, Container, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   addChinaOutboundBoxAction,
@@ -51,6 +51,7 @@ export type ChinaShipmentDetailView = {
     externalReference: string | null
     plannedOutboundDate: string | null
     memo: string | null
+    createdAt: string
   }
   items: Array<{
     id: string
@@ -72,6 +73,9 @@ type InventorySummary = {
   reservedQuantity: number
   availableQuantity: number
 }
+
+type InventorySortKey = 'warehouseCode' | 'sku' | 'productName' | 'onHandQuantity' | 'reservedQuantity' | 'availableQuantity'
+type SortDirection = 'asc' | 'desc'
 
 const editableStatuses = new Set(['draft', 'packing'])
 const statusLabels: Record<string, string> = {
@@ -101,8 +105,32 @@ export function ChinaShipmentsBoard({
   const [destinationName, setDestinationName] = useState('')
   const [plannedOutboundDate, setPlannedOutboundDate] = useState(today())
   const [memo, setMemo] = useState('')
+  const [inventorySort, setInventorySort] = useState<{ key: InventorySortKey; direction: SortDirection }>({ key: 'warehouseCode', direction: 'asc' })
 
   const availableInventory = inventoryItems.filter((item) => item.availableQuantity > 0)
+  const sortedAvailableInventory = [...availableInventory].sort((left, right) => {
+    let comparison = 0
+    switch (inventorySort.key) {
+      case 'warehouseCode': comparison = left.warehouseCode.localeCompare(right.warehouseCode, 'ko', { numeric: true }); break
+      case 'sku': comparison = left.sku.localeCompare(right.sku, 'ko', { numeric: true }); break
+      case 'productName': comparison = left.productName.localeCompare(right.productName, 'ko', { numeric: true }); break
+      case 'onHandQuantity': comparison = left.onHandQuantity - right.onHandQuantity; break
+      case 'reservedQuantity': comparison = left.reservedQuantity - right.reservedQuantity; break
+      case 'availableQuantity': comparison = left.availableQuantity - right.availableQuantity; break
+    }
+    return inventorySort.direction === 'asc' ? comparison : -comparison
+  })
+
+  function fillAllOutboundQuantities() {
+    setQuantities(Object.fromEntries(availableInventory.map((item) => [item.id, String(item.availableQuantity)])))
+  }
+
+  function toggleInventorySort(key: InventorySortKey) {
+    setInventorySort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }))
+  }
 
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -170,7 +198,8 @@ export function ChinaShipmentsBoard({
               <input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" />
             </label>
             <div className="space-y-2 md:hidden">
-              {availableInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</p> : availableInventory.map((item) => (
+              {availableInventory.length > 0 ? <div className="flex justify-end"><button type="button" onClick={fillAllOutboundQuantities} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted">전체수량</button></div> : null}
+              {availableInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</p> : sortedAvailableInventory.map((item) => (
                 <article key={item.id} className="rounded-lg border bg-background p-3">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-muted-foreground">{item.warehouseCode}</p>
@@ -190,13 +219,14 @@ export function ChinaShipmentsBoard({
               ))}
             </div>
             <div className="hidden overflow-x-auto rounded-md border md:block">
-              <table className="w-full min-w-[900px] text-left text-sm">
-                <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">재고 위치</th><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">현재고</th><th className="px-3 py-2 text-right">기존 예약</th><th className="px-3 py-2 text-right">작업 가능</th><th className="px-3 py-2 text-right">이번 출고</th></tr></thead>
+              <table className="w-full min-w-[1050px] text-left text-sm">
+                <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2"><InventorySortButton label="재고 위치" sortKey="warehouseCode" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2"><InventorySortButton label="상품코드" sortKey="sku" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2"><InventorySortButton label="상품명" sortKey="productName" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2 text-right"><InventorySortButton label="현재고" sortKey="onHandQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><InventorySortButton label="기존 예약" sortKey="reservedQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><InventorySortButton label="작업 가능" sortKey="availableQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><div className="inline-flex items-center gap-2"><span>이번 출고</span><button type="button" onClick={fillAllOutboundQuantities} className="rounded border bg-background px-2 py-1 text-xs font-medium text-foreground hover:bg-muted">전체수량</button></div></th></tr></thead>
                 <tbody>
-                  {availableInventory.length === 0 ? <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</td></tr> : availableInventory.map((item) => (
+                  {availableInventory.length === 0 ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</td></tr> : sortedAvailableInventory.map((item) => (
                     <tr key={item.id} className="border-t">
                       <td className="px-3 py-2 text-xs font-medium text-muted-foreground">{item.warehouseCode}</td>
-                      <td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{item.sku}</td>
+                      <td className="px-3 py-2"><div className="font-medium">{item.productName}</div>{item.optionName ? <div className="text-xs text-muted-foreground">{item.optionName}</div> : null}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{item.onHandQuantity.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-amber-700">{item.reservedQuantity.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-700">{item.availableQuantity.toLocaleString('ko-KR')}</td>
@@ -219,6 +249,14 @@ export function ChinaShipmentsBoard({
   )
 }
 
+function InventorySortButton({ label, sortKey, currentSort, onSort, align = 'left' }: { label: string; sortKey: InventorySortKey; currentSort: { key: InventorySortKey; direction: SortDirection }; onSort: (key: InventorySortKey) => void; align?: 'left' | 'right' }) {
+  const active = currentSort.key === sortKey
+  return <button type="button" onClick={() => onSort(sortKey)} className={`inline-flex items-center gap-1 font-medium hover:text-foreground ${align === 'right' ? 'justify-end' : ''}`} aria-label={`${label} 정렬`}>
+    <span>{label}</span>
+    <ArrowDownUp className={`size-3 ${active ? 'text-foreground' : 'text-muted-foreground/60'} ${active && currentSort.direction === 'desc' ? 'rotate-180' : ''}`} />
+  </button>
+}
+
 function ShipmentList({ shipments, selectedShipmentId, onSelect }: { shipments: ChinaShipmentListItem[]; selectedShipmentId?: string; onSelect: (id: string) => void }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
@@ -229,6 +267,7 @@ function ShipmentList({ shipments, selectedShipmentId, onSelect }: { shipments: 
           return <button key={shipment.id} type="button" onClick={() => onSelect(shipment.id)} className={`mb-1 w-full rounded-md border p-3 text-left transition-colors ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted'}`}>
             <div className="flex items-center justify-between gap-2"><span className="font-medium">{shipment.shipmentNo}</span><StatusBadge status={shipment.status} /></div>
             <p className="mt-1 text-xs text-muted-foreground">출발 위치: {shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 등록일: {formatRegisteredDate(shipment.createdAt)}</p>
             <p className="mt-2 text-xs tabular-nums text-muted-foreground">상품 {shipment.itemCount}종 · {shipment.packedQuantity.toLocaleString('ko-KR')} / {shipment.reservedQuantity.toLocaleString('ko-KR')}개 포장</p>
           </button>
         })}
@@ -291,7 +330,8 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
       <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipment.shipmentNo}</h2><StatusBadge status={shipment.status} /></div>
-          <p className="mt-1 text-sm text-muted-foreground">출발 위치: {shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}{shipment.plannedOutboundDate ? ` · ${shipment.plannedOutboundDate}` : ''}</p>
+          <p className="mt-1 text-sm text-muted-foreground">출발 위치: {shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}</p>
+          <p className="mt-1 text-xs text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 등록일: {formatRegisteredDate(shipment.createdAt)}</p>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -355,6 +395,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
+}
+
+function formatRegisteredDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
 }
 
 const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30'

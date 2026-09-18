@@ -89,6 +89,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       externalReference: detail.shipment.externalReference,
       plannedOutboundDate: detail.shipment.plannedOutboundDate,
       memo: detail.shipment.memo,
+      createdAt: detail.shipment.createdAt.toISOString(),
     },
     items: detail.items.map((item) => ({
       id: item.id,

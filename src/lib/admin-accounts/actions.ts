@@ -19,6 +19,7 @@ import { db } from '@/lib/db'
 import { userProfiles, auditLogs, type UserRole } from '@/lib/db/schema'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import bcrypt from 'bcryptjs'
 
 const BAN_FOREVER = '876000h' // ~100 years (Supabase ban_duration is a Go duration string)
 const RESET_PASSWORD = '0000'
@@ -29,6 +30,60 @@ function getInitialPassword(): string {
   const pw = process.env.INITIAL_USER_PASSWORD
   if (!pw) throw new Error('INITIAL_USER_PASSWORD env var not set')
   return pw
+}
+
+function normalizeEmail(email: string | null | undefined): string {
+  return email?.trim().toLowerCase() ?? ''
+}
+
+function getResetPasswordErrorMessage(errorMessage: string): string {
+  const normalized = errorMessage.toLowerCase()
+  if (
+    normalized.includes('password')
+    && (normalized.includes('at least') || normalized.includes('minimum') || normalized.includes('length'))
+  ) {
+    return '인증 서버의 최소 비밀번호 길이 설정 때문에 0000으로 초기화하지 못했습니다.'
+  }
+  return errorMessage
+}
+
+/**
+ * Legacy profile rows can predate their matching Supabase auth user. Resolve
+ * by ID first, then fall back to the profile email so a reset always targets
+ * the identity that actually signs in.
+ */
+async function resolveAuthUserForProfile(
+  admin: ReturnType<typeof createAdminClient>,
+  profile: { id: string; email: string },
+) {
+  const profileEmail = normalizeEmail(profile.email)
+  const { data: directLookup } = await admin.auth.admin.getUserById(profile.id)
+  if (directLookup.user && normalizeEmail(directLookup.user.email) === profileEmail) {
+    return {
+      ok: true as const,
+      userId: directLookup.user.id,
+      appMetadata: directLookup.user.app_metadata,
+    }
+  }
+
+  const { data: listedUsers, error: listError } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  })
+  if (listError) return { ok: false as const, error: listError.message }
+
+  const matchedUser = listedUsers.users.find(
+    (user) => normalizeEmail(user.email) === profileEmail,
+  )
+  if (!matchedUser) {
+    return { ok: false as const, error: `Auth user not found for ${profile.email}` }
+  }
+
+  return {
+    ok: true as const,
+    userId: matchedUser.id,
+    appMetadata: matchedUser.app_metadata,
+  }
 }
 
 /**
@@ -193,30 +248,41 @@ export async function resetAccountPassword(input: { targetId: string }): Promise
   if (!guard.ok) return { success: false, error: guard.error }
 
   const [target] = await db
-    .select({ id: userProfiles.id })
+    .select({ id: userProfiles.id, email: userProfiles.email })
     .from(userProfiles)
     .where(eq(userProfiles.id, input.targetId))
     .limit(1)
   if (!target) return { success: false, error: 'Target not found' }
 
   const admin = createAdminClient()
-  const { data: authTarget, error: authTargetError } = await admin.auth.admin.getUserById(input.targetId)
-  if (authTargetError || !authTarget.user) {
-    return { success: false, error: authTargetError?.message ?? 'Auth user not found' }
+  const authTarget = await resolveAuthUserForProfile(admin, target)
+  if (!authTarget.ok) {
+    return { success: false, error: authTarget.error }
   }
 
-  const { error } = await admin.auth.admin.updateUserById(input.targetId, {
-    password: RESET_PASSWORD,
-    app_metadata: withPasswordChangeRequired(authTarget.user.app_metadata, true),
+  const { data: updatedAuthUser, error } = await admin.auth.admin.updateUserById(authTarget.userId, {
+    // Supabase's normal password policy can reject a four-character reset
+    // password. The server-only admin API accepts a bcrypt hash instead;
+    // the forced-change flag makes this temporary password unusable beyond
+    // the first sign-in screen.
+    password_hash: await bcrypt.hash(RESET_PASSWORD, 12),
+    app_metadata: withPasswordChangeRequired(authTarget.appMetadata, true),
   })
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: getResetPasswordErrorMessage(error.message) }
+  if (normalizeEmail(updatedAuthUser.user?.email) !== normalizeEmail(target.email)) {
+    return { success: false, error: '비밀번호 초기화 대상 계정을 확인하지 못했습니다.' }
+  }
 
   await db.transaction(async (tx) => {
     await tx.insert(auditLogs).values({
       actorId: guard.callerId,
       action: 'account.password_reset',
       targetId: input.targetId,
-      metadata: { forcePasswordChange: true },
+      metadata: {
+        forcePasswordChange: true,
+        authUserId: authTarget.userId,
+        resolvedByEmail: authTarget.userId !== target.id,
+      },
     })
   })
 

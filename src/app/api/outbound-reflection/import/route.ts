@@ -37,6 +37,18 @@ export async function POST(request: NextRequest) {
       fallbackMarketplaceId: marketplaceId || undefined,
       applyInventory,
     })
+    // A duplicate upload intentionally returns a zero-row skipped result with
+    // its existing queue ID. Only that response may bypass the parse error.
+    const isExistingDuplicate = result.skipped && Boolean(result.batchId)
+    if (!isExistingDuplicate && result.totalRows === 0) {
+      return NextResponse.json(
+        {
+          error: noParsedOutboundRowsError(result.errors),
+          errors: result.errors,
+        },
+        { status: 400 },
+      )
+    }
     revalidatePath('/outbound-reflection')
     return NextResponse.json(result)
   } catch (error) {
@@ -46,6 +58,13 @@ export async function POST(request: NextRequest) {
       { status: error instanceof InvalidExcelWorkbookError ? 400 : 500 },
     )
   }
+}
+
+function noParsedOutboundRowsError(errors: Array<{ row: number; message: string }>): string {
+  const firstError = errors.find((error) => error.message?.trim())
+  if (!firstError) return '출고반영 파일에서 등록할 행을 찾지 못했습니다. 업로드 양식과 필수 컬럼을 확인해주세요.'
+  const detail = firstError.row > 0 ? `${firstError.row}행: ${firstError.message}` : firstError.message
+  return `출고반영 파일에서 등록할 행을 찾지 못했습니다. ${detail}`
 }
 
 async function resolveMappings(userId: string, templateId: string): Promise<OrderImportMapping[]> {

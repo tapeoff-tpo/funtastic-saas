@@ -4,10 +4,12 @@ import {
   applyBulkPaymentOverride,
   classifyEcountPurchasingUpload,
   collectBulkPaymentOverrides,
+  excludeSaasChinaProtectedSnapshotItems,
   getEcountChinaInventorySnapshotDate,
   getEcountPurchasingRefreshScope,
   getPurchaseHistoryBridgeKey,
   getPurchaseHistoryBridgeKeysAfterChinaInventorySnapshot,
+  getSaasChinaProtectedPurchaseKeys,
   parseEcountPurchasingSnapshot,
   resolveChinaInventorySnapshotAsOfDate,
   type EcountPurchasingUpload,
@@ -66,6 +68,43 @@ describe('bulk payment override persistence', () => {
 
     expect(next.bulkPaymentPending).toBeUndefined()
     expect(next.bulkPaymentDueDate).toBeUndefined()
+  })
+})
+
+describe('SaaS China raw snapshot safeguard', () => {
+  it('keeps only the same management-code and SKU snapshot line from duplicating a protected row', () => {
+    const protectedPurchaseKeys = getSaasChinaProtectedPurchaseKeys([
+      {
+        sku: '100001-0001',
+        purchaseManagementCode: 'P-SAA-1',
+        rawData: { saasChinaMode: true },
+      },
+      {
+        sku: '100001-0001',
+        purchaseManagementCode: 'P-NOT-BOOLEAN',
+        rawData: { saasChinaMode: 'true' },
+      },
+      {
+        sku: '100001-0001',
+        purchaseManagementCode: null,
+        rawData: { saasChinaMode: true },
+      },
+    ])
+
+    expect([...protectedPurchaseKeys]).toEqual(['P-SAA-1::100001-0001'])
+
+    const insertableRows = excludeSaasChinaProtectedSnapshotItems([
+      { label: 'same purchase', sku: '100001-0001', purchaseManagementCode: 'P-SAA-1' },
+      { label: 'different SKU', sku: '100002-0001', purchaseManagementCode: 'P-SAA-1' },
+      { label: 'different management code', sku: '100001-0001', purchaseManagementCode: 'P-SAA-2' },
+      { label: 'unknown management code', sku: '100001-0001', purchaseManagementCode: null },
+    ], protectedPurchaseKeys)
+
+    expect(insertableRows.map((row) => row.label)).toEqual([
+      'different SKU',
+      'different management code',
+      'unknown management code',
+    ])
   })
 })
 

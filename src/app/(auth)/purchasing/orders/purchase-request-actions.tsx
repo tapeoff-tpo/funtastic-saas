@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Check, ChevronDown, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
@@ -35,10 +36,12 @@ import {
 type BulkSelectionContextValue = {
   ids: string[]
   selectedIds: Set<string>
+  pendingSaasChinaModeIds: Set<string>
   nextStatus: PurchaseRequestStatus | null
   toggle: (id: string) => void
   toggleAll: () => void
   clear: () => void
+  setSaasChinaModePending: (id: string, pending: boolean) => void
 }
 
 const BulkSelectionContext = createContext<BulkSelectionContextValue | null>(null)
@@ -53,6 +56,7 @@ export function PurchaseBulkSelectionProvider({
   children: ReactNode
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [pendingSaasChinaModeIds, setPendingSaasChinaModeIds] = useState<Set<string>>(() => new Set())
 
   function toggle(id: string) {
     setSelectedIds((current) => {
@@ -75,8 +79,26 @@ export function PurchaseBulkSelectionProvider({
     setSelectedIds(new Set())
   }
 
+  function setSaasChinaModePending(id: string, pending: boolean) {
+    setPendingSaasChinaModeIds((current) => {
+      const next = new Set(current)
+      if (pending) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
   return (
-    <BulkSelectionContext.Provider value={{ ids, selectedIds, nextStatus, toggle, toggleAll, clear }}>
+    <BulkSelectionContext.Provider value={{
+      ids,
+      selectedIds,
+      pendingSaasChinaModeIds,
+      nextStatus,
+      toggle,
+      toggleAll,
+      clear,
+      setSaasChinaModePending,
+    }}>
       {children}
     </BulkSelectionContext.Provider>
   )
@@ -121,12 +143,17 @@ export function PurchaseBulkStatusButton() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
+  const hasPendingSaasChinaMode = Array.from(context.selectedIds).some((id) => context.pendingSaasChinaModeIds.has(id))
 
   if (!context.nextStatus) return null
 
   function moveSelected() {
     const ids = Array.from(context.selectedIds)
     if (ids.length === 0) return
+    if (ids.some((id) => context.pendingSaasChinaModeIds.has(id))) {
+      setMessage('SaaS 중국재고 연동 설정을 저장 중인 행이 있어 잠시 후 다시 시도해주세요.')
+      return
+    }
     setMessage(null)
 
     startTransition(async () => {
@@ -155,7 +182,7 @@ export function PurchaseBulkStatusButton() {
         size="sm"
         variant="outline"
         onClick={moveSelected}
-        disabled={isPending || selectedCount === 0}
+        disabled={isPending || selectedCount === 0 || hasPendingSaasChinaMode}
       >
         {isPending ? <Loader2 className="animate-spin" /> : <Check />}
         선택 {selectedCount.toLocaleString('ko-KR')}건 {PURCHASE_REQUEST_STATUS_LABELS[context.nextStatus]}로 이동
@@ -814,29 +841,45 @@ export function PurchaseBulkDeleteButton() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
+  const hasPendingSaasChinaMode = Array.from(context.selectedIds).some((id) => context.pendingSaasChinaModeIds.has(id))
 
   function removeSelected() {
     const ids = Array.from(context.selectedIds)
     if (ids.length === 0) return
+    if (ids.some((id) => context.pendingSaasChinaModeIds.has(id))) {
+      setMessage('SaaS 중국재고 연동 설정을 저장 중인 행이 있어 잠시 후 다시 시도해주세요.')
+      return
+    }
     if (!window.confirm(`선택한 ${ids.length.toLocaleString('ko-KR')}건을 삭제할까요?`)) return
     setMessage(null)
     startTransition(async () => {
       let deletedCount = 0
+      const failedMessages: string[] = []
       for (const id of ids) {
         const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
           method: 'DELETE',
         })
-        if (response.ok) deletedCount += 1
+        if (response.ok) {
+          deletedCount += 1
+        } else {
+          const body = await response.json().catch(() => ({}))
+          failedMessages.push(typeof body.error === 'string' ? body.error : '삭제하지 못한 항목이 있습니다.')
+        }
       }
       context.clear()
-      setMessage(`${deletedCount.toLocaleString('ko-KR')}건 삭제`)
+      if (failedMessages.length > 0) {
+        const firstReason = failedMessages[0]
+        setMessage(`${deletedCount.toLocaleString('ko-KR')}건 삭제 · ${failedMessages.length.toLocaleString('ko-KR')}건 제외: ${firstReason}`)
+      } else {
+        setMessage(`${deletedCount.toLocaleString('ko-KR')}건 삭제`)
+      }
       router.refresh()
     })
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" size="sm" variant="destructive" onClick={removeSelected} disabled={isPending || selectedCount === 0}>
+      <Button type="button" size="sm" variant="destructive" onClick={removeSelected} disabled={isPending || selectedCount === 0 || hasPendingSaasChinaMode}>
         {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
         선택 삭제 {selectedCount.toLocaleString('ko-KR')}
       </Button>
@@ -1159,14 +1202,32 @@ export function PurchaseRecommendationGenerator({
 export function PurchaseStatusButton({
   id,
   nextStatus,
+  saasChinaMode = false,
 }: {
   id: string
   nextStatus: PurchaseRequestStatus | null
+  saasChinaMode?: boolean
 }) {
   const router = useRouter()
+  const context = useBulkSelection()
   const [isPending, startTransition] = useTransition()
+  const isSaasChinaModePending = context.pendingSaasChinaModeIds.has(id)
 
   if (!nextStatus) return null
+
+  if (saasChinaMode && (nextStatus === 'outbound_requested' || nextStatus === 'completed')) {
+    return (
+      <div className="space-y-1">
+        <Link
+          href="/purchasing/china-shipments"
+          className="inline-flex h-7 items-center justify-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+        >
+          중국출고에서 작업
+        </Link>
+        <p className="text-[11px] leading-tight text-muted-foreground">SaaS 재고 출고로 처리</p>
+      </div>
+    )
+  }
 
   function moveStatus() {
     startTransition(async () => {
@@ -1185,7 +1246,7 @@ export function PurchaseStatusButton({
   }
 
   return (
-    <Button type="button" size="sm" variant="outline" onClick={moveStatus} disabled={isPending}>
+    <Button type="button" size="sm" variant="outline" onClick={moveStatus} disabled={isPending || isSaasChinaModePending}>
       {isPending ? <Loader2 className="animate-spin" /> : <Check />}
       {PURCHASE_REQUEST_STATUS_LABELS[nextStatus]}로 이동
     </Button>
@@ -1413,7 +1474,9 @@ export function PurchaseDeleteButton({
   productName: string
 }) {
   const router = useRouter()
+  const context = useBulkSelection()
   const [isPending, startTransition] = useTransition()
+  const isSaasChinaModePending = context.pendingSaasChinaModeIds.has(id)
 
   function remove() {
     if (!window.confirm(`${productName} 발주 항목을 삭제할까요?`)) return
@@ -1430,7 +1493,7 @@ export function PurchaseDeleteButton({
   }
 
   return (
-    <Button type="button" size="sm" variant="destructive" onClick={remove} disabled={isPending}>
+    <Button type="button" size="sm" variant="destructive" onClick={remove} disabled={isPending || isSaasChinaModePending}>
       {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
       삭제
     </Button>
@@ -1525,6 +1588,70 @@ export function PurchasePlanFieldsV2({
         {message ?? '저장'}
       </Button>
     </form>
+  )
+}
+
+export function PurchaseSaasChinaModeField({
+  id,
+  enabled,
+}: {
+  id: string
+  enabled: boolean
+}) {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [value, setValue] = useState(enabled)
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function save(nextValue: boolean) {
+    const previousValue = value
+    setValue(nextValue)
+    setMessage(null)
+    context.setSaasChinaModePending(id, true)
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ saasChinaMode: nextValue }),
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          setValue(previousValue)
+          setMessage(body.error ?? 'SaaS 중국재고 연동 설정을 저장하지 못했습니다.')
+          return
+        }
+
+        setMessage(nextValue ? 'SaaS 중국재고 연동 사용' : 'SaaS 중국재고 연동 해제')
+        router.refresh()
+      } finally {
+        context.setSaasChinaModePending(id, false)
+      }
+    })
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-dashed border-sky-200 bg-sky-50/60 px-2 py-1.5">
+      <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-sky-900">
+        <input
+          type="checkbox"
+          checked={value}
+          disabled={isPending}
+          onChange={(event) => save(event.target.checked)}
+          aria-label="SaaS 중국재고 연동"
+          className="size-3.5"
+        />
+        SaaS 중국재고 연동
+      </label>
+      <p className="mt-0.5 text-[11px] leading-snug text-sky-800">
+        중국창고도착 전에 선택하세요. 기존 Ecount/raw 중국재고는 변경하지 않습니다.
+      </p>
+      {message ? (
+        <p className={isPending ? 'sr-only' : 'mt-1 text-[11px] text-muted-foreground'}>{message}</p>
+      ) : null}
+    </div>
   )
 }
 

@@ -7,8 +7,11 @@ import {
   chinaOutboundPallets,
   chinaOutboundShipmentItems,
   chinaOutboundShipments,
+  purchaseRequestItems,
   saasChinaInventory,
   saasChinaInventoryMovements,
+  saasChinaPurchaseLinks,
+  saasChinaShipmentPurchaseAllocations,
 } from '@/lib/db/schema'
 
 /**
@@ -35,6 +38,11 @@ export const CHINA_OUTBOUND_SHIPMENT_STATUS_LABELS: Record<ChinaOutboundShipment
   cancelled: '취소',
 }
 
+// Automatic purchase arrivals use one stable warehouse label so they join the
+// same isolated SaaS stock ledger as manually entered stock. This is never the
+// replaceable Ecount/raw China-inventory table.
+export const SAAS_CHINA_DEFAULT_WAREHOUSE_CODE = '중국창고'
+
 export type SaasChinaInventoryInput = {
   userId: string
   createdBy: string
@@ -52,6 +60,71 @@ export type SaasChinaInventoryAdjustmentInput = {
   inventoryId: string
   delta: number
   note?: string | null
+}
+
+export type SaasChinaPurchaseArrivalInput = {
+  userId: string
+  createdBy: string
+  purchaseRequestItemId: string
+  sku: string
+  productName: string
+  optionName?: string | null
+  quantity: number
+  warehouseCode?: string | null
+}
+
+export type SaasChinaPurchaseLifecycleStatus =
+  | 'china_arrived'
+  | 'outbound_requested'
+  | 'completed'
+
+export type SaasChinaPurchaseLotBalance = {
+  id: string
+  receivedQuantity: number
+  reservedQuantity: number
+  dispatchedQuantity: number
+}
+
+export type SaasChinaPurchaseLotAllocation = {
+  purchaseLinkId: string
+  reservedQuantity: number
+}
+
+/**
+ * Keeps the purchase row's workflow status derived solely from its linked
+ * SaaS China inventory lot. A reservation is an outbound request; only a
+ * fully dispatched lot can complete the purchase row.
+ */
+export function getSaasChinaPurchaseLifecycleStatus(input: Omit<SaasChinaPurchaseLotBalance, 'id'>): SaasChinaPurchaseLifecycleStatus {
+  const outboundQuantity = input.reservedQuantity + input.dispatchedQuantity
+  if (input.receivedQuantity > 0 && input.dispatchedQuantity >= input.receivedQuantity) {
+    return 'completed'
+  }
+  return outboundQuantity > 0 ? 'outbound_requested' : 'china_arrived'
+}
+
+/**
+ * Allocates a shipment line to purchase lots in the caller's FIFO order.
+ * `remainingQuantity` deliberately stays unlinked so manually entered or
+ * opening-balance SaaS inventory can still be shipped alongside linked lots.
+ */
+export function allocateSaasChinaPurchaseLots(
+  lots: ReadonlyArray<SaasChinaPurchaseLotBalance>,
+  quantity: number,
+) {
+  let remainingQuantity = quantity
+  const allocations: SaasChinaPurchaseLotAllocation[] = []
+
+  for (const lot of lots) {
+    if (remainingQuantity <= 0) break
+    const allocatable = lot.receivedQuantity - lot.reservedQuantity - lot.dispatchedQuantity
+    if (allocatable <= 0) continue
+    const reservedQuantity = Math.min(remainingQuantity, allocatable)
+    allocations.push({ purchaseLinkId: lot.id, reservedQuantity })
+    remainingQuantity -= reservedQuantity
+  }
+
+  return { allocations, remainingQuantity }
 }
 
 export type ChinaOutboundShipmentLineInput = {
@@ -74,6 +147,7 @@ export type CreateChinaOutboundShipmentInput = {
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type ChinaOutboundShipmentItemRow = typeof chinaOutboundShipmentItems.$inferSelect
+type SaasChinaPurchaseLinkRow = typeof saasChinaPurchaseLinks.$inferSelect
 
 const EDITABLE_SHIPMENT_STATUSES: ChinaOutboundShipmentStatus[] = ['draft', 'packing']
 
@@ -113,6 +187,11 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   CREATE INDEX IF NOT EXISTS saas_china_inventory_user_warehouse_available
     ON saas_china_inventory(user_id, warehouse_code, sku)
     WHERE available_quantity > 0;
+
+  -- This composite candidate key lets a bridge lot prove that its purchase
+  -- row belongs to the same workspace as the isolated SaaS inventory record.
+  CREATE UNIQUE INDEX IF NOT EXISTS purchase_request_items_id_user
+    ON purchase_request_items(id, user_id);
 
   CREATE TABLE IF NOT EXISTS saas_china_inventory_movements (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -355,6 +434,84 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   CREATE INDEX IF NOT EXISTS china_outbound_box_items_shipment_user
     ON china_outbound_box_items(shipment_id, user_id);
 
+  -- These bridge tables are deliberately separate from the legacy Ecount
+  -- China inventory. They only connect a user-opted-in purchase row to the
+  -- already-isolated SaaS inventory and its outbound reservation.
+  CREATE TABLE IF NOT EXISTS saas_china_purchase_links (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    inventory_id uuid NOT NULL,
+    purchase_request_item_id uuid NOT NULL,
+    received_quantity integer NOT NULL DEFAULT 0,
+    reserved_quantity integer NOT NULL DEFAULT 0,
+    dispatched_quantity integer NOT NULL DEFAULT 0,
+    created_by uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT saas_china_purchase_links_id_user_key UNIQUE (id, user_id),
+    CONSTRAINT saas_china_purchase_links_inventory_workspace_fkey
+      FOREIGN KEY (inventory_id, user_id)
+      REFERENCES saas_china_inventory(id, user_id)
+      ON DELETE RESTRICT,
+    CONSTRAINT saas_china_purchase_links_purchase_item_workspace_fkey
+      FOREIGN KEY (purchase_request_item_id, user_id)
+      REFERENCES purchase_request_items(id, user_id)
+      ON DELETE RESTRICT,
+    CONSTRAINT saas_china_purchase_links_received_nonnegative
+      CHECK (received_quantity >= 0),
+    CONSTRAINT saas_china_purchase_links_reserved_nonnegative
+      CHECK (reserved_quantity >= 0),
+    CONSTRAINT saas_china_purchase_links_dispatched_nonnegative
+      CHECK (dispatched_quantity >= 0),
+    CONSTRAINT saas_china_purchase_links_allocation_within_received
+      CHECK (reserved_quantity + dispatched_quantity <= received_quantity)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS saas_china_purchase_links_user_purchase_item
+    ON saas_china_purchase_links(user_id, purchase_request_item_id);
+  CREATE INDEX IF NOT EXISTS saas_china_purchase_links_user_inventory_created
+    ON saas_china_purchase_links(user_id, inventory_id, created_at, id);
+
+  CREATE TABLE IF NOT EXISTS saas_china_shipment_purchase_allocations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    shipment_id uuid NOT NULL,
+    shipment_item_id uuid NOT NULL,
+    purchase_link_id uuid NOT NULL,
+    reserved_quantity integer NOT NULL,
+    dispatched_quantity integer NOT NULL DEFAULT 0,
+    released_quantity integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT saas_china_shipment_purchase_allocations_shipment_workspace_fkey
+      FOREIGN KEY (shipment_id, user_id)
+      REFERENCES china_outbound_shipments(id, user_id)
+      ON DELETE RESTRICT,
+    CONSTRAINT saas_china_shipment_purchase_allocations_shipment_item_workspace_fkey
+      FOREIGN KEY (shipment_item_id, shipment_id, user_id)
+      REFERENCES china_outbound_shipment_items(id, shipment_id, user_id)
+      ON DELETE RESTRICT,
+    CONSTRAINT saas_china_shipment_purchase_allocations_purchase_link_workspace_fkey
+      FOREIGN KEY (purchase_link_id, user_id)
+      REFERENCES saas_china_purchase_links(id, user_id)
+      ON DELETE RESTRICT,
+    CONSTRAINT saas_china_shipment_purchase_allocations_reserved_positive
+      CHECK (reserved_quantity > 0),
+    CONSTRAINT saas_china_shipment_purchase_allocations_dispatched_nonnegative
+      CHECK (dispatched_quantity >= 0),
+    CONSTRAINT saas_china_shipment_purchase_allocations_released_nonnegative
+      CHECK (released_quantity >= 0),
+    CONSTRAINT saas_china_shipment_purchase_allocations_resolved_within_reserved
+      CHECK (dispatched_quantity + released_quantity <= reserved_quantity)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_item_link
+    ON saas_china_shipment_purchase_allocations(shipment_item_id, purchase_link_id);
+  CREATE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_user_shipment
+    ON saas_china_shipment_purchase_allocations(user_id, shipment_id);
+  CREATE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_purchase_link
+    ON saas_china_shipment_purchase_allocations(purchase_link_id);
+
   ALTER TABLE saas_china_inventory ENABLE ROW LEVEL SECURITY;
   ALTER TABLE saas_china_inventory_movements ENABLE ROW LEVEL SECURITY;
   ALTER TABLE china_outbound_shipments ENABLE ROW LEVEL SECURITY;
@@ -362,6 +519,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE china_outbound_pallets ENABLE ROW LEVEL SECURITY;
   ALTER TABLE china_outbound_boxes ENABLE ROW LEVEL SECURITY;
   ALTER TABLE china_outbound_box_items ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE saas_china_purchase_links ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE saas_china_shipment_purchase_allocations ENABLE ROW LEVEL SECURITY;
 
   REVOKE ALL ON TABLE saas_china_inventory FROM anon, authenticated;
   REVOKE ALL ON TABLE saas_china_inventory_movements FROM anon, authenticated;
@@ -370,6 +529,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   REVOKE ALL ON TABLE china_outbound_pallets FROM anon, authenticated;
   REVOKE ALL ON TABLE china_outbound_boxes FROM anon, authenticated;
   REVOKE ALL ON TABLE china_outbound_box_items FROM anon, authenticated;
+  REVOKE ALL ON TABLE saas_china_purchase_links FROM anon, authenticated;
+  REVOKE ALL ON TABLE saas_china_shipment_purchase_allocations FROM anon, authenticated;
 `
 
 let ensureSaasChinaOutboundSchemaPromise: Promise<void> | null = null
@@ -595,6 +756,14 @@ export async function adjustSaasChinaInventory(input: SaasChinaInventoryAdjustme
     if (afterOnHand < inventory.reservedQuantity) {
       throw new Error(`예약된 ${inventory.reservedQuantity.toLocaleString('ko-KR')}개보다 적게 재고를 줄일 수 없습니다.`)
     }
+    // A manual adjustment may reduce only the unlinked/manual balance. It
+    // must not silently consume inventory that is still traceable to an
+    // opt-in purchase lot, otherwise a later shipment could allocate stock
+    // that was manually removed.
+    const linkedOnHand = await getSaasChinaPurchaseLinkedOnHand(tx, input.userId, inventory.id)
+    if (afterOnHand < linkedOnHand) {
+      throw new Error(`발주 연동 재고 ${linkedOnHand.toLocaleString('ko-KR')}개를 제외한 수량만 조정할 수 있습니다.`)
+    }
 
     const afterAvailable = afterOnHand - inventory.reservedQuantity
     const [updated] = await tx
@@ -625,6 +794,198 @@ export async function adjustSaasChinaInventory(input: SaasChinaInventoryAdjustme
 
     return updated
   })
+}
+
+/**
+ * Creates the traceable SaaS inventory lot for one opt-in purchase row. This
+ * is intentionally transaction-only: the purchase status update owns the
+ * outer transaction so a legacy inventory write can never slip in between.
+ */
+export async function receiveSaasChinaPurchaseArrivalInTransaction(
+  tx: DbTransaction,
+  input: SaasChinaPurchaseArrivalInput,
+) {
+  const quantity = positiveInteger(input.quantity, '중국도착 수량')
+  const sku = requiredText(input.sku, '품목코드')
+  const productName = requiredText(input.productName, '상품명')
+  const warehouseCode = requiredText(input.warehouseCode ?? SAAS_CHINA_DEFAULT_WAREHOUSE_CODE, '중국창고')
+  const optionName = optionalText(input.optionName)
+  const optionKey = optionName ?? ''
+
+  await lockSaasChinaOutboundWorkspace(tx, input.userId)
+  const [existingLink] = await tx
+    .select()
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, input.userId),
+      eq(saasChinaPurchaseLinks.purchaseRequestItemId, input.purchaseRequestItemId),
+    ))
+    .limit(1)
+
+  if (existingLink) {
+    const inventory = await getSaasChinaInventoryForUpdate(tx, input.userId, existingLink.inventoryId)
+    return { inventory, link: existingLink, created: false }
+  }
+
+  const [existingInventory] = await tx
+    .select()
+    .from(saasChinaInventory)
+    .where(and(
+      eq(saasChinaInventory.userId, input.userId),
+      eq(saasChinaInventory.warehouseCode, warehouseCode),
+      eq(saasChinaInventory.sku, sku),
+      eq(saasChinaInventory.optionKey, optionKey),
+    ))
+    .limit(1)
+
+  const beforeOnHand = existingInventory?.onHandQuantity ?? 0
+  const beforeReserved = existingInventory?.reservedQuantity ?? 0
+  const afterOnHand = beforeOnHand + quantity
+  const afterAvailable = afterOnHand - beforeReserved
+  const inventory = existingInventory
+    ? (await tx
+      .update(saasChinaInventory)
+      .set({
+        productName,
+        optionName,
+        onHandQuantity: afterOnHand,
+        availableQuantity: afterAvailable,
+        lastReceivedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaInventory.id, existingInventory.id))
+      .returning())[0]
+    : (await tx
+      .insert(saasChinaInventory)
+      .values({
+        userId: input.userId,
+        warehouseCode,
+        sku,
+        productName,
+        optionKey,
+        optionName,
+        onHandQuantity: afterOnHand,
+        reservedQuantity: beforeReserved,
+        availableQuantity: afterAvailable,
+        lastReceivedAt: new Date(),
+        createdBy: input.createdBy,
+      })
+      .returning())[0]
+  if (!inventory) throw new Error('발주 연동 SaaS 중국재고를 저장하지 못했습니다.')
+
+  await insertSaasChinaInventoryMovement(tx, {
+    inventoryId: inventory.id,
+    userId: input.userId,
+    movementType: 'arrival',
+    onHandDelta: quantity,
+    reservedDelta: 0,
+    onHandBefore: beforeOnHand,
+    reservedBefore: beforeReserved,
+    onHandAfter: afterOnHand,
+    reservedAfter: beforeReserved,
+    sourceKey: `saas-china-purchase-arrival:${input.purchaseRequestItemId}`,
+    note: '발주 중국창고도착 연동',
+    createdBy: input.createdBy,
+  })
+
+  const [link] = await tx
+    .insert(saasChinaPurchaseLinks)
+    .values({
+      userId: input.userId,
+      inventoryId: inventory.id,
+      purchaseRequestItemId: input.purchaseRequestItemId,
+      receivedQuantity: quantity,
+      createdBy: input.createdBy,
+    })
+    .returning()
+  if (!link) throw new Error('발주와 SaaS 중국재고 연결을 저장하지 못했습니다.')
+
+  await reconcileSaasChinaPurchaseLinks(tx, input.userId, [link.id])
+  return { inventory, link, created: true }
+}
+
+/** Adjusts a received quantity while preserving every existing reservation. */
+export async function adjustSaasChinaPurchaseArrivalQuantityInTransaction(input: {
+  tx: DbTransaction
+  userId: string
+  createdBy: string
+  purchaseRequestItemId: string
+  quantity: number
+}) {
+  const quantity = nonNegativeInteger(input.quantity, '중국도착 수량')
+  await lockSaasChinaOutboundWorkspace(input.tx, input.userId)
+  const link = await getSaasChinaPurchaseLinkForUpdate(
+    input.tx,
+    input.userId,
+    input.purchaseRequestItemId,
+  )
+  const difference = quantity - link.receivedQuantity
+  if (difference === 0) return link
+  if (quantity < link.reservedQuantity + link.dispatchedQuantity) {
+    throw new Error('이미 출고 예약 또는 완료된 수량보다 중국도착수량을 적게 줄일 수 없습니다.')
+  }
+
+  const inventory = await getSaasChinaInventoryForUpdate(input.tx, input.userId, link.inventoryId)
+  const afterOnHand = inventory.onHandQuantity + difference
+  if (afterOnHand < inventory.reservedQuantity) {
+    throw new Error('현재 SaaS 중국재고의 출고 예약 수량보다 적게 줄일 수 없습니다.')
+  }
+  if (difference < 0 && inventory.availableQuantity < Math.abs(difference)) {
+    throw new Error('다른 출고작업에 사용할 수 있는 SaaS 중국재고보다 적게 줄일 수 없습니다.')
+  }
+
+  const afterAvailable = afterOnHand - inventory.reservedQuantity
+  const [updatedInventory] = await input.tx
+    .update(saasChinaInventory)
+    .set({
+      onHandQuantity: afterOnHand,
+      availableQuantity: afterAvailable,
+      lastReceivedAt: difference > 0 ? new Date() : inventory.lastReceivedAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(saasChinaInventory.id, inventory.id))
+    .returning()
+  if (!updatedInventory) throw new Error('SaaS 중국재고 도착수량을 조정하지 못했습니다.')
+
+  const [updatedLink] = await input.tx
+    .update(saasChinaPurchaseLinks)
+    .set({ receivedQuantity: quantity, updatedAt: new Date() })
+    .where(eq(saasChinaPurchaseLinks.id, link.id))
+    .returning()
+  if (!updatedLink) throw new Error('발주 연동 도착수량을 조정하지 못했습니다.')
+
+  await insertSaasChinaInventoryMovement(input.tx, {
+    inventoryId: inventory.id,
+    userId: input.userId,
+    movementType: 'manual_adjustment',
+    onHandDelta: difference,
+    reservedDelta: 0,
+    onHandBefore: inventory.onHandQuantity,
+    reservedBefore: inventory.reservedQuantity,
+    onHandAfter: afterOnHand,
+    reservedAfter: inventory.reservedQuantity,
+    sourceKey: `saas-china-purchase-arrival-adjust:${input.purchaseRequestItemId}:${randomUUID()}`,
+    note: '발주 중국도착수량 수정',
+    createdBy: input.createdBy,
+  })
+  await reconcileSaasChinaPurchaseLinks(input.tx, input.userId, [link.id])
+  return updatedLink
+}
+
+export async function hasSaasChinaPurchaseLinkInTransaction(input: {
+  tx: DbTransaction
+  userId: string
+  purchaseRequestItemId: string
+}) {
+  const [link] = await input.tx
+    .select({ id: saasChinaPurchaseLinks.id })
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, input.userId),
+      eq(saasChinaPurchaseLinks.purchaseRequestItemId, input.purchaseRequestItemId),
+    ))
+    .limit(1)
+  return Boolean(link)
 }
 
 export async function createChinaOutboundShipment(input: CreateChinaOutboundShipmentInput) {
@@ -677,19 +1038,33 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
       .returning()
     if (!shipment) throw new Error('중국출고 작업을 만들지 못했습니다.')
 
+    const affectedPurchaseLinkIds = new Set<string>()
     for (const [index, line] of normalizedLines.entries()) {
       const inventory = inventoriesById.get(line.inventoryId)!
-      await tx.insert(chinaOutboundShipmentItems).values({
-        shipmentId: shipment.id,
-        inventoryId: inventory.id,
+      const [shipmentItem] = await tx
+        .insert(chinaOutboundShipmentItems)
+        .values({
+          shipmentId: shipment.id,
+          inventoryId: inventory.id,
+          userId: input.userId,
+          sku: inventory.sku,
+          productName: inventory.productName,
+          optionKey: inventory.optionKey,
+          optionName: inventory.optionName,
+          reservedQuantity: line.quantity,
+          sortOrder: index,
+        })
+        .returning()
+      if (!shipmentItem) throw new Error('중국출고 상품을 저장하지 못했습니다.')
+
+      const allocatedPurchaseLinkIds = await reserveSaasChinaPurchaseLotsForShipmentItem(tx, {
         userId: input.userId,
-        sku: inventory.sku,
-        productName: inventory.productName,
-        optionKey: inventory.optionKey,
-        optionName: inventory.optionName,
-        reservedQuantity: line.quantity,
-        sortOrder: index,
+        shipmentId: shipment.id,
+        shipmentItemId: shipmentItem.id,
+        inventoryId: inventory.id,
+        quantity: line.quantity,
       })
+      allocatedPurchaseLinkIds.forEach((id) => affectedPurchaseLinkIds.add(id))
 
       const afterReserved = inventory.reservedQuantity + line.quantity
       const afterAvailable = inventory.onHandQuantity - afterReserved
@@ -716,6 +1091,8 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
         createdBy: input.createdBy,
       })
     }
+
+    await reconcileSaasChinaPurchaseLinks(tx, input.userId, [...affectedPurchaseLinkIds])
 
     return shipment
   })
@@ -951,6 +1328,8 @@ export async function dispatchChinaOutboundShipment(input: { userId: string; cre
         .where(eq(chinaOutboundShipmentItems.id, item.id))
     }
 
+    await dispatchSaasChinaPurchaseAllocationsForShipment(tx, input.userId, shipment.id)
+
     const [updated] = await tx
       .update(chinaOutboundShipments)
       .set({ status: 'dispatched', dispatchedAt: new Date(), updatedAt: new Date() })
@@ -1002,6 +1381,7 @@ export async function cancelChinaOutboundShipment(input: { userId: string; creat
         createdBy: input.createdBy,
       })
     }
+    await releaseSaasChinaPurchaseAllocationsForShipment(tx, input.userId, shipment.id)
     const [updated] = await tx
       .update(chinaOutboundShipments)
       .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
@@ -1010,6 +1390,232 @@ export async function cancelChinaOutboundShipment(input: { userId: string; creat
     if (!updated) throw new Error('출고작업 취소에 실패했습니다.')
     return updated
   })
+}
+
+async function reserveSaasChinaPurchaseLotsForShipmentItem(
+  tx: DbTransaction,
+  input: {
+    userId: string
+    shipmentId: string
+    shipmentItemId: string
+    inventoryId: string
+    quantity: number
+  },
+) {
+  const links = await tx
+    .select()
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, input.userId),
+      eq(saasChinaPurchaseLinks.inventoryId, input.inventoryId),
+    ))
+    .orderBy(asc(saasChinaPurchaseLinks.createdAt), asc(saasChinaPurchaseLinks.id))
+
+  const { allocations } = allocateSaasChinaPurchaseLots(links, input.quantity)
+  const linksById = new Map(links.map((link) => [link.id, link]))
+  const affectedLinkIds: string[] = []
+  for (const allocation of allocations) {
+    const link = linksById.get(allocation.purchaseLinkId)
+    if (!link) throw new Error('발주 연동 SaaS 중국재고를 찾을 수 없습니다.')
+    const [updatedLink] = await tx
+      .update(saasChinaPurchaseLinks)
+      .set({
+        reservedQuantity: link.reservedQuantity + allocation.reservedQuantity,
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaPurchaseLinks.id, link.id))
+      .returning()
+    if (!updatedLink) throw new Error('발주 연동 출고예약을 저장하지 못했습니다.')
+
+    await tx.insert(saasChinaShipmentPurchaseAllocations).values({
+      userId: input.userId,
+      shipmentId: input.shipmentId,
+      shipmentItemId: input.shipmentItemId,
+      purchaseLinkId: link.id,
+      reservedQuantity: allocation.reservedQuantity,
+    })
+    affectedLinkIds.push(link.id)
+  }
+
+  // Any remaining quantity comes from a manually received/opening SaaS stock
+  // balance, which intentionally has no purchase-request link.
+  return affectedLinkIds
+}
+
+async function dispatchSaasChinaPurchaseAllocationsForShipment(
+  tx: DbTransaction,
+  userId: string,
+  shipmentId: string,
+) {
+  const allocations = await tx
+    .select()
+    .from(saasChinaShipmentPurchaseAllocations)
+    .where(and(
+      eq(saasChinaShipmentPurchaseAllocations.userId, userId),
+      eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipmentId),
+    ))
+  if (allocations.length === 0) return
+
+  const shipmentItemIds = allocations.map((allocation) => allocation.shipmentItemId)
+  const shipmentItems = await tx
+    .select({ id: chinaOutboundShipmentItems.id, inventoryId: chinaOutboundShipmentItems.inventoryId })
+    .from(chinaOutboundShipmentItems)
+    .where(and(
+      eq(chinaOutboundShipmentItems.userId, userId),
+      eq(chinaOutboundShipmentItems.shipmentId, shipmentId),
+      inArray(chinaOutboundShipmentItems.id, shipmentItemIds),
+    ))
+  const shipmentItemById = new Map(shipmentItems.map((item) => [item.id, item]))
+  const affectedLinkIds = new Set<string>()
+
+  for (const allocation of allocations) {
+    const unresolvedQuantity = allocation.reservedQuantity
+      - allocation.dispatchedQuantity
+      - allocation.releasedQuantity
+    if (unresolvedQuantity <= 0) continue
+    const shipmentItem = shipmentItemById.get(allocation.shipmentItemId)
+    if (!shipmentItem) throw new Error('발주 연동 출고 상품을 찾을 수 없습니다.')
+    const link = await getSaasChinaPurchaseLinkById(tx, userId, allocation.purchaseLinkId)
+    if (link.inventoryId !== shipmentItem.inventoryId) {
+      throw new Error('발주 연동 재고와 출고 상품이 일치하지 않습니다.')
+    }
+    if (link.reservedQuantity < unresolvedQuantity) {
+      throw new Error('발주 연동 출고예약 수량이 맞지 않습니다.')
+    }
+
+    await tx
+      .update(saasChinaShipmentPurchaseAllocations)
+      .set({
+        dispatchedQuantity: allocation.dispatchedQuantity + unresolvedQuantity,
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaShipmentPurchaseAllocations.id, allocation.id))
+    await tx
+      .update(saasChinaPurchaseLinks)
+      .set({
+        reservedQuantity: link.reservedQuantity - unresolvedQuantity,
+        dispatchedQuantity: link.dispatchedQuantity + unresolvedQuantity,
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaPurchaseLinks.id, link.id))
+    affectedLinkIds.add(link.id)
+  }
+
+  await reconcileSaasChinaPurchaseLinks(tx, userId, [...affectedLinkIds])
+}
+
+async function releaseSaasChinaPurchaseAllocationsForShipment(
+  tx: DbTransaction,
+  userId: string,
+  shipmentId: string,
+) {
+  const allocations = await tx
+    .select()
+    .from(saasChinaShipmentPurchaseAllocations)
+    .where(and(
+      eq(saasChinaShipmentPurchaseAllocations.userId, userId),
+      eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipmentId),
+    ))
+  if (allocations.length === 0) return
+
+  const shipmentItemIds = allocations.map((allocation) => allocation.shipmentItemId)
+  const shipmentItems = await tx
+    .select({ id: chinaOutboundShipmentItems.id, inventoryId: chinaOutboundShipmentItems.inventoryId })
+    .from(chinaOutboundShipmentItems)
+    .where(and(
+      eq(chinaOutboundShipmentItems.userId, userId),
+      eq(chinaOutboundShipmentItems.shipmentId, shipmentId),
+      inArray(chinaOutboundShipmentItems.id, shipmentItemIds),
+    ))
+  const shipmentItemById = new Map(shipmentItems.map((item) => [item.id, item]))
+  const affectedLinkIds = new Set<string>()
+
+  for (const allocation of allocations) {
+    const unresolvedQuantity = allocation.reservedQuantity
+      - allocation.dispatchedQuantity
+      - allocation.releasedQuantity
+    if (unresolvedQuantity <= 0) continue
+    const shipmentItem = shipmentItemById.get(allocation.shipmentItemId)
+    if (!shipmentItem) throw new Error('발주 연동 출고 상품을 찾을 수 없습니다.')
+    const link = await getSaasChinaPurchaseLinkById(tx, userId, allocation.purchaseLinkId)
+    if (link.inventoryId !== shipmentItem.inventoryId) {
+      throw new Error('발주 연동 재고와 출고 상품이 일치하지 않습니다.')
+    }
+    if (link.reservedQuantity < unresolvedQuantity) {
+      throw new Error('발주 연동 출고예약 수량이 맞지 않아 취소할 수 없습니다.')
+    }
+
+    await tx
+      .update(saasChinaShipmentPurchaseAllocations)
+      .set({
+        releasedQuantity: allocation.releasedQuantity + unresolvedQuantity,
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaShipmentPurchaseAllocations.id, allocation.id))
+    await tx
+      .update(saasChinaPurchaseLinks)
+      .set({
+        reservedQuantity: link.reservedQuantity - unresolvedQuantity,
+        updatedAt: new Date(),
+      })
+      .where(eq(saasChinaPurchaseLinks.id, link.id))
+    affectedLinkIds.add(link.id)
+  }
+
+  await reconcileSaasChinaPurchaseLinks(tx, userId, [...affectedLinkIds])
+}
+
+async function reconcileSaasChinaPurchaseLinks(
+  tx: DbTransaction,
+  userId: string,
+  linkIds: string[],
+) {
+  const uniqueLinkIds = [...new Set(linkIds)]
+  if (uniqueLinkIds.length === 0) return
+
+  const links = await tx
+    .select()
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, userId),
+      inArray(saasChinaPurchaseLinks.id, uniqueLinkIds),
+    ))
+  const purchaseItemIds = links.map((link) => link.purchaseRequestItemId)
+  if (purchaseItemIds.length === 0) return
+  const purchaseItems = await tx
+    .select()
+    .from(purchaseRequestItems)
+    .where(and(
+      eq(purchaseRequestItems.userId, userId),
+      inArray(purchaseRequestItems.id, purchaseItemIds),
+    ))
+  const purchaseItemById = new Map(purchaseItems.map((item) => [item.id, item]))
+
+  for (const link of links) {
+    const item = purchaseItemById.get(link.purchaseRequestItemId)
+    if (!item) throw new Error('발주 연동 항목을 찾을 수 없습니다.')
+    const outboundQuantity = link.reservedQuantity + link.dispatchedQuantity
+    const nextStatus = getSaasChinaPurchaseLifecycleStatus(link)
+    await tx
+      .update(purchaseRequestItems)
+      .set({
+        status: nextStatus,
+        chinaReceivedQuantity: link.receivedQuantity,
+        rawData: {
+          ...item.rawData,
+          saasChinaMode: true,
+          saasChinaReceivedQuantity: link.receivedQuantity,
+          saasChinaReservedQuantity: link.reservedQuantity,
+          saasChinaDispatchedQuantity: link.dispatchedQuantity,
+          outboundRequestedQuantity: outboundQuantity,
+        },
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(purchaseRequestItems.userId, userId),
+        eq(purchaseRequestItems.id, item.id),
+      ))
+  }
 }
 
 async function assertShipmentFullyPacked(
@@ -1046,6 +1652,57 @@ async function getSaasChinaInventoryForUpdate(tx: DbTransaction, userId: string,
     .limit(1)
   if (!inventory) throw new Error('SaaS 중국재고를 찾을 수 없습니다.')
   return inventory
+}
+
+async function getSaasChinaPurchaseLinkForUpdate(
+  tx: DbTransaction,
+  userId: string,
+  purchaseRequestItemId: string,
+): Promise<SaasChinaPurchaseLinkRow> {
+  const [link] = await tx
+    .select()
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, userId),
+      eq(saasChinaPurchaseLinks.purchaseRequestItemId, purchaseRequestItemId),
+    ))
+    .limit(1)
+  if (!link) throw new Error('SaaS 중국재고와 연결된 발주 입고를 찾을 수 없습니다.')
+  return link
+}
+
+async function getSaasChinaPurchaseLinkById(
+  tx: DbTransaction,
+  userId: string,
+  linkId: string,
+): Promise<SaasChinaPurchaseLinkRow> {
+  const [link] = await tx
+    .select()
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, userId),
+      eq(saasChinaPurchaseLinks.id, linkId),
+    ))
+    .limit(1)
+  if (!link) throw new Error('발주 연동 SaaS 중국재고를 찾을 수 없습니다.')
+  return link
+}
+
+async function getSaasChinaPurchaseLinkedOnHand(
+  tx: DbTransaction,
+  userId: string,
+  inventoryId: string,
+) {
+  const [{ quantity }] = await tx
+    .select({
+      quantity: sql<number>`COALESCE(SUM(${saasChinaPurchaseLinks.receivedQuantity} - ${saasChinaPurchaseLinks.dispatchedQuantity}), 0)::int`,
+    })
+    .from(saasChinaPurchaseLinks)
+    .where(and(
+      eq(saasChinaPurchaseLinks.userId, userId),
+      eq(saasChinaPurchaseLinks.inventoryId, inventoryId),
+    ))
+  return quantity ?? 0
 }
 
 async function getChinaOutboundShipment(tx: DbTransaction, userId: string, shipmentId: string) {
@@ -1143,6 +1800,11 @@ function optionalText(value: string | null | undefined) {
 
 function positiveInteger(value: number, label: string) {
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${label}은(는) 1 이상의 정수여야 합니다.`)
+  return value
+}
+
+function nonNegativeInteger(value: number, label: string) {
+  if (!Number.isInteger(value) || value < 0) throw new Error(`${label}은(는) 0 이상의 정수여야 합니다.`)
   return value
 }
 

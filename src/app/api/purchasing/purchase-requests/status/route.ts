@@ -1,3 +1,4 @@
+import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -41,6 +42,15 @@ export async function PATCH(request: NextRequest) {
         error: error instanceof Error ? error.message : '진행상태 변경에 실패했습니다.',
       })
     }
+  }
+
+  if (updated.length > 0) {
+    revalidatePath('/purchasing/overdue')
+    revalidatePath('/purchasing/purchases')
+    revalidatePath('/purchasing/orders')
+    revalidatePath('/purchasing/payment-flow')
+    revalidatePath('/purchasing/saas-china-inventory')
+    revalidatePath('/purchasing/china-shipments')
   }
 
   if (failed.length > 0) {

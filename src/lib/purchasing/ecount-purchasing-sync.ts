@@ -72,6 +72,10 @@ type EcountPurchaseCompletedSource =
   | typeof ECOUNT_PURCHASE_COMPLETED_SOURCE
   | typeof ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
 type PurchaseRequestItemInsert = typeof purchaseRequestItems.$inferInsert
+type PurchaseManagementSkuIdentity = {
+  sku: string
+  purchaseManagementCode: string | null
+}
 
 type ParsedReport = {
   kind: EcountReportKind
@@ -1751,6 +1755,25 @@ export async function syncEcountPurchasingSnapshot(input: {
           : item.fallbackMatchKey,
         includeFallbackDiscriminator: true,
       }))
+
+    // A row explicitly moved into the SaaS China-inventory workflow remains
+    // user-managed after the raw Ecount snapshot refresh. Keep it in place
+    // and suppress only the same management-code + SKU snapshot row; using a
+    // weaker key here could hide a different purchase accidentally.
+    const saasChinaProtectedRows = await tx
+      .select({
+        sku: purchaseRequestItems.sku,
+        purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+        rawData: purchaseRequestItems.rawData,
+      })
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        sql`${purchaseRequestItems.rawData}->'saasChinaMode' = 'true'::jsonb`,
+      ))
+    const saasChinaProtectedPurchaseKeys = getSaasChinaProtectedPurchaseKeys(
+      saasChinaProtectedRows,
+    )
     const snapshotManagedItems = [
       ...selectedActiveRequests,
       ...selectedPurchaseCompleted,
@@ -1773,6 +1796,9 @@ export async function syncEcountPurchasingSnapshot(input: {
         ))
       const conflicts = existingRows.filter((row) => {
         const source = readRawDataSource(row.rawData)
+        const isMatchingProtectedSaasChinaRow = isSaasChinaMode(row.rawData)
+          && snapshotManagedItems.some((item) => saasChinaPurchaseKeysMatch(row, item))
+        if (isMatchingProtectedSaasChinaRow) return false
         return !REPLACEABLE_ECOUNT_SOURCES.includes(source as (typeof REPLACEABLE_ECOUNT_SOURCES)[number])
           && snapshotManagedItems.some((item) => (
             item.purchaseManagementCode === row.purchaseManagementCode && item.sku === row.sku
@@ -1782,6 +1808,27 @@ export async function syncEcountPurchasingSnapshot(input: {
         throw new Error(`다른 발주 데이터와 겹치는 구입관리코드+품목이 ${conflicts.length.toLocaleString('ko-KR')}건 있습니다. 기존 행을 확인한 뒤 다시 동기화해주세요.`)
       }
     }
+
+    const insertableActiveRequests = excludeSaasChinaProtectedSnapshotItems(
+      selectedActiveRequests,
+      saasChinaProtectedPurchaseKeys,
+    )
+    const insertablePurchaseCompleted = excludeSaasChinaProtectedSnapshotItems(
+      selectedPurchaseCompleted,
+      saasChinaProtectedPurchaseKeys,
+    )
+    const insertableChinaArrived = excludeSaasChinaProtectedSnapshotItems(
+      selectedChinaArrived,
+      saasChinaProtectedPurchaseKeys,
+    )
+    const insertableOutboundPending = excludeSaasChinaProtectedSnapshotItems(
+      selectedOutboundPending,
+      saasChinaProtectedPurchaseKeys,
+    )
+    const insertableOutboundCompleted = excludeSaasChinaProtectedSnapshotItems(
+      selectedOutboundCompleted,
+      saasChinaProtectedPurchaseKeys,
+    )
 
     const replaceableRows = await tx
       .select({
@@ -1795,6 +1842,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         bulkPaymentDepositKrw: purchaseRequestItems.bulkPaymentDepositKrw,
         bulkPaymentDepositPaidAt: purchaseRequestItems.bulkPaymentDepositPaidAt,
         bulkPaymentDepositMemo: purchaseRequestItems.bulkPaymentDepositMemo,
+        rawData: purchaseRequestItems.rawData,
         updatedAt: purchaseRequestItems.updatedAt,
       })
       .from(purchaseRequestItems)
@@ -1803,11 +1851,12 @@ export async function syncEcountPurchasingSnapshot(input: {
         isReplaceableEcountSource(sourcesToReplace),
       ))
       .orderBy(desc(purchaseRequestItems.updatedAt))
-    const bulkPaymentOverrides = collectBulkPaymentOverrides(replaceableRows)
-    if (replaceableRows.length > 0) {
+    const replaceableRowsToDelete = replaceableRows.filter((row) => !isSaasChinaMode(row.rawData))
+    const bulkPaymentOverrides = collectBulkPaymentOverrides(replaceableRowsToDelete)
+    if (replaceableRowsToDelete.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
         purchaseRequestItems.id,
-        replaceableRows.map((row) => row.id),
+        replaceableRowsToDelete.map((row) => row.id),
       ))
     }
 
@@ -1819,7 +1868,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     const now = new Date()
     const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
-    const requestRows = selectedActiveRequests.map((item) => ({
+    const requestRows = insertableActiveRequests.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchased' as const,
@@ -1841,7 +1890,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const purchaseCompletedRows = selectedPurchaseCompleted.map((item) => ({
+    const purchaseCompletedRows = insertablePurchaseCompleted.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchase_completed' as const,
@@ -1878,7 +1927,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const chinaArrivedRows = selectedChinaArrived.map((item) => ({
+    const chinaArrivedRows = insertableChinaArrived.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'china_arrived' as const,
@@ -1920,7 +1969,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundRows = selectedOutboundPending.map((item) => ({
+    const outboundRows = insertableOutboundPending.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'outbound_requested' as const,
@@ -1954,7 +2003,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = selectedOutboundCompleted.map((item) => ({
+    const outboundCompletedRows = insertableOutboundCompleted.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'completed' as const,
@@ -2334,6 +2383,61 @@ export function applyBulkPaymentOverride(
 
 function sumQuantities<T extends { quantity?: number; requestedQuantity?: number }>(items: T[]) {
   return items.reduce((total, item) => total + (item.quantity ?? item.requestedQuantity ?? 0), 0)
+}
+
+/**
+ * Return only explicit SaaS-China rows with the exact stable purchase identity
+ * shared by the Ecount snapshot stages. A SKU alone (or an absent management
+ * code) is never enough to suppress a raw row.
+ */
+export function getSaasChinaProtectedPurchaseKeys(
+  rows: ReadonlyArray<PurchaseManagementSkuIdentity & { rawData: unknown }>,
+) {
+  const keys = new Set<string>()
+  for (const row of rows) {
+    if (!isSaasChinaMode(row.rawData)) continue
+    const key = saasChinaPurchaseKey(row)
+    if (key) keys.add(key)
+  }
+  return keys
+}
+
+/**
+ * Ecount is still authoritative for ordinary raw rows. This deliberately
+ * filters only snapshot entries that name an explicitly protected SaaS row by
+ * management code + SKU, so incomplete/unknown Ecount identifiers continue
+ * through the normal replacement path.
+ */
+export function excludeSaasChinaProtectedSnapshotItems<T extends PurchaseManagementSkuIdentity>(
+  items: ReadonlyArray<T>,
+  protectedPurchaseKeys: ReadonlySet<string>,
+) {
+  return items.filter((item) => {
+    const key = saasChinaPurchaseKey(item)
+    return !key || !protectedPurchaseKeys.has(key)
+  })
+}
+
+function saasChinaPurchaseKeysMatch(
+  left: PurchaseManagementSkuIdentity,
+  right: PurchaseManagementSkuIdentity,
+) {
+  const leftKey = saasChinaPurchaseKey(left)
+  const rightKey = saasChinaPurchaseKey(right)
+  return Boolean(leftKey && rightKey && leftKey === rightKey)
+}
+
+function saasChinaPurchaseKey(input: PurchaseManagementSkuIdentity) {
+  const sku = input.sku.trim()
+  const purchaseManagementCode = input.purchaseManagementCode?.trim() ?? ''
+  return purchaseKey(purchaseManagementCode, sku)
+}
+
+function isSaasChinaMode(rawData: unknown) {
+  if (typeof rawData !== 'object' || rawData === null || !('saasChinaMode' in rawData)) {
+    return false
+  }
+  return rawData.saasChinaMode === true
 }
 
 function readRawDataSource(rawData: unknown) {

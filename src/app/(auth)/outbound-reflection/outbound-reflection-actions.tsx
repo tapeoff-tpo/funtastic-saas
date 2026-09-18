@@ -14,6 +14,7 @@ type ImportResponse = {
   readyRows?: number
   blockedRows?: number
   applyInventory?: boolean
+  errors?: Array<{ row?: number; message?: string }>
   error?: string
 }
 
@@ -65,8 +66,11 @@ export function OutboundReflectionActions({
       if (!willApplyInventory && !window.confirm('이 파일은 재고 수량이 이미 반영된 상태입니다. 출고·매출만 기록하고 재고 수량과 재고 이력은 변경하지 않습니다. 계속할까요?')) return
       const response = await fetch('/api/outbound-reflection/import', { method: 'POST', body: formData })
       const json = await readJson<ImportResponse>(response)
-      if (!response.ok) throw new Error(json.error ?? '출고반영 파일 업로드에 실패했습니다.')
-      const summary = json.skipped
+      const isExistingDuplicate = json.skipped && Boolean(json.batchId)
+      if (!response.ok || (!isExistingDuplicate && json.totalRows === 0)) {
+        throw new Error(outboundReflectionImportError(json))
+      }
+      const summary = isExistingDuplicate
         ? '같은 파일이 이미 등록되어 기존 대기열을 열었습니다.'
         : `대기열 등록: ${json.applyInventory === false ? '재고 변동 없음, 매출·출고만 기록' : '재고·매출 반영'} · 전체 ${(json.totalRows ?? 0).toLocaleString('ko-KR')}건, 반영 대기 ${(json.readyRows ?? 0).toLocaleString('ko-KR')}건, 확인 필요 ${(json.blockedRows ?? 0).toLocaleString('ko-KR')}건`
       setMessage(summary)
@@ -183,6 +187,14 @@ export function OutboundReflectionActions({
       {message ? <div className="rounded-md bg-muted px-3 py-2 text-sm">{message}</div> : null}
     </div>
   )
+}
+
+function outboundReflectionImportError(response: ImportResponse): string {
+  if (response.error) return response.error
+  const firstError = response.errors?.find((error) => error.message?.trim())
+  if (!firstError) return '출고반영 파일에서 등록할 행을 찾지 못했습니다. 업로드 양식과 필수 컬럼을 확인해주세요.'
+  const detail = firstError.row && firstError.row > 0 ? `${firstError.row}행: ${firstError.message}` : firstError.message
+  return `출고반영 파일에서 등록할 행을 찾지 못했습니다. ${detail}`
 }
 
 async function readJson<T extends { error?: string }>(response: Response): Promise<T> {

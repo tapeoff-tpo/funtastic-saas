@@ -35,6 +35,7 @@ import {
   PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
+  PurchaseSaasChinaModeField,
   PurchasePaymentStatusField,
   PurchasePaginationControls,
   PurchaseQuantityField,
@@ -539,6 +540,8 @@ export async function PurchasingOrdersView({
                     const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, item.status, outboundRequestedQuantity)
+                    const isSaasChinaOutbound = item.rawData.saasChinaMode === true
+                      && (item.status === 'outbound_requested' || item.status === 'completed')
                     const cumulativeOutboundQuantity = numericRawDataValue(item.rawData, 'cumulativeOutboundQuantity')
                     const purchasedQuantity = numericRawDataValue(item.rawData, 'purchasedQuantity')
                     const requestDateElapsedDays = item.requestDate ? daysSinceDateOnly(item.requestDate) : 0
@@ -569,6 +572,13 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
+                        {item.rawData.saasChinaMode === true ? (
+                          <div className="mt-1">
+                            <Badge className="border-sky-200 bg-sky-100 px-1.5 text-[11px] text-sky-800 hover:bg-sky-100">
+                              SaaS 중국재고
+                            </Badge>
+                          </div>
+                        ) : null}
                         {isPurchaseRequestOverdue ? (
                           <div className="mt-1">
                             <Badge
@@ -615,16 +625,23 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       <td className="px-2 py-2 text-center tabular-nums align-middle">
-                        <PurchaseQuantityField
-                          id={item.id}
-                          field={quantityColumn.field}
-                          quantity={stageQuantity}
-                          stockLimit={item.status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
-                          costSummary={isRequestedStatus ? {
-                            unitCostYuan: costs.unitCostYuan,
-                            unitCostKrw: costs.unitCostKrw,
-                          } : undefined}
-                        />
+                        {isSaasChinaOutbound ? (
+                          <div className="mx-auto w-[112px] py-1 text-sm font-medium tabular-nums">
+                            {formatNumber(stageQuantity)}
+                            <p className="mt-0.5 text-[11px] font-normal leading-tight text-sky-700">중국출고 작업 기준</p>
+                          </div>
+                        ) : (
+                          <PurchaseQuantityField
+                            id={item.id}
+                            field={quantityColumn.field}
+                            quantity={stageQuantity}
+                            stockLimit={item.status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
+                            costSummary={isRequestedStatus ? {
+                              unitCostYuan: costs.unitCostYuan,
+                              unitCostKrw: costs.unitCostKrw,
+                            } : undefined}
+                          />
+                        )}
                         {(item.status === 'outbound_requested' || item.status === 'completed')
                           && cumulativeOutboundQuantity !== null ? (
                             <div className="mt-1 whitespace-nowrap text-[11px] text-muted-foreground">
@@ -673,6 +690,12 @@ export async function PurchasingOrdersView({
                                 : '구매날짜'}
                             purchaseMethod={item.purchaseMethod}
                           />
+                          {(item.status === 'purchased' || item.status === 'purchase_completed') ? (
+                            <PurchaseSaasChinaModeField
+                              id={item.id}
+                              enabled={item.rawData.saasChinaMode === true}
+                            />
+                          ) : null}
                         </td>
                       )}
                       {isRequestedStatus ? null : (
@@ -703,7 +726,11 @@ export async function PurchasingOrdersView({
                         <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
-                        <PurchaseStatusButton id={item.id} nextStatus={getNextPurchaseStatus(item.status)} />
+                        <PurchaseStatusButton
+                          id={item.id}
+                          nextStatus={getNextPurchaseStatus(item.status)}
+                          saasChinaMode={item.rawData.saasChinaMode === true}
+                        />
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <PurchaseDeleteButton id={item.id} productName={item.productName} />

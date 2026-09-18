@@ -44,6 +44,8 @@ export async function PATCH(
 
   revalidatePath('/purchasing/orders')
   revalidatePath('/purchasing/payment-flow')
+  revalidatePath('/purchasing/saas-china-inventory')
+  revalidatePath('/purchasing/china-shipments')
 
   return NextResponse.json({
     id: row.id,

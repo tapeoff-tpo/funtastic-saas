@@ -6,6 +6,7 @@ import {
   chinaWarehouseInventoryMovements,
   products,
   purchaseRequestItems,
+  saasChinaPurchaseLinks,
 } from '@/lib/db/schema'
 import {
   calculateAppliedPurchaseExchangeRateKrw,
@@ -36,6 +37,12 @@ import {
   purchasingOutboundComponentIdentity,
 } from './ignored-purchasing-items'
 import { isUniqueSupplierOrderIdentifier } from './supplier-order-reference'
+import {
+  adjustSaasChinaPurchaseArrivalQuantityInTransaction,
+  ensureSaasChinaOutboundSchema,
+  hasSaasChinaPurchaseLinkInTransaction,
+  receiveSaasChinaPurchaseArrivalInTransaction,
+} from './saas-china-outbound'
 
 const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '부품관리',
@@ -1071,6 +1078,9 @@ export async function updatePurchaseRequestStatus(input: {
   status: PurchaseRequestStatus
 }) {
   await ensurePurchasePaymentTrackingSchema()
+  if (input.status === 'china_arrived' || input.status === 'outbound_requested' || input.status === 'completed') {
+    await ensureSaasChinaOutboundSchema()
+  }
   const exchangeRateReference = input.status === 'requested'
     ? null
     : await getLatestCnyKrwReferenceRate()
@@ -1086,8 +1096,35 @@ export async function updatePurchaseRequestStatus(input: {
     if (!current) return null
     if (current.status === input.status) return { id: current.id }
 
+    const saasChinaMode = usesSaasChinaInventory(current.rawData)
+    if (saasChinaMode) {
+      const hasSaasChinaLink = await hasSaasChinaPurchaseLinkInTransaction({
+        tx,
+        userId: input.userId,
+        purchaseRequestItemId: current.id,
+      })
+      if (hasSaasChinaLink) {
+        throw new Error('SaaS 중국재고에 입고된 발주는 중국출고 작업에서만 상태와 수량을 변경할 수 있습니다.')
+      }
+      if (input.status === 'outbound_requested' || input.status === 'completed') {
+        throw new Error('SaaS 중국재고 연동 발주는 중국출고 작업에서 예약·출고완료 처리해주세요.')
+      }
+    }
+
     if (input.status === 'china_arrived') {
-      await addChinaWarehouseStock(tx, current)
+      if (saasChinaMode) {
+        await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
+          userId: input.userId,
+          createdBy: input.userId,
+          purchaseRequestItemId: current.id,
+          sku: current.sku,
+          productName: current.productName,
+          optionName: current.optionName,
+          quantity: purchaseQuantity(current),
+        })
+      } else {
+        await addChinaWarehouseStock(tx, current)
+      }
     }
     if (input.status === 'outbound_requested') {
       if (current.status === 'china_arrived') {
@@ -1156,8 +1193,12 @@ export async function updatePurchaseRequestPlanFields(input: {
   delayReason?: PurchaseDelayReason | null
   delayNote?: string | null
   applyDelayReasonToItem?: boolean
+  saasChinaMode?: boolean
 }) {
   await ensurePurchasePaymentTrackingSchema()
+  if (input.saasChinaMode !== undefined || input.chinaReceivedQuantity !== undefined || input.outboundRequestedQuantity !== undefined) {
+    await ensureSaasChinaOutboundSchema()
+  }
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
   const actualPurchaseQuantity = normalizeOptionalPurchaseRequestQuantity(input.actualPurchaseQuantity)
   const chinaReceivedQuantity = normalizeOptionalPurchaseRequestQuantity(input.chinaReceivedQuantity)
@@ -1241,14 +1282,51 @@ export async function updatePurchaseRequestPlanFields(input: {
       values.costExchangeRateDate = exchangeRateReference.date ?? todayKstDate()
     }
 
-    if (outboundRequestedQuantity !== undefined) {
+    const currentSaasChinaMode = usesSaasChinaInventory(current.rawData)
+    if (input.saasChinaMode !== undefined) {
+      const canChangeSaasMode = current.status === 'purchased' || current.status === 'purchase_completed'
+      if (!canChangeSaasMode && input.saasChinaMode !== currentSaasChinaMode) {
+        throw new Error('SaaS 중국재고 연동은 중국창고도착 전에만 변경할 수 있습니다.')
+      }
+      if (!input.saasChinaMode && currentSaasChinaMode) {
+        const hasLink = await hasSaasChinaPurchaseLinkInTransaction({
+          tx,
+          userId: input.userId,
+          purchaseRequestItemId: current.id,
+        })
+        if (hasLink) {
+          throw new Error('이미 SaaS 중국재고에 입고된 발주는 연동을 해제할 수 없습니다.')
+        }
+      }
+    }
+    const saasChinaMode = input.saasChinaMode ?? currentSaasChinaMode
+    const saasChinaModeChanged = input.saasChinaMode !== undefined && input.saasChinaMode !== currentSaasChinaMode
+    if (saasChinaMode && outboundRequestedQuantity !== undefined) {
+      throw new Error('SaaS 중국재고 연동 발주의 출고요청수량은 중국출고 작업에서만 변경할 수 있습니다.')
+    }
+
+    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined) {
       values.rawData = {
         ...current.rawData,
-        outboundRequestedQuantity,
+        ...(saasChinaModeChanged ? { saasChinaMode: input.saasChinaMode } : {}),
+        ...(outboundRequestedQuantity !== undefined ? { outboundRequestedQuantity } : {}),
       }
     }
     if (chinaReceivedQuantity !== undefined) {
-      await adjustChinaWarehouseArrivalQuantity(tx, current, chinaReceivedQuantity)
+      if (saasChinaMode) {
+        if (current.status !== 'china_arrived') {
+          throw new Error('SaaS 중국재고 연동 발주의 중국도착수량은 중국창고도착 이후에만 수정할 수 있습니다.')
+        }
+        await adjustSaasChinaPurchaseArrivalQuantityInTransaction({
+          tx,
+          userId: input.userId,
+          createdBy: input.userId,
+          purchaseRequestItemId: current.id,
+          quantity: chinaReceivedQuantity,
+        })
+      } else {
+        await adjustChinaWarehouseArrivalQuantity(tx, current, chinaReceivedQuantity)
+      }
     }
     if (outboundRequestedQuantity !== undefined && current.status === 'outbound_requested') {
       await adjustChinaWarehouseOutboundQuantity(tx, current, outboundRequestedQuantity)
@@ -1520,8 +1598,9 @@ export async function deletePurchaseRequestItem(input: {
   userId: string
   id: string
 }) {
-  const [, exchangeRateReference] = await Promise.all([
+  const [, , exchangeRateReference] = await Promise.all([
     ensurePurchaseFundLedgerSchema(),
+    ensureSaasChinaOutboundSchema(),
     getLatestCnyKrwReferenceRate(),
   ])
   return db.transaction(async (tx) => {
@@ -1538,6 +1617,14 @@ export async function deletePurchaseRequestItem(input: {
       .limit(1)
 
     if (!item) return null
+
+    if (await hasSaasChinaPurchaseLinkInTransaction({
+      tx,
+      userId: input.userId,
+      purchaseRequestItemId: item.id,
+    })) {
+      throw new Error('SaaS 중국재고 또는 중국출고와 연결된 발주는 삭제할 수 없습니다.')
+    }
 
     const movements = await tx
       .select()
@@ -1583,7 +1670,10 @@ export async function deletePurchaseRequestItemsWithoutInventoryMovements(input:
     return { deletedIds: [], inventoryLinkedIds: [], ineligibleIds: [], missingIds: [] }
   }
 
-  await ensureIgnoredPurchasingItemsTable()
+  await Promise.all([
+    ensureIgnoredPurchasingItemsTable(),
+    ensureSaasChinaOutboundSchema(),
+  ])
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
@@ -1610,7 +1700,19 @@ export async function deletePurchaseRequestItemsWithoutInventoryMovements(input:
           eq(chinaWarehouseInventoryMovements.userId, input.userId),
           inArray(chinaWarehouseInventoryMovements.purchaseRequestItemId, [...eligibleIds]),
         ))
-    const inventoryLinkedIds = new Set(movementRows.map((row) => row.purchaseRequestItemId))
+    const saasLinkRows = eligibleIds.size === 0
+      ? []
+      : await tx
+        .select({ purchaseRequestItemId: saasChinaPurchaseLinks.purchaseRequestItemId })
+        .from(saasChinaPurchaseLinks)
+        .where(and(
+          eq(saasChinaPurchaseLinks.userId, input.userId),
+          inArray(saasChinaPurchaseLinks.purchaseRequestItemId, [...eligibleIds]),
+        ))
+    const inventoryLinkedIds = new Set([
+      ...movementRows.map((row) => row.purchaseRequestItemId),
+      ...saasLinkRows.map((row) => row.purchaseRequestItemId),
+    ])
     const deletableIds = [...eligibleIds].filter((id) => !inventoryLinkedIds.has(id))
 
     const deletedRows = deletableIds.length === 0
@@ -1626,6 +1728,11 @@ export async function deletePurchaseRequestItemsWithoutInventoryMovements(input:
             SELECT 1
             FROM ${chinaWarehouseInventoryMovements}
             WHERE ${chinaWarehouseInventoryMovements.purchaseRequestItemId} = ${purchaseRequestItems.id}
+          )`,
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM ${saasChinaPurchaseLinks}
+            WHERE ${saasChinaPurchaseLinks.purchaseRequestItemId} = ${purchaseRequestItems.id}
           )`,
         ))
         .returning({ id: purchaseRequestItems.id })
@@ -1662,6 +1769,7 @@ export async function completeOutstandingPurchaseRequestItems(input: {
   await Promise.all([
     ensurePurchasePaymentTrackingSchema(),
     ensureIgnoredPurchasingItemsTable(),
+    ensureSaasChinaOutboundSchema(),
   ])
 
   return db.transaction(async (tx) => {
@@ -1674,7 +1782,9 @@ export async function completeOutstandingPurchaseRequestItems(input: {
         inArray(purchaseRequestItems.id, ids),
       ))
     const workspaceIds = new Set(workspaceRows.map((row) => row.id))
-    const eligibleRows = workspaceRows.filter(isOutstandingPurchasePaymentRow)
+    const eligibleRows = workspaceRows.filter((row) => (
+      isOutstandingPurchasePaymentRow(row) && !usesSaasChinaInventory(row.rawData)
+    ))
     const eligibleIds = eligibleRows.map((row) => row.id)
 
     const completedRows = eligibleIds.length === 0
@@ -1702,6 +1812,12 @@ export async function completeOutstandingPurchaseRequestItems(input: {
           inArray(purchaseRequestItems.id, eligibleIds),
           inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
           sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NULL`,
+          sql`COALESCE(${purchaseRequestItems.rawData}->'saasChinaMode', 'false'::jsonb) <> 'true'::jsonb`,
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM ${saasChinaPurchaseLinks}
+            WHERE ${saasChinaPurchaseLinks.purchaseRequestItemId} = ${purchaseRequestItems.id}
+          )`,
         ))
         .returning({ id: purchaseRequestItems.id })
 
@@ -2144,6 +2260,10 @@ function outboundQuantity(item: PurchaseRequestItem) {
     actualPurchaseQuantity: item.actualPurchaseQuantity,
     requestedQuantity: item.requestedQuantity,
   })
+}
+
+function usesSaasChinaInventory(rawData: Record<string, unknown>) {
+  return rawData.saasChinaMode === true
 }
 
 const PURCHASE_BUYERS: Record<string, string> = {

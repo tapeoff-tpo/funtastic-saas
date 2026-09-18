@@ -182,6 +182,11 @@ async function getActor() {
 function revalidateSaasChinaPaths() {
   revalidatePath('/purchasing/saas-china-inventory')
   revalidatePath('/purchasing/china-shipments')
+  // Shipment reservations, dispatches, and cancellations can move a linked
+  // purchase row between China-arrived, outbound-requested, and completed.
+  revalidatePath('/purchasing/orders')
+  revalidatePath('/purchasing/payment-flow')
+  revalidatePath('/purchasing/overdue')
 }
 
 async function runAction(action: () => Promise<{ shipmentId?: string } | void>): Promise<ActionResult> {

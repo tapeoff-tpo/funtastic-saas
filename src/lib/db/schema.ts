@@ -770,6 +770,10 @@ export const purchaseRequestItems = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    // Needed by the workspace-scoped foreign key from the opt-in SaaS China
+    // purchase lot. `id` remains the primary key; this adds the composite
+    // candidate key required to prove both row and workspace ownership.
+    uniqueIndex('purchase_request_items_id_user').on(table.id, table.userId),
     index('purchase_request_items_user_status').on(table.userId, table.status),
     index('purchase_request_items_user_payment_status').on(table.userId, table.paymentStatus),
     index('purchase_request_items_user_sku').on(table.userId, table.sku),
@@ -1105,6 +1109,111 @@ export const chinaOutboundShipmentItems = pgTable(
       sql`${table.dispatchedQuantity} >= 0 AND ${table.dispatchedQuantity} <= ${table.packedQuantity}`,
     ),
     check('china_outbound_shipment_items_sort_nonnegative', sql`${table.sortOrder} >= 0`),
+  ],
+)
+
+// An opt-in purchase row can contribute a lot to an aggregate SaaS China
+// inventory SKU/option. These quantities keep the origin traceable even
+// though the inventory screen itself remains aggregated by SKU/option.
+export const saasChinaPurchaseLinks = pgTable(
+  'saas_china_purchase_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    inventoryId: uuid('inventory_id').notNull(),
+    purchaseRequestItemId: uuid('purchase_request_item_id').notNull(),
+    receivedQuantity: integer('received_quantity').notNull().default(0),
+    reservedQuantity: integer('reserved_quantity').notNull().default(0),
+    dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('saas_china_purchase_links_id_user').on(table.id, table.userId),
+    foreignKey({
+      name: 'saas_china_purchase_links_inventory_workspace_fkey',
+      columns: [table.inventoryId, table.userId],
+      foreignColumns: [saasChinaInventory.id, saasChinaInventory.userId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'saas_china_purchase_links_purchase_item_workspace_fkey',
+      columns: [table.purchaseRequestItemId, table.userId],
+      foreignColumns: [purchaseRequestItems.id, purchaseRequestItems.userId],
+    }).onDelete('restrict'),
+    uniqueIndex('saas_china_purchase_links_user_purchase_item').on(
+      table.userId,
+      table.purchaseRequestItemId,
+    ),
+    index('saas_china_purchase_links_user_inventory_created').on(
+      table.userId,
+      table.inventoryId,
+      table.createdAt,
+      table.id,
+    ),
+    check('saas_china_purchase_links_received_nonnegative', sql`${table.receivedQuantity} >= 0`),
+    check('saas_china_purchase_links_reserved_nonnegative', sql`${table.reservedQuantity} >= 0`),
+    check('saas_china_purchase_links_dispatched_nonnegative', sql`${table.dispatchedQuantity} >= 0`),
+    check(
+      'saas_china_purchase_links_allocation_within_received',
+      sql`${table.reservedQuantity} + ${table.dispatchedQuantity} <= ${table.receivedQuantity}`,
+    ),
+  ],
+)
+
+// Allocation rows provide a durable audit trail from a shipment line back to
+// the opt-in purchase lots it reserved. Manual/opening stock remains valid and
+// simply has no allocation row here.
+export const saasChinaShipmentPurchaseAllocations = pgTable(
+  'saas_china_shipment_purchase_allocations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    shipmentId: uuid('shipment_id').notNull(),
+    shipmentItemId: uuid('shipment_item_id').notNull(),
+    purchaseLinkId: uuid('purchase_link_id').notNull(),
+    reservedQuantity: integer('reserved_quantity').notNull(),
+    dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),
+    releasedQuantity: integer('released_quantity').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'saas_china_shipment_purchase_allocations_shipment_workspace_fkey',
+      columns: [table.shipmentId, table.userId],
+      foreignColumns: [chinaOutboundShipments.id, chinaOutboundShipments.userId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'saas_china_shipment_purchase_allocations_shipment_item_workspace_fkey',
+      columns: [table.shipmentItemId, table.shipmentId, table.userId],
+      foreignColumns: [
+        chinaOutboundShipmentItems.id,
+        chinaOutboundShipmentItems.shipmentId,
+        chinaOutboundShipmentItems.userId,
+      ],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'saas_china_shipment_purchase_allocations_purchase_link_workspace_fkey',
+      columns: [table.purchaseLinkId, table.userId],
+      foreignColumns: [saasChinaPurchaseLinks.id, saasChinaPurchaseLinks.userId],
+    }).onDelete('restrict'),
+    uniqueIndex('saas_china_shipment_purchase_allocations_item_link').on(
+      table.shipmentItemId,
+      table.purchaseLinkId,
+    ),
+    index('saas_china_shipment_purchase_allocations_user_shipment').on(
+      table.userId,
+      table.shipmentId,
+    ),
+    index('saas_china_shipment_purchase_allocations_purchase_link').on(table.purchaseLinkId),
+    check('saas_china_shipment_purchase_allocations_reserved_positive', sql`${table.reservedQuantity} > 0`),
+    check('saas_china_shipment_purchase_allocations_dispatched_nonnegative', sql`${table.dispatchedQuantity} >= 0`),
+    check('saas_china_shipment_purchase_allocations_released_nonnegative', sql`${table.releasedQuantity} >= 0`),
+    check(
+      'saas_china_shipment_purchase_allocations_resolved_within_reserved',
+      sql`${table.dispatchedQuantity} + ${table.releasedQuantity} <= ${table.reservedQuantity}`,
+    ),
   ],
 )
 

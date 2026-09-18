@@ -115,6 +115,11 @@ export function ChinaShipmentsBoard({
     availableQuantityByWarehouse.set(item.warehouseCode, (availableQuantityByWarehouse.get(item.warehouseCode) ?? 0) + item.availableQuantity)
   }
   const selectedWarehouseInventory = availableInventory.filter((item) => selectedWarehouseCodes.includes(item.warehouseCode))
+  const stagedShipmentLines = availableInventory.flatMap((item) => {
+    const quantity = Number(quantities[item.id] ?? 0)
+    return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
+  })
+  const stagedOutboundQuantity = stagedShipmentLines.reduce((total, line) => total + line.quantity, 0)
   const allWarehouseSelected = warehouseOptions.length > 0 && warehouseOptions.every((warehouseCode) => selectedWarehouseCodes.includes(warehouseCode))
   const sortedSelectedWarehouseInventory = [...selectedWarehouseInventory].sort((left, right) => {
     let comparison = 0
@@ -139,15 +144,10 @@ export function ChinaShipmentsBoard({
   function toggleWarehouseSelection(warehouseCode: string) {
     const isSelected = selectedWarehouseCodes.includes(warehouseCode)
     setSelectedWarehouseCodes((current) => isSelected ? current.filter((code) => code !== warehouseCode) : [...current, warehouseCode])
-    if (isSelected) {
-      const inventoryIds = new Set(availableInventory.filter((item) => item.warehouseCode === warehouseCode).map((item) => item.id))
-      setQuantities((current) => Object.fromEntries(Object.entries(current).filter(([inventoryId]) => !inventoryIds.has(inventoryId))))
-    }
   }
 
   function toggleAllWarehouseSelections() {
     setSelectedWarehouseCodes(allWarehouseSelected ? [] : warehouseOptions)
-    if (allWarehouseSelected) setQuantities({})
   }
 
   function toggleInventorySort(key: InventorySortKey) {
@@ -159,17 +159,13 @@ export function ChinaShipmentsBoard({
 
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const lines = selectedWarehouseInventory.flatMap((item) => {
-      const quantity = Number(quantities[item.id] ?? 0)
-      return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
-    })
     startTransition(async () => {
       const result = await createChinaOutboundShipmentAction({
         shipmentNo,
         destinationName,
         plannedOutboundDate: plannedOutboundDate || null,
         memo,
-        lines,
+        lines: stagedShipmentLines,
       })
       if (!result.ok) {
         toast.error(result.error)
@@ -225,7 +221,7 @@ export function ChinaShipmentsBoard({
             </label>
             <section className="rounded-md border bg-muted/20 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div><h3 className="text-sm font-semibold">출고 재고 위치</h3><p className="mt-1 text-xs text-muted-foreground">여러 위치를 체크하면 선택한 위치의 품목을 한 출고작업에 함께 담을 수 있습니다.</p></div>
+                <div><h3 className="text-sm font-semibold">출고 재고 위치</h3><p className="mt-1 text-xs text-muted-foreground">창고 체크는 입력할 품목을 화면에 표시하는 용도입니다. 체크를 해제해도 기입한 출고수량은 유지됩니다.</p></div>
                 <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">{allWarehouseSelected ? '전체 해제' : '전체 선택'}</button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="출고 재고 위치 선택">
@@ -235,6 +231,7 @@ export function ChinaShipmentsBoard({
                   <span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span>
                 </label>)}
               </div>
+              {stagedShipmentLines.length > 0 ? <p className="mt-3 text-xs font-medium text-primary">입력된 출고수량: {stagedShipmentLines.length.toLocaleString('ko-KR')}개 품목 · {stagedOutboundQuantity.toLocaleString('ko-KR')}개 (체크 해제한 창고 수량도 포함)</p> : null}
             </section>
             <div className="space-y-2 md:hidden">
               {selectedWarehouseInventory.length > 0 ? <div className="flex justify-end"><button type="button" onClick={fillAllOutboundQuantities} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted">전체수량</button></div> : null}
@@ -275,7 +272,7 @@ export function ChinaShipmentsBoard({
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end"><button type="submit" disabled={isPending || selectedWarehouseInventory.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
+            <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
           </form>
         ) : null}
       </section>

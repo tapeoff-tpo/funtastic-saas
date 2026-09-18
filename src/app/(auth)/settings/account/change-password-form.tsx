@@ -1,16 +1,18 @@
 'use client'
 
 import { useTransition, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { changeOwnPassword } from '@/lib/admin-accounts/actions'
 
-export function ChangePasswordForm() {
+export function ChangePasswordForm({ forceChange = false }: { forceChange?: boolean }) {
   const [pending, startTransition] = useTransition()
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
+  const router = useRouter()
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -25,9 +27,16 @@ export function ChangePasswordForm() {
     startTransition(async () => {
       const res = await changeOwnPassword({ newPassword: pw })
       if (res.success) {
-        toast.success('비밀번호 변경 완료')
         setPw('')
         setPw2('')
+        if (res.data?.requiresFreshLogin) {
+          toast.success('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.')
+          router.replace('/login?reason=password_changed')
+          return
+        }
+
+        toast.success('비밀번호 변경 완료')
+        if (forceChange) router.replace('/dashboard')
       } else {
         toast.error(res.error)
       }
@@ -36,6 +45,11 @@ export function ChangePasswordForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4 rounded-lg border p-4">
+      {forceChange && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          초기화 비밀번호는 계속 사용할 수 없습니다. 새 비밀번호를 설정해주세요.
+        </p>
+      )}
       <div>
         <Label htmlFor="pw">새 비밀번호</Label>
         <Input

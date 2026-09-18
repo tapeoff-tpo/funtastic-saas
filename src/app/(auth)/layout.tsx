@@ -23,5 +23,9 @@ export default async function AuthLayout({
     redirect('/login?reason=deactivated')
   }
 
+  if (user.mustChangePassword) {
+    redirect('/change-password')
+  }
+
   return <AppShell>{children}</AppShell>
 }

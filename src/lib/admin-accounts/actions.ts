@@ -11,12 +11,17 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  isPasswordChangeRequired,
+  withPasswordChangeRequired,
+} from '@/lib/auth/force-password-change'
 import { db } from '@/lib/db'
 import { userProfiles, auditLogs, type UserRole } from '@/lib/db/schema'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
 const BAN_FOREVER = '876000h' // ~100 years (Supabase ban_duration is a Go duration string)
+const RESET_PASSWORD = '0000'
 
 type ActionResult<T = void> = { success: true; data?: T } | { success: false; error: string }
 
@@ -46,12 +51,6 @@ async function assertSuperAdmin(): Promise<{ ok: true; callerId: string } | { ok
   if (profile.role !== 'super_admin') return { ok: false, error: 'Forbidden: super_admin only' }
 
   return { ok: true, callerId: user.id }
-}
-
-async function getCurrentUserId(): Promise<string | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  return user?.id ?? null
 }
 
 /**
@@ -167,9 +166,17 @@ export async function changeRole(input: {
 
       // Mirror role into auth.users.app_metadata for JWT consistency
       const admin = createAdminClient()
-      await admin.auth.admin.updateUserById(target.id, {
-        app_metadata: { role: input.newRole },
+      const { data: authTarget, error: authTargetError } = await admin.auth.admin.getUserById(target.id)
+      if (authTargetError || !authTarget.user) {
+        throw new Error(authTargetError?.message ?? 'Auth user not found')
+      }
+      const { error: authUpdateError } = await admin.auth.admin.updateUserById(target.id, {
+        app_metadata: {
+          ...authTarget.user.app_metadata,
+          role: input.newRole,
+        },
       })
+      if (authUpdateError) throw new Error(authUpdateError.message)
 
       return { success: true as const }
     })
@@ -180,23 +187,37 @@ export async function changeRole(input: {
     .catch((e) => ({ success: false, error: e instanceof Error ? e.message : 'Role change failed' }))
 }
 
-/**
- * Reset a user's password to INITIAL_USER_PASSWORD.
- */
+/** Reset a user's password and require a new password on their next login. */
 export async function resetAccountPassword(input: { targetId: string }): Promise<ActionResult> {
   const guard = await assertSuperAdmin()
   if (!guard.ok) return { success: false, error: guard.error }
 
-  const admin = createAdminClient()
-  const password = getInitialPassword()
+  const [target] = await db
+    .select({ id: userProfiles.id })
+    .from(userProfiles)
+    .where(eq(userProfiles.id, input.targetId))
+    .limit(1)
+  if (!target) return { success: false, error: 'Target not found' }
 
-  const { error } = await admin.auth.admin.updateUserById(input.targetId, { password })
+  const admin = createAdminClient()
+  const { data: authTarget, error: authTargetError } = await admin.auth.admin.getUserById(input.targetId)
+  if (authTargetError || !authTarget.user) {
+    return { success: false, error: authTargetError?.message ?? 'Auth user not found' }
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(input.targetId, {
+    password: RESET_PASSWORD,
+    app_metadata: withPasswordChangeRequired(authTarget.user.app_metadata, true),
+  })
   if (error) return { success: false, error: error.message }
 
-  await db.insert(auditLogs).values({
-    actorId: guard.callerId,
-    action: 'account.password_reset',
-    targetId: input.targetId,
+  await db.transaction(async (tx) => {
+    await tx.insert(auditLogs).values({
+      actorId: guard.callerId,
+      action: 'account.password_reset',
+      targetId: input.targetId,
+      metadata: { forcePasswordChange: true },
+    })
   })
 
   revalidatePath('/admin/accounts')
@@ -300,23 +321,40 @@ export async function reactivateAccount(input: { targetId: string }): Promise<Ac
  */
 export async function changeOwnPassword(input: {
   newPassword: string
-}): Promise<ActionResult> {
-  const userId = await getCurrentUserId()
-  if (!userId) return { success: false, error: 'Not authenticated' }
+}): Promise<ActionResult<{ requiresFreshLogin: boolean }>> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Not authenticated' }
+
+  const userId = user.id
+  const requiresFreshLogin = isPasswordChangeRequired(user.app_metadata)
 
   if (!input.newPassword || input.newPassword.length < 8) {
     return { success: false, error: 'Password must be at least 8 characters' }
   }
 
-  const supabase = await createClient()
   const { error } = await supabase.auth.updateUser({ password: input.newPassword })
   if (error) return { success: false, error: error.message }
 
-  await db.insert(auditLogs).values({
-    actorId: userId,
-    action: 'password.self_change',
-    targetId: userId,
+  const admin = createAdminClient()
+  const { error: forceFlagError } = await admin.auth.admin.updateUserById(userId, {
+    app_metadata: withPasswordChangeRequired(user.app_metadata, false),
+  })
+  if (forceFlagError) {
+    return { success: false, error: `비밀번호는 변경됐지만 강제변경 상태 해제에 실패했습니다: ${forceFlagError.message}` }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.insert(auditLogs).values({
+      actorId: userId,
+      action: 'password.self_change',
+      targetId: userId,
+    })
   })
 
-  return { success: true }
+  revalidatePath('/change-password')
+  revalidatePath('/dashboard')
+  if (requiresFreshLogin) await supabase.auth.signOut()
+
+  return { success: true, data: { requiresFreshLogin } }
 }

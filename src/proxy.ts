@@ -1,4 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import {
+  LOGIN_SESSION_MODE_COOKIE,
+  LOGIN_SESSION_PROOF_COOKIE,
+  hasExpiredManagedLoginSession,
+} from '@/lib/auth/login-session'
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -41,6 +46,24 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
+  }
+
+  const sessionMode = request.cookies.get(LOGIN_SESSION_MODE_COOKIE)?.value
+  const sessionProof = request.cookies.get(LOGIN_SESSION_PROOF_COOKIE)?.value
+  if (hasExpiredManagedLoginSession(sessionMode, sessionProof)) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' },
+        { status: 401 },
+      )
+    }
+
+    if (pathname !== '/login') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      url.searchParams.set('reason', 'session_expired')
+      return NextResponse.redirect(url)
+    }
   }
 
   // Prevent caching of authenticated responses

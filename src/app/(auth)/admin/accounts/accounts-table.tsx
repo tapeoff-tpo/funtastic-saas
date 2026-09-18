@@ -31,10 +31,10 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
   }
 
   function handleReset(targetId: string, email: string) {
-    if (!confirm(`${email} 의 비밀번호를 초기 비밀번호로 리셋하시겠습니까?`)) return
+    if (!confirm(`${email} 의 비밀번호를 0000으로 초기화하시겠습니까?\n다음 로그인 시 새 비밀번호를 설정해야 합니다.`)) return
     startTransition(async () => {
       const res = await resetAccountPassword({ targetId })
-      if (res.success) toast.success('비밀번호 초기화 완료')
+      if (res.success) toast.success('비밀번호가 0000으로 초기화되었습니다. 다음 로그인 시 새 비밀번호를 설정해야 합니다.')
       else toast.error(res.error)
     })
   }

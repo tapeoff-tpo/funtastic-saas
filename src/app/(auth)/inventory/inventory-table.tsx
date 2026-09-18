@@ -8,6 +8,7 @@ import {
   type RowSelectionState,
   useReactTable,
 } from '@tanstack/react-table'
+import { Dialog } from '@base-ui/react/dialog'
 import { parseAsInteger, parseAsString, useQueryState, useQueryStates } from 'nuqs'
 import { toast } from 'sonner'
 import { AdjustStockDialog } from './adjust-stock-dialog'
@@ -24,6 +25,7 @@ export interface InventoryRow {
   productName: string
   optionName: string | null
   warehouseZone: string | null
+  sectorCode: string | null
   availableStock: number
   oneWarehouseStock: number
   coupangWarehouseStock: number
@@ -88,6 +90,7 @@ export function InventoryTable({
   }>({ open: false, inventoryId: '', sku: '' })
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
   const [bulkAdjustmentOpen, setBulkAdjustmentOpen] = useState(false)
+  const [mobileDetailRow, setMobileDetailRow] = useState<InventoryRow | null>(null)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [handledFocusSku, setHandledFocusSku] = useState<string | null>(null)
 
@@ -291,11 +294,11 @@ export function InventoryTable({
       header: '3개월평균출고수량',
       cell: (info) => <span className="tabular-nums">{formatNumber(info.getValue(), 1)}</span>,
     }),
-    columnHelper.accessor('warehouseZone', {
-      size: 130,
+    columnHelper.accessor('sectorCode', {
+      size: 180,
       header: () => (
-        <button type="button" onClick={() => handleSort('warehouseZone')} className="hover:text-foreground">
-          창고{getSortIndicator('warehouseZone')}
+        <button type="button" onClick={() => handleSort('sectorCode')} className="hover:text-foreground">
+          로케이션{getSortIndicator('sectorCode')}
         </button>
       ),
       cell: (info) => info.getValue() || '-',
@@ -467,7 +470,7 @@ export function InventoryTable({
               <option key={month} value={month}>{month}월</option>
             ))}
           </select>
-          <button type="button" onClick={() => downloadExcel(true)} disabled={selectedCount === 0} className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={() => downloadExcel(true)} disabled={selectedCount === 0} className="hidden rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex">
             선택 다운({selectedCount})
           </button>
           <button type="button" onClick={() => downloadExcel(false)} className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
@@ -500,49 +503,171 @@ export function InventoryTable({
           검색 조건을 입력하고 <span className="font-medium text-foreground">검색</span> 버튼을 눌러주세요.
         </div>
       ) : (
-        <SyncedScrollContainer>
-          <table className="w-full text-xs" style={{ minWidth: table.getTotalSize() }}>
-            <thead className="sticky top-0 z-[1] bg-muted/50">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="border-b">
-                  {headerGroup.headers.map((header) => (
-                    <th key={header.id} style={{ width: header.getSize() }} className="relative whitespace-nowrap px-2 py-1.5 text-center font-medium text-muted-foreground">
-                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                      {header.column.getCanResize() && (
-                        <div
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                          onClick={(event) => event.stopPropagation()}
-                          className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400 ${header.column.getIsResizing() ? 'bg-blue-500' : ''}`}
-                          aria-label="컬럼 너비 조절"
-                        />
-                      )}
-                    </th>
+        <>
+          <div className="space-y-1 md:hidden">
+            {data.length === 0 ? (
+              <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+                재고 항목이 없습니다.
+              </div>
+            ) : (
+              data.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setMobileDetailRow(row)}
+                  className="flex w-full items-center gap-3 rounded-md border bg-white px-3 py-3 text-left shadow-sm transition-colors hover:bg-muted/50 active:bg-muted"
+                  aria-label={`${row.productName} 상세 보기`}
+                >
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.sku}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.productName}</span>
+                  <span aria-hidden="true" className="text-muted-foreground">›</span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="hidden md:block">
+            <SyncedScrollContainer>
+              <table className="w-full text-xs" style={{ minWidth: table.getTotalSize() }}>
+                <thead className="sticky top-0 z-[1] bg-muted/50">
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <tr key={headerGroup.id} className="border-b">
+                      {headerGroup.headers.map((header) => (
+                        <th key={header.id} style={{ width: header.getSize() }} className="relative whitespace-nowrap px-2 py-1.5 text-center font-medium text-muted-foreground">
+                          {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                          {header.column.getCanResize() && (
+                            <div
+                              onMouseDown={header.getResizeHandler()}
+                              onTouchStart={header.getResizeHandler()}
+                              onClick={(event) => event.stopPropagation()}
+                              className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400 ${header.column.getIsResizing() ? 'bg-blue-500' : ''}`}
+                              aria-label="컬럼 너비 조절"
+                            />
+                          )}
+                        </th>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                    재고 항목이 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                table.getRowModel().rows.map((row, index) => (
-                  <tr key={row.id} className={`border-b transition-colors hover:bg-muted/50 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} style={{ width: cell.column.getSize() }} className="overflow-hidden whitespace-nowrap px-2 py-1 text-center">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </thead>
+                <tbody>
+                  {table.getRowModel().rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={columns.length} className="h-32 text-center text-muted-foreground">
+                        재고 항목이 없습니다.
                       </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </SyncedScrollContainer>
+                    </tr>
+                  ) : (
+                    table.getRowModel().rows.map((row, index) => (
+                      <tr key={row.id} className={`border-b transition-colors hover:bg-muted/50 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} style={{ width: cell.column.getSize() }} className="overflow-hidden whitespace-nowrap px-2 py-1 text-center">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </SyncedScrollContainer>
+          </div>
+        </>
+      )}
+
+      {mobileDetailRow && (
+        <Dialog.Root open onOpenChange={(open) => { if (!open) setMobileDetailRow(null) }}>
+          <Dialog.Portal>
+            <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+            <Dialog.Popup className="fixed inset-x-3 bottom-3 z-50 max-h-[85dvh] overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2">
+              <Dialog.Description className="sr-only">선택한 재고 상품의 상세 정보</Dialog.Description>
+              <div className="flex items-start justify-between gap-3 border-b pb-3">
+                <div className="min-w-0">
+                  <p className="font-mono text-xs text-muted-foreground">{mobileDetailRow.sku}</p>
+                  <Dialog.Title className="mt-1 break-words text-base font-semibold">
+                    {mobileDetailRow.productName}
+                  </Dialog.Title>
+                </div>
+                <Dialog.Close
+                  render={(props) => (
+                    <button
+                      {...props}
+                      type="button"
+                      className="shrink-0 rounded-md p-1 text-lg leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+                      aria-label="닫기"
+                    >
+                      ×
+                    </button>
+                  )}
+                />
+              </div>
+
+              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">옵션명</dt>
+                  <dd className="mt-0.5 break-words">{mobileDetailRow.optionName || '-'}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">로케이션</dt>
+                  <dd className="mt-0.5 break-words">{mobileDetailRow.sectorCode || '-'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">현재고 합계</dt>
+                  <dd className={`mt-0.5 font-semibold tabular-nums ${mobileDetailRow.availableStock <= 0 ? 'text-red-600' : ''}`}>
+                    {formatNumber(mobileDetailRow.availableStock)}개
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">1창고 / 2창고 / 쿠팡</dt>
+                  <dd className="mt-0.5 tabular-nums">
+                    {formatNumber(mobileDetailRow.oneWarehouseStock)} / {formatNumber(mobileDetailRow.twoWarehouseStock)} / {formatNumber(mobileDetailRow.coupangWarehouseStock)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">당월 출고수량</dt>
+                  <dd className="mt-0.5 tabular-nums">{formatNumber(mobileDetailRow.currentMonthOutgoing)}개</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">3개월 평균 출고수량</dt>
+                  <dd className="mt-0.5 tabular-nums">{formatNumber(mobileDetailRow.threeMonthAverageOutgoing, 1)}개</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">최종수정날짜</dt>
+                  <dd className="mt-0.5">{new Date(mobileDetailRow.updatedAt).toLocaleDateString('ko-KR')}</dd>
+                </div>
+              </dl>
+
+              <div className="mt-5 flex justify-end gap-2 border-t pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDetailRow(null)
+                    setAdjustDialog({
+                      open: true,
+                      mode: 'adjust',
+                      inventoryId: mobileDetailRow.id,
+                      sku: mobileDetailRow.sku,
+                      productName: mobileDetailRow.productName,
+                      currentStock: mobileDetailRow.primaryTotalStock,
+                    })
+                  }}
+                  className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  재고 조정
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDetailRow(null)
+                    setHistoryDialog({ open: true, inventoryId: mobileDetailRow.id, sku: mobileDetailRow.sku })
+                  }}
+                  className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  이력 보기
+                </button>
+              </div>
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {adjustDialog.open && (

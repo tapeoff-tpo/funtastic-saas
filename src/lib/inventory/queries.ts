@@ -48,6 +48,7 @@ export async function getInventoryList(
       case 'sku': return inventory.sku
       case 'productName': return sql`MAX(${inventory.productName})`
       case 'warehouseZone': return sql`STRING_AGG(DISTINCT COALESCE(${inventory.warehouseZone}, ''), '/' ORDER BY COALESCE(${inventory.warehouseZone}, ''))`
+      case 'sectorCode': return sql`STRING_AGG(DISTINCT COALESCE(${inventory.sectorCode}, ''), '/' ORDER BY COALESCE(${inventory.sectorCode}, ''))`
       case 'totalStock':
       case 'availableStock': return purchasingStockSql
       case 'updatedAt': return sql`MAX(${inventory.updatedAt})`
@@ -64,6 +65,7 @@ export async function getInventoryList(
     productName: sql<string>`MAX(${inventory.productName})`,
     optionName: sql<string | null>`MAX(${inventory.optionName})`,
     warehouseZone: sql<string | null>`NULLIF(STRING_AGG(DISTINCT COALESCE(${inventory.warehouseZone}, ''), '/' ORDER BY COALESCE(${inventory.warehouseZone}, '')), '')`,
+    sectorCode: sql<string | null>`NULLIF(STRING_AGG(DISTINCT COALESCE(${inventory.sectorCode}, ''), '/' ORDER BY COALESCE(${inventory.sectorCode}, '')), '')`,
     availableStock: purchasingStockSql,
     oneWarehouseStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} = '1창고' THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
     coupangWarehouseStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('쿠팡창고', '쿠팡') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,

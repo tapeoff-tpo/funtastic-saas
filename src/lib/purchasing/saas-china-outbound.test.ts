@@ -4,6 +4,7 @@ vi.mock('@/lib/db', () => ({ db: {} }))
 
 import {
   allocateSaasChinaPurchaseLots,
+  getChinaOutboundOriginWarehouseCode,
   getSaasChinaPurchaseLifecycleStatus,
 } from './saas-china-outbound'
 
@@ -83,5 +84,15 @@ describe('SaaS China purchase lot allocation', () => {
     allocateSaasChinaPurchaseLots(lots, 3)
 
     expect(lots).toEqual([{ id: 'lot', receivedQuantity: 5, reservedQuantity: 0, dispatchedQuantity: 0 }])
+  })
+})
+
+describe('SaaS China outbound warehouse label', () => {
+  it('keeps a single warehouse label when every selected item is from the same location', () => {
+    expect(getChinaOutboundOriginWarehouseCode(['중국창고', '중국창고'])).toBe('중국창고')
+  })
+
+  it('marks a shipment as multiple warehouses when selected items are mixed', () => {
+    expect(getChinaOutboundOriginWarehouseCode(['중국창고', '쿠팡', '스마일배송(개인个人1688)'])).toBe('복수 창고')
   })
 })

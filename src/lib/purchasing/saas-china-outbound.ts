@@ -42,6 +42,18 @@ export const CHINA_OUTBOUND_SHIPMENT_STATUS_LABELS: Record<ChinaOutboundShipment
 // same isolated SaaS stock ledger as manually entered stock. This is never the
 // replaceable Ecount/raw China-inventory table.
 export const SAAS_CHINA_DEFAULT_WAREHOUSE_CODE = '중국창고'
+export const SAAS_CHINA_MULTI_WAREHOUSE_CODE = '복수 창고'
+
+export function getChinaOutboundOriginWarehouseCode(warehouseCodes: Iterable<string>) {
+  const uniqueWarehouseCodes = new Set<string>()
+  for (const warehouseCode of warehouseCodes) {
+    const normalized = warehouseCode.trim()
+    if (normalized) uniqueWarehouseCodes.add(normalized)
+  }
+  return uniqueWarehouseCodes.size === 1
+    ? [...uniqueWarehouseCodes][0]!
+    : SAAS_CHINA_MULTI_WAREHOUSE_CODE
+}
 
 export type SaasChinaInventoryInput = {
   userId: string
@@ -644,6 +656,17 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
   ])
 
+  const inventoryIds = [...new Set(items.map((item) => item.inventoryId))]
+  const inventoryRows = inventoryIds.length === 0
+    ? []
+    : await db
+      .select({ id: saasChinaInventory.id, warehouseCode: saasChinaInventory.warehouseCode })
+      .from(saasChinaInventory)
+      .where(and(
+        eq(saasChinaInventory.userId, input.userId),
+        inArray(saasChinaInventory.id, inventoryIds),
+      ))
+  const warehouseCodeByInventoryId = new Map(inventoryRows.map((inventory) => [inventory.id, inventory.warehouseCode]))
   const boxIds = boxes.map((box) => box.id)
   const itemIds = items.map((item) => item.id)
   const boxItems = boxIds.length === 0 || itemIds.length === 0
@@ -661,7 +684,10 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
 
   return {
     shipment,
-    items,
+    items: items.map((item) => ({
+      ...item,
+      warehouseCode: warehouseCodeByInventoryId.get(item.inventoryId) ?? shipment.originWarehouseCode,
+    })),
     pallets,
     boxes,
     boxItems,
@@ -1006,11 +1032,6 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
     }
 
     const inventoriesById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
-    const warehouseCodes = new Set(inventories.map((inventory) => inventory.warehouseCode))
-    if (warehouseCodes.size !== 1) {
-      throw new Error('한 출고작업에는 같은 출발 창고의 재고만 선택해주세요.')
-    }
-
     for (const line of normalizedLines) {
       const inventory = inventoriesById.get(line.inventoryId)
       if (!inventory) throw new Error('SaaS 중국재고를 찾을 수 없습니다.')
@@ -1026,7 +1047,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
         userId: input.userId,
         shipmentNo,
         status: 'draft',
-        originWarehouseCode: inventories[0]!.warehouseCode,
+        originWarehouseCode: getChinaOutboundOriginWarehouseCode(inventories.map((inventory) => inventory.warehouseCode)),
         destinationName: optionalText(input.destinationName),
         destinationAddress: optionalText(input.destinationAddress),
         forwarderName: optionalText(input.forwarderName),

@@ -62,7 +62,7 @@ export default async function ChinaShipmentsPage({
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">SaaS 재고 전용</span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          중국재고(SaaS)에서 출고 상품을 예약하고, 파렛트·박스·박스별 적재 상품까지 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
+          중국재고(SaaS)의 여러 위치 재고를 한 출고작업에 함께 예약하고, 파렛트·박스·박스별 적재 상품까지 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
         </p>
       </header>
 
@@ -92,6 +92,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
     },
     items: detail.items.map((item) => ({
       id: item.id,
+      warehouseCode: item.warehouseCode,
       sku: item.sku,
       productName: item.productName,
       optionName: item.optionName,

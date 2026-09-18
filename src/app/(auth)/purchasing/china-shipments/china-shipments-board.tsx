@@ -1,6 +1,6 @@
 'use client'
 
-import { type FormEvent, type ReactNode, type TransitionStartFunction, useMemo, useState, useTransition } from 'react'
+import { type FormEvent, type ReactNode, type TransitionStartFunction, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Archive, Box, Check, Container, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -54,6 +54,7 @@ export type ChinaShipmentDetailView = {
   }
   items: Array<{
     id: string
+    warehouseCode: string
     sku: string
     productName: string
     optionName: string | null
@@ -94,8 +95,6 @@ export function ChinaShipmentsBoard({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const warehouseOptions = useMemo(() => [...new Set(inventoryItems.map((item) => item.warehouseCode))], [inventoryItems])
-  const [warehouseCode, setWarehouseCode] = useState(warehouseOptions[0] ?? '')
   const [showCreate, setShowCreate] = useState(shipments.length === 0)
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [shipmentNo, setShipmentNo] = useState('')
@@ -103,12 +102,11 @@ export function ChinaShipmentsBoard({
   const [plannedOutboundDate, setPlannedOutboundDate] = useState(today())
   const [memo, setMemo] = useState('')
 
-  const selectedWarehouseCode = warehouseOptions.includes(warehouseCode) ? warehouseCode : (warehouseOptions[0] ?? '')
-  const warehouseInventory = inventoryItems.filter((item) => item.warehouseCode === selectedWarehouseCode && item.availableQuantity > 0)
+  const availableInventory = inventoryItems.filter((item) => item.availableQuantity > 0)
 
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const lines = warehouseInventory.flatMap((item) => {
+    const lines = availableInventory.flatMap((item) => {
       const quantity = Number(quantities[item.id] ?? 0)
       return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
     })
@@ -147,7 +145,7 @@ export function ChinaShipmentsBoard({
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-semibold">새 중국출고 작업</h2>
-            <p className="mt-1 text-xs text-muted-foreground">중국 내 출발 창고를 선택한 뒤 수량을 예약합니다. 기존 Ecount 중국재고는 변경하지 않습니다.</p>
+            <p className="mt-1 text-xs text-muted-foreground">중국 내 여러 재고 위치의 품목을 함께 선택할 수 있습니다. 예약·출고 차감은 각 품목의 원래 위치에서 처리됩니다.</p>
           </div>
           <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
             <PackagePlus className="size-4" />
@@ -156,12 +154,7 @@ export function ChinaShipmentsBoard({
         </div>
         {showCreate ? (
           <form onSubmit={createShipment} className="space-y-4 p-4">
-            <div className="grid gap-3 md:grid-cols-4">
-              <Field label="출고 출발 창고">
-                <select value={selectedWarehouseCode} onChange={(event) => { setWarehouseCode(event.target.value); setQuantities({}) }} className={inputClass} required>
-                  {warehouseOptions.length === 0 ? <option value="">등록된 SaaS 중국재고 없음</option> : warehouseOptions.map((warehouse) => <option key={warehouse} value={warehouse}>{warehouse}</option>)}
-                </select>
-              </Field>
+            <div className="grid gap-3 md:grid-cols-3">
               <Field label="쉽먼트 번호">
                 <input value={shipmentNo} onChange={(event) => setShipmentNo(event.target.value)} className={inputClass} placeholder="비우면 자동 생성" />
               </Field>
@@ -177,9 +170,10 @@ export function ChinaShipmentsBoard({
               <input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" />
             </label>
             <div className="space-y-2 md:hidden">
-              {warehouseInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">선택한 창고에 출고 가능한 SaaS 재고가 없습니다. 중국재고(SaaS)에서 테스트 재고를 먼저 추가해주세요.</p> : warehouseInventory.map((item) => (
+              {availableInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</p> : availableInventory.map((item) => (
                 <article key={item.id} className="rounded-lg border bg-background p-3">
                   <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground">{item.warehouseCode}</p>
                     <p className="truncate font-medium">{item.productName}</p>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
                   </div>
@@ -196,11 +190,12 @@ export function ChinaShipmentsBoard({
               ))}
             </div>
             <div className="hidden overflow-x-auto rounded-md border md:block">
-              <table className="w-full min-w-[780px] text-left text-sm">
-                <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">현재고</th><th className="px-3 py-2 text-right">기존 예약</th><th className="px-3 py-2 text-right">작업 가능</th><th className="px-3 py-2 text-right">이번 출고</th></tr></thead>
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">재고 위치</th><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">현재고</th><th className="px-3 py-2 text-right">기존 예약</th><th className="px-3 py-2 text-right">작업 가능</th><th className="px-3 py-2 text-right">이번 출고</th></tr></thead>
                 <tbody>
-                  {warehouseInventory.length === 0 ? <tr><td colSpan={5} className="px-3 py-10 text-center text-muted-foreground">선택한 창고에 출고 가능한 SaaS 재고가 없습니다. 중국재고(SaaS)에서 테스트 재고를 먼저 추가해주세요.</td></tr> : warehouseInventory.map((item) => (
+                  {availableInventory.length === 0 ? <tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</td></tr> : availableInventory.map((item) => (
                     <tr key={item.id} className="border-t">
+                      <td className="px-3 py-2 text-xs font-medium text-muted-foreground">{item.warehouseCode}</td>
                       <td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td>
                       <td className="px-3 py-2 text-right tabular-nums">{item.onHandQuantity.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-amber-700">{item.reservedQuantity.toLocaleString('ko-KR')}</td>
@@ -211,7 +206,7 @@ export function ChinaShipmentsBoard({
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end"><button type="submit" disabled={isPending || warehouseInventory.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
+            <div className="flex justify-end"><button type="submit" disabled={isPending || availableInventory.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
           </form>
         ) : null}
       </section>
@@ -233,7 +228,7 @@ function ShipmentList({ shipments, selectedShipmentId, onSelect }: { shipments: 
           const selected = shipment.id === selectedShipmentId
           return <button key={shipment.id} type="button" onClick={() => onSelect(shipment.id)} className={`mb-1 w-full rounded-md border p-3 text-left transition-colors ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted'}`}>
             <div className="flex items-center justify-between gap-2"><span className="font-medium">{shipment.shipmentNo}</span><StatusBadge status={shipment.status} /></div>
-            <p className="mt-1 text-xs text-muted-foreground">{shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">출발 위치: {shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}</p>
             <p className="mt-2 text-xs tabular-nums text-muted-foreground">상품 {shipment.itemCount}종 · {shipment.packedQuantity.toLocaleString('ko-KR')} / {shipment.reservedQuantity.toLocaleString('ko-KR')}개 포장</p>
           </button>
         })}
@@ -296,7 +291,7 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
       <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipment.shipmentNo}</h2><StatusBadge status={shipment.status} /></div>
-          <p className="mt-1 text-sm text-muted-foreground">{shipment.originWarehouseCode} → {shipment.destinationName || '도착지 미입력'}{shipment.plannedOutboundDate ? ` · ${shipment.plannedOutboundDate}` : ''}</p>
+          <p className="mt-1 text-sm text-muted-foreground">출발 위치: {shipment.originWarehouseCode} · {shipment.destinationName || '도착지 미입력'}{shipment.plannedOutboundDate ? ` · ${shipment.plannedOutboundDate}` : ''}</p>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -312,7 +307,7 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
           {items.map((item) => (
             <article key={item.id} className="rounded-lg border bg-background p-3">
               <p className="truncate font-medium">{item.productName}</p>
-              <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">{item.warehouseCode} · {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
               <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
                 <StockMetric label="출고 예약" value={item.reservedQuantity} />
                 <StockMetric label="박스 적재" value={item.packedQuantity} tone="emerald" />
@@ -321,13 +316,13 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
             </article>
           ))}
         </div>
-        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">출고 예약</th><th className="px-3 py-2 text-right">박스 적재</th><th className="px-3 py-2 text-right">미포장</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td><td className="px-3 py-2 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-700">{item.packedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right tabular-nums text-amber-700">{(item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}</td></tr>)}</tbody></table></div>
+        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">재고 위치</th><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">출고 예약</th><th className="px-3 py-2 text-right">박스 적재</th><th className="px-3 py-2 text-right">미포장</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-2 text-xs font-medium text-muted-foreground">{item.warehouseCode}</td><td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td><td className="px-3 py-2 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-700">{item.packedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right tabular-nums text-amber-700">{(item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}</td></tr>)}</tbody></table></div>
       </section>
 
       {editable ? <div className="grid gap-4 lg:grid-cols-3">
         <form onSubmit={addPallet} className="rounded-md border p-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><Container className="size-4" /> 파렛트 추가</h3><div className="mt-3 flex gap-2"><input value={palletNo} onChange={(event) => setPalletNo(event.target.value)} className={inputClass} required placeholder="예: PLT-01" /><button disabled={isPending} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-3 text-sm hover:bg-muted"><Plus className="size-4" /> 추가</button></div></form>
         <form onSubmit={addBox} className="rounded-md border p-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><Archive className="size-4" /> 박스 추가</h3><div className="mt-3 grid gap-2"><select value={boxPalletId} onChange={(event) => setBoxPalletId(event.target.value)} required className={inputClass}><option value="">파렛트를 먼저 선택하세요</option>{pallets.map((pallet) => <option key={pallet.id} value={pallet.id}>{pallet.palletNo}</option>)}</select><div className="flex gap-2"><input value={boxNo} onChange={(event) => setBoxNo(event.target.value)} className={inputClass} required placeholder="예: BOX-001" /><button disabled={isPending || pallets.length === 0} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-3 text-sm hover:bg-muted disabled:opacity-60"><Plus className="size-4" /> 추가</button></div>{pallets.length === 0 ? <p className="text-xs text-muted-foreground">박스를 추가하려면 먼저 파렛트를 등록해주세요.</p> : null}</div></form>
-        <form onSubmit={addPacking} className="rounded-md border p-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><Box className="size-4" /> 박스에 상품 담기</h3><div className="mt-3 grid gap-2"><select value={packingBoxId} onChange={(event) => setPackingBoxId(event.target.value)} required className={inputClass}><option value="">박스 선택</option>{boxes.map((box) => <option key={box.id} value={box.id}>{box.boxNo}</option>)}</select><select value={packingItemId} onChange={(event) => setPackingItemId(event.target.value)} required className={inputClass}><option value="">출고 상품 선택</option>{items.filter((item) => item.packedQuantity < item.reservedQuantity).map((item) => <option key={item.id} value={item.id}>{item.sku} · 미포장 {item.reservedQuantity - item.packedQuantity}개</option>)}</select><div className="flex gap-2"><input type="number" min="1" step="1" value={packingQuantity} onChange={(event) => setPackingQuantity(event.target.value)} required className={inputClass} placeholder="수량" /><button disabled={isPending} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-3 text-sm hover:bg-muted"><Plus className="size-4" /> 담기</button></div></div></form>
+        <form onSubmit={addPacking} className="rounded-md border p-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><Box className="size-4" /> 박스에 상품 담기</h3><div className="mt-3 grid gap-2"><select value={packingBoxId} onChange={(event) => setPackingBoxId(event.target.value)} required className={inputClass}><option value="">박스 선택</option>{boxes.map((box) => <option key={box.id} value={box.id}>{box.boxNo}</option>)}</select><select value={packingItemId} onChange={(event) => setPackingItemId(event.target.value)} required className={inputClass}><option value="">출고 상품 선택</option>{items.filter((item) => item.packedQuantity < item.reservedQuantity).map((item) => <option key={item.id} value={item.id}>{item.warehouseCode} · {item.sku} · 미포장 {item.reservedQuantity - item.packedQuantity}개</option>)}</select><div className="flex gap-2"><input type="number" min="1" step="1" value={packingQuantity} onChange={(event) => setPackingQuantity(event.target.value)} required className={inputClass} placeholder="수량" /><button disabled={isPending} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-3 text-sm hover:bg-muted"><Plus className="size-4" /> 담기</button></div></div></form>
       </div> : null}
 
       <section className="rounded-md border"><div className="border-b px-3 py-2"><h3 className="text-sm font-semibold">파렛트 · 박스 적재 현황</h3><p className="mt-1 text-xs text-muted-foreground">박스가 어떤 파렛트에 있고, 박스마다 어떤 상품이 몇 개 담겼는지 확인합니다.</p></div><div className="grid gap-3 p-3 md:grid-cols-2">{pallets.length === 0 && unassignedBoxes.length === 0 ? <p className="p-4 text-center text-sm text-muted-foreground md:col-span-2">파렛트와 박스를 추가하면 적재 현황이 표시됩니다.</p> : null}{pallets.map((pallet) => <PalletCard key={pallet.id} palletNo={pallet.palletNo} boxes={boxesByPallet.get(pallet.id) ?? []} boxItemsByBox={boxItemsByBox} itemById={itemById} editable={editable} shipmentId={shipment.id} isPending={isPending} startTransition={startTransition} router={router} />)}{unassignedBoxes.length > 0 ? <PalletCard palletNo="파렛트 미배치" boxes={unassignedBoxes} boxItemsByBox={boxItemsByBox} itemById={itemById} editable={editable} shipmentId={shipment.id} isPending={isPending} startTransition={startTransition} router={router} /> : null}</div></section>
@@ -336,7 +331,7 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
 }
 
 function PalletCard({ palletNo, boxes, boxItemsByBox, itemById, editable, shipmentId, isPending, startTransition, router }: { palletNo: string; boxes: ChinaShipmentDetailView['boxes']; boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>; itemById: Map<string, ChinaShipmentDetailView['items'][number]>; editable: boolean; shipmentId: string; isPending: boolean; startTransition: TransitionStartFunction; router: ReturnType<typeof useRouter> }) {
-  return <div className="rounded-md border bg-muted/20 p-3"><h4 className="flex items-center gap-2 text-sm font-semibold"><Container className="size-4" /> {palletNo}</h4><div className="mt-3 space-y-2">{boxes.length === 0 ? <p className="text-xs text-muted-foreground">배치된 박스가 없습니다.</p> : boxes.map((box) => <div key={box.id} className="rounded border bg-background p-2"><div className="flex items-center justify-between"><span className="font-medium text-sm">{box.boxNo}</span><span className="text-xs text-muted-foreground">{box.status === 'sealed' ? '봉인' : '작업중'}</span></div><ul className="mt-2 space-y-1">{(boxItemsByBox.get(box.id) ?? []).length === 0 ? <li className="text-xs text-muted-foreground">담긴 상품 없음</li> : (boxItemsByBox.get(box.id) ?? []).map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return <li key={boxItem.id} className="flex items-center justify-between gap-2 text-xs"><span>{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '상품 확인 필요'}</span><span className="flex items-center gap-1 font-medium tabular-nums">{boxItem.quantity.toLocaleString('ko-KR')}개{editable ? <button type="button" disabled={isPending} aria-label="박스 적재 삭제" onClick={() => { if (!window.confirm('이 박스의 상품 적재를 삭제할까요?')) return; startTransition(async () => { const result = await removeChinaOutboundBoxItemAction({ shipmentId, boxItemId: boxItem.id }); if (!result.ok) { toast.error(result.error); return } toast.success('박스 적재를 삭제했습니다.'); router.refresh() }) }} className="rounded p-0.5 text-red-600 hover:bg-red-50"><Trash2 className="size-3" /></button> : null}</span></li> })}</ul></div>)}</div></div>
+  return <div className="rounded-md border bg-muted/20 p-3"><h4 className="flex items-center gap-2 text-sm font-semibold"><Container className="size-4" /> {palletNo}</h4><div className="mt-3 space-y-2">{boxes.length === 0 ? <p className="text-xs text-muted-foreground">배치된 박스가 없습니다.</p> : boxes.map((box) => <div key={box.id} className="rounded border bg-background p-2"><div className="flex items-center justify-between"><span className="font-medium text-sm">{box.boxNo}</span><span className="text-xs text-muted-foreground">{box.status === 'sealed' ? '봉인' : '작업중'}</span></div><ul className="mt-2 space-y-1">{(boxItemsByBox.get(box.id) ?? []).length === 0 ? <li className="text-xs text-muted-foreground">담긴 상품 없음</li> : (boxItemsByBox.get(box.id) ?? []).map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return <li key={boxItem.id} className="flex items-center justify-between gap-2 text-xs"><span>{item ? `${item.warehouseCode} · ${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '상품 확인 필요'}</span><span className="flex items-center gap-1 font-medium tabular-nums">{boxItem.quantity.toLocaleString('ko-KR')}개{editable ? <button type="button" disabled={isPending} aria-label="박스 적재 삭제" onClick={() => { if (!window.confirm('이 박스의 상품 적재를 삭제할까요?')) return; startTransition(async () => { const result = await removeChinaOutboundBoxItemAction({ shipmentId, boxItemId: boxItem.id }); if (!result.ok) { toast.error(result.error); return } toast.success('박스 적재를 삭제했습니다.'); router.refresh() }) }} className="rounded p-0.5 text-red-600 hover:bg-red-50"><Trash2 className="size-3" /></button> : null}</span></li> })}</ul></div>)}</div></div>
 }
 
 function SummaryCard({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {

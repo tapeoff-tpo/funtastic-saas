@@ -188,7 +188,33 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           </div>
           <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="창고, SKU, 상품, 옵션 검색" />
         </div>
-        <div className="overflow-x-auto">
+        <div className="space-y-2 p-3 md:hidden">
+          {filteredItems.length === 0 ? (
+            <p className="px-3 py-12 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</p>
+          ) : filteredItems.map((item) => (
+            <article key={item.id} className="rounded-lg border bg-background p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{item.productName}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                </div>
+                <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{item.warehouseCode}</span>
+              </div>
+              <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
+                <StockMetric label="현재고" value={item.onHandQuantity} />
+                <StockMetric label="예약" value={item.reservedQuantity} tone="amber" />
+                <StockMetric label="작업 가능" value={item.availableQuantity} tone="emerald" />
+              </dl>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="min-w-0 truncate text-xs text-muted-foreground">최근 입고 {formatDateTime(item.lastReceivedAt)}</p>
+                <button type="button" onClick={() => { setAdjusting(item); setAdjustDelta(''); setAdjustNote('') }} className="inline-flex h-10 shrink-0 items-center gap-1 rounded-md border px-3 text-sm font-medium hover:bg-muted">
+                  <Pencil className="size-4" /> 수량 조정
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
@@ -259,6 +285,16 @@ function SummaryCard({ label, value, description, emphasis = false }: { label: s
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${emphasis ? 'text-emerald-700' : ''}`}>{value.toLocaleString('ko-KR')}개</p>
       <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+    </div>
+  )
+}
+
+function StockMetric({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
+  const toneClass = tone === 'amber' ? 'text-amber-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-foreground'
+  return (
+    <div className="px-1.5 py-2">
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className={`mt-0.5 text-sm font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString('ko-KR')}</dd>
     </div>
   )
 }

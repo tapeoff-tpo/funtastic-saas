@@ -58,8 +58,40 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
   }
 
   return (
-    <div className="rounded-lg border">
-      <table className="w-full text-sm">
+    <>
+      <div className="space-y-3 md:hidden">
+        {accounts.map((a) => {
+          const isSelf = a.id === currentUserId
+          const isActive = !a.deactivatedAt
+          return (
+            <article key={a.id} className="rounded-lg border bg-card p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm font-medium">{a.email}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{a.displayName ?? '-' }{isSelf ? ' · 나' : ''}</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge variant={a.role === 'super_admin' ? 'default' : 'secondary'}>{a.role}</Badge>
+                  <Badge variant="outline" className={isActive ? 'border-green-200 text-green-700' : 'border-red-200 text-red-700'}>{isActive ? '활성' : '비활성'}</Badge>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">생성일 {new Date(a.createdAt).toLocaleDateString('ko-KR')}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button size="sm" variant="outline" className="h-10" disabled={pending || isSelf} onClick={() => handleChangeRole(a.id, a.role)}>역할변경</Button>
+                <Button size="sm" variant="outline" className="h-10" disabled={pending || !isActive} onClick={() => handleReset(a.id, a.email)}>비번초기화</Button>
+                {isActive ? (
+                  <Button size="sm" variant="outline" className="col-span-2 h-10 text-red-600 hover:text-red-700" disabled={pending || isSelf} onClick={() => handleDeactivate(a.id, a.email)}>비활성화</Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="col-span-2 h-10" disabled={pending} onClick={() => handleReactivate(a.id, a.email)}>재활성화</Button>
+                )}
+              </div>
+            </article>
+          )
+        })}
+        {accounts.length === 0 && <p className="rounded-lg border px-4 py-8 text-center text-sm text-muted-foreground">계정 없음</p>}
+      </div>
+      <div className="hidden overflow-x-auto rounded-lg border md:block">
+        <table className="w-full text-sm">
         <thead className="bg-muted/50 text-left">
           <tr>
             <th className="px-4 py-2 font-medium">이메일</th>
@@ -145,7 +177,8 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
             </tr>
           )}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+    </>
   )
 }

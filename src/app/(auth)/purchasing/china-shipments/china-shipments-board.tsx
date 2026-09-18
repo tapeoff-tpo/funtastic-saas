@@ -176,7 +176,26 @@ export function ChinaShipmentsBoard({
               <span className="mb-1 block text-xs font-medium text-muted-foreground">메모</span>
               <input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" />
             </label>
-            <div className="overflow-x-auto rounded-md border">
+            <div className="space-y-2 md:hidden">
+              {warehouseInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">선택한 창고에 출고 가능한 SaaS 재고가 없습니다. 중국재고(SaaS)에서 테스트 재고를 먼저 추가해주세요.</p> : warehouseInventory.map((item) => (
+                <article key={item.id} className="rounded-lg border bg-background p-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{item.productName}</p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
+                    <StockMetric label="현재고" value={item.onHandQuantity} />
+                    <StockMetric label="기존 예약" value={item.reservedQuantity} tone="amber" />
+                    <StockMetric label="작업 가능" value={item.availableQuantity} tone="emerald" />
+                  </dl>
+                  <label className="mt-3 block">
+                    <span className="mb-1 block text-xs font-medium text-muted-foreground">이번 출고 수량</span>
+                    <input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 w-full rounded-md border bg-background px-3 text-right text-base tabular-nums" placeholder="0" />
+                  </label>
+                </article>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto rounded-md border md:block">
               <table className="w-full min-w-[780px] text-left text-sm">
                 <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">현재고</th><th className="px-3 py-2 text-right">기존 예약</th><th className="px-3 py-2 text-right">작업 가능</th><th className="px-3 py-2 text-right">이번 출고</th></tr></thead>
                 <tbody>
@@ -289,7 +308,20 @@ function ShipmentDetailPanel({ detail, isPending, startTransition, router }: { d
 
       <section className="rounded-md border">
         <div className="border-b px-3 py-2"><h3 className="text-sm font-semibold">출고 상품 · 포장 진행</h3></div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">출고 예약</th><th className="px-3 py-2 text-right">박스 적재</th><th className="px-3 py-2 text-right">미포장</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td><td className="px-3 py-2 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-700">{item.packedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right tabular-nums text-amber-700">{(item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}</td></tr>)}</tbody></table></div>
+        <div className="space-y-2 p-3 md:hidden">
+          {items.map((item) => (
+            <article key={item.id} className="rounded-lg border bg-background p-3">
+              <p className="truncate font-medium">{item.productName}</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+              <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
+                <StockMetric label="출고 예약" value={item.reservedQuantity} />
+                <StockMetric label="박스 적재" value={item.packedQuantity} tone="emerald" />
+                <StockMetric label="미포장" value={item.reservedQuantity - item.packedQuantity} tone="amber" />
+              </dl>
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2">상품</th><th className="px-3 py-2 text-right">출고 예약</th><th className="px-3 py-2 text-right">박스 적재</th><th className="px-3 py-2 text-right">미포장</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-2"><div className="font-medium">{item.productName}</div><div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div></td><td className="px-3 py-2 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right font-medium tabular-nums text-emerald-700">{item.packedQuantity.toLocaleString('ko-KR')}</td><td className="px-3 py-2 text-right tabular-nums text-amber-700">{(item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}</td></tr>)}</tbody></table></div>
       </section>
 
       {editable ? <div className="grid gap-4 lg:grid-cols-3">
@@ -310,6 +342,11 @@ function PalletCard({ palletNo, boxes, boxItemsByBox, itemById, editable, shipme
 function SummaryCard({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
   const toneClass = tone === 'amber' ? 'border-amber-200 bg-amber-50/50 text-amber-800' : tone === 'emerald' ? 'border-emerald-200 bg-emerald-50/50 text-emerald-800' : 'bg-card'
   return <div className={`rounded-lg border p-4 ${toneClass}`}><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></div>
+}
+
+function StockMetric({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
+  const toneClass = tone === 'amber' ? 'text-amber-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-foreground'
+  return <div className="px-1.5 py-2"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className={`mt-0.5 text-sm font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString('ko-KR')}</dd></div>
 }
 
 function StatusBadge({ status }: { status: string }) {

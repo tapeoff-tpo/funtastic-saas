@@ -42,7 +42,7 @@ export function CreateAccountDialog() {
       />
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 bg-black/40" />
-        <Dialog.Popup className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[420px] rounded-lg bg-white p-6 shadow-xl">
+        <Dialog.Popup className="fixed left-1/2 top-1/2 max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:p-6">
           <Dialog.Title className="text-lg font-semibold mb-1">새 관리자 추가</Dialog.Title>
           <Dialog.Description className="text-sm text-muted-foreground mb-4">
             초기 비밀번호는 환경변수 <code className="rounded bg-muted px-1">INITIAL_USER_PASSWORD</code>로 자동 적용됩니다.

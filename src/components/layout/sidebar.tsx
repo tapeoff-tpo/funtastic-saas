@@ -201,9 +201,11 @@ const allNavItems: NavItem[] = navSections.flatMap((section) => section.items)
 
 interface SidebarProps {
   onCollapse?: () => void
+  onNavigate?: () => void
+  mobile?: boolean
 }
 
-export function Sidebar({ onCollapse }: SidebarProps = {}) {
+export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps = {}) {
   const pathname = usePathname()
   const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
@@ -267,11 +269,16 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         <Link
           href={item.href}
           prefetch={false}
+          onClick={() => onNavigate?.()}
           onMouseEnter={() => prefetchItem(item.href)}
           onFocus={() => prefetchItem(item.href)}
-          className="flex flex-1 items-center gap-2 px-2 py-1 text-xs font-medium"
+          className={`flex flex-1 items-center font-medium ${
+            mobile
+              ? 'min-h-11 gap-3 px-3 py-2 text-sm'
+              : 'gap-2 px-2 py-1 text-xs'
+          }`}
         >
-          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <Icon className={mobile ? 'h-4 w-4 shrink-0' : 'h-3.5 w-3.5 shrink-0'} />
           <span className="truncate">{item.label}</span>
         </Link>
         {opts.showStar && (
@@ -283,11 +290,13 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
               toggleFavorite(item.href)
             }}
             aria-label={fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
-            className={`mr-1 flex h-5 w-5 items-center justify-center rounded transition-opacity hover:bg-gray-700 ${
-              fav ? 'text-yellow-400 opacity-100' : 'text-gray-500 opacity-0 group-hover:opacity-100'
+            className={`mr-1 flex items-center justify-center rounded transition-opacity hover:bg-gray-700 ${
+              mobile ? 'h-10 w-10' : 'h-5 w-5'
+            } ${
+              fav || mobile ? 'text-yellow-400 opacity-100' : 'text-gray-500 opacity-0 group-hover:opacity-100'
             }`}
           >
-            <Star className={`h-3 w-3 ${fav ? 'fill-yellow-400' : ''}`} />
+            <Star className={`${mobile ? 'h-4 w-4' : 'h-3 w-3'} ${fav ? 'fill-yellow-400' : ''}`} />
           </button>
         )}
       </div>
@@ -301,7 +310,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
     return section.groups.map((group) => (
       <div key={group.id} className="space-y-px">
-        <p className="px-2 pt-1 text-[9px] font-semibold text-gray-500">
+        <p className={mobile ? 'px-3 pt-2 text-xs font-semibold text-gray-500' : 'px-2 pt-1 text-[9px] font-semibold text-gray-500'}>
           {group.title}
         </p>
         <div className="space-y-px">
@@ -312,11 +321,11 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
   }
 
   return (
-    <aside className="flex h-full w-48 flex-col bg-gray-900 text-white">
-      <div className="flex h-10 items-center justify-between border-b border-gray-800 px-3">
+    <aside className={`flex h-full flex-col bg-gray-900 text-white ${mobile ? 'w-full pt-[env(safe-area-inset-top)]' : 'w-48'}`}>
+      <div className={`flex items-center justify-between border-b border-gray-800 px-3 ${mobile ? 'h-14 pr-12' : 'h-10'}`}>
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-bold">Funtastic</span>
-          <span className="text-[9px] text-gray-500">v2.1</span>
+          <span className={mobile ? 'text-base font-bold' : 'text-sm font-bold'}>Funtastic</span>
+          <span className={mobile ? 'text-[10px] text-gray-500' : 'text-[9px] text-gray-500'}>v2.1</span>
         </div>
         {onCollapse && (
           <button
@@ -330,15 +339,15 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-1.5">
+      <nav className={`flex-1 overflow-y-auto ${mobile ? 'px-3 py-3' : 'px-2 py-1.5'}`}>
         <div className="space-y-px">
           {orderedSections.find((section) => section.id === 'dashboard')?.items.map((item) => renderNavItem(item, { showStar: false }))}
         </div>
 
         {favoriteItems.length > 0 && (
           <div className="mt-2">
-            <p className="mb-0.5 flex items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-              <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400" />
+            <p className={`mb-0.5 flex items-center gap-1 font-semibold uppercase tracking-wider text-gray-500 ${mobile ? 'px-3 text-xs' : 'px-2 text-[9px]'}`}>
+              <Star className={mobile ? 'h-3 w-3 fill-yellow-400 text-yellow-400' : 'h-2.5 w-2.5 fill-yellow-400 text-yellow-400'} />
               즐겨찾기
             </p>
             <div className="space-y-px">
@@ -362,15 +371,17 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
                     ...current,
                     [section.id]: !(current[section.id] ?? (sectionIsActive || !section.defaultCollapsed)),
                   }))}
-                  className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-0.5 text-left text-[9px] font-semibold uppercase tracking-wider transition-colors ${
+                  className={`mb-0.5 flex w-full items-center justify-between rounded text-left font-semibold uppercase tracking-wider transition-colors ${
+                    mobile ? 'min-h-10 px-3 py-2 text-xs' : 'px-2 py-0.5 text-[9px]'
+                  } ${
                     sectionIsActive ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'
                   }`}
                 >
                   <span>{section.title}</span>
-                  {sectionIsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  {sectionIsOpen ? <ChevronDown className={mobile ? 'h-4 w-4' : 'h-3 w-3'} /> : <ChevronRight className={mobile ? 'h-4 w-4' : 'h-3 w-3'} />}
                 </button>
               ) : (
-                <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                <p className={`mb-0.5 font-semibold uppercase tracking-wider text-gray-500 ${mobile ? 'px-3 pt-2 text-xs' : 'px-2 text-[9px]'}`}>
                   {section.title}
                 </p>
               )
@@ -385,13 +396,13 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         })}
       </nav>
 
-      <div className="border-t border-gray-800 px-2 py-1.5">
+      <div className={`border-t border-gray-800 ${mobile ? 'px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3' : 'px-2 py-1.5'}`}>
         <form action={signOut}>
           <button
             type="submit"
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+            className={`flex w-full items-center gap-2 rounded font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white ${mobile ? 'min-h-11 px-3 py-2 text-sm' : 'px-2 py-1 text-xs'}`}
           >
-          <LogOut className="h-3.5 w-3.5" />
+          <LogOut className={mobile ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
           로그아웃
           </button>
         </form>

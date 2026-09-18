@@ -106,9 +106,17 @@ export function ChinaShipmentsBoard({
   const [plannedOutboundDate, setPlannedOutboundDate] = useState(today())
   const [memo, setMemo] = useState('')
   const [inventorySort, setInventorySort] = useState<{ key: InventorySortKey; direction: SortDirection }>({ key: 'warehouseCode', direction: 'asc' })
+  const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
 
   const availableInventory = inventoryItems.filter((item) => item.availableQuantity > 0)
-  const sortedAvailableInventory = [...availableInventory].sort((left, right) => {
+  const warehouseOptions = [...new Set(availableInventory.map((item) => item.warehouseCode))].sort((left, right) => left.localeCompare(right, 'ko', { numeric: true }))
+  const availableQuantityByWarehouse = new Map<string, number>()
+  for (const item of availableInventory) {
+    availableQuantityByWarehouse.set(item.warehouseCode, (availableQuantityByWarehouse.get(item.warehouseCode) ?? 0) + item.availableQuantity)
+  }
+  const selectedWarehouseInventory = availableInventory.filter((item) => selectedWarehouseCodes.includes(item.warehouseCode))
+  const allWarehouseSelected = warehouseOptions.length > 0 && warehouseOptions.every((warehouseCode) => selectedWarehouseCodes.includes(warehouseCode))
+  const sortedSelectedWarehouseInventory = [...selectedWarehouseInventory].sort((left, right) => {
     let comparison = 0
     switch (inventorySort.key) {
       case 'warehouseCode': comparison = left.warehouseCode.localeCompare(right.warehouseCode, 'ko', { numeric: true }); break
@@ -122,7 +130,24 @@ export function ChinaShipmentsBoard({
   })
 
   function fillAllOutboundQuantities() {
-    setQuantities(Object.fromEntries(availableInventory.map((item) => [item.id, String(item.availableQuantity)])))
+    setQuantities((current) => ({
+      ...current,
+      ...Object.fromEntries(selectedWarehouseInventory.map((item) => [item.id, String(item.availableQuantity)])),
+    }))
+  }
+
+  function toggleWarehouseSelection(warehouseCode: string) {
+    const isSelected = selectedWarehouseCodes.includes(warehouseCode)
+    setSelectedWarehouseCodes((current) => isSelected ? current.filter((code) => code !== warehouseCode) : [...current, warehouseCode])
+    if (isSelected) {
+      const inventoryIds = new Set(availableInventory.filter((item) => item.warehouseCode === warehouseCode).map((item) => item.id))
+      setQuantities((current) => Object.fromEntries(Object.entries(current).filter(([inventoryId]) => !inventoryIds.has(inventoryId))))
+    }
+  }
+
+  function toggleAllWarehouseSelections() {
+    setSelectedWarehouseCodes(allWarehouseSelected ? [] : warehouseOptions)
+    if (allWarehouseSelected) setQuantities({})
   }
 
   function toggleInventorySort(key: InventorySortKey) {
@@ -134,7 +159,7 @@ export function ChinaShipmentsBoard({
 
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const lines = availableInventory.flatMap((item) => {
+    const lines = selectedWarehouseInventory.flatMap((item) => {
       const quantity = Number(quantities[item.id] ?? 0)
       return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
     })
@@ -153,6 +178,7 @@ export function ChinaShipmentsBoard({
       toast.success('중국출고 작업을 만들고 재고를 예약했습니다.')
       setShowCreate(false)
       setQuantities({})
+      setSelectedWarehouseCodes([])
       setShipmentNo('')
       setDestinationName('')
       setMemo('')
@@ -197,9 +223,22 @@ export function ChinaShipmentsBoard({
               <span className="mb-1 block text-xs font-medium text-muted-foreground">메모</span>
               <input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" />
             </label>
+            <section className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div><h3 className="text-sm font-semibold">출고 재고 위치</h3><p className="mt-1 text-xs text-muted-foreground">여러 위치를 체크하면 선택한 위치의 품목을 한 출고작업에 함께 담을 수 있습니다.</p></div>
+                <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">{allWarehouseSelected ? '전체 해제' : '전체 선택'}</button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="출고 재고 위치 선택">
+                {warehouseOptions.map((warehouseCode) => <label key={warehouseCode} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${selectedWarehouseCodes.includes(warehouseCode) ? 'border-primary bg-primary/5 text-primary' : 'bg-background hover:bg-muted'}`}>
+                  <input type="checkbox" checked={selectedWarehouseCodes.includes(warehouseCode)} onChange={() => toggleWarehouseSelection(warehouseCode)} className="size-4 accent-primary" />
+                  <span>{warehouseCode}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span>
+                </label>)}
+              </div>
+            </section>
             <div className="space-y-2 md:hidden">
-              {availableInventory.length > 0 ? <div className="flex justify-end"><button type="button" onClick={fillAllOutboundQuantities} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted">전체수량</button></div> : null}
-              {availableInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</p> : sortedAvailableInventory.map((item) => (
+              {selectedWarehouseInventory.length > 0 ? <div className="flex justify-end"><button type="button" onClick={fillAllOutboundQuantities} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted">전체수량</button></div> : null}
+              {selectedWarehouseInventory.length === 0 ? <p className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 선택해주세요.</p> : sortedSelectedWarehouseInventory.map((item) => (
                 <article key={item.id} className="rounded-lg border bg-background p-3">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-muted-foreground">{item.warehouseCode}</p>
@@ -222,7 +261,7 @@ export function ChinaShipmentsBoard({
               <table className="w-full min-w-[1050px] text-left text-sm">
                 <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-3 py-2"><InventorySortButton label="재고 위치" sortKey="warehouseCode" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2"><InventorySortButton label="상품코드" sortKey="sku" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2"><InventorySortButton label="상품명" sortKey="productName" currentSort={inventorySort} onSort={toggleInventorySort} /></th><th className="px-3 py-2 text-right"><InventorySortButton label="현재고" sortKey="onHandQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><InventorySortButton label="기존 예약" sortKey="reservedQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><InventorySortButton label="작업 가능" sortKey="availableQuantity" currentSort={inventorySort} onSort={toggleInventorySort} align="right" /></th><th className="px-3 py-2 text-right"><div className="inline-flex items-center gap-2"><span>이번 출고</span><button type="button" onClick={fillAllOutboundQuantities} className="rounded border bg-background px-2 py-1 text-xs font-medium text-foreground hover:bg-muted">전체수량</button></div></th></tr></thead>
                 <tbody>
-                  {availableInventory.length === 0 ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">출고 가능한 SaaS 중국재고가 없습니다. 중국재고(SaaS)에서 재고를 확인해주세요.</td></tr> : sortedAvailableInventory.map((item) => (
+                  {selectedWarehouseInventory.length === 0 ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">출고할 재고 위치를 하나 이상 선택해주세요.</td></tr> : sortedSelectedWarehouseInventory.map((item) => (
                     <tr key={item.id} className="border-t">
                       <td className="px-3 py-2 text-xs font-medium text-muted-foreground">{item.warehouseCode}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{item.sku}</td>
@@ -236,7 +275,7 @@ export function ChinaShipmentsBoard({
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end"><button type="submit" disabled={isPending || availableInventory.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
+            <div className="flex justify-end"><button type="submit" disabled={isPending || selectedWarehouseInventory.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
           </form>
         ) : null}
       </section>

@@ -19,10 +19,11 @@ import { db } from '@/lib/db'
 import { userProfiles, auditLogs, type UserRole } from '@/lib/db/schema'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import bcrypt from 'bcryptjs'
+import {
+  getTemporaryResetAuthPassword,
+} from '@/lib/auth/temporary-reset-password'
 
 const BAN_FOREVER = '876000h' // ~100 years (Supabase ban_duration is a Go duration string)
-const RESET_PASSWORD = '0000'
 
 type ActionResult<T = void> = { success: true; data?: T } | { success: false; error: string }
 
@@ -34,17 +35,6 @@ function getInitialPassword(): string {
 
 function normalizeEmail(email: string | null | undefined): string {
   return email?.trim().toLowerCase() ?? ''
-}
-
-function getResetPasswordErrorMessage(errorMessage: string): string {
-  const normalized = errorMessage.toLowerCase()
-  if (
-    normalized.includes('password')
-    && (normalized.includes('at least') || normalized.includes('minimum') || normalized.includes('length'))
-  ) {
-    return '인증 서버의 최소 비밀번호 길이 설정 때문에 0000으로 초기화하지 못했습니다.'
-  }
-  return errorMessage
 }
 
 /**
@@ -261,14 +251,13 @@ export async function resetAccountPassword(input: { targetId: string }): Promise
   }
 
   const { data: updatedAuthUser, error } = await admin.auth.admin.updateUserById(authTarget.userId, {
-    // Supabase's normal password policy can reject a four-character reset
-    // password. The server-only admin API accepts a bcrypt hash instead;
-    // the forced-change flag makes this temporary password unusable beyond
-    // the first sign-in screen.
-    password_hash: await bcrypt.hash(RESET_PASSWORD, 12),
+    // The auth provider requires a longer password. Only the server knows the
+    // account-specific suffix, so the employee still enters the requested
+    // temporary value, 0000, on the login form.
+    password: getTemporaryResetAuthPassword(authTarget.userId),
     app_metadata: withPasswordChangeRequired(authTarget.appMetadata, true),
   })
-  if (error) return { success: false, error: getResetPasswordErrorMessage(error.message) }
+  if (error) return { success: false, error: error.message }
   if (normalizeEmail(updatedAuthUser.user?.email) !== normalizeEmail(target.email)) {
     return { success: false, error: '비밀번호 초기화 대상 계정을 확인하지 못했습니다.' }
   }

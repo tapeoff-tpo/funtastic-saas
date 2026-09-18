@@ -1008,7 +1008,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
     const inventoriesById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
     const warehouseCodes = new Set(inventories.map((inventory) => inventory.warehouseCode))
     if (warehouseCodes.size !== 1) {
-      throw new Error('한 출고작업에는 같은 중국창고의 재고만 선택해주세요.')
+      throw new Error('한 출고작업에는 같은 출발 창고의 재고만 선택해주세요.')
     }
 
     for (const line of normalizedLines) {

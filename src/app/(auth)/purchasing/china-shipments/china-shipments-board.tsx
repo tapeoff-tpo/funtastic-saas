@@ -147,7 +147,7 @@ export function ChinaShipmentsBoard({
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-semibold">새 중국출고 작업</h2>
-            <p className="mt-1 text-xs text-muted-foreground">선택 수량은 초안 생성과 동시에 예약됩니다. 기존 Ecount 중국재고는 변경하지 않습니다.</p>
+            <p className="mt-1 text-xs text-muted-foreground">중국 내 출발 창고를 선택한 뒤 수량을 예약합니다. 기존 Ecount 중국재고는 변경하지 않습니다.</p>
           </div>
           <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
             <PackagePlus className="size-4" />

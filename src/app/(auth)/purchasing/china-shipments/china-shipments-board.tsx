@@ -76,7 +76,6 @@ const editableStatuses = new Set(['draft', 'packing'])
 const statusLabels: Record<string, string> = {
   draft: '초안', packing: '포장중', ready: '포장완료', dispatched: '출고완료', cancelled: '취소',
 }
-const ALL_WAREHOUSES = '__all__'
 
 export function ChinaShipmentsBoard({
   inventoryItems,
@@ -95,7 +94,7 @@ export function ChinaShipmentsBoard({
   const [isPending, startTransition] = useTransition()
   const [showCreate, setShowCreate] = useState(shipments.length === 0)
   const [stockSearch, setStockSearch] = useState('')
-  const [selectedWarehouseCode, setSelectedWarehouseCode] = useState('')
+  const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [shipmentNo, setShipmentNo] = useState('')
   const [destinationName, setDestinationName] = useState('')
@@ -109,18 +108,13 @@ export function ChinaShipmentsBoard({
   }
   const warehouseOptions = [...availableQuantityByWarehouse.keys()]
     .sort((left, right) => left.localeCompare(right, 'ko-KR', { numeric: true }))
-  const isAllWarehouses = selectedWarehouseCode === ALL_WAREHOUSES
-  const selectedWarehouseInventory = !selectedWarehouseCode
-    ? []
-    : isAllWarehouses
-      ? availableInventory
-      : availableInventory.filter((item) => item.warehouseCode === selectedWarehouseCode)
-  const selectedWarehouseLabel = isAllWarehouses ? '전체 창고 · 복수 창고 출고' : selectedWarehouseCode
+  const selectedWarehouseInventory = availableInventory.filter((item) => selectedWarehouseCodes.includes(item.warehouseCode))
+  const allWarehouseSelected = warehouseOptions.length > 0 && warehouseOptions.every((warehouseCode) => selectedWarehouseCodes.includes(warehouseCode))
   const stockSearchKeyword = stockSearch.trim().toLocaleLowerCase('ko-KR')
   const shownInventory = !stockSearchKeyword
     ? selectedWarehouseInventory
     : selectedWarehouseInventory.filter((item) => [item.sku, item.productName, item.optionName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(stockSearchKeyword)))
-  const stagedShipmentLines = selectedWarehouseInventory.flatMap((item) => {
+  const stagedShipmentLines = availableInventory.flatMap((item) => {
     const quantity = Number(quantities[item.id] ?? 0)
     return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
   })
@@ -130,12 +124,16 @@ export function ChinaShipmentsBoard({
     setQuantities((current) => ({ ...current, ...Object.fromEntries(shownInventory.map((item) => [item.id, String(item.availableQuantity)])) }))
   }
 
+  function toggleWarehouseSelection(warehouseCode: string) {
+    setSelectedWarehouseCodes((current) => current.includes(warehouseCode) ? current.filter((code) => code !== warehouseCode) : [...current, warehouseCode])
+  }
+
+  function toggleAllWarehouseSelections() {
+    setSelectedWarehouseCodes(allWarehouseSelected ? [] : warehouseOptions)
+  }
+
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedWarehouseCode) {
-      toast.error('출고 창고를 선택해주세요.')
-      return
-    }
     startTransition(async () => {
       const result = await createChinaOutboundShipmentAction({
         shipmentNo,
@@ -149,7 +147,7 @@ export function ChinaShipmentsBoard({
       toast.success('중국출고 작업을 만들고 재고를 예약했습니다.')
       setShowCreate(false)
       setQuantities({})
-      setSelectedWarehouseCode('')
+      setSelectedWarehouseCodes([])
       setShipmentNo('')
       setDestinationName('')
       setMemo('')
@@ -172,22 +170,30 @@ export function ChinaShipmentsBoard({
           <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><PackagePlus className="size-4" />{showCreate ? '작업 생성 닫기' : '새 출고작업'}</button>
         </div>
         {showCreate ? <form onSubmit={createShipment} className="space-y-4 p-4">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-3">
             <Field label="쉽먼트 번호"><input value={shipmentNo} onChange={(event) => setShipmentNo(event.target.value)} className={inputClass} placeholder="비우면 자동 생성" /></Field>
             <Field label="도착지"><input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} placeholder="예: 한국 1창고" /></Field>
             <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => setPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
-            <Field label="출고 창고"><select value={selectedWarehouseCode} onChange={(event) => { setSelectedWarehouseCode(event.target.value); setQuantities({}) }} required className={inputClass}><option value="">창고를 선택하세요</option><option value={ALL_WAREHOUSES}>전체 창고 · 복수 창고 출고 · 작업 가능 {inventorySummary.availableQuantity.toLocaleString('ko-KR')}개</option>{warehouseOptions.map((warehouseCode) => <option key={warehouseCode} value={warehouseCode}>{warehouseCode} · 작업 가능 {(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</option>)}</select></Field>
           </div>
           <Field label="메모"><input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" /></Field>
           <section className="rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고할 상품과 수량</h3><p className="mt-1 text-xs text-muted-foreground">{selectedWarehouseCode ? `${selectedWarehouseLabel}의 작업 가능 재고만 표시합니다.` : '먼저 출고 창고를 선택해주세요.'}</p></div><button type="button" onClick={fillAllOutboundQuantities} disabled={!selectedWarehouseCode} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">보이는 상품 전체수량</button></div>
-            {selectedWarehouseCode ? <><input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
-              {stagedShipmentLines.length > 0 ? <p className="mt-3 text-xs font-medium text-primary">선택됨: {stagedShipmentLines.length.toLocaleString('ko-KR')}개 품목 · 전체 {stagedOutboundQuantity.toLocaleString('ko-KR')}개</p> : null}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><h3 className="text-sm font-semibold">출고 재고 위치</h3><p className="mt-1 text-xs text-muted-foreground">여러 창고를 체크하면 선택한 창고의 품목을 한 출고작업에 함께 담을 수 있습니다. 체크 해제해도 이미 입력한 출고수량은 유지됩니다.</p></div>
+              <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">{allWarehouseSelected ? '전체 해제' : '전체 선택'}</button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="출고 재고 위치 선택">
+              {warehouseOptions.map((warehouseCode) => <label key={warehouseCode} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${selectedWarehouseCodes.includes(warehouseCode) ? 'border-primary bg-primary/5 text-primary' : 'bg-background hover:bg-muted'}`}><input type="checkbox" checked={selectedWarehouseCodes.includes(warehouseCode)} onChange={() => toggleWarehouseSelection(warehouseCode)} className="size-4 accent-primary" /><span>{warehouseCode}</span><span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span></label>)}
+            </div>
+          </section>
+          <section className="rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고할 상품과 수량</h3><p className="mt-1 text-xs text-muted-foreground">{selectedWarehouseInventory.length > 0 ? `선택한 ${selectedWarehouseCodes.length.toLocaleString('ko-KR')}개 창고의 작업 가능 재고를 표시합니다.` : '출고할 재고 위치를 하나 이상 체크해주세요.'}</p></div><button type="button" onClick={fillAllOutboundQuantities} disabled={selectedWarehouseInventory.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">보이는 상품 전체수량</button></div>
+            {stagedShipmentLines.length > 0 ? <p className="mt-3 text-xs font-medium text-primary">입력된 출고수량: {stagedShipmentLines.length.toLocaleString('ko-KR')}개 품목 · 전체 {stagedOutboundQuantity.toLocaleString('ko-KR')}개 <span className="font-normal text-muted-foreground">(체크 해제한 창고의 입력 수량도 포함)</span></p> : null}
+            {selectedWarehouseInventory.length > 0 ? <><input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
               <div className="mt-3 max-h-[440px] space-y-2 overflow-y-auto pr-1">
-                {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>{isAllWarehouses ? <p className="mt-1 text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p> : null}</div><div className="flex items-end gap-3"><div className="text-right text-xs text-muted-foreground"><p>현재고 {item.onHandQuantity.toLocaleString('ko-KR')}개</p><p className="mt-1 font-medium text-emerald-700">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p></div><label className="block"><span className="mb-1 block text-xs text-muted-foreground">이번 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" /></label></div></div></article>)}
-              </div></> : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고 창고를 고르면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
-            </section>
-          <div className="flex justify-end"><button type="submit" disabled={isPending || !selectedWarehouseCode || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
+                {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><div className="text-right text-xs text-muted-foreground"><p>현재고 {item.onHandQuantity.toLocaleString('ko-KR')}개</p><p className="mt-1 font-medium text-emerald-700">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p></div><label className="block"><span className="mb-1 block text-xs text-muted-foreground">이번 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" /></label></div></div></article>)}
+              </div></> : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
+          </section>
+          <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
         </form> : null}
       </section>
 

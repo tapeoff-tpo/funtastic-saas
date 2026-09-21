@@ -23,6 +23,7 @@ export default async function ChinaShipmentsPage({
 
   const params = await searchParams
   const selectedShipmentId = parseShipmentId(stringParam(params.shipment))
+  const selectedStep = stringParam(params.step) === 'packing' ? 'packing' : 'setup'
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [{ items: inventoryItems, summary }, shipments, detail] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
@@ -62,7 +63,7 @@ export default async function ChinaShipmentsPage({
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">SaaS 재고 전용</span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          중국재고(SaaS)의 여러 위치 재고를 한 출고작업에 함께 예약하고, 파렛트·박스·박스별 적재 상품까지 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
+          중국재고(SaaS)의 상품을 한 출고작업에 예약한 뒤, 파렛트·박스 구성과 박스별 적재 상품을 단계별로 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
         </p>
       </header>
 
@@ -71,6 +72,7 @@ export default async function ChinaShipmentsPage({
         inventorySummary={summary}
         shipments={shipmentItems}
         selectedShipment={detail ? toShipmentDetailView(detail) : null}
+        selectedStep={selectedStep}
       />
     </div>
   )

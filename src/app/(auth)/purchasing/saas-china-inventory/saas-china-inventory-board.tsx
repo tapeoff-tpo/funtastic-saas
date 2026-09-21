@@ -51,23 +51,10 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
     const keyword = search.trim().toLocaleLowerCase('ko-KR')
     if (!keyword) return items
     return items.filter((item) => (
-      [item.warehouseCode, item.sku, item.productName, item.optionName ?? '']
+      [item.sku, item.productName, item.optionName ?? '']
         .some((value) => value.toLocaleLowerCase('ko-KR').includes(keyword))
     ))
   }, [items, search])
-
-  const warehouseSummaries = useMemo(() => {
-    const summaries = new Map<string, { itemCount: number; onHandQuantity: number }>()
-    for (const item of items) {
-      const current = summaries.get(item.warehouseCode) ?? { itemCount: 0, onHandQuantity: 0 }
-      current.itemCount += 1
-      current.onHandQuantity += item.onHandQuantity
-      summaries.set(item.warehouseCode, current)
-    }
-    return [...summaries.entries()]
-      .map(([warehouseCode, value]) => ({ warehouseCode, ...value }))
-      .sort((left, right) => left.warehouseCode.localeCompare(right.warehouseCode, 'ko-KR'))
-  }, [items])
 
   function receiveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -116,24 +103,6 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
         <SummaryCard label="작업 가능" value={summary.availableQuantity} description="새 출고작업에 선택할 수 있는 수량" emphasis />
       </section>
 
-      {warehouseSummaries.length > 0 ? (
-        <section className="rounded-lg border bg-card p-4">
-          <div className="mb-3">
-            <h2 className="font-semibold">창고별 현재고</h2>
-            <p className="mt-1 text-xs text-muted-foreground">엑셀의 창고 열을 각각 나누어 표시합니다.</p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {warehouseSummaries.map((warehouse) => (
-              <div key={warehouse.warehouseCode} className="rounded-md border bg-muted/20 px-3 py-2">
-                <p className="truncate text-xs font-medium text-muted-foreground" title={warehouse.warehouseCode}>{warehouse.warehouseCode}</p>
-                <p className="mt-1 font-semibold tabular-nums">{warehouse.onHandQuantity.toLocaleString('ko-KR')}개</p>
-                <p className="text-xs text-muted-foreground">{warehouse.itemCount.toLocaleString('ko-KR')}개 품목</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       <section className="rounded-lg border bg-card">
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -150,10 +119,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           </button>
         </div>
         {showReceive ? (
-          <form onSubmit={receiveStock} className="grid gap-3 p-4 md:grid-cols-6">
-            <Field label="중국창고">
-              <input value={receiveForm.warehouseCode} onChange={(event) => setReceiveForm((form) => ({ ...form, warehouseCode: event.target.value }))} required className={inputClass} placeholder="예: 중국창고 A" />
-            </Field>
+          <form onSubmit={receiveStock} className="grid gap-3 p-4 md:grid-cols-5">
             <Field label="품목코드">
               <input value={receiveForm.sku} onChange={(event) => setReceiveForm((form) => ({ ...form, sku: event.target.value }))} required className={inputClass} placeholder="SKU" />
             </Field>
@@ -172,7 +138,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
                 입고 반영
               </button>
             </div>
-            <label className="md:col-span-6">
+            <label className="md:col-span-5">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">메모</span>
               <input value={receiveForm.note} onChange={(event) => setReceiveForm((form) => ({ ...form, note: event.target.value }))} className={inputClass} placeholder="테스트 목적, 도착일 등" />
             </label>
@@ -186,19 +152,16 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
             <h2 className="font-semibold">SaaS 중국재고 목록</h2>
             <p className="mt-1 text-xs text-muted-foreground">총 {items.length.toLocaleString('ko-KR')}개 재고 항목</p>
           </div>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="창고, SKU, 상품, 옵션 검색" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="품목코드, 상품명, 옵션 검색" />
         </div>
         <div className="space-y-2 p-3 md:hidden">
           {filteredItems.length === 0 ? (
             <p className="px-3 py-12 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</p>
           ) : filteredItems.map((item) => (
             <article key={item.id} className="rounded-lg border bg-background p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{item.productName}</p>
-                  <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
-                </div>
-                <span className="max-w-[42%] shrink-0 truncate rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground" title={item.warehouseCode}>{item.warehouseCode}</span>
+              <div className="min-w-0">
+                <p className="truncate font-medium">{item.productName}</p>
+                <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
               </div>
               <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
                 <StockMetric label="현재고" value={item.onHandQuantity} />
@@ -215,10 +178,9 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           ))}
         </div>
         <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[780px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">창고</th>
                 <th className="px-3 py-2 font-medium">품목</th>
                 <th className="px-3 py-2 text-right font-medium">현재고</th>
                 <th className="px-3 py-2 text-right font-medium">출고 예약</th>
@@ -229,10 +191,9 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
             </thead>
             <tbody>
               {filteredItems.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</td></tr>
               ) : filteredItems.map((item) => (
                 <tr key={item.id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{item.warehouseCode}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{item.productName}</div>
                     <div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div>

@@ -10,6 +10,7 @@ import {
   addChinaOutboundPallet,
   adjustSaasChinaInventory,
   cancelChinaOutboundShipment,
+  configureChinaOutboundPackaging,
   createChinaOutboundShipment,
   dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
@@ -73,6 +74,12 @@ const addBoxItemSchema = z.object({
   quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
 })
 
+const configurePackagingSchema = z.object({
+  shipmentId,
+  palletCount: z.coerce.number().int().min(1, '파렛트 수는 1개 이상이어야 합니다.').max(500, '파렛트 수는 500개 이하로 입력해주세요.'),
+  boxCount: z.coerce.number().int().min(1, '박스 수는 1개 이상이어야 합니다.').max(5_000, '박스 수는 5,000개 이하로 입력해주세요.'),
+})
+
 const removeBoxItemSchema = z.object({
   shipmentId,
   boxItemId: z.string().uuid('박스 적재 항목을 확인해주세요.'),
@@ -120,6 +127,15 @@ export async function addChinaOutboundBoxAction(input: unknown): Promise<ActionR
     const value = addBoxSchema.parse(input)
     const actor = await getActor()
     await addChinaOutboundBox({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function configureChinaOutboundPackagingAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = configurePackagingSchema.parse(input)
+    const actor = await getActor()
+    await configureChinaOutboundPackaging({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

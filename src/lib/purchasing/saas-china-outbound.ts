@@ -144,6 +144,13 @@ export type ChinaOutboundShipmentLineInput = {
   quantity: number
 }
 
+export type ConfigureChinaOutboundPackagingInput = {
+  userId: string
+  shipmentId: string
+  palletCount: number
+  boxCount: number
+}
+
 export type CreateChinaOutboundShipmentInput = {
   userId: string
   createdBy: string
@@ -1182,6 +1189,91 @@ export async function addChinaOutboundBox(input: {
   })
 }
 
+/**
+ * Creates the requested pallet and box slots in one transaction. Existing
+ * allocations are deliberately preserved: this operation can grow a setup,
+ * but never removes a pallet or box that may already contain packed goods.
+ */
+export async function configureChinaOutboundPackaging(input: ConfigureChinaOutboundPackagingInput) {
+  await ensureSaasChinaOutboundSchema()
+  const palletCount = positiveInteger(input.palletCount, '파렛트 수')
+  const boxCount = positiveInteger(input.boxCount, '박스 수')
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+
+    const [existingPallets, existingBoxes] = await Promise.all([
+      tx
+        .select()
+        .from(chinaOutboundPallets)
+        .where(and(
+          eq(chinaOutboundPallets.userId, input.userId),
+          eq(chinaOutboundPallets.shipmentId, input.shipmentId),
+        ))
+        .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
+      tx
+        .select()
+        .from(chinaOutboundBoxes)
+        .where(and(
+          eq(chinaOutboundBoxes.userId, input.userId),
+          eq(chinaOutboundBoxes.shipmentId, input.shipmentId),
+        ))
+        .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
+    ])
+
+    if (palletCount < existingPallets.length || boxCount < existingBoxes.length) {
+      throw new Error(`이미 파렛트 ${existingPallets.length}개·박스 ${existingBoxes.length}개가 생성되어 있습니다. 기존 수량보다 작게 줄일 수 없습니다.`)
+    }
+
+    const palletNos = new Set(existingPallets.map((pallet) => pallet.palletNo))
+    const newPallets = [] as typeof existingPallets
+    let nextPalletNumber = 1
+    while (existingPallets.length + newPallets.length < palletCount) {
+      const palletNo = nextGeneratedPackageNo('파렛트', palletNos, () => nextPalletNumber++)
+      const [pallet] = await tx
+        .insert(chinaOutboundPallets)
+        .values({
+          shipmentId: input.shipmentId,
+          userId: input.userId,
+          palletNo,
+          sortOrder: existingPallets.length + newPallets.length,
+        })
+        .returning()
+      if (!pallet) throw new Error('파렛트 구성을 저장하지 못했습니다.')
+      newPallets.push(pallet)
+    }
+
+    const pallets = [...existingPallets, ...newPallets]
+    const boxNos = new Set(existingBoxes.map((box) => box.boxNo))
+    let nextBoxNumber = 1
+    let createdBoxCount = 0
+    while (existingBoxes.length + createdBoxCount < boxCount) {
+      const boxNo = nextGeneratedPackageNo('박스', boxNos, () => nextBoxNumber++)
+      const boxIndex = existingBoxes.length + createdBoxCount
+      const [box] = await tx
+        .insert(chinaOutboundBoxes)
+        .values({
+          shipmentId: input.shipmentId,
+          userId: input.userId,
+          palletId: pallets[boxIndex % pallets.length]!.id,
+          boxNo,
+          sortOrder: boxIndex,
+        })
+        .returning()
+      if (!box) throw new Error('박스 구성을 저장하지 못했습니다.')
+      createdBoxCount += 1
+    }
+
+    return {
+      palletCount,
+      boxCount,
+      addedPalletCount: newPallets.length,
+      addedBoxCount: createdBoxCount,
+    }
+  })
+}
+
 export async function addChinaOutboundBoxItem(input: {
   userId: string
   shipmentId: string
@@ -1812,6 +1904,14 @@ function requiredText(value: string | null | undefined, label: string) {
   const normalized = value?.trim()
   if (!normalized) throw new Error(`${label}을(를) 입력해주세요.`)
   return normalized
+}
+
+function nextGeneratedPackageNo(prefix: string, used: Set<string>, nextNumber: () => number) {
+  let number = nextNumber()
+  while (used.has(`${prefix} ${number}`)) number = nextNumber()
+  const packageNo = `${prefix} ${number}`
+  used.add(packageNo)
+  return packageNo
 }
 
 function optionalText(value: string | null | undefined) {

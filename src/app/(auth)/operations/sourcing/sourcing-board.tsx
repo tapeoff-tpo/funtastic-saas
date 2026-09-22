@@ -1352,9 +1352,12 @@ function decimalText(value: number | null) {
 
 function externalUrl(value: string | null | undefined) {
   const text = value?.trim()
-  if (!text) return null
+  if (!text || /\s/.test(text)) return null
+  const hasHttpProtocol = /^https?:\/\//i.test(text)
+  const isBareDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?#][^\s]*)?$/i.test(text)
+  if (!hasHttpProtocol && !isBareDomain) return null
   try {
-    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`)
+    const url = new URL(hasHttpProtocol ? text : `https://${text}`)
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
   } catch {
     return null

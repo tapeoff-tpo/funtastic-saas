@@ -4,7 +4,7 @@ import { type FormEvent, type ReactNode, type TransitionStartFunction, useState,
 import { useRouter } from 'next/navigation'
 import { Box, Check, Container, Download, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
+import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import {
   addChinaOutboundBoxItemAction,
   cancelChinaOutboundShipmentAction,
@@ -428,7 +428,7 @@ function createPackingSplitRow(): PackingSplitRow {
 }
 
 function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className={`rounded-md px-3 py-2 text-left transition-colors ${active ? 'bg-background shadow-sm' : 'text-muted-foreground hover:bg-background/60'}`}><span className="block text-xs font-medium">{step}</span><span className="mt-0.5 block text-sm font-semibold">{title}</span><span className="mt-1 block text-xs">{detail}</span></button>
+  return <button type="button" onClick={onClick} aria-current={active ? 'step' : undefined} className={`rounded-md border px-3 py-2 text-left transition-all ${active ? 'border-primary bg-primary text-primary-foreground shadow-md ring-2 ring-primary/25' : 'border-transparent text-muted-foreground hover:border-border hover:bg-background/70'}`}><span className="flex items-center justify-between gap-2 text-xs font-medium"><span>{step}</span><span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{active ? '현재 단계' : '선택'}</span></span><span className="mt-0.5 block text-sm font-semibold">{title}</span><span className={`mt-1 block text-xs ${active ? 'text-primary-foreground/80' : ''}`}>{detail}</span></button>
 }
 
 function PackagingSetupOverview({ pallets, boxesByPallet }: { pallets: ChinaShipmentDetailView['pallets']; boxesByPallet: Map<string, ChinaShipmentDetailView['boxes']> }) {
@@ -436,14 +436,76 @@ function PackagingSetupOverview({ pallets, boxesByPallet }: { pallets: ChinaShip
 }
 
 function BoxPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: { boxes: ChinaShipmentDetailView['boxes']; boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>; itemById: Map<string, ChinaShipmentDetailView['items'][number]>; palletById: Map<string, ChinaShipmentDetailView['pallets'][number]> }) {
-  return <div className="space-y-4"><section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">박스별 적재 현황</h3><p className="mt-1 text-xs text-muted-foreground">각 박스 안에 어떤 상품이 몇 개 들어가는지 확인합니다.</p></div><div className="grid gap-3 p-3 md:grid-cols-2">{boxes.map((box) => { const pallet = box.palletId ? palletById.get(box.palletId) : null; const packedItems = boxItemsByBox.get(box.id) ?? []; const packedQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0); return <article key={box.id} className="rounded-md border bg-muted/20 p-3"><div className="flex items-center justify-between gap-2"><div><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {packedQuantity.toLocaleString('ko-KR')}개</p></div><span className="text-xs text-muted-foreground">{pallet?.palletNo ?? '파렛트 미배정'}</span></div><ul className="mt-3 space-y-2">{packedItems.length === 0 ? <li className="text-sm text-muted-foreground">담긴 상품 없음</li> : packedItems.map((packedItem) => { const item = itemById.get(packedItem.shipmentItemId); return <li key={packedItem.id} className="flex items-start justify-between gap-3 text-sm"><div className="min-w-0"><p className="truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''} · 전체 ${item.reservedQuantity.toLocaleString('ko-KR')}개` : '-'}</p></div><span className="shrink-0 font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</span></li> })}</ul></article> })}</div></section><PalletPackingOverview boxes={boxes} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} /></div>
+  return <div className="space-y-4"><section className="overflow-hidden rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">박스별 적재 현황</h3><p className="mt-1 text-xs text-muted-foreground">박스마다 담긴 상품·수량·규격·CBM을 한 줄씩 확인합니다.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground"><tr><th className="px-3 py-2">파렛트</th><th className="px-3 py-2">박스</th><th className="px-3 py-2">상품</th><th className="px-3 py-2">상품코드 · 옵션</th><th className="px-3 py-2 text-right">적재수량</th><th className="px-3 py-2 text-right">박스 합계</th><th className="px-3 py-2">규격 · CBM</th></tr></thead><tbody className="divide-y">{boxes.length === 0 ? <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">생성된 박스가 없습니다.</td></tr> : boxes.flatMap((box) => { const pallet = box.palletId ? palletById.get(box.palletId) : null; const packedItems = boxItemsByBox.get(box.id) ?? []; const packedQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0); const dimensions = formatChinaOutboundBoxDimensions(box); const cbm = formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(box)); const boxInfo = <><p className="whitespace-nowrap font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {packedQuantity.toLocaleString('ko-KR')}개</p></>; const dimensionInfo = <><p className="whitespace-nowrap tabular-nums">{dimensions ?? '규격 미입력'}</p><p className="mt-0.5 text-xs font-medium tabular-nums text-muted-foreground">{cbm ? `${cbm} CBM` : '-'}</p></>; if (packedItems.length === 0) return <tr key={box.id} className="bg-muted/[0.03]"><td className="px-3 py-2.5"><span className={pallet ? 'text-sm' : 'text-amber-700'}>{pallet?.palletNo ?? '미배정'}</span></td><td className="px-3 py-2.5">{boxInfo}</td><td colSpan={2} className="px-3 py-2.5 text-muted-foreground">담긴 상품 없음</td><td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">-</td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">0개</td><td className="px-3 py-2.5">{dimensionInfo}</td></tr>; return packedItems.map((packedItem) => { const item = itemById.get(packedItem.shipmentItemId); return <tr key={packedItem.id}><td className="px-3 py-2.5"><span className={pallet ? 'text-sm' : 'text-amber-700'}>{pallet?.palletNo ?? '미배정'}</span></td><td className="px-3 py-2.5">{boxInfo}</td><td className="px-3 py-2.5"><p className="max-w-[18rem] truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p></td><td className="px-3 py-2.5"><p className="max-w-[16rem] truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-2.5 text-right font-semibold tabular-nums text-muted-foreground">{packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-2.5">{dimensionInfo}</td></tr> }) })}</tbody></table></div></section><PalletPackingOverview boxes={boxes} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} /></div>
 }
 
 function PalletPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: { boxes: ChinaShipmentDetailView['boxes']; boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>; itemById: Map<string, ChinaShipmentDetailView['items'][number]>; palletById: Map<string, ChinaShipmentDetailView['pallets'][number]> }) {
   const pallets = Array.from(palletById.values())
   const unassignedLoadedBoxes = boxes.filter((box) => !box.palletId && (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
 
-  return <section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">파렛트별 적재 현황</h3><p className="mt-1 text-xs text-muted-foreground">파렛트마다 어떤 박스와 상품이 몇 개 들어가는지 확인합니다.</p></div><div className="grid gap-3 p-3 md:grid-cols-2">{pallets.length === 0 ? <p className="p-3 text-sm text-muted-foreground">생성된 파렛트가 없습니다.</p> : pallets.map((pallet) => { const palletBoxes = boxes.filter((box) => box.palletId === pallet.id); const palletBoxItems = palletBoxes.flatMap((box) => boxItemsByBox.get(box.id) ?? []); const packedQuantity = palletBoxItems.reduce((total, packedItem) => total + packedItem.quantity, 0); const productCount = new Set(palletBoxItems.map((packedItem) => packedItem.shipmentItemId)).size; return <article key={pallet.id} className="rounded-md border bg-muted/20 p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="flex items-center gap-2 font-medium"><Container className="size-4" /> {pallet.palletNo}</p><p className="mt-1 text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개 · 상품 {productCount.toLocaleString('ko-KR')}종 · 총 {packedQuantity.toLocaleString('ko-KR')}개</p></div></div><div className="mt-3 space-y-2">{palletBoxes.length === 0 ? <p className="text-sm text-muted-foreground">배정된 박스가 없습니다.</p> : palletBoxes.map((box) => { const packedItems = boxItemsByBox.get(box.id) ?? []; const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0); return <div key={box.id} className="rounded-md border bg-background p-3"><div className="flex items-center justify-between gap-2"><p className="font-medium">{box.boxNo}</p><span className="text-xs font-medium tabular-nums text-muted-foreground">{boxQuantity.toLocaleString('ko-KR')}개</span></div>{packedItems.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">담긴 상품 없음</p> : <ul className="mt-2 space-y-1.5">{packedItems.map((packedItem) => { const item = itemById.get(packedItem.shipmentItemId); return <li key={packedItem.id} className="flex items-start justify-between gap-3 text-sm"><div className="min-w-0"><p className="truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></div><span className="shrink-0 font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</span></li> })}</ul>}</div> })}</div></article> })}{unassignedLoadedBoxes.length > 0 ? <article className="rounded-md border border-amber-200 bg-amber-50/60 p-3 md:col-span-2"><p className="font-medium text-amber-900">파렛트 미지정 박스</p><p className="mt-1 text-xs text-amber-800">상품이 들어있지만 아직 파렛트 번호가 연결되지 않은 박스입니다.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{unassignedLoadedBoxes.map((box) => { const packedItems = boxItemsByBox.get(box.id) ?? []; const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0); return <div key={box.id} className="rounded-md border border-amber-200 bg-background p-3"><div className="flex items-center justify-between gap-2"><p className="font-medium">{box.boxNo}</p><span className="text-xs font-medium tabular-nums">{boxQuantity.toLocaleString('ko-KR')}개</span></div><ul className="mt-2 space-y-1.5">{packedItems.map((packedItem) => { const item = itemById.get(packedItem.shipmentItemId); return <li key={packedItem.id} className="flex justify-between gap-3 text-sm"><span className="min-w-0 truncate">{item?.productName ?? '상품 확인 필요'}</span><span className="shrink-0 tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</span></li> })}</ul></div> })}</div></article> : null}</div></section>
+  return (
+    <section className="overflow-hidden rounded-lg border">
+      <div className="border-b px-4 py-3">
+        <h3 className="font-semibold">파렛트별 적재 현황</h3>
+        <p className="mt-1 text-xs text-muted-foreground">파렛트별 박스·상품·수량과 합산 CBM을 한 줄씩 확인합니다.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-sm">
+          <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2">파렛트</th>
+              <th className="px-3 py-2">박스</th>
+              <th className="px-3 py-2">상품</th>
+              <th className="px-3 py-2">상품코드 · 옵션</th>
+              <th className="px-3 py-2 text-right">적재수량</th>
+              <th className="px-3 py-2">파렛트 현황</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {pallets.length === 0 && unassignedLoadedBoxes.length === 0 ? <tr><td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">생성된 파렛트가 없습니다.</td></tr> : null}
+            {pallets.flatMap((pallet) => {
+              const palletBoxes = boxes.filter((box) => box.palletId === pallet.id)
+              const palletBoxItems = palletBoxes.flatMap((box) => boxItemsByBox.get(box.id) ?? [])
+              const packedQuantity = palletBoxItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
+              const productCount = new Set(palletBoxItems.map((packedItem) => packedItem.shipmentItemId)).size
+              const cbmByBox = palletBoxes.map((box) => calculateChinaOutboundBoxCbm(box))
+              const cbmInputBoxCount = cbmByBox.filter((cbm) => cbm != null).length
+              const palletCbm = cbmByBox.reduce((total, cbm) => total + (cbm ?? 0), 0)
+              const formattedPalletCbm = formatChinaOutboundCbm(palletCbm) ?? '-'
+              const palletCbmLabel = cbmInputBoxCount === 0
+                ? 'CBM 미입력'
+                : cbmInputBoxCount === palletBoxes.length
+                  ? `${formattedPalletCbm} CBM`
+                  : `부분 입력 ${formattedPalletCbm} CBM (${cbmInputBoxCount}/${palletBoxes.length}박스)`
+              const palletInfo = <><p className="font-medium">{pallet.palletNo}</p><p className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개 · 상품 {productCount.toLocaleString('ko-KR')}종 · 총 {packedQuantity.toLocaleString('ko-KR')}개</p><p className="mt-0.5 text-xs font-medium tabular-nums text-muted-foreground">{palletCbmLabel}</p></>
+
+              if (palletBoxes.length === 0) return <tr key={pallet.id} className="bg-muted/[0.03]"><td className="px-3 py-2.5 align-top">{palletInfo}</td><td colSpan={4} className="px-3 py-2.5 text-muted-foreground">배정된 박스가 없습니다.</td><td className="px-3 py-2.5 text-muted-foreground">-</td></tr>
+
+              return palletBoxes.flatMap((box) => {
+                const packedItems = boxItemsByBox.get(box.id) ?? []
+                const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
+
+                if (packedItems.length === 0) return <tr key={box.id} className="bg-muted/[0.03]"><td className="px-3 py-2.5 align-top">{palletInfo}</td><td className="px-3 py-2.5"><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 0개</p></td><td colSpan={2} className="px-3 py-2.5 text-muted-foreground">담긴 상품 없음</td><td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">-</td><td className="px-3 py-2.5 text-xs text-muted-foreground">-</td></tr>
+
+                return packedItems.map((packedItem) => {
+                  const item = itemById.get(packedItem.shipmentItemId)
+                  return <tr key={packedItem.id}><td className="px-3 py-2.5 align-top">{palletInfo}</td><td className="px-3 py-2.5"><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {boxQuantity.toLocaleString('ko-KR')}개</p></td><td className="px-3 py-2.5"><p className="max-w-[18rem] truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p></td><td className="px-3 py-2.5"><p className="max-w-[16rem] truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-2.5 text-xs text-muted-foreground">{boxQuantity.toLocaleString('ko-KR')}개</td></tr>
+                })
+              })
+            })}
+            {unassignedLoadedBoxes.flatMap((box) => {
+              const packedItems = boxItemsByBox.get(box.id) ?? []
+              const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
+              return packedItems.map((packedItem) => {
+                const item = itemById.get(packedItem.shipmentItemId)
+                return <tr key={`unassigned:${packedItem.id}`} className="bg-amber-50/60"><td className="px-3 py-2.5"><p className="font-medium text-amber-900">파렛트 미지정</p><p className="mt-0.5 text-xs text-amber-800">배정 필요</p></td><td className="px-3 py-2.5"><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {boxQuantity.toLocaleString('ko-KR')}개</p></td><td className="px-3 py-2.5"><p className="max-w-[18rem] truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p></td><td className="px-3 py-2.5"><p className="max-w-[16rem] truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-2.5 text-xs font-medium text-amber-800">파렛트 배정 필요</td></tr>
+              })
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
 }
 
 function PackingMetric({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {

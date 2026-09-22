@@ -151,6 +151,12 @@ export type ConfigureChinaOutboundPackagingInput = {
   boxCount: number
 }
 
+export type ChinaOutboundPackingAllocationInput = {
+  palletNumber: number
+  boxNumber: number
+  quantity: number
+}
+
 export type CreateChinaOutboundShipmentInput = {
   userId: string
   createdBy: string
@@ -1244,7 +1250,6 @@ export async function configureChinaOutboundPackaging(input: ConfigureChinaOutbo
       newPallets.push(pallet)
     }
 
-    const pallets = [...existingPallets, ...newPallets]
     const boxNos = new Set(existingBoxes.map((box) => box.boxNo))
     let nextBoxNumber = 1
     let createdBoxCount = 0
@@ -1256,7 +1261,9 @@ export async function configureChinaOutboundPackaging(input: ConfigureChinaOutbo
         .values({
           shipmentId: input.shipmentId,
           userId: input.userId,
-          palletId: pallets[boxIndex % pallets.length]!.id,
+          // A box is intentionally left unassigned here. The operator decides
+          // its pallet only while splitting an individual product in step 2.
+          palletId: null,
           boxNo,
           sortOrder: boxIndex,
         })
@@ -1327,6 +1334,111 @@ export async function addChinaOutboundBoxItem(input: {
       .set({ packedQuantity: shipmentItem.packedQuantity + quantity, updatedAt: new Date() })
       .where(eq(chinaOutboundShipmentItems.id, shipmentItem.id))
     if (shipment.status === 'draft') {
+      await tx
+        .update(chinaOutboundShipments)
+        .set({ status: 'packing', updatedAt: new Date() })
+        .where(eq(chinaOutboundShipments.id, shipment.id))
+    }
+  })
+}
+
+/**
+ * Replaces one product's box split in a single transaction. A box becomes
+ * connected to a pallet only when the operator explicitly writes that
+ * product's pallet and box numbers. This avoids inferring a packing layout
+ * from the total box/pallet counts alone.
+ */
+export async function saveChinaOutboundItemPacking(input: {
+  userId: string
+  shipmentId: string
+  shipmentItemId: string
+  allocations: ChinaOutboundPackingAllocationInput[]
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const allocations = normalizeChinaOutboundPackingAllocations(input.allocations)
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const shipmentItem = await getChinaOutboundShipmentItem(tx, input.userId, shipment.id, input.shipmentItemId)
+    const totalQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
+    if (totalQuantity > shipmentItem.reservedQuantity) {
+      throw new Error(`${shipmentItem.sku}의 분할 수량은 출고수량 ${shipmentItem.reservedQuantity.toLocaleString('ko-KR')}개를 넘을 수 없습니다.`)
+    }
+
+    const [pallets, boxes, existingBoxItems] = await Promise.all([
+      tx
+        .select()
+        .from(chinaOutboundPallets)
+        .where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, shipment.id)))
+        .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
+      tx
+        .select()
+        .from(chinaOutboundBoxes)
+        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id)))
+        .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
+      tx
+        .select({ id: chinaOutboundBoxItems.id, boxId: chinaOutboundBoxItems.boxId, shipmentItemId: chinaOutboundBoxItems.shipmentItemId })
+        .from(chinaOutboundBoxItems)
+        .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, shipment.id))),
+    ])
+
+    const resolvedAllocations = allocations.map((allocation) => {
+      const pallet = pallets[allocation.palletNumber - 1]
+      if (!pallet) throw new Error(`파렛트 번호 ${allocation.palletNumber}번이 없습니다. 1~${pallets.length}번 안에서 입력해주세요.`)
+      const box = boxes[allocation.boxNumber - 1]
+      if (!box) throw new Error(`박스 번호 ${allocation.boxNumber}번이 없습니다. 1~${boxes.length}번 안에서 입력해주세요.`)
+      if (box.status !== 'open') throw new Error(`${box.boxNo}은(는) 봉인되어 수정할 수 없습니다.`)
+      return { ...allocation, pallet, box }
+    })
+
+    const occupiedByOtherItems = new Set(existingBoxItems.filter((item) => item.shipmentItemId !== shipmentItem.id).map((item) => item.boxId))
+    for (const allocation of resolvedAllocations) {
+      if (occupiedByOtherItems.has(allocation.box.id) && allocation.box.palletId && allocation.box.palletId !== allocation.pallet.id) {
+        const currentPallet = pallets.find((pallet) => pallet.id === allocation.box.palletId)
+        throw new Error(`${allocation.box.boxNo}에는 이미 다른 상품이 담겨 있습니다. ${currentPallet?.palletNo ?? '기존'} 파렛트 번호로 입력해주세요.`)
+      }
+    }
+
+    const previousBoxIds = new Set(existingBoxItems.filter((item) => item.shipmentItemId === shipmentItem.id).map((item) => item.boxId))
+    if (previousBoxIds.size > 0) {
+      await tx
+        .delete(chinaOutboundBoxItems)
+        .where(and(
+          eq(chinaOutboundBoxItems.userId, input.userId),
+          eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+          eq(chinaOutboundBoxItems.shipmentItemId, shipmentItem.id),
+        ))
+    }
+
+    const requestedBoxIds = new Set(resolvedAllocations.map((allocation) => allocation.box.id))
+    for (const boxId of previousBoxIds) {
+      if (requestedBoxIds.has(boxId) || occupiedByOtherItems.has(boxId)) continue
+      await tx
+        .update(chinaOutboundBoxes)
+        .set({ palletId: null, updatedAt: new Date() })
+        .where(eq(chinaOutboundBoxes.id, boxId))
+    }
+
+    for (const allocation of resolvedAllocations) {
+      await tx
+        .update(chinaOutboundBoxes)
+        .set({ palletId: allocation.pallet.id, updatedAt: new Date() })
+        .where(eq(chinaOutboundBoxes.id, allocation.box.id))
+      await tx.insert(chinaOutboundBoxItems).values({
+        boxId: allocation.box.id,
+        shipmentId: shipment.id,
+        shipmentItemId: shipmentItem.id,
+        userId: input.userId,
+        quantity: allocation.quantity,
+      })
+    }
+
+    await tx
+      .update(chinaOutboundShipmentItems)
+      .set({ packedQuantity: totalQuantity, updatedAt: new Date() })
+      .where(eq(chinaOutboundShipmentItems.id, shipmentItem.id))
+    if (shipment.status === 'draft' && totalQuantity > 0) {
       await tx
         .update(chinaOutboundShipments)
         .set({ status: 'packing', updatedAt: new Date() })
@@ -1749,12 +1861,19 @@ async function assertShipmentFullyPacked(
   if (unfinished) {
     throw new Error(`${unfinished.sku}의 포장수량(${unfinished.packedQuantity.toLocaleString('ko-KR')})이 출고수량(${unfinished.reservedQuantity.toLocaleString('ko-KR')})과 다릅니다.`)
   }
-  const boxes = await tx
-    .select({ id: chinaOutboundBoxes.id, palletId: chinaOutboundBoxes.palletId })
-    .from(chinaOutboundBoxes)
-    .where(and(eq(chinaOutboundBoxes.userId, userId), eq(chinaOutboundBoxes.shipmentId, shipmentId)))
+  const [boxes, packedBoxItems] = await Promise.all([
+    tx
+      .select({ id: chinaOutboundBoxes.id, palletId: chinaOutboundBoxes.palletId })
+      .from(chinaOutboundBoxes)
+      .where(and(eq(chinaOutboundBoxes.userId, userId), eq(chinaOutboundBoxes.shipmentId, shipmentId))),
+    tx
+      .select({ boxId: chinaOutboundBoxItems.boxId })
+      .from(chinaOutboundBoxItems)
+      .where(and(eq(chinaOutboundBoxItems.userId, userId), eq(chinaOutboundBoxItems.shipmentId, shipmentId))),
+  ])
   if (boxes.length === 0) throw new Error('박스를 하나 이상 등록해주세요.')
-  if (boxes.some((box) => !box.palletId)) throw new Error('모든 박스를 파렛트에 배치해주세요.')
+  const packedBoxIds = new Set(packedBoxItems.map((boxItem) => boxItem.boxId))
+  if (boxes.some((box) => packedBoxIds.has(box.id) && !box.palletId)) throw new Error('상품이 담긴 박스는 파렛트 번호를 지정해주세요.')
 }
 
 async function getSaasChinaInventoryForUpdate(tx: DbTransaction, userId: string, inventoryId: string) {
@@ -1898,6 +2017,24 @@ function normalizeShipmentLines(lines: ChinaOutboundShipmentLineInput[]) {
   }
   if (quantitiesByInventoryId.size === 0) throw new Error('출고할 SaaS 중국재고를 하나 이상 선택해주세요.')
   return [...quantitiesByInventoryId.entries()].map(([inventoryId, quantity]) => ({ inventoryId, quantity }))
+}
+
+function normalizeChinaOutboundPackingAllocations(allocations: ChinaOutboundPackingAllocationInput[]) {
+  const quantitiesByBoxNumber = new Map<number, { palletNumber: number; quantity: number }>()
+  for (const allocation of allocations) {
+    const palletNumber = positiveInteger(allocation.palletNumber, '파렛트 번호')
+    const boxNumber = positiveInteger(allocation.boxNumber, '박스 번호')
+    const quantity = positiveInteger(allocation.quantity, '박스 적재 수량')
+    const current = quantitiesByBoxNumber.get(boxNumber)
+    if (current && current.palletNumber !== palletNumber) {
+      throw new Error(`박스 ${boxNumber}번은 한 파렛트에만 배정할 수 있습니다.`)
+    }
+    quantitiesByBoxNumber.set(boxNumber, {
+      palletNumber,
+      quantity: (current?.quantity ?? 0) + quantity,
+    })
+  }
+  return [...quantitiesByBoxNumber.entries()].map(([boxNumber, allocation]) => ({ boxNumber, ...allocation }))
 }
 
 function requiredText(value: string | null | undefined, label: string) {

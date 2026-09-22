@@ -16,6 +16,7 @@ import {
   markChinaOutboundShipmentReady,
   receiveSaasChinaInventory,
   removeChinaOutboundBoxItem,
+  saveChinaOutboundItemPacking,
 } from '@/lib/purchasing/saas-china-outbound'
 
 type ActionResult = { ok: true; shipmentId?: string } | { ok: false; error: string }
@@ -72,6 +73,16 @@ const addBoxItemSchema = z.object({
   boxId: z.string().uuid('박스를 확인해주세요.'),
   shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
   quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
+})
+
+const saveItemPackingSchema = z.object({
+  shipmentId,
+  shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
+  allocations: z.array(z.object({
+    palletNumber: z.coerce.number().int().positive('파렛트 번호는 1 이상의 정수여야 합니다.'),
+    boxNumber: z.coerce.number().int().positive('박스 번호는 1 이상의 정수여야 합니다.'),
+    quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
+  })).max(5_000, '분할 박스는 5,000개 이하로 입력해주세요.'),
 })
 
 const configurePackagingSchema = z.object({
@@ -145,6 +156,15 @@ export async function addChinaOutboundBoxItemAction(input: unknown): Promise<Act
     const value = addBoxItemSchema.parse(input)
     const actor = await getActor()
     await addChinaOutboundBoxItem({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundItemPackingAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = saveItemPackingSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundItemPacking({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

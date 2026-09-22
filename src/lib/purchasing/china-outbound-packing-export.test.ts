@@ -26,9 +26,9 @@ describe('exportChinaOutboundPackingWorkbook', () => {
         { id: 'pallet-2', palletNo: '파렛트 2' },
       ],
       boxes: [
-        { id: 'box-1', palletId: 'pallet-1', boxNo: '박스 1', status: 'open' },
-        { id: 'box-2', palletId: 'pallet-1', boxNo: '박스 2', status: 'open' },
-        { id: 'box-3', palletId: null, boxNo: '박스 3', status: 'open' },
+        { id: 'box-1', palletId: 'pallet-1', boxNo: '박스 1', status: 'open', lengthCm: 50, widthCm: 40, heightCm: 30 },
+        { id: 'box-2', palletId: 'pallet-1', boxNo: '박스 2', status: 'open', lengthCm: 10, widthCm: 20, heightCm: 30 },
+        { id: 'box-3', palletId: null, boxNo: '박스 3', status: 'open', lengthCm: 10, widthCm: 10, heightCm: 10 },
       ],
       boxItems: [
         { id: 'box-item-1', boxId: 'box-1', shipmentItemId: 'item-a', quantity: 60 },
@@ -52,7 +52,10 @@ describe('exportChinaOutboundPackingWorkbook', () => {
     expect(workbook.getWorksheet('요약')?.getCell('B2').value).toBe('CHN-20260922-001')
     expect(workbook.getWorksheet('상품별 분할')?.rowCount).toBe(6)
     expect(workbook.getWorksheet('박스별 적재')?.rowCount).toBe(5)
+    expect(workbook.getWorksheet('박스별 적재')?.getCell('K2').value).toBe(0.06)
     expect(workbook.getWorksheet('파렛트별 적재')?.rowCount).toBe(5)
-    expect(workbook.getWorksheet('파렛트 미지정')?.getCell('G2').value).toBe(5)
+    expect(workbook.getWorksheet('파렛트별 적재')?.getCell('E2').value).toBe(0.066)
+    expect(workbook.getWorksheet('파렛트 미지정')?.getCell('I2').value).toBe(5)
+    expect(workbook.getWorksheet('요약')?.getCell('B14').value).toBe(0.067)
   })
 })

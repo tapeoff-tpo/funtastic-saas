@@ -157,6 +157,12 @@ export type ChinaOutboundPackingAllocationInput = {
   quantity: number
 }
 
+export type ChinaOutboundBoxDimensionsInput = {
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+}
+
 export type CreateChinaOutboundShipmentInput = {
   userId: string
   createdBy: string
@@ -420,6 +426,14 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
       AND (height_cm IS NULL OR height_cm >= 0)
     )
   );
+
+  -- Existing deployments can have this isolated table from an earlier build
+  -- without the physical-dimension fields. Keep the runtime bootstrap
+  -- additive so CBM entry works without depending on a separate migration run.
+  ALTER TABLE china_outbound_boxes
+    ADD COLUMN IF NOT EXISTS length_cm numeric(12, 2),
+    ADD COLUMN IF NOT EXISTS width_cm numeric(12, 2),
+    ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2);
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_boxes_shipment_box_no
     ON china_outbound_boxes(shipment_id, box_no);
@@ -1281,6 +1295,39 @@ export async function configureChinaOutboundPackaging(input: ConfigureChinaOutbo
   })
 }
 
+/**
+ * Stores the physical outer dimensions for one box. CBM remains derived from
+ * these three measurements so it cannot become stale when a dimension changes.
+ */
+export async function saveChinaOutboundBoxDimensions(input: {
+  userId: string
+  shipmentId: string
+  boxId: string
+} & ChinaOutboundBoxDimensionsInput) {
+  await ensureSaasChinaOutboundSchema()
+  const dimensions = normalizeChinaOutboundBoxDimensions(input)
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const box = await getChinaOutboundBox(tx, input.userId, shipment.id, input.boxId)
+    if (box.status !== 'open') throw new Error(`${box.boxNo}은(는) 봉인되어 규격을 수정할 수 없습니다.`)
+
+    const [updated] = await tx
+      .update(chinaOutboundBoxes)
+      .set({
+        lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm),
+        widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm),
+        heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm),
+        updatedAt: new Date(),
+      })
+      .where(eq(chinaOutboundBoxes.id, box.id))
+      .returning()
+    if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
+    return updated
+  })
+}
+
 export async function addChinaOutboundBoxItem(input: {
   userId: string
   shipmentId: string
@@ -2037,6 +2084,17 @@ function normalizeChinaOutboundPackingAllocations(allocations: ChinaOutboundPack
   return [...quantitiesByBoxNumber.entries()].map(([boxNumber, allocation]) => ({ boxNumber, ...allocation }))
 }
 
+function normalizeChinaOutboundBoxDimensions(input: ChinaOutboundBoxDimensionsInput) {
+  const lengthCm = positiveDecimal(input.lengthCm, '가로')
+  const widthCm = positiveDecimal(input.widthCm, '세로')
+  const heightCm = positiveDecimal(input.heightCm, '높이')
+  const filledCount = [lengthCm, widthCm, heightCm].filter((value) => value != null).length
+  if (filledCount > 0 && filledCount < 3) {
+    throw new Error('가로·세로·높이는 모두 입력하거나 모두 비워주세요.')
+  }
+  return { lengthCm, widthCm, heightCm }
+}
+
 function requiredText(value: string | null | undefined, label: string) {
   const normalized = value?.trim()
   if (!normalized) throw new Error(`${label}을(를) 입력해주세요.`)
@@ -2059,6 +2117,18 @@ function optionalText(value: string | null | undefined) {
 function positiveInteger(value: number, label: string) {
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${label}은(는) 1 이상의 정수여야 합니다.`)
   return value
+}
+
+function positiveDecimal(value: number | null | undefined, label: string) {
+  if (value == null) return null
+  if (!Number.isFinite(value) || value <= 0 || value > 9_999_999.99) {
+    throw new Error(`${label}은(는) 0보다 큰 숫자로 입력해주세요.`)
+  }
+  const rounded = Math.round(value * 100) / 100
+  if (Math.abs(value - rounded) > 0.000_000_1) {
+    throw new Error(`${label}은(는) 소수점 둘째 자리까지 입력해주세요.`)
+  }
+  return rounded
 }
 
 function nonNegativeInteger(value: number, label: string) {

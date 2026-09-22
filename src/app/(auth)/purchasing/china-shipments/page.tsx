@@ -7,6 +7,7 @@ import {
   listChinaOutboundShipments,
 } from '@/lib/purchasing/saas-china-outbound'
 import { ProductFlowNav } from '@/components/product-flow-nav'
+import { dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem, type ChinaShipmentStockItem } from './china-shipments-board'
 
 export const metadata: Metadata = {
@@ -104,7 +105,18 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       dispatchedQuantity: item.dispatchedQuantity,
     })),
     pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note })),
-    boxes: detail.boxes.map((box) => ({ id: box.id, palletId: box.palletId, boxNo: box.boxNo, status: box.status, note: box.note })),
+    boxes: detail.boxes.map((box) => ({
+      id: box.id,
+      shipmentId: detail.shipment.id,
+      editable: detail.shipment.status === 'draft' || detail.shipment.status === 'packing',
+      palletId: box.palletId,
+      boxNo: box.boxNo,
+      status: box.status,
+      note: box.note,
+      lengthCm: dimensionNumber(box.lengthCm),
+      widthCm: dimensionNumber(box.widthCm),
+      heightCm: dimensionNumber(box.heightCm),
+    })),
     boxItems: detail.boxItems.map((item) => ({ id: item.id, boxId: item.boxId, shipmentItemId: item.shipmentItemId, quantity: item.quantity })),
   }
 }

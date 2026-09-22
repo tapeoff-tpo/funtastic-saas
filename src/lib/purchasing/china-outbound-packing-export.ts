@@ -1,4 +1,9 @@
 import ExcelJS from 'exceljs'
+import {
+  calculateChinaOutboundBoxCbm,
+  dimensionNumber,
+  formatChinaOutboundBoxDimensions,
+} from './china-outbound-dimensions'
 
 export type ChinaOutboundPackingExportDetail = {
   shipment: {
@@ -27,6 +32,9 @@ export type ChinaOutboundPackingExportDetail = {
     palletId: string | null
     boxNo: string
     status: string
+    lengthCm?: number | string | null
+    widthCm?: number | string | null
+    heightCm?: number | string | null
   }>
   boxItems: Array<{
     id: string
@@ -71,8 +79,11 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
   const boxItemsByShipmentItem = new Map(detail.items.map((item) => [item.id, detail.boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id)]))
   const totalOutboundQuantity = detail.items.reduce((total, item) => total + item.reservedQuantity, 0)
   const totalPackedQuantity = detail.boxItems.reduce((total, item) => total + item.quantity, 0)
+  const cbmByBoxId = new Map(detail.boxes.map((box) => [box.id, calculateChinaOutboundBoxCbm(box)]))
+  const boxesWithCbm = [...cbmByBoxId.values()].filter((cbm): cbm is number => cbm != null)
+  const totalCbm = boxesWithCbm.reduce((total, cbm) => total + cbm, 0)
 
-  addSummarySheet(workbook, detail, totalOutboundQuantity, totalPackedQuantity)
+  addSummarySheet(workbook, detail, totalOutboundQuantity, totalPackedQuantity, boxesWithCbm.length, totalCbm)
 
   const productSheet = createListSheet(workbook, '상품별 분할', [
     'No.',
@@ -85,8 +96,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '미포장수량',
     '파렛트',
     '박스',
+    '박스 규격 (cm)',
+    '박스 CBM',
     '해당 박스 적재수량',
-  ], [6, 18, 34, 22, 14, 14, 12, 12, 16, 14, 20])
+  ], [6, 18, 34, 22, 14, 14, 12, 12, 16, 14, 24, 14, 20])
 
   let productRowNo = 1
   for (const item of detail.items) {
@@ -107,6 +120,8 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
         Math.max(0, item.reservedQuantity - item.packedQuantity),
         pallet?.palletNo ?? (box ? '미지정' : ''),
         box?.boxNo ?? '',
+        box ? formatChinaOutboundBoxDimensions(box) ?? '' : '',
+        box ? cbmByBoxId.get(box.id) ?? '' : '',
         allocation?.quantity ?? 0,
       ])
     }
@@ -120,9 +135,13 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '상품코드',
     '상품명',
     '옵션명',
+    '가로 (cm)',
+    '세로 (cm)',
+    '높이 (cm)',
+    '박스 CBM',
     '상품 전체 출고수량',
     '박스 적재수량',
-  ], [6, 16, 14, 12, 18, 34, 22, 18, 16])
+  ], [6, 16, 14, 12, 18, 34, 22, 12, 12, 12, 14, 18, 16])
 
   let boxRowNo = 1
   for (const box of detail.boxes) {
@@ -140,6 +159,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
         item?.sku ?? '',
         item?.productName ?? '',
         item?.optionName ?? '',
+        dimensionNumber(box.lengthCm) ?? '',
+        dimensionNumber(box.widthCm) ?? '',
+        dimensionNumber(box.heightCm) ?? '',
+        cbmByBoxId.get(box.id) ?? '',
         item?.reservedQuantity ?? 0,
         packedItem?.quantity ?? 0,
       ])
@@ -151,17 +174,22 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '파렛트',
     '파렛트 박스 수',
     '파렛트 총 적재수량',
+    '파렛트 총 CBM',
     '박스',
+    '박스 규격 (cm)',
+    '박스 CBM',
     '상품코드',
     '상품명',
     '옵션명',
     '박스 적재수량',
-  ], [6, 16, 16, 20, 14, 18, 34, 22, 16])
+  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16])
 
   let palletRowNo = 1
   for (const pallet of detail.pallets) {
     const palletBoxes = detail.boxes.filter((box) => box.palletId === pallet.id)
     const palletPackedQuantity = palletBoxes.reduce((total, box) => total + (boxItemsByBox.get(box.id) ?? []).reduce((boxTotal, item) => boxTotal + item.quantity, 0), 0)
+    const palletCbms = palletBoxes.map((box) => cbmByBoxId.get(box.id)).filter((cbm): cbm is number => cbm != null)
+    const palletCbm = palletCbms.length > 0 ? palletCbms.reduce((total, cbm) => total + cbm, 0) : ''
     const rows = palletBoxes.length === 0 ? [null] : palletBoxes
 
     for (const box of rows) {
@@ -175,7 +203,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
           pallet.palletNo,
           palletBoxes.length,
           palletPackedQuantity,
+          palletCbm,
           box?.boxNo ?? '',
+          box ? formatChinaOutboundBoxDimensions(box) ?? '' : '',
+          box ? cbmByBoxId.get(box.id) ?? '' : '',
           item?.sku ?? '',
           item?.productName ?? '',
           item?.optionName ?? '',
@@ -194,8 +225,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
       '상품코드',
       '상품명',
       '옵션명',
+      '박스 규격 (cm)',
+      '박스 CBM',
       '박스 적재수량',
-    ], [6, 14, 12, 18, 34, 22, 16])
+    ], [6, 14, 12, 18, 34, 22, 24, 14, 16])
 
     let unassignedRowNo = 1
     for (const box of unassignedBoxes) {
@@ -210,6 +243,8 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
           item?.sku ?? '',
           item?.productName ?? '',
           item?.optionName ?? '',
+          formatChinaOutboundBoxDimensions(box) ?? '',
+          cbmByBoxId.get(box.id) ?? '',
           packedItem?.quantity ?? 0,
         ])
       }
@@ -229,7 +264,7 @@ export function chinaOutboundPackingFilename(shipmentNo: string, now = new Date(
   return `${safeShipmentNo}_적재현황_${date}.xlsx`
 }
 
-function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackingExportDetail, totalOutboundQuantity: number, totalPackedQuantity: number) {
+function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackingExportDetail, totalOutboundQuantity: number, totalPackedQuantity: number, boxesWithCbmCount: number, totalCbm: number) {
   const sheet = workbook.addWorksheet('요약')
   sheet.columns = [{ width: 22 }, { width: 42 }]
   sheet.mergeCells('A1:B1')
@@ -250,6 +285,8 @@ function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackin
     ['미포장수량', Math.max(0, totalOutboundQuantity - totalPackedQuantity)],
     ['파렛트 수', detail.pallets.length],
     ['박스 수', detail.boxes.length],
+    ['CBM 입력 박스 수', boxesWithCbmCount],
+    ['총 CBM', totalCbm],
     ['등록일', formatDateTime(detail.shipment.createdAt)],
     ['내보낸 시각', formatDateTime(new Date())],
   ]
@@ -263,7 +300,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackin
       cell.alignment = { vertical: 'middle' }
       cell.border = THIN_BORDER
     })
-    if (typeof value === 'number') row.getCell(2).numFmt = '#,##0'
+    if (typeof value === 'number') row.getCell(2).numFmt = label === '총 CBM' ? '#,##0.0000' : '#,##0'
   }
 }
 
@@ -278,6 +315,10 @@ function createListSheet(workbook: ExcelJS.Workbook, name: string, headers: stri
     cell.border = THIN_BORDER
   })
   headerRow.height = 28
+  headers.forEach((header, index) => {
+    if (header.includes('CBM')) sheet.getColumn(index + 1).numFmt = '#,##0.0000'
+    if (header.endsWith('(cm)')) sheet.getColumn(index + 1).numFmt = '#,##0.00'
+  })
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
   sheet.autoFilter = { from: 'A1', to: `${excelColumnName(headers.length)}1` }
   return sheet
@@ -289,7 +330,7 @@ function addDataRow(sheet: ExcelJS.Worksheet, values: Array<string | number>) {
     cell.font = { size: 10 }
     cell.alignment = { vertical: 'middle', wrapText: columnNumber === 3 || columnNumber === 6 || columnNumber === 7 }
     cell.border = THIN_BORDER
-    if (typeof cell.value === 'number') cell.numFmt = '#,##0'
+    if (typeof cell.value === 'number') cell.numFmt = sheet.getColumn(columnNumber).numFmt ?? '#,##0'
   })
   row.height = 18
 }

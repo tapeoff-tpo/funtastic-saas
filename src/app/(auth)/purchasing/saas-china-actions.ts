@@ -16,6 +16,7 @@ import {
   markChinaOutboundShipmentReady,
   receiveSaasChinaInventory,
   removeChinaOutboundBoxItem,
+  saveChinaOutboundBoxDimensions,
   saveChinaOutboundItemPacking,
 } from '@/lib/purchasing/saas-china-outbound'
 
@@ -91,6 +92,21 @@ const configurePackagingSchema = z.object({
   boxCount: z.coerce.number().int().min(1, '박스 수는 1개 이상이어야 합니다.').max(5_000, '박스 수는 5,000개 이하로 입력해주세요.'),
 })
 
+const boxDimension = z.coerce.number().finite('박스 규격은 숫자로 입력해주세요.').positive('박스 규격은 0보다 커야 합니다.').max(9_999_999.99, '박스 규격이 너무 큽니다.').nullable()
+const saveBoxDimensionsSchema = z.object({
+  shipmentId,
+  boxId: z.string().uuid('박스를 확인해주세요.'),
+  lengthCm: boxDimension,
+  widthCm: boxDimension,
+  heightCm: boxDimension,
+}).superRefine((value, context) => {
+  const dimensions = [value.lengthCm, value.widthCm, value.heightCm]
+  const filledCount = dimensions.filter((dimension) => dimension != null).length
+  if (filledCount > 0 && filledCount < dimensions.length) {
+    context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력하거나 모두 비워주세요.' })
+  }
+})
+
 const removeBoxItemSchema = z.object({
   shipmentId,
   boxItemId: z.string().uuid('박스 적재 항목을 확인해주세요.'),
@@ -147,6 +163,15 @@ export async function configureChinaOutboundPackagingAction(input: unknown): Pro
     const value = configurePackagingSchema.parse(input)
     const actor = await getActor()
     await configureChinaOutboundPackaging({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundBoxDimensionsAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = saveBoxDimensionsSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundBoxDimensions({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

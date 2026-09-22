@@ -4,6 +4,7 @@ import { type FormEvent, type ReactNode, type TransitionStartFunction, useState,
 import { useRouter } from 'next/navigation'
 import { Box, Check, Container, Download, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import {
   addChinaOutboundBoxItemAction,
   cancelChinaOutboundShipmentAction,
@@ -12,6 +13,7 @@ import {
   dispatchChinaOutboundShipmentAction,
   markChinaOutboundShipmentReadyAction,
   removeChinaOutboundBoxItemAction,
+  saveChinaOutboundBoxDimensionsAction,
   saveChinaOutboundItemPackingAction,
 } from '../saas-china-actions'
 
@@ -66,7 +68,18 @@ export type ChinaShipmentDetailView = {
     dispatchedQuantity: number
   }>
   pallets: Array<{ id: string; palletNo: string; note: string | null }>
-  boxes: Array<{ id: string; palletId: string | null; boxNo: string; status: string; note: string | null }>
+  boxes: Array<{
+    id: string
+    shipmentId: string
+    editable: boolean
+    palletId: string | null
+    boxNo: string
+    status: string
+    note: string | null
+    lengthCm: number | null
+    widthCm: number | null
+    heightCm: number | null
+  }>
   boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number }>
 }
 
@@ -293,7 +306,58 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router
 }
 
 function ManualPackagingSetupOverview({ pallets, boxes }: { pallets: ChinaShipmentDetailView['pallets']; boxes: ChinaShipmentDetailView['boxes'] }) {
-  return <section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">생성된 번호</h3><p className="mt-1 text-xs text-muted-foreground">아직 서로 연결하지 않은 파렛트·박스 번호입니다. 상품별 박스 분할을 저장할 때 직접 연결됩니다.</p></div><div className="grid gap-3 p-3 sm:grid-cols-2"><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Container className="size-4" /> 파렛트 {pallets.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{pallets.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : pallets.map((pallet, index) => <span key={pallet.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {pallet.palletNo}</span>)}</div></article><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Box className="size-4" /> 박스 {boxes.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{boxes.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : boxes.map((box, index) => <span key={box.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {box.boxNo}</span>)}</div></article></div></section>
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+
+  function saveDimensions(box: ChinaShipmentDetailView['boxes'][number], dimensions: { lengthCm: number | null; widthCm: number | null; heightCm: number | null }, afterSuccess: () => void) {
+    startTransition(async () => {
+      const result = await saveChinaOutboundBoxDimensionsAction({ shipmentId: box.shipmentId, boxId: box.id, ...dimensions })
+      if (!result.ok) {
+        toast.error(result.error ?? '박스 규격을 저장하지 못했습니다.')
+        return
+      }
+      afterSuccess()
+      toast.success(`${box.boxNo} 규격과 CBM을 저장했습니다.`)
+      router.refresh()
+    })
+  }
+
+  return <section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">생성된 번호</h3><p className="mt-1 text-xs text-muted-foreground">아직 서로 연결하지 않은 파렛트·박스 번호입니다. 상품별 박스 분할을 저장할 때 직접 연결됩니다.</p></div><div className="grid gap-3 p-3 sm:grid-cols-2"><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Container className="size-4" /> 파렛트 {pallets.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{pallets.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : pallets.map((pallet, index) => <span key={pallet.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {pallet.palletNo}</span>)}</div></article><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Box className="size-4" /> 박스 {boxes.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{boxes.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : boxes.map((box, index) => <span key={box.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {box.boxNo}</span>)}</div></article></div>{boxes.length > 0 ? <section className="border-t p-3"><div className="mb-3"><h3 className="font-semibold">박스 규격 · CBM</h3><p className="mt-1 text-xs text-muted-foreground">가로·세로·높이(cm)를 입력하면 CBM을 자동 계산합니다. CBM = 가로 × 세로 × 높이 ÷ 1,000,000</p></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{boxes.map((box) => <BoxDimensionsEditor key={`${box.id}:${box.lengthCm ?? ''}:${box.widthCm ?? ''}:${box.heightCm ?? ''}`} box={box} isPending={isPending} onSave={(dimensions, afterSuccess) => saveDimensions(box, dimensions, afterSuccess)} />)}</div></section> : null}</section>
+}
+
+function BoxDimensionsEditor({ box, isPending, onSave }: {
+  box: ChinaShipmentDetailView['boxes'][number]
+  isPending: boolean
+  onSave: (dimensions: { lengthCm: number | null; widthCm: number | null; heightCm: number | null }, afterSuccess: () => void) => void
+}) {
+  const savedCbm = calculateChinaOutboundBoxCbm(box)
+  const [isEditing, setIsEditing] = useState(() => box.editable && savedCbm == null)
+  const [lengthCm, setLengthCm] = useState(box.lengthCm?.toString() ?? '')
+  const [widthCm, setWidthCm] = useState(box.widthCm?.toString() ?? '')
+  const [heightCm, setHeightCm] = useState(box.heightCm?.toString() ?? '')
+  const draftCbm = calculateChinaOutboundBoxCbm({ lengthCm, widthCm, heightCm })
+  const savedDimensions = formatChinaOutboundBoxDimensions(box)
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const rawValues = [lengthCm.trim(), widthCm.trim(), heightCm.trim()]
+    if (rawValues.every((value) => value === '')) {
+      onSave({ lengthCm: null, widthCm: null, heightCm: null }, () => setIsEditing(true))
+      return
+    }
+    if (rawValues.some((value) => value === '')) {
+      toast.error('가로·세로·높이를 모두 입력해주세요.')
+      return
+    }
+    const [nextLengthCm, nextWidthCm, nextHeightCm] = rawValues.map(Number)
+    if (![nextLengthCm, nextWidthCm, nextHeightCm].every((value) => Number.isFinite(value) && value > 0)) {
+      toast.error('박스 규격은 0보다 큰 숫자로 입력해주세요.')
+      return
+    }
+    onSave({ lengthCm: nextLengthCm, widthCm: nextWidthCm, heightCm: nextHeightCm }, () => setIsEditing(false))
+  }
+
+  return <article className="rounded-md border bg-muted/20 p-3"><div className="flex items-start justify-between gap-2"><div><p className="font-medium">{box.boxNo}</p><p className="mt-1 text-xs text-muted-foreground">{savedDimensions ? `${savedDimensions} · ${formatChinaOutboundCbm(savedCbm)} CBM` : '규격 미입력'}</p></div>{!isEditing && box.editable ? <button type="button" onClick={() => setIsEditing(true)} disabled={isPending} className="h-8 rounded-md border bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:opacity-60">규격 수정</button> : null}</div>{isEditing ? <form onSubmit={save} className="mt-3"><div className="grid grid-cols-3 gap-2"><Field label="가로 (cm)"><input type="number" min="0.01" step="0.01" inputMode="decimal" value={lengthCm} onChange={(event) => setLengthCm(event.target.value)} className={inputClass} placeholder="가로" /></Field><Field label="세로 (cm)"><input type="number" min="0.01" step="0.01" inputMode="decimal" value={widthCm} onChange={(event) => setWidthCm(event.target.value)} className={inputClass} placeholder="세로" /></Field><Field label="높이 (cm)"><input type="number" min="0.01" step="0.01" inputMode="decimal" value={heightCm} onChange={(event) => setHeightCm(event.target.value)} className={inputClass} placeholder="높이" /></Field></div><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">예상 CBM: <span className="font-semibold tabular-nums text-foreground">{formatChinaOutboundCbm(draftCbm) ?? '-'}</span></p><div className="flex gap-2"><button type="button" onClick={() => setIsEditing(false)} disabled={isPending} className="h-8 rounded-md border bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 규격 저장</button></div></div></form> : null}</article>
 }
 
 function ProductPackingSplitEditor({ item, allocations, boxes, pallets, boxById, palletById, editable, isPending, onSave }: {

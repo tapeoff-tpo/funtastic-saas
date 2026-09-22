@@ -447,7 +447,7 @@ function PalletPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: {
     <section className="overflow-hidden rounded-lg border">
       <div className="border-b px-4 py-3">
         <h3 className="font-semibold">파렛트별 적재 현황</h3>
-        <p className="mt-1 text-xs text-muted-foreground">파렛트별 박스·상품·수량과 합산 CBM을 한 줄씩 확인합니다.</p>
+        <p className="mt-1 text-xs text-muted-foreground">파렛트별 박스·상품·수량과 실제 합산 CBM을 확인합니다. CBM은 현황용이며 적재를 제한하지 않습니다.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] text-sm">
@@ -469,7 +469,7 @@ function PalletPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: {
               const packedQuantity = palletBoxItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
               const productCount = new Set(palletBoxItems.map((packedItem) => packedItem.shipmentItemId)).size
               const cbmByBox = palletBoxes.map((box) => calculateChinaOutboundBoxCbm(box))
-              const palletInfo = <><p className="font-medium">{pallet.palletNo}</p><p className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개 · 상품 {productCount.toLocaleString('ko-KR')}종 · 총 {packedQuantity.toLocaleString('ko-KR')}개</p><PalletCbmCapacitySummary cbmByBox={cbmByBox} boxCount={palletBoxes.length} /></>
+              const palletInfo = <><p className="font-medium">{pallet.palletNo}</p><p className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개 · 상품 {productCount.toLocaleString('ko-KR')}종 · 총 {packedQuantity.toLocaleString('ko-KR')}개</p><PalletCbmSummary cbmByBox={cbmByBox} boxCount={palletBoxes.length} /></>
 
               if (palletBoxes.length === 0) return <tr key={pallet.id} className="bg-muted/[0.03]"><td className="px-3 py-2.5 align-top">{palletInfo}</td><td colSpan={4} className="px-3 py-2.5 text-muted-foreground">배정된 박스가 없습니다.</td><td className="px-3 py-2.5 text-muted-foreground">-</td></tr>
 
@@ -500,25 +500,16 @@ function PalletPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: {
   )
 }
 
-const PALLET_CAPACITY_CBM = 1
-
-function PalletCbmCapacitySummary({ cbmByBox, boxCount }: { cbmByBox: Array<number | null>; boxCount: number }) {
+function PalletCbmSummary({ cbmByBox, boxCount }: { cbmByBox: Array<number | null>; boxCount: number }) {
   const cbmInputBoxCount = cbmByBox.filter((cbm) => cbm != null).length
   const currentCbm = cbmByBox.reduce((total, cbm) => total + (cbm ?? 0), 0)
   const formattedCurrentCbm = formatChinaOutboundCbm(currentCbm) ?? '-'
-  const capacityLabel = formatChinaOutboundCbm(PALLET_CAPACITY_CBM) ?? '1.0000'
 
-  if (boxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 - / {capacityLabel} CBM · 박스 미배정</p>
-  if (cbmInputBoxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 - / {capacityLabel} CBM · CBM 미입력 (0/{boxCount}박스)</p>
-  if (cbmInputBoxCount < boxCount) return <p className="mt-1 text-xs font-medium tabular-nums text-muted-foreground">현재 적재 {formattedCurrentCbm} / {capacityLabel} CBM · 부분 입력 ({cbmInputBoxCount}/{boxCount}박스, 입력된 박스 기준)</p>
+  if (boxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 0.0000 CBM · 박스 미배정</p>
+  if (cbmInputBoxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 - CBM · CBM 미입력 (0/{boxCount}박스)</p>
+  if (cbmInputBoxCount < boxCount) return <p className="mt-1 text-xs font-medium tabular-nums text-muted-foreground">현재 적재 {formattedCurrentCbm} CBM · 부분 입력 ({cbmInputBoxCount}/{boxCount}박스, 입력된 박스 기준)</p>
 
-  const utilization = Math.round((currentCbm / PALLET_CAPACITY_CBM) * 100)
-  const difference = Math.abs(PALLET_CAPACITY_CBM - currentCbm)
-  const isOverCapacity = currentCbm > PALLET_CAPACITY_CBM
-  const tone = isOverCapacity ? 'text-red-700' : utilization >= 90 ? 'text-amber-700' : 'text-emerald-700'
-  const availability = isOverCapacity ? `초과 ${formatChinaOutboundCbm(difference)} CBM` : `여유 ${formatChinaOutboundCbm(difference)} CBM`
-
-  return <p className={`mt-1 text-xs font-semibold tabular-nums ${tone}`}>현재 적재 {formattedCurrentCbm} / {capacityLabel} CBM · 적재율 {utilization}% · {availability}</p>
+  return <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">현재 적재 {formattedCurrentCbm} CBM · 박스 CBM {cbmInputBoxCount}/{boxCount} 입력</p>
 }
 
 function PackingMetric({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {

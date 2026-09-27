@@ -18,6 +18,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
 import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
+import { normalizeInventoryProductName } from '@/lib/inventory/product-name'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -266,7 +267,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     })
 
     const sku = (raw.sku ?? '').trim()
-    const productName = (raw.productName ?? '').trim()
+    const productName = normalizeInventoryProductName(raw.productName)
     const stockRaw = raw.totalStock ?? ''
     const totalStock = Number(stockRaw)
 

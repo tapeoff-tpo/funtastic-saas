@@ -15,6 +15,7 @@ import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 import { getOrderInventoryWarehouseZone } from '@/lib/orders/fulfillment-channel'
+import { normalizeInventoryProductName } from './product-name'
 
 export type InventoryActionResult = { success: boolean; error?: string; newTotal?: number }
 export type StockAdjustmentOptions = { note?: string; orderId?: string; warehouseZone?: string | null }
@@ -136,6 +137,8 @@ export async function setStock(
   totalStock: number,
   opts?: { warehouseZone?: string; sectorCode?: string },
 ): Promise<InventoryActionResult> {
+  const normalizedProductName = normalizeInventoryProductName(productName) || sku
+
   return db.transaction(async (tx) => {
     // Try to find existing record with lock
     const [existing] = await tx
@@ -158,7 +161,7 @@ export async function setStock(
       await tx
         .update(inventory)
         .set({
-          productName,
+          productName: normalizedProductName,
           totalStock,
           availableStock: newAvailable,
           ...(opts?.warehouseZone !== undefined && { warehouseZone: opts.warehouseZone || null }),
@@ -184,7 +187,7 @@ export async function setStock(
         .values({
           userId,
           sku,
-          productName,
+          productName: normalizedProductName,
           warehouseZone: opts?.warehouseZone || null,
           sectorCode: opts?.sectorCode || null,
           totalStock,

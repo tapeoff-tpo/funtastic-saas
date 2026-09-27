@@ -18,6 +18,7 @@ import { HistoryDialog } from './history-dialog'
 import { Pagination } from '@/components/ui/pagination'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
+import { normalizeInventoryProductName } from '@/lib/inventory/product-name'
 
 export interface InventoryRow {
   id: string
@@ -54,10 +55,7 @@ function formatNumber(value: number, maximumFractionDigits = 0) {
 }
 
 function formatMobileInventoryProductName(productName: string, optionName: string | null) {
-  const cleanedProductName = productName
-    .replace(/_펀타스틱/gi, '')
-    .replace(/_+$/g, '')
-    .trim()
+  const cleanedProductName = normalizeInventoryProductName(productName)
   const cleanedOptionName = optionName?.trim().replace(/^_+|_+$/g, '') ?? ''
 
   if (!cleanedOptionName || cleanedProductName.endsWith(`_${cleanedOptionName}`)) {
@@ -275,7 +273,10 @@ export function InventoryTable({
           상품명{getSortIndicator('productName')}
         </button>
       ),
-      cell: (info) => <span className="block truncate" title={info.getValue()}>{info.getValue()}</span>,
+      cell: (info) => {
+        const productName = normalizeInventoryProductName(info.getValue())
+        return <span className="block truncate" title={productName}>{productName}</span>
+      },
     }),
     columnHelper.accessor('optionName', {
       size: 180,
@@ -658,7 +659,7 @@ export function InventoryTable({
                 <div className="min-w-0">
                   <p className="font-mono text-xs text-muted-foreground">{mobileDetailRow.sku}</p>
                   <Dialog.Title className="mt-1 break-words text-base font-semibold">
-                    {mobileDetailRow.productName}
+                    {normalizeInventoryProductName(mobileDetailRow.productName)}
                   </Dialog.Title>
                 </div>
                 <Dialog.Close

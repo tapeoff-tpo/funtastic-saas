@@ -558,7 +558,7 @@ export async function completeReturnClaim(
           .values({
             userId,
             sku,
-            productName: template?.productName ?? sku,
+            productName: normalizeInventoryProductName(template?.productName) || sku,
             warehouseZone,
             optionName: template?.optionName ?? null,
             packagingUnit: template?.packagingUnit ?? null,

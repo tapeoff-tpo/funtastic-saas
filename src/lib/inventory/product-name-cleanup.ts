@@ -20,7 +20,7 @@ export function normalizeStoredInventoryProductNames(userId: string): Promise<vo
       UPDATE ${inventory}
       SET product_name = COALESCE(
             NULLIF(
-              BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(${inventory.productName}, '_펀타스틱', '', 'gi'), '_+$', '', 'g')),
+              BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(${inventory.productName}, '_펀타스틱', '', 'gi'), '\\s+', ' ', 'g'), '_+$', '', 'g')),
               ''
             ),
             ${inventory.sku}
@@ -34,7 +34,7 @@ export function normalizeStoredInventoryProductNames(userId: string): Promise<vo
       UPDATE ${products}
       SET name = COALESCE(
             NULLIF(
-              BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(${products.name}, '_펀타스틱', '', 'gi'), '_+$', '', 'g')),
+              BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(${products.name}, '_펀타스틱', '', 'gi'), '\\s+', ' ', 'g'), '_+$', '', 'g')),
               ''
             ),
             ${products.internalSku}

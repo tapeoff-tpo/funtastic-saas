@@ -8,6 +8,7 @@ describe('normalizeInventoryProductName', () => {
 
   it('removes repeated suffixes and leaves no trailing underscore', () => {
     expect(normalizeInventoryProductName('약통_펀타스틱_펀타스틱_')).toBe('약통')
+    expect(normalizeInventoryProductName('약통_펀타스틱_ ')).toBe('약통')
   })
 
   it('keeps normal product names unchanged', () => {

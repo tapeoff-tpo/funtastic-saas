@@ -5,7 +5,7 @@
 UPDATE inventory
 SET product_name = COALESCE(
       NULLIF(
-        BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(product_name, '_펀타스틱', '', 'gi'), '_+$', '', 'g')),
+        BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(product_name, '_펀타스틱', '', 'gi'), '\s+', ' ', 'g'), '_+$', '', 'g')),
         ''
       ),
       sku
@@ -16,7 +16,7 @@ WHERE product_name ~* '_펀타스틱';
 UPDATE products
 SET name = COALESCE(
       NULLIF(
-        BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(name, '_펀타스틱', '', 'gi'), '_+$', '', 'g')),
+        BTRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(name, '_펀타스틱', '', 'gi'), '\s+', ' ', 'g'), '_+$', '', 'g')),
         ''
       ),
       internal_sku

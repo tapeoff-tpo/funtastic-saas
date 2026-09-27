@@ -401,7 +401,7 @@ export function InventoryTable({
             <select
               value={filters.warehouseZone ?? ''}
               onChange={(event) => void setFilters({ warehouseZone: event.target.value || null, page: 1, searched: '1' })}
-              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs md:w-auto md:flex-none"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-base md:w-auto md:flex-none md:text-xs"
             >
               <option value="">전체</option>
               {warehouseZones.map((zone) => (
@@ -416,7 +416,7 @@ export function InventoryTable({
               placeholder="상품명 검색"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground md:w-[180px] md:flex-none"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-base placeholder:text-muted-foreground md:w-[180px] md:flex-none md:text-xs"
             />
           </label>
           <label className="flex min-w-0 items-center gap-1 text-xs">
@@ -426,7 +426,7 @@ export function InventoryTable({
               placeholder="상품코드 검색"
               value={productCodeInput}
               onChange={(event) => setProductCodeInput(event.target.value)}
-              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-base font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none md:text-xs"
             />
           </label>
           <label className="flex min-w-0 items-center gap-1 text-xs">
@@ -436,7 +436,7 @@ export function InventoryTable({
               placeholder="옵션/SKU"
               value={optionCodeInput}
               onChange={(event) => setOptionCodeInput(event.target.value)}
-              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none"
+              className="min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-base font-mono placeholder:font-sans placeholder:text-muted-foreground md:w-[140px] md:flex-none md:text-xs"
             />
           </label>
           <label className="flex min-w-0 items-center gap-1 text-xs">
@@ -448,7 +448,7 @@ export function InventoryTable({
               placeholder="N"
               value={maxStockInput}
               onChange={(event) => setMaxStockInput(event.target.value)}
-              className="w-[52px] shrink-0 rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground md:w-[70px]"
+              className="w-[52px] shrink-0 rounded-md border bg-white px-2 py-1 text-base placeholder:text-muted-foreground md:w-[70px] md:text-xs"
             />
             <span className="shrink-0 whitespace-nowrap text-muted-foreground">개 이하</span>
           </label>

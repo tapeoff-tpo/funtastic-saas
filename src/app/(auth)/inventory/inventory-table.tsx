@@ -53,6 +53,20 @@ function formatNumber(value: number, maximumFractionDigits = 0) {
   return value.toLocaleString('ko-KR', { maximumFractionDigits })
 }
 
+function formatMobileInventoryProductName(productName: string, optionName: string | null) {
+  const cleanedProductName = productName
+    .replace(/_펀타스틱/gi, '')
+    .replace(/_+$/g, '')
+    .trim()
+  const cleanedOptionName = optionName?.trim().replace(/^_+|_+$/g, '') ?? ''
+
+  if (!cleanedOptionName || cleanedProductName.endsWith(`_${cleanedOptionName}`)) {
+    return cleanedProductName
+  }
+
+  return cleanedProductName ? `${cleanedProductName}_${cleanedOptionName}` : cleanedOptionName
+}
+
 function StockBreakdownCell({ row }: { row: InventoryRow }) {
   const lowStock = row.availableStock <= 0
   return (
@@ -556,19 +570,23 @@ export function InventoryTable({
                 재고 항목이 없습니다.
               </div>
             ) : (
-              data.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => setMobileDetailRow(row)}
-                  className="flex w-full items-center gap-3 rounded-md border bg-white px-3 py-3 text-left shadow-sm transition-colors hover:bg-muted/50 active:bg-muted"
-                  aria-label={`${row.productName} 상세 보기`}
-                >
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.sku}</span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.productName}</span>
-                  <span aria-hidden="true" className="text-muted-foreground">›</span>
-                </button>
-              ))
+              data.map((row) => {
+                const mobileProductName = formatMobileInventoryProductName(row.productName, row.optionName)
+
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => setMobileDetailRow(row)}
+                    className="flex w-full items-center gap-3 rounded-md border bg-white px-3 py-3 text-left shadow-sm transition-colors hover:bg-muted/50 active:bg-muted"
+                    aria-label={`${mobileProductName} 상세 보기`}
+                  >
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.sku}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{mobileProductName}</span>
+                    <span aria-hidden="true" className="text-muted-foreground">›</span>
+                  </button>
+                )
+              })
             )}
           </div>
 

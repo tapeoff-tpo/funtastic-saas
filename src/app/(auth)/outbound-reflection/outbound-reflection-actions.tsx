@@ -1,6 +1,7 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { type FormEvent, useRef, useState } from 'react'
+import { Dialog } from '@base-ui/react/dialog'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, Loader2, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
@@ -15,8 +16,18 @@ type ImportResponse = {
   blockedRows?: number
   applyInventory?: boolean
   errors?: Array<{ row?: number; message?: string }>
+  code?: 'excel_password_required' | 'excel_password_invalid'
   error?: string
 }
+
+type PendingOutboundUpload = {
+  file: File
+  marketplaceId: string
+  templateId: string
+  applyInventory: boolean
+}
+
+type UploadAttemptResult = 'completed' | 'password_required' | 'password_invalid'
 
 type ApplyResponse = {
   applied?: number
@@ -53,37 +64,112 @@ export function OutboundReflectionActions({
   const [applying, setApplying] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [passwordUpload, setPasswordUpload] = useState<PendingOutboundUpload | null>(null)
+  const [filePassword, setFilePassword] = useState('')
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
-  async function handleUpload(formData: FormData) {
-    if (uploadInFlightRef.current) return
+  function closePasswordDialog() {
+    setPasswordUpload(null)
+    setFilePassword('')
+    setPasswordError(null)
+  }
+
+  function createPendingUpload(formData: FormData): PendingOutboundUpload {
+    const file = formData.get('file')
+    if (!(file instanceof File) || file.size === 0) throw new Error('업로드할 엑셀 파일을 선택해주세요.')
+    return {
+      file,
+      marketplaceId: String(formData.get('marketplaceId') ?? ''),
+      templateId: String(formData.get('templateId') ?? ''),
+      applyInventory: formData.get('applyInventory') === 'true',
+    }
+  }
+
+  async function uploadOutboundFile(upload: PendingOutboundUpload, password?: string): Promise<UploadAttemptResult> {
+    const formData = new FormData()
+    formData.set('file', upload.file)
+    formData.set('marketplaceId', upload.marketplaceId)
+    formData.set('templateId', upload.templateId)
+    formData.set('applyInventory', String(upload.applyInventory))
+    if (password !== undefined) formData.set('filePassword', password)
+
+    const response = await fetch('/api/outbound-reflection/import', { method: 'POST', body: formData })
+    const json = await readJson<ImportResponse>(response)
+    if (!response.ok) {
+      if (json.code === 'excel_password_required') return 'password_required'
+      if (json.code === 'excel_password_invalid') return 'password_invalid'
+      throw new Error(outboundReflectionImportError(json))
+    }
+
+    const isExistingDuplicate = json.skipped && Boolean(json.batchId)
+    if (!isExistingDuplicate && json.totalRows === 0) throw new Error(outboundReflectionImportError(json))
+
+    const summary = isExistingDuplicate
+      ? '같은 파일이 이미 등록되어 기존 대기열을 열었습니다.'
+      : `대기열 등록: ${json.applyInventory === false ? '재고 변동 없음, 매출·출고만 기록' : '재고·매출 반영'} · 전체 ${(json.totalRows ?? 0).toLocaleString('ko-KR')}건, 반영 대기 ${(json.readyRows ?? 0).toLocaleString('ko-KR')}건, 확인 필요 ${(json.blockedRows ?? 0).toLocaleString('ko-KR')}건`
+    setMessage(summary)
+    toast.success(summary)
+    if (json.batchId) router.push(`/outbound-reflection?batch=${json.batchId}`)
+    router.refresh()
+    return 'completed'
+  }
+
+  async function runUpload(upload: PendingOutboundUpload, password?: string): Promise<UploadAttemptResult | null> {
+    if (uploadInFlightRef.current) return null
     uploadInFlightRef.current = true
     setUploading(true)
-    setMessage('사방넷 검수 파일을 출고반영 대기열로 읽고 있습니다.')
+    setMessage(password === undefined ? '사방넷 검수 파일을 출고반영 대기열로 읽고 있습니다.' : '비밀번호로 보호된 사방넷 검수 파일을 열고 있습니다.')
     try {
-      const file = formData.get('file')
-      if (!(file instanceof File) || file.size === 0) throw new Error('업로드할 엑셀 파일을 선택해주세요.')
-      const willApplyInventory = formData.get('applyInventory') === 'true'
-      if (!willApplyInventory && !window.confirm('이 파일은 재고 수량이 이미 반영된 상태입니다. 출고·매출만 기록하고 재고 수량과 재고 이력은 변경하지 않습니다. 계속할까요?')) return
-      const response = await fetch('/api/outbound-reflection/import', { method: 'POST', body: formData })
-      const json = await readJson<ImportResponse>(response)
-      const isExistingDuplicate = json.skipped && Boolean(json.batchId)
-      if (!response.ok || (!isExistingDuplicate && json.totalRows === 0)) {
-        throw new Error(outboundReflectionImportError(json))
-      }
-      const summary = isExistingDuplicate
-        ? '같은 파일이 이미 등록되어 기존 대기열을 열었습니다.'
-        : `대기열 등록: ${json.applyInventory === false ? '재고 변동 없음, 매출·출고만 기록' : '재고·매출 반영'} · 전체 ${(json.totalRows ?? 0).toLocaleString('ko-KR')}건, 반영 대기 ${(json.readyRows ?? 0).toLocaleString('ko-KR')}건, 확인 필요 ${(json.blockedRows ?? 0).toLocaleString('ko-KR')}건`
-      setMessage(summary)
-      toast.success(summary)
-      if (json.batchId) router.push(`/outbound-reflection?batch=${json.batchId}`)
-      router.refresh()
+      return await uploadOutboundFile(upload, password)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '출고반영 파일 업로드에 실패했습니다.'
       setMessage(errorMessage)
       toast.error(errorMessage)
+      return null
     } finally {
       uploadInFlightRef.current = false
       setUploading(false)
+    }
+  }
+
+  async function handleUpload(formData: FormData) {
+    let upload: PendingOutboundUpload
+    try {
+      upload = createPendingUpload(formData)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '업로드할 엑셀 파일을 선택해주세요.'
+      setMessage(errorMessage)
+      toast.error(errorMessage)
+      return
+    }
+
+    if (!upload.applyInventory && !window.confirm('이 파일은 재고 수량이 이미 반영된 상태입니다. 출고·매출만 기록하고 재고 수량과 재고 이력은 변경하지 않습니다. 계속할까요?')) return
+
+    const result = await runUpload(upload)
+    if (result === 'password_required') {
+      setPasswordUpload(upload)
+      setFilePassword('')
+      setPasswordError(null)
+      setMessage('파일의 비밀번호를 입력하여 주세요.')
+    }
+  }
+
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!passwordUpload) return
+    if (filePassword.length === 0) {
+      setPasswordError('파일 비밀번호를 입력해주세요.')
+      return
+    }
+
+    const result = await runUpload(passwordUpload, filePassword)
+    if (result === 'completed') {
+      closePasswordDialog()
+      return
+    }
+    if (result === 'password_required' || result === 'password_invalid') {
+      setFilePassword('')
+      setPasswordError('비밀번호가 맞지 않거나 파일을 열 수 없습니다. 파일 비밀번호를 다시 확인해주세요.')
     }
   }
 
@@ -143,7 +229,7 @@ export function OutboundReflectionActions({
       <form action={handleUpload} className="grid gap-3 lg:grid-cols-[1.45fr_1fr_1fr_1.2fr_auto] lg:items-end">
         <label className="space-y-1">
           <span className="text-xs font-medium text-muted-foreground">사방넷 검수 엑셀</span>
-          <input name="file" type="file" accept=".xlsx" required disabled={uploading || applying} className="h-9 w-full rounded-md border bg-background px-3 py-1.5 text-sm disabled:opacity-60" />
+          <input name="file" type="file" accept=".xlsx" required disabled={uploading || applying} onChange={closePasswordDialog} className="h-9 w-full rounded-md border bg-background px-3 py-1.5 text-sm disabled:opacity-60" />
         </label>
         <label className="space-y-1">
           <span className="text-xs font-medium text-muted-foreground">마켓 보정</span>
@@ -185,6 +271,53 @@ export function OutboundReflectionActions({
         </div>
       </div>
       {message ? <div className="rounded-md bg-muted px-3 py-2 text-sm">{message}</div> : null}
+
+      <Dialog.Root
+        open={Boolean(passwordUpload)}
+        onOpenChange={(open) => {
+          if (!open && !uploading) closePasswordDialog()
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45" />
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-[60] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-5 shadow-2xl">
+            <Dialog.Title className="text-lg font-semibold">파일의 비밀번호를 입력하여 주세요</Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
+              <span className="font-medium text-foreground">{passwordUpload?.file.name}</span> 파일은 비밀번호로 보호되어 있습니다. 파일을 열 때 사용하는 비밀번호를 입력해주세요. 비밀번호는 이번 업로드에만 사용되며 저장되지 않습니다.
+            </Dialog.Description>
+
+            <form onSubmit={handlePasswordSubmit} className="mt-5 space-y-3">
+              <label className="block space-y-1.5" htmlFor="outbound-file-password">
+                <span className="text-sm font-medium">엑셀 비밀번호</span>
+                <input
+                  id="outbound-file-password"
+                  type="password"
+                  value={filePassword}
+                  onChange={(event) => {
+                    setFilePassword(event.target.value)
+                    if (passwordError) setPasswordError(null)
+                  }}
+                  maxLength={255}
+                  autoComplete="off"
+                  autoFocus
+                  disabled={uploading}
+                  aria-invalid={Boolean(passwordError)}
+                  aria-describedby={passwordError ? 'outbound-file-password-error' : undefined}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                />
+              </label>
+              {passwordError ? <p id="outbound-file-password-error" role="alert" className="text-sm text-destructive">{passwordError}</p> : null}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closePasswordDialog} disabled={uploading} className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button>
+                <button type="submit" disabled={uploading} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
+                  {uploading ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {uploading ? '파일 여는 중...' : '파일 열기 및 등록'}
+                </button>
+              </div>
+            </form>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }

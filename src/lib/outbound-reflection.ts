@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 import { marketplaceConnections, products, productVariants } from '@/lib/db/schema'
 import { adjustStockInTransaction } from '@/lib/inventory/actions'
 import { parseOrderExcel, type ParsedOrderRow } from '@/lib/orders/excel-import'
-import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
+import { normalizePasswordProtectedExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 import { alignSabangnetRawRows, matchMarketplaceConnection } from '@/lib/analytics/sabangnet-review'
@@ -200,12 +200,13 @@ export async function importOutboundReflectionBatch(input: {
   userId: string
   fileName: string
   fileBuffer: ArrayBuffer
+  filePassword?: string
   mappings?: OrderImportMapping[]
   fallbackMarketplaceId?: string
   fallbackMarketplaceName?: string
   applyInventory?: boolean
 }) {
-  const buffer = normalizeExcelWorkbookBuffer(Buffer.from(input.fileBuffer))
+  const buffer = await normalizePasswordProtectedExcelWorkbookBuffer(Buffer.from(input.fileBuffer), input.filePassword)
   await ensureOutboundReflectionTables()
 
   const fileHash = createHash('sha256').update(buffer).digest('hex')

@@ -7,8 +7,14 @@ import { db } from '@/lib/db'
 import { excelImportTemplates } from '@/lib/db/schema'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
-import { InvalidExcelWorkbookError } from '@/lib/orders/excel-workbook-buffer'
+import {
+  ExcelWorkbookPasswordInvalidError,
+  ExcelWorkbookPasswordRequiredError,
+  InvalidExcelWorkbookError,
+} from '@/lib/orders/excel-workbook-buffer'
 import { importOutboundReflectionBatch } from '@/lib/outbound-reflection'
+
+export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -21,6 +27,8 @@ export async function POST(request: NextRequest) {
   const marketplaceId = String(formData.get('marketplaceId') ?? '').trim()
   const templateId = String(formData.get('templateId') ?? '').trim()
   const applyInventory = formData.get('applyInventory') === 'true'
+  const filePasswordValue = formData.get('filePassword')
+  const filePassword = typeof filePasswordValue === 'string' ? filePasswordValue : undefined
 
   if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 })
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
@@ -33,6 +41,7 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       fileName: file.name,
       fileBuffer: await file.arrayBuffer(),
+      filePassword,
       mappings,
       fallbackMarketplaceId: marketplaceId || undefined,
       applyInventory,
@@ -52,6 +61,18 @@ export async function POST(request: NextRequest) {
     revalidatePath('/outbound-reflection')
     return NextResponse.json(result)
   } catch (error) {
+    if (error instanceof ExcelWorkbookPasswordRequiredError) {
+      return NextResponse.json(
+        { code: 'excel_password_required', error: error.message },
+        { status: 400 },
+      )
+    }
+    if (error instanceof ExcelWorkbookPasswordInvalidError) {
+      return NextResponse.json(
+        { code: 'excel_password_invalid', error: error.message },
+        { status: 400 },
+      )
+    }
     console.error('[OutboundReflectionImport] Error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '출고반영 파일 처리 중 오류가 발생했습니다.' },

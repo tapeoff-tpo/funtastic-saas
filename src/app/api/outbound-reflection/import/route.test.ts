@@ -1,9 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  importOutboundReflectionBatch: vi.fn(),
-  revalidatePath: vi.fn(),
-}))
+const mocks = vi.hoisted(() => {
+  class InvalidExcelWorkbookError extends Error {}
+  class ExcelWorkbookPasswordRequiredError extends InvalidExcelWorkbookError {
+    constructor() {
+      super('파일이 비밀번호로 보호되어 있습니다. 파일의 비밀번호를 입력하여 주세요.')
+    }
+  }
+  class ExcelWorkbookPasswordInvalidError extends InvalidExcelWorkbookError {
+    constructor() {
+      super('파일 비밀번호가 올바르지 않습니다. 다시 입력하여 주세요.')
+    }
+  }
+
+  return {
+    importOutboundReflectionBatch: vi.fn(),
+    revalidatePath: vi.fn(),
+    InvalidExcelWorkbookError,
+    ExcelWorkbookPasswordRequiredError,
+    ExcelWorkbookPasswordInvalidError,
+  }
+})
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
@@ -35,20 +52,22 @@ vi.mock('@/lib/orders/default-import-templates', () => ({
   }],
 }))
 vi.mock('@/lib/orders/excel-workbook-buffer', () => ({
-  InvalidExcelWorkbookError: class InvalidExcelWorkbookError extends Error {},
+  InvalidExcelWorkbookError: mocks.InvalidExcelWorkbookError,
+  ExcelWorkbookPasswordRequiredError: mocks.ExcelWorkbookPasswordRequiredError,
+  ExcelWorkbookPasswordInvalidError: mocks.ExcelWorkbookPasswordInvalidError,
 }))
 vi.mock('@/lib/outbound-reflection', () => ({
   importOutboundReflectionBatch: mocks.importOutboundReflectionBatch,
 }))
 
-function importRequest() {
+function importRequest(values: Record<string, unknown> = {}) {
   const file = {
     name: 'outbound.xlsx',
     arrayBuffer: async () => new ArrayBuffer(0),
   }
   return {
     formData: async () => ({
-      get: (key: string) => key === 'file' ? file : null,
+      get: (key: string) => key === 'file' ? file : values[key] ?? null,
     }),
   }
 }
@@ -117,5 +136,37 @@ describe('POST /api/outbound-reflection/import', () => {
       errors: [{ row: 2, message: '필수 컬럼 누락: 출고완료일자' }],
     })
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('uses the supplied file password for only the current import request', async () => {
+    mocks.importOutboundReflectionBatch.mockResolvedValue({
+      batchId: 'new-batch',
+      skipped: false,
+      totalRows: 1,
+      readyRows: 1,
+      blockedRows: 0,
+      errors: [],
+    })
+    const { POST } = await import('./route')
+
+    const response = await POST(importRequest({ filePassword: 'temporary-file-password' }) as never)
+
+    expect(response.status).toBe(200)
+    expect(mocks.importOutboundReflectionBatch).toHaveBeenCalledWith(expect.objectContaining({
+      filePassword: 'temporary-file-password',
+    }))
+  })
+
+  it('returns a structured password-required response without logging the error', async () => {
+    mocks.importOutboundReflectionBatch.mockRejectedValue(new mocks.ExcelWorkbookPasswordRequiredError())
+    const { POST } = await import('./route')
+
+    const response = await POST(importRequest() as never)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      code: 'excel_password_required',
+      error: '파일이 비밀번호로 보호되어 있습니다. 파일의 비밀번호를 입력하여 주세요.',
+    })
   })
 })

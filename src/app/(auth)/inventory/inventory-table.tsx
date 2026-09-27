@@ -384,7 +384,17 @@ export function InventoryTable({
 
   return (
     <div className="space-y-2">
-      <form onSubmit={(event) => { event.preventDefault(); submitSearch() }} className="rounded-md border bg-muted/30 p-2">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          const activeElement = document.activeElement
+          if (activeElement instanceof HTMLElement && event.currentTarget.contains(activeElement)) {
+            activeElement.blur()
+          }
+          submitSearch()
+        }}
+        className="rounded-md border bg-muted/30 p-2"
+      >
         <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center md:gap-x-3 md:gap-y-1.5">
           <label className="flex min-w-0 items-center gap-1 text-xs">
             <span className="text-muted-foreground">창고</span>

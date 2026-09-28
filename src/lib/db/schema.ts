@@ -1020,6 +1020,9 @@ export const chinaOutboundShipments = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
+    // A user-facing label such as "2026-09-21 출고". The immutable,
+    // workspace-unique shipmentNo remains the operational identifier.
+    displayName: varchar('display_name', { length: 200 }),
     shipmentNo: varchar('shipment_no', { length: 100 }).notNull(),
     status: varchar('status', { length: 30 }).notNull().default('draft'),
     originWarehouseCode: varchar('origin_warehouse_code', { length: 100 }).notNull().default('default'),

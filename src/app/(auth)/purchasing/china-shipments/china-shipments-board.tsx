@@ -10,11 +10,13 @@ import {
   cancelChinaOutboundShipmentAction,
   configureChinaOutboundPackagingAction,
   createChinaOutboundShipmentAction,
+  deleteChinaOutboundShipmentAction,
   dispatchChinaOutboundShipmentAction,
   markChinaOutboundShipmentReadyAction,
   removeChinaOutboundBoxItemAction,
   saveChinaOutboundBoxDimensionsAction,
   saveChinaOutboundItemPackingAction,
+  updateChinaOutboundShipmentAction,
 } from '../saas-china-actions'
 
 export type ChinaShipmentStockItem = {
@@ -31,6 +33,7 @@ export type ChinaShipmentStockItem = {
 export type ChinaShipmentListItem = {
   id: string
   shipmentNo: string
+  displayName: string | null
   status: string
   originWarehouseCode: string
   destinationName: string | null
@@ -47,6 +50,7 @@ export type ChinaShipmentDetailView = {
   shipment: {
     id: string
     shipmentNo: string
+    displayName: string | null
     status: string
     originWarehouseCode: string
     destinationName: string | null
@@ -111,9 +115,10 @@ export function ChinaShipmentsBoard({
   const [stockSearch, setStockSearch] = useState('')
   const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
-  const [shipmentNo, setShipmentNo] = useState('')
   const [destinationName, setDestinationName] = useState('')
   const [plannedOutboundDate, setPlannedOutboundDate] = useState(today())
+  const [displayName, setDisplayName] = useState(() => defaultShipmentDisplayName(today()))
+  const [displayNameIsDateDefault, setDisplayNameIsDateDefault] = useState(true)
   const [memo, setMemo] = useState('')
 
   const availableInventory = inventoryItems.filter((item) => item.availableQuantity > 0)
@@ -147,11 +152,16 @@ export function ChinaShipmentsBoard({
     setSelectedWarehouseCodes(allWarehouseSelected ? [] : warehouseOptions)
   }
 
+  function changePlannedOutboundDate(nextDate: string) {
+    setPlannedOutboundDate(nextDate)
+    if (displayNameIsDateDefault) setDisplayName(defaultShipmentDisplayName(nextDate))
+  }
+
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     startTransition(async () => {
       const result = await createChinaOutboundShipmentAction({
-        shipmentNo,
+        displayName,
         destinationName,
         plannedOutboundDate: plannedOutboundDate || null,
         memo,
@@ -163,8 +173,11 @@ export function ChinaShipmentsBoard({
       setShowCreate(false)
       setQuantities({})
       setSelectedWarehouseCodes([])
-      setShipmentNo('')
       setDestinationName('')
+      const nextDefaultDate = today()
+      setPlannedOutboundDate(nextDefaultDate)
+      setDisplayName(defaultShipmentDisplayName(nextDefaultDate))
+      setDisplayNameIsDateDefault(true)
       setMemo('')
       router.push(shipmentHref(result.shipmentId, 'setup'))
       router.refresh()
@@ -186,9 +199,9 @@ export function ChinaShipmentsBoard({
         </div>
         {showCreate ? <form onSubmit={createShipment} className="space-y-4 p-4">
           <div className="grid gap-3 md:grid-cols-3">
-            <Field label="쉽먼트 번호"><input value={shipmentNo} onChange={(event) => setShipmentNo(event.target.value)} className={inputClass} placeholder="비우면 자동 생성" /></Field>
+            <Field label="출고작업명"><input value={displayName} onChange={(event) => { setDisplayName(event.target.value); setDisplayNameIsDateDefault(false) }} className={inputClass} placeholder="예: 2026-09-28 출고" /></Field>
             <Field label="도착지"><input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} placeholder="예: 한국 1창고" /></Field>
-            <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => setPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
+            <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => changePlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
           </div>
           <Field label="메모"><input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" /></Field>
           <section className="rounded-md border bg-muted/20 p-3">
@@ -214,8 +227,9 @@ export function ChinaShipmentsBoard({
 
       <div className="space-y-3">
         <ShipmentSelector
+          key={selectedShipment?.shipment.id ?? 'no-shipment'}
           shipments={shipments}
-          selectedShipmentId={selectedShipment?.shipment.id}
+          selectedShipment={selectedShipment?.shipment ?? null}
           onSelect={(id) => router.push(shipmentHref(id, 'setup'))}
         />
         <ShipmentDetailPanel key={selectedShipment?.shipment.id ?? 'no-shipment'} detail={selectedShipment} stage={selectedStep} isPending={isPending} startTransition={startTransition} router={router} onStageChange={(stage) => selectedShipment && router.push(shipmentHref(selectedShipment.shipment.id, stage))} />
@@ -224,25 +238,80 @@ export function ChinaShipmentsBoard({
   )
 }
 
-function ShipmentSelector({ shipments, selectedShipmentId, onSelect }: { shipments: ChinaShipmentListItem[]; selectedShipmentId?: string; onSelect: (id: string) => void }) {
-  return <section className="rounded-md border bg-card px-3 py-2">
-    <label className="grid gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <span className="text-xs font-medium text-muted-foreground">출고작업 선택</span>
-      <select
-        value={selectedShipmentId ?? ''}
-        onChange={(event) => {
-          if (event.target.value) onSelect(event.target.value)
-        }}
-        className={inputClass}
-      >
-        <option value="">{shipments.length === 0 ? '등록된 출고작업이 없습니다.' : '출고작업을 선택해주세요.'}</option>
-        {shipments.map((shipment) => (
-          <option key={shipment.id} value={shipment.id}>
-            {shipment.shipmentNo} · {statusLabels[shipment.status] ?? shipment.status} · {shipment.destinationName || '도착지 미입력'} · {shipment.plannedOutboundDate || '출고예정일 미입력'}
-          </option>
-        ))}
-      </select>
-    </label>
+function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
+  shipments: ChinaShipmentListItem[]
+  selectedShipment: ChinaShipmentDetailView['shipment'] | null
+  onSelect: (id: string) => void
+}) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [isEditing, setIsEditing] = useState(false)
+  const [draftDisplayName, setDraftDisplayName] = useState(() => selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null))
+  const [draftPlannedOutboundDate, setDraftPlannedOutboundDate] = useState(() => selectedShipment?.plannedOutboundDate ?? '')
+  const activeShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const selectedShipmentId = selectedShipment?.id ?? ''
+
+  function saveShipmentDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedShipment) return
+    startTransition(async () => {
+      const result = await updateChinaOutboundShipmentAction({
+        shipmentId: selectedShipment.id,
+        displayName: draftDisplayName.trim() || null,
+        plannedOutboundDate: draftPlannedOutboundDate || null,
+      })
+      if (!result.ok) return toast.error(result.error ?? '출고작업 정보를 수정하지 못했습니다.')
+      setIsEditing(false)
+      toast.success('출고작업 이름과 날짜를 수정했습니다.')
+      router.refresh()
+    })
+  }
+
+  function deleteShipment() {
+    if (!selectedShipment) return
+    const name = shipmentDisplayName(selectedShipment)
+    if (!window.confirm(`“${name}” 출고작업을 정말 삭제할까요?\n예약된 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return
+
+    startTransition(async () => {
+      const result = await deleteChinaOutboundShipmentAction({ shipmentId: selectedShipment.id })
+      if (!result.ok) return toast.error(result.error ?? '출고작업을 삭제하지 못했습니다.')
+      toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
+      router.push('/purchasing/china-shipments')
+      router.refresh()
+    })
+  }
+
+  return <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+      <label className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
+        <span className="text-xs font-medium text-muted-foreground">출고작업 선택</span>
+        <select
+          value={selectedShipmentId}
+          onChange={(event) => {
+            if (event.target.value) onSelect(event.target.value)
+          }}
+          className={inputClass}
+          disabled={isPending}
+        >
+          <option value="">{activeShipments.length === 0 ? '등록된 출고작업이 없습니다.' : '출고작업을 선택해주세요.'}</option>
+          {activeShipments.map((shipment) => (
+            <option key={shipment.id} value={shipment.id}>
+              {shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selectedShipment ? <div className="flex shrink-0 gap-2">
+        <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none"><span aria-hidden="true">✎</span>{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
+        <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} title={selectedShipment.status === 'dispatched' ? '출고완료 작업은 삭제할 수 없습니다.' : undefined} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
+      </div> : null}
+    </div>
+    {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
+      <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-09-28 출고" /></Field>
+      <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
+      <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
+    </form> : null}
+    {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {((shipments.length - activeShipments.length)).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
   </section>
 }
 
@@ -299,8 +368,9 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router
     return <section className="space-y-4 rounded-lg border bg-card p-4">
       <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipment.shipmentNo}</h2><StatusBadge status={shipment.status} /></div>
-          <p className="mt-1 text-sm text-muted-foreground">출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'} · 출고예정일: {shipment.plannedOutboundDate || '미입력'}</p>
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipmentDisplayName(shipment)}</h2><StatusBadge status={shipment.status} /></div>
+          <p className="mt-1 text-sm text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'}</p>
+          <p className="mt-1 text-xs text-muted-foreground">작업번호: {shipment.shipmentNo}</p>
           <p className="mt-1 text-xs text-muted-foreground">상품 {items.length.toLocaleString('ko-KR')}종 · 전체 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 포장 {totalPackedQuantity.toLocaleString('ko-KR')}개</p>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
@@ -308,7 +378,6 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router
           <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 엑셀 다운로드</a>
           {editable && stage === 'packing' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
-          {shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('이 출고작업을 취소하고 예약 수량을 풀까요?')) run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}
         </div>
       </div>
 
@@ -564,6 +633,14 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function shipmentHref(shipmentId: string, stage: ChinaShipmentStage) {
   return `/purchasing/china-shipments?shipment=${encodeURIComponent(shipmentId)}&step=${stage}`
+}
+
+function shipmentDisplayName(shipment: Pick<ChinaShipmentListItem, 'displayName' | 'shipmentNo'>) {
+  return shipment.displayName?.trim() || shipment.shipmentNo
+}
+
+function defaultShipmentDisplayName(plannedOutboundDate: string | null | undefined) {
+  return plannedOutboundDate ? `${plannedOutboundDate} 출고` : '새 출고작업'
 }
 
 function today() {

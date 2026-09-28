@@ -12,12 +12,14 @@ import {
   cancelChinaOutboundShipment,
   configureChinaOutboundPackaging,
   createChinaOutboundShipment,
+  deleteChinaOutboundShipment,
   dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
   receiveSaasChinaInventory,
   removeChinaOutboundBoxItem,
   saveChinaOutboundBoxDimensions,
   saveChinaOutboundItemPacking,
+  updateChinaOutboundShipment,
 } from '@/lib/purchasing/saas-china-outbound'
 
 type ActionResult = { ok: true; shipmentId?: string } | { ok: false; error: string }
@@ -43,6 +45,7 @@ const adjustSchema = z.object({
 })
 
 const createShipmentSchema = z.object({
+  displayName: optionalText(200),
   shipmentNo: optionalText(100),
   destinationName: optionalText(1_000),
   destinationAddress: optionalText(2_000),
@@ -54,6 +57,12 @@ const createShipmentSchema = z.object({
     inventoryId,
     quantity: z.coerce.number().int().positive('출고 수량은 1 이상의 정수여야 합니다.'),
   })).min(1, '출고할 상품을 하나 이상 선택해주세요.'),
+})
+
+const updateShipmentSchema = z.object({
+  shipmentId,
+  displayName: optionalText(200),
+  plannedOutboundDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '출고예정일을 확인해주세요.').optional().nullable(),
 })
 
 const addPalletSchema = z.object({
@@ -137,6 +146,15 @@ export async function createChinaOutboundShipmentAction(input: unknown): Promise
     const shipment = await createChinaOutboundShipment({ ...value, ...actor })
     revalidateSaasChinaPaths()
     return { shipmentId: shipment.id }
+  })
+}
+
+export async function updateChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = updateShipmentSchema.parse(input)
+    const actor = await getActor()
+    await updateChinaOutboundShipment({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
   })
 }
 
@@ -226,6 +244,15 @@ export async function cancelChinaOutboundShipmentAction(input: unknown): Promise
     const value = z.object({ shipmentId }).parse(input)
     const actor = await getActor()
     await cancelChinaOutboundShipment({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function deleteChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = z.object({ shipmentId }).parse(input)
+    const actor = await getActor()
+    await deleteChinaOutboundShipment({ ...value, ...actor })
     revalidateSaasChinaPaths()
   })
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   chinaOutboundBoxItems,
@@ -36,6 +36,14 @@ export const CHINA_OUTBOUND_SHIPMENT_STATUS_LABELS: Record<ChinaOutboundShipment
   ready: '포장완료',
   dispatched: '출고완료',
   cancelled: '취소',
+}
+
+/**
+ * A dispatched shipment has already reduced SaaS China inventory. It must
+ * remain as an audit record rather than being deleted from the workflow.
+ */
+export function isChinaOutboundShipmentDeletable(status: ChinaOutboundShipmentStatus) {
+  return status === 'draft' || status === 'packing' || status === 'ready' || status === 'cancelled'
 }
 
 // Automatic purchase arrivals use one stable warehouse label so they join the
@@ -166,6 +174,7 @@ export type ChinaOutboundBoxDimensionsInput = {
 export type CreateChinaOutboundShipmentInput = {
   userId: string
   createdBy: string
+  displayName?: string | null
   shipmentNo?: string | null
   destinationName?: string | null
   destinationAddress?: string | null
@@ -282,6 +291,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   CREATE TABLE IF NOT EXISTS china_outbound_shipments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL,
+    display_name varchar(200),
     shipment_no varchar(100) NOT NULL,
     status varchar(30) NOT NULL DEFAULT 'draft',
     origin_warehouse_code varchar(100) NOT NULL DEFAULT 'default',
@@ -308,6 +318,12 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ON china_outbound_shipments(user_id, status, created_at);
   CREATE INDEX IF NOT EXISTS china_outbound_shipments_user_planned_outbound
     ON china_outbound_shipments(user_id, planned_outbound_date);
+
+  -- CREATE TABLE IF NOT EXISTS does not evolve the existing production table.
+  -- Keep this idempotent bootstrap in addition to the formal migration so
+  -- older deployments receive the optional user-facing name on first use.
+  ALTER TABLE china_outbound_shipments
+    ADD COLUMN IF NOT EXISTS display_name varchar(200);
 
   CREATE TABLE IF NOT EXISTS china_outbound_shipment_items (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -614,13 +630,18 @@ export async function getSaasChinaInventory(userId: string) {
   }
 }
 
-export async function listChinaOutboundShipments(userId: string) {
+export async function listChinaOutboundShipments(
+  userId: string,
+  options: { includeCancelled?: boolean } = {},
+) {
   await ensureSaasChinaOutboundSchema()
+  const shipmentConditions = [eq(chinaOutboundShipments.userId, userId)]
+  if (!options.includeCancelled) shipmentConditions.push(ne(chinaOutboundShipments.status, 'cancelled'))
   const [shipments, itemCounts] = await Promise.all([
     db
       .select()
       .from(chinaOutboundShipments)
-      .where(eq(chinaOutboundShipments.userId, userId))
+      .where(and(...shipmentConditions))
       .orderBy(desc(chinaOutboundShipments.createdAt)),
     db
       .select({
@@ -1072,6 +1093,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
       .insert(chinaOutboundShipments)
       .values({
         userId: input.userId,
+        displayName: optionalText(input.displayName),
         shipmentNo,
         status: 'draft',
         originWarehouseCode: getChinaOutboundOriginWarehouseCode(inventories.map((inventory) => inventory.warehouseCode)),
@@ -1143,6 +1165,40 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
     await reconcileSaasChinaPurchaseLinks(tx, input.userId, [...affectedPurchaseLinkIds])
 
     return shipment
+  })
+}
+
+/**
+ * Updates administrative shipment metadata only. The internal shipment number
+ * intentionally remains immutable and display names are allowed to repeat.
+ */
+export async function updateChinaOutboundShipment(input: {
+  userId: string
+  shipmentId: string
+  displayName?: string | null
+  plannedOutboundDate?: string | null
+}) {
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    // Omitted fields mean "leave unchanged"; null or an empty string means
+    // "clear this value". This keeps the service safe for partial callers.
+    const changes: Partial<typeof chinaOutboundShipments.$inferInsert> = {
+      updatedAt: new Date(),
+    }
+    if (input.displayName !== undefined) changes.displayName = optionalText(input.displayName)
+    if (input.plannedOutboundDate !== undefined) changes.plannedOutboundDate = optionalText(input.plannedOutboundDate)
+    const [updated] = await tx
+      .update(chinaOutboundShipments)
+      .set(changes)
+      .where(and(
+        eq(chinaOutboundShipments.id, shipment.id),
+        eq(chinaOutboundShipments.userId, input.userId),
+      ))
+      .returning()
+    if (!updated) throw new Error('출고작업 정보를 수정하지 못했습니다.')
+    return updated
   })
 }
 
@@ -1620,40 +1676,7 @@ export async function cancelChinaOutboundShipment(input: { userId: string; creat
     if (!EDITABLE_SHIPMENT_STATUSES.includes(shipment.status as ChinaOutboundShipmentStatus) && shipment.status !== 'ready') {
       throw new Error('출고완료 또는 취소된 작업은 취소할 수 없습니다.')
     }
-    const items = await tx
-      .select()
-      .from(chinaOutboundShipmentItems)
-      .where(and(
-        eq(chinaOutboundShipmentItems.userId, input.userId),
-        eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
-      ))
-    for (const item of items) {
-      const inventory = await getSaasChinaInventoryForUpdate(tx, input.userId, item.inventoryId)
-      if (inventory.reservedQuantity < item.reservedQuantity) {
-        throw new Error(`${item.sku}의 예약 수량이 맞지 않아 출고작업을 취소할 수 없습니다.`)
-      }
-      const afterReserved = inventory.reservedQuantity - item.reservedQuantity
-      const afterAvailable = inventory.onHandQuantity - afterReserved
-      await tx
-        .update(saasChinaInventory)
-        .set({ reservedQuantity: afterReserved, availableQuantity: afterAvailable, updatedAt: new Date() })
-        .where(eq(saasChinaInventory.id, inventory.id))
-      await insertSaasChinaInventoryMovement(tx, {
-        inventoryId: inventory.id,
-        userId: input.userId,
-        movementType: 'shipment_release',
-        onHandDelta: 0,
-        reservedDelta: -item.reservedQuantity,
-        onHandBefore: inventory.onHandQuantity,
-        reservedBefore: inventory.reservedQuantity,
-        onHandAfter: inventory.onHandQuantity,
-        reservedAfter: afterReserved,
-        sourceKey: `china-outbound-release:${shipment.id}:${inventory.id}`,
-        note: shipment.shipmentNo,
-        createdBy: input.createdBy,
-      })
-    }
-    await releaseSaasChinaPurchaseAllocationsForShipment(tx, input.userId, shipment.id)
+    await releaseChinaOutboundShipmentReservations(tx, { ...input, shipment })
     const [updated] = await tx
       .update(chinaOutboundShipments)
       .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
@@ -1662,6 +1685,119 @@ export async function cancelChinaOutboundShipment(input: { userId: string; creat
     if (!updated) throw new Error('출고작업 취소에 실패했습니다.')
     return updated
   })
+}
+
+/**
+ * Permanently removes a non-dispatched outbound task after releasing every
+ * inventory and purchase-lot reservation in the same transaction. Inventory
+ * movements are retained as the audit trail; only the disposable work record
+ * and its packing/allocation rows are removed.
+ */
+export async function deleteChinaOutboundShipment(input: { userId: string; createdBy: string; shipmentId: string }) {
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    if (!isChinaOutboundShipmentDeletable(shipment.status as ChinaOutboundShipmentStatus)) {
+      throw new Error('출고완료 작업은 재고 차감 이력 때문에 삭제할 수 없습니다.')
+    }
+
+    // Cancelled work has already released reservations. A draft/packing/ready
+    // work item must release first, before its child rows can be removed.
+    if (shipment.status !== 'cancelled') {
+      await releaseChinaOutboundShipmentReservations(tx, { ...input, shipment })
+    }
+
+    // Allocation rows deliberately use RESTRICT foreign keys so an accidental
+    // shipment delete cannot silently bypass purchase-link reconciliation.
+    await tx
+      .delete(saasChinaShipmentPurchaseAllocations)
+      .where(and(
+        eq(saasChinaShipmentPurchaseAllocations.userId, input.userId),
+        eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipment.id),
+      ))
+
+    // Delete child rows explicitly, rather than relying on multiple cascades:
+    // boxes restrict pallet deletion while they are still assigned to one.
+    await tx
+      .delete(chinaOutboundBoxItems)
+      .where(and(
+        eq(chinaOutboundBoxItems.userId, input.userId),
+        eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+      ))
+    await tx
+      .delete(chinaOutboundBoxes)
+      .where(and(
+        eq(chinaOutboundBoxes.userId, input.userId),
+        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+      ))
+    await tx
+      .delete(chinaOutboundPallets)
+      .where(and(
+        eq(chinaOutboundPallets.userId, input.userId),
+        eq(chinaOutboundPallets.shipmentId, shipment.id),
+      ))
+    await tx
+      .delete(chinaOutboundShipmentItems)
+      .where(and(
+        eq(chinaOutboundShipmentItems.userId, input.userId),
+        eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
+      ))
+
+    const [deleted] = await tx
+      .delete(chinaOutboundShipments)
+      .where(and(
+        eq(chinaOutboundShipments.id, shipment.id),
+        eq(chinaOutboundShipments.userId, input.userId),
+      ))
+      .returning({ id: chinaOutboundShipments.id })
+    if (!deleted) throw new Error('출고작업을 삭제하지 못했습니다.')
+    return deleted
+  })
+}
+
+async function releaseChinaOutboundShipmentReservations(
+  tx: DbTransaction,
+  input: {
+    userId: string
+    createdBy: string
+    shipment: typeof chinaOutboundShipments.$inferSelect
+  },
+) {
+  const items = await tx
+    .select()
+    .from(chinaOutboundShipmentItems)
+    .where(and(
+      eq(chinaOutboundShipmentItems.userId, input.userId),
+      eq(chinaOutboundShipmentItems.shipmentId, input.shipment.id),
+    ))
+  for (const item of items) {
+    const inventory = await getSaasChinaInventoryForUpdate(tx, input.userId, item.inventoryId)
+    if (inventory.reservedQuantity < item.reservedQuantity) {
+      throw new Error(`${item.sku}의 예약 수량이 맞지 않아 출고작업을 취소할 수 없습니다.`)
+    }
+    const afterReserved = inventory.reservedQuantity - item.reservedQuantity
+    const afterAvailable = inventory.onHandQuantity - afterReserved
+    await tx
+      .update(saasChinaInventory)
+      .set({ reservedQuantity: afterReserved, availableQuantity: afterAvailable, updatedAt: new Date() })
+      .where(eq(saasChinaInventory.id, inventory.id))
+    await insertSaasChinaInventoryMovement(tx, {
+      inventoryId: inventory.id,
+      userId: input.userId,
+      movementType: 'shipment_release',
+      onHandDelta: 0,
+      reservedDelta: -item.reservedQuantity,
+      onHandBefore: inventory.onHandQuantity,
+      reservedBefore: inventory.reservedQuantity,
+      onHandAfter: inventory.onHandQuantity,
+      reservedAfter: afterReserved,
+      sourceKey: `china-outbound-release:${input.shipment.id}:${inventory.id}`,
+      note: input.shipment.shipmentNo,
+      createdBy: input.createdBy,
+    })
+  }
+  await releaseSaasChinaPurchaseAllocationsForShipment(tx, input.userId, input.shipment.id)
 }
 
 async function reserveSaasChinaPurchaseLotsForShipmentItem(

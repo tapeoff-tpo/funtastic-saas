@@ -44,6 +44,7 @@ export default async function ChinaShipmentsPage({
   }))
   const shipmentItems: ChinaShipmentListItem[] = shipments.map((shipment) => ({
     id: shipment.id,
+    displayName: shipment.displayName,
     shipmentNo: shipment.shipmentNo,
     status: shipment.status,
     originWarehouseCode: shipment.originWarehouseCode,
@@ -83,6 +84,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
   return {
     shipment: {
       id: detail.shipment.id,
+      displayName: detail.shipment.displayName,
       shipmentNo: detail.shipment.shipmentNo,
       status: detail.shipment.status,
       originWarehouseCode: detail.shipment.originWarehouseCode,

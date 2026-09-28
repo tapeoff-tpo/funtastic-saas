@@ -6,6 +6,7 @@ import {
   allocateSaasChinaPurchaseLots,
   getChinaOutboundOriginWarehouseCode,
   getSaasChinaPurchaseLifecycleStatus,
+  isChinaOutboundShipmentDeletable,
 } from './saas-china-outbound'
 
 describe('SaaS China purchase lifecycle status', () => {
@@ -94,5 +95,15 @@ describe('SaaS China outbound warehouse label', () => {
 
   it('marks a shipment as multiple warehouses when selected items are mixed', () => {
     expect(getChinaOutboundOriginWarehouseCode(['중국창고', '쿠팡', '스마일배송(개인个人1688)'])).toBe('복수 창고')
+  })
+})
+
+describe('SaaS China outbound deletion guard', () => {
+  it('allows disposable drafts, packing, ready, and cancelled work, but keeps dispatched inventory history', () => {
+    expect(isChinaOutboundShipmentDeletable('draft')).toBe(true)
+    expect(isChinaOutboundShipmentDeletable('packing')).toBe(true)
+    expect(isChinaOutboundShipmentDeletable('ready')).toBe(true)
+    expect(isChinaOutboundShipmentDeletable('cancelled')).toBe(true)
+    expect(isChinaOutboundShipmentDeletable('dispatched')).toBe(false)
   })
 })

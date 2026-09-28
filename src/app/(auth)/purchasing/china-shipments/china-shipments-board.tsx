@@ -173,7 +173,7 @@ export function ChinaShipmentsBoard({
 
   return (
     <div className="space-y-4" aria-busy={isPending}>
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid gap-2 sm:grid-cols-3">
         <SummaryCard label="SaaS 현재고" value={inventorySummary.onHandQuantity} />
         <SummaryCard label="출고 예약" value={inventorySummary.reservedQuantity} tone="amber" />
         <SummaryCard label="새 작업 가능" value={inventorySummary.availableQuantity} tone="emerald" />
@@ -212,16 +212,38 @@ export function ChinaShipmentsBoard({
         </form> : null}
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[350px_minmax(0,1fr)]">
-        <ShipmentList shipments={shipments} selectedShipmentId={selectedShipment?.shipment.id} onSelect={(id) => router.push(shipmentHref(id, 'setup'))} />
+      <div className="space-y-3">
+        <ShipmentSelector
+          shipments={shipments}
+          selectedShipmentId={selectedShipment?.shipment.id}
+          onSelect={(id) => router.push(shipmentHref(id, 'setup'))}
+        />
         <ShipmentDetailPanel key={selectedShipment?.shipment.id ?? 'no-shipment'} detail={selectedShipment} stage={selectedStep} isPending={isPending} startTransition={startTransition} router={router} onStageChange={(stage) => selectedShipment && router.push(shipmentHref(selectedShipment.shipment.id, stage))} />
       </div>
     </div>
   )
 }
 
-function ShipmentList({ shipments, selectedShipmentId, onSelect }: { shipments: ChinaShipmentListItem[]; selectedShipmentId?: string; onSelect: (id: string) => void }) {
-  return <section className="overflow-hidden rounded-lg border bg-card"><div className="border-b px-4 py-3"><h2 className="font-semibold">출고작업 목록</h2><p className="mt-1 text-xs text-muted-foreground">총 {shipments.length.toLocaleString('ko-KR')}건</p></div><div className="max-h-[720px] overflow-y-auto p-2">{shipments.length === 0 ? <p className="p-6 text-center text-sm text-muted-foreground">아직 만든 출고작업이 없습니다.</p> : shipments.map((shipment) => { const selected = shipment.id === selectedShipmentId; return <button key={shipment.id} type="button" onClick={() => onSelect(shipment.id)} className={`mb-1 w-full rounded-md border p-3 text-left transition-colors ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted'}`}><div className="flex items-center justify-between gap-2"><span className="font-medium">{shipment.shipmentNo}</span><StatusBadge status={shipment.status} /></div><p className="mt-1 truncate text-xs text-muted-foreground">출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'}</p><p className="mt-1 text-xs text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 등록일: {formatRegisteredDate(shipment.createdAt)}</p><p className="mt-2 text-xs tabular-nums text-muted-foreground">상품 {shipment.itemCount.toLocaleString('ko-KR')}종 · 전체 {shipment.reservedQuantity.toLocaleString('ko-KR')}개 · 포장 {shipment.packedQuantity.toLocaleString('ko-KR')}개</p></button> })}</div></section>
+function ShipmentSelector({ shipments, selectedShipmentId, onSelect }: { shipments: ChinaShipmentListItem[]; selectedShipmentId?: string; onSelect: (id: string) => void }) {
+  return <section className="rounded-md border bg-card px-3 py-2">
+    <label className="grid gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
+      <span className="text-xs font-medium text-muted-foreground">출고작업 선택</span>
+      <select
+        value={selectedShipmentId ?? ''}
+        onChange={(event) => {
+          if (event.target.value) onSelect(event.target.value)
+        }}
+        className={inputClass}
+      >
+        <option value="">{shipments.length === 0 ? '등록된 출고작업이 없습니다.' : '출고작업을 선택해주세요.'}</option>
+        {shipments.map((shipment) => (
+          <option key={shipment.id} value={shipment.id}>
+            {shipment.shipmentNo} · {statusLabels[shipment.status] ?? shipment.status} · {shipment.destinationName || '도착지 미입력'} · {shipment.plannedOutboundDate || '출고예정일 미입력'}
+          </option>
+        ))}
+      </select>
+    </label>
+  </section>
 }
 
 function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router, onStageChange }: { detail: ChinaShipmentDetailView | null; stage: ChinaShipmentStage; isPending: boolean; startTransition: TransitionStartFunction; router: ReturnType<typeof useRouter>; onStageChange: (stage: ChinaShipmentStage) => void }) {
@@ -229,7 +251,7 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router
   const [boxCount, setBoxCount] = useState(() => String(detail?.boxes.length || 1))
   const [packingDrafts, setPackingDrafts] = useState<Record<string, PackingDraft>>({})
 
-  if (!detail) return <section className="flex min-h-[360px] items-center justify-center rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">왼쪽에서 출고작업을 선택하면 박스·파렛트 구성과 상품 포장을 단계별로 처리할 수 있습니다.</section>
+  if (!detail) return <section className="flex min-h-[360px] items-center justify-center rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">위 드롭다운에서 출고작업을 선택하면 박스·파렛트 구성과 상품 포장을 단계별로 처리할 수 있습니다.</section>
 
   const { shipment, items, pallets, boxes, boxItems } = detail
   const editable = editableStatuses.has(shipment.status)
@@ -528,7 +550,7 @@ function PackingMetric({ label, value, tone }: { label: string; value: number; t
 
 function SummaryCard({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
   const toneClass = tone === 'amber' ? 'border-amber-200 bg-amber-50/50 text-amber-800' : tone === 'emerald' ? 'border-emerald-200 bg-emerald-50/50 text-emerald-800' : 'bg-card'
-  return <div className={`rounded-lg border p-4 ${toneClass}`}><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></div>
+  return <div className={`rounded-md border px-2 py-1.5 ${toneClass}`}><p className="text-[11px] text-muted-foreground">{label}</p><p className="text-base font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></div>
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -546,12 +568,6 @@ function shipmentHref(shipmentId: string, stage: ChinaShipmentStage) {
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
-}
-
-function formatRegisteredDate(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
 }
 
 const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30'

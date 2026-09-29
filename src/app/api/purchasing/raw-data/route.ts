@@ -146,7 +146,12 @@ export async function POST(request: NextRequest) {
     await Promise.all(classified.map((file) => recordDataRefresh({
       userId: workspaceUserId,
       source: `purchasing_raw:${file.kind}`,
-      metadata: { fileName: file.fileName },
+      metadata: {
+        fileName: file.fileName,
+        ...(file.kind === 'chinaOutbound'
+          ? { domesticInventoryReflectedThrough: fields.domesticInventoryReflectedThrough }
+          : {}),
+      },
     })))
     revalidatePath('/purchasing/raw-data')
     revalidatePath('/purchasing/purchases')

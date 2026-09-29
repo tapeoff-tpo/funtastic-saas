@@ -17,6 +17,8 @@ type DataFreshness = {
   chinaInventoryAt: string | null
   outboundRawAt: string | null
   outboundReflectionAt: string | null
+  domesticInventoryReflectedThrough: string | null
+  monthlySalesMetricsAt: string | null
 }
 type FileKey =
   | 'purchaseRequest'
@@ -102,6 +104,9 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [inventoryPreview, setInventoryPreview] = useState<InventoryPreview | null>(null)
   const [discontinuedPreview, setDiscontinuedPreview] = useState<DiscontinuedPreview | null>(null)
   const [previewKinds, setPreviewKinds] = useState<FileKey[]>([])
+  const [domesticInventoryReflectedThrough, setDomesticInventoryReflectedThrough] = useState(
+    dataFreshness.domesticInventoryReflectedThrough ?? inventoryUpdatedDate,
+  )
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
@@ -302,7 +307,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             fields: {
               mode,
               asOfDate: today,
-              domesticInventoryReflectedThrough: inventoryUpdatedDate,
+              domesticInventoryReflectedThrough,
               purchasePlanConfirmedSince: '2026-07-01',
             },
           })
@@ -421,6 +426,24 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         </div>
       </section>
 
+      <section className="rounded-lg border bg-muted/20 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="font-semibold">국내재고 반영 기준일</h2>
+            <p className="mt-1 text-sm text-muted-foreground">중국출고 완료 건 중 이 날짜까지의 유효기간은 국내재고에 이미 포함된 것으로 보고 입고예정 수량에서 제외합니다.</p>
+          </div>
+          <label className="grid gap-1 text-sm font-medium">
+            <span>국내재고 반영 완료일</span>
+            <input
+              type="date"
+              value={domesticInventoryReflectedThrough}
+              onChange={(event) => setDomesticInventoryReflectedThrough(event.target.value)}
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+            />
+          </label>
+        </div>
+      </section>
+
       <section className="rounded-lg border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
         <h2 className="font-medium text-foreground">연결 데이터 기준</h2>
         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
@@ -429,6 +452,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           <span>중국재고 {formatKstTimestamp(dataFreshness.chinaInventoryAt)}</span>
           <span>중국출고 {formatKstTimestamp(dataFreshness.outboundRawAt)}</span>
           <span>출고반영 {formatKstTimestamp(dataFreshness.outboundReflectionAt)}</span>
+          <span>국내 반영 기준 {dataFreshness.domesticInventoryReflectedThrough ?? '미기록'}</span>
+          <span>3개월 평균 {formatKstTimestamp(dataFreshness.monthlySalesMetricsAt)}</span>
         </div>
       </section>
 

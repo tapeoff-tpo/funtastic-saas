@@ -9,6 +9,7 @@ export type DataRefreshSource =
   | 'purchasing_raw:chinaInventory'
   | 'purchasing_raw:chinaOutbound'
   | 'purchasing_raw:discontinuedProducts'
+  | 'purchasing_metrics:monthlySalesCalculator'
 
 async function ensureDataRefreshEvents() {
   await db.execute(sql`
@@ -48,6 +49,8 @@ export async function getPurchasingDataFreshness(userId: string) {
     chinaInventoryAt: string | null
     outboundRawAt: string | null
     outboundReflectionAt: string | null
+    domesticInventoryReflectedThrough: string | null
+    monthlySalesMetricsAt: string | null
   }>(sql`
     SELECT
       (
@@ -84,7 +87,22 @@ export async function getPurchasingDataFreshness(userId: string) {
       (
         SELECT MAX(applied_at) FROM outbound_reflection_batches
         WHERE user_id = ${userId}::uuid
-      )::text AS "outboundReflectionAt"
+      )::text AS "outboundReflectionAt",
+      (
+        SELECT NULLIF(metadata->>'domesticInventoryReflectedThrough', '')
+        FROM data_refresh_events
+        WHERE user_id = ${userId}::uuid
+          AND source = 'purchasing_raw:chinaOutbound'
+          AND NULLIF(metadata->>'domesticInventoryReflectedThrough', '') IS NOT NULL
+        ORDER BY completed_at DESC
+        LIMIT 1
+      ) AS "domesticInventoryReflectedThrough",
+      (
+        SELECT MAX(completed_at)
+        FROM data_refresh_events
+        WHERE user_id = ${userId}::uuid
+          AND source = 'purchasing_metrics:monthlySalesCalculator'
+      )::text AS "monthlySalesMetricsAt"
   `)
   const rows = Array.isArray(result) ? result : result.rows ?? []
   return rows[0] ?? {
@@ -95,5 +113,7 @@ export async function getPurchasingDataFreshness(userId: string) {
     chinaInventoryAt: null,
     outboundRawAt: null,
     outboundReflectionAt: null,
+    domesticInventoryReflectedThrough: null,
+    monthlySalesMetricsAt: null,
   }
 }

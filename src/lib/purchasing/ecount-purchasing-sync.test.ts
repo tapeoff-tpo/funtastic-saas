@@ -396,7 +396,6 @@ describe('parseEcountPurchasingSnapshot', () => {
     ]))
     expect(snapshot.purchaseCompleted).toHaveLength(2)
     expect(snapshot.outboundCompleted).toMatchObject([
-      { sku: '100001-0001', quantity: 10, effectiveDate: '2026-07-13' },
       { sku: '109037-9998-package', quantity: 20, effectiveDate: '2026-07-15' },
       { sku: '100002-0001', quantity: 5, effectiveDate: '2026-07-20' },
     ])
@@ -409,6 +408,26 @@ describe('parseEcountPurchasingSnapshot', () => {
       outboundRowsWithoutReliableSupplierOrder: 1,
     })
     expect(snapshot.warnings.join(' ')).not.toContain('[object Object]')
+  })
+
+  it('keeps only China outbound completed after the domestic-inventory cutoff as expected inbound', async () => {
+    const outbound = await makeUpload('china-outbound.xlsx', [
+      '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+    ], [
+      ['100001-0001', '20260713-1', '이미 입고된 상품', '기본', 10, '2026-07-13', '', 'OUT-1'],
+      ['100002-0001', '20260714-1', '입고예정 상품', '기본', 20, '2026-07-14', '', 'OUT-2'],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [outbound],
+      domesticInventoryReflectedThrough: '2026-07-13',
+      asOfDate: '2026-07-14',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.outboundCompleted).toEqual([
+      expect.objectContaining({ sku: '100002-0001', quantity: 20, effectiveDate: '2026-07-14' }),
+    ])
   })
 
   it('keeps plan rows regardless of their arrival target date and preserves the source purchase date', async () => {
@@ -969,7 +988,7 @@ describe('parseEcountPurchasingSnapshot', () => {
 
     const snapshot = await parseEcountPurchasingSnapshot({
       files,
-      domesticInventoryReflectedThrough: '2026-08-21',
+      domesticInventoryReflectedThrough: '2026-08-20',
       asOfDate: '2026-08-21',
       allowMissingReports: true,
     })
@@ -1007,7 +1026,7 @@ describe('parseEcountPurchasingSnapshot', () => {
 
     const snapshot = await parseEcountPurchasingSnapshot({
       files,
-      domesticInventoryReflectedThrough: '2026-08-24',
+      domesticInventoryReflectedThrough: '2026-08-19',
       asOfDate: '2026-08-24',
       allowMissingReports: true,
     })
@@ -1104,7 +1123,7 @@ describe('parseEcountPurchasingSnapshot', () => {
 
     const snapshot = await parseEcountPurchasingSnapshot({
       files,
-      domesticInventoryReflectedThrough: '2026-08-24',
+      domesticInventoryReflectedThrough: '2026-08-19',
       asOfDate: '2026-08-24',
       allowMissingReports: true,
     })
@@ -1138,7 +1157,7 @@ describe('parseEcountPurchasingSnapshot', () => {
 
     const snapshot = await parseEcountPurchasingSnapshot({
       files: [outbound],
-      domesticInventoryReflectedThrough: '2026-09-02',
+      domesticInventoryReflectedThrough: '2026-08-31',
       asOfDate: '2026-09-02',
       allowMissingReports: true,
     })
@@ -1495,7 +1514,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     ])
   })
 
-  it('waits for domestic inventory to catch up before completing an absent China item', async () => {
+  it('does not revive historic China arrivals when the domestic snapshot is one day behind', async () => {
     const files = await Promise.all([
       makeUpload('purchase-history.xlsx', [
         '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
@@ -1528,8 +1547,8 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.chinaArrived).toEqual([
       expect.objectContaining({
         sku: '100001-0001',
-        quantity: 100,
-        pendingChinaInventoryQuantity: 50,
+        quantity: 50,
+        pendingChinaInventoryQuantity: 0,
       }),
     ])
   })

@@ -10,6 +10,8 @@ const freshness = {
   chinaInventoryAt: null,
   outboundRawAt: null,
   outboundReflectionAt: null,
+  domesticInventoryReflectedThrough: null,
+  monthlySalesMetricsAt: null,
 }
 
 function renderUploader(initialStoredFiles: Record<string, { fileName: string; updatedAt: string }> = {}) {
@@ -29,6 +31,22 @@ afterEach(() => {
 })
 
 describe('PurchasingRawDataUpload drag and drop', () => {
+  it('reuses the last confirmed domestic inventory cutoff instead of the file update date', () => {
+    render(
+      <PurchasingRawDataUpload
+        today="2026-09-11"
+        inventoryUpdatedDate="2026-09-11"
+        initialStoredFiles={{}}
+        dataFreshness={{
+          ...freshness,
+          domesticInventoryReflectedThrough: '2026-09-08',
+        }}
+      />,
+    )
+
+    expect(screen.getByLabelText('국내재고 반영 완료일')).toHaveValue('2026-09-08')
+  })
+
   it('accepts five arbitrarily named Ecount files dropped together on the upload section', () => {
     renderUploader()
     const files = [

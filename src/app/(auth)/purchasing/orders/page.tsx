@@ -6,7 +6,6 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
-import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
@@ -113,13 +112,6 @@ export async function PurchasingOrdersView({
     getWorkspaceUserId(user.id),
     getLatestCnyKrwReferenceRate(),
   ])
-  const completedOutboundAutoCleanup = status === 'completed'
-    ? await cleanupExpiredCompletedOutboundItems({
-      userId: workspaceUserId,
-      reflectedByUserId: user.id,
-      fallbackExchangeRateKrw: exchangeRateReference.rate,
-    })
-    : null
   const initialPurchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
     status: selectedStatus,
@@ -269,19 +261,6 @@ export async function PurchasingOrdersView({
 
       {showRecommendationGenerator ? (
         <PurchaseRecommendationGenerator initialTargetStockMonths={latestTargetStockMonths} />
-      ) : null}
-
-      {completedOutboundAutoCleanup && completedOutboundAutoCleanup.reflectedCount > 0 ? (
-        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
-          <strong>중국출고완료 자동 정리</strong>
-          <span className="ml-2">
-            출고일 기준 14일이 지난 {completedOutboundAutoCleanup.reflectedCount.toLocaleString('ko-KR')}건 · {completedOutboundAutoCleanup.reflectedQuantity.toLocaleString('ko-KR')}개를 목록에서 정리했습니다.
-            같은 중국출고 원본을 다시 반영해도 다시 나타나지 않습니다.
-            {completedOutboundAutoCleanup.skippedMissingMatchKeyCount > 0
-              ? ` 식별키가 없는 ${completedOutboundAutoCleanup.skippedMissingMatchKeyCount.toLocaleString('ko-KR')}건은 안전하게 남겨뒀습니다.`
-              : ''}
-          </span>
-        </section>
       ) : null}
 
       {newProductFirstSaleItems.length > 0 ? (

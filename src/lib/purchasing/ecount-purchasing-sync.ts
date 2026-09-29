@@ -6,10 +6,7 @@ import {
   chinaWarehouseInventory,
   purchaseRequestItems,
 } from '@/lib/db/schema'
-import {
-  cleanupExpiredCompletedOutboundItems,
-  getReflectedOutboundMatchKeys,
-} from './reflected-outbound-items'
+import { getReflectedOutboundMatchKeys } from './reflected-outbound-items'
 import { cleanupExpiredEcountPurchaseOrderRowsInTransaction } from './purchase-order-retention'
 import {
   ensureIgnoredPurchasingItemsTable,
@@ -598,7 +595,6 @@ export async function parseEcountPurchasingSnapshot(input: {
     historyRemainingAfterOutbound,
     chinaInventoryItems,
     chinaInventory.fileName ? chinaInventorySnapshotAsOfDate : null,
-    reflectedThrough,
   )
   const outstandingChinaArrivals = chinaInventoryReconciliation.items
   // 구매현황 is the source of the China-arrival stage. A recent arrival can be
@@ -632,11 +628,14 @@ export async function parseEcountPurchasingSnapshot(input: {
   }))
   const purchaseCompleted = purchaseCompletedFromPlan
 
-  // Split shipments remain distinct by outbound date so date-based inventory
-  // reflection stays exact. Rows from the same supplier order + SKU + date are
-  // aggregated, while cumulative progress is calculated across every date.
+  // A China outbound is domestic inbound expected stock only until the
+  // domestic-inventory snapshot has reflected its effective date. Do not use a
+  // fixed transit-day guess here: the domestic cutoff is the source of truth.
+  // Split shipments remain distinct by outbound date so partial shipments stay exact.
   const outboundCompleted = aggregateChinaOutboundItems(
-    rawChinaOutboundItems.filter((row) => row.effectiveDate <= asOfDate),
+    rawChinaOutboundItems.filter((row) => (
+      row.effectiveDate <= asOfDate && row.effectiveDate > reflectedThrough
+    )),
     rawChinaOutboundItems,
     historyItems,
   )
@@ -1133,20 +1132,21 @@ function reconcilePurchaseHistoryWithChinaInventory(
   historyItems: EcountPurchaseCompletedItem[],
   inventoryItems: EcountChinaInventoryItem[],
   inventorySnapshotDate: string | null,
-  domesticInventoryReflectedThrough: string,
 ) {
   // A dated but empty workbook can be an incomplete/incorrect export. Never
-  // infer that every China arrival shipped from an empty snapshot. Likewise,
-  // if domestic inventory has not caught up to this China snapshot, an absent
-  // item may still be in transit and must remain in the recommendation bridge.
+  // infer that every China arrival shipped from an empty snapshot.
+  //
+  // This is deliberately independent from the domestic-inventory cutoff. A
+  // China-inventory snapshot answers what remains in China; a domestic cutoff
+  // answers which China-outbound rows have already reached Korea. Coupling the
+  // two revives every historic purchase as pipeline whenever the two reports
+  // were exported a day apart.
   if (!inventorySnapshotDate || inventoryItems.length === 0) {
     return {
       items: historyItems,
       pendingQuantityByHistoryKey: new Map<string, number>(),
     }
   }
-  const canCompleteDomesticArrival = domesticInventoryReflectedThrough >= inventorySnapshotDate
-
   const inventoryBySku = new Map<string, number>()
   for (const item of inventoryItems) {
     const key = purchaseSkuKey(item.sku)
@@ -1181,7 +1181,7 @@ function reconcilePurchaseHistoryWithChinaInventory(
     for (const { item, index } of newestFirst) {
       const retainedQuantity = Math.min(item.quantity, stockRemaining)
       inventoryBackedQuantityByIndex.set(index, retainedQuantity)
-      if (canCompleteDomesticArrival && retainedQuantity > 0) {
+      if (retainedQuantity > 0) {
         retainedQuantityByIndex.set(index, retainedQuantity)
       }
       stockRemaining -= retainedQuantity
@@ -1192,9 +1192,6 @@ function reconcilePurchaseHistoryWithChinaInventory(
     // Same-day arrivals may have been recorded after the inventory export, so
     // keep the order-level row even when no inventory quantity covers it.
     if (item.purchaseDate === inventorySnapshotDate) return [item]
-    if (!canCompleteDomesticArrival && item.purchaseDate && item.purchaseDate < inventorySnapshotDate) {
-      return [item]
-    }
     const retainedQuantity = retainedQuantityByIndex.get(index) ?? 0
     return retainedQuantity > 0 ? [{ ...item, quantity: retainedQuantity }] : []
   })
@@ -1202,7 +1199,7 @@ function reconcilePurchaseHistoryWithChinaInventory(
   historyItems.forEach((item, index) => {
     if (!item.purchaseDate || item.purchaseDate > inventorySnapshotDate) return
     const inventoryBackedQuantity = inventoryBackedQuantityByIndex.get(index) ?? 0
-    const pendingQuantity = item.purchaseDate === inventorySnapshotDate || !canCompleteDomesticArrival
+    const pendingQuantity = item.purchaseDate === inventorySnapshotDate
       ? item.quantity - inventoryBackedQuantity
       : 0
     // Keep zeroes as an explicit reconciliation result. A late/backfilled
@@ -2102,14 +2099,6 @@ export async function syncEcountPurchasingSnapshot(input: {
       chinaInventoryQuantity: reportKinds.has('chinaInventory') ? sumQuantities(input.snapshot.chinaInventory) : 0,
     }
   })
-
-  if (refreshOutbound) {
-    await cleanupExpiredCompletedOutboundItems({
-      userId: input.userId,
-      reflectedByUserId: input.requestedByUserId,
-      fallbackExchangeRateKrw: exchangeRateReference.rate,
-    })
-  }
 
   return result
 }

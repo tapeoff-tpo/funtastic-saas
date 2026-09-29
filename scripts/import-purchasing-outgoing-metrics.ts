@@ -1,4 +1,5 @@
 ﻿import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import postgres from 'postgres'
 import { parseMonthlySalesCalculator } from '../src/lib/purchasing/monthly-sales-calculator'
 
@@ -86,6 +87,18 @@ async function main() {
         updated += result.length
       }
     })
+    await sql`
+      INSERT INTO data_refresh_events (user_id, source, metadata)
+      VALUES (
+        ${ownerId}::uuid,
+        'purchasing_metrics:monthlySalesCalculator',
+        ${JSON.stringify({
+          fileName: basename(filePath),
+          matched: matched.length,
+          sourceColumn: 'D',
+        })}::jsonb
+      )
+    `
     console.log(JSON.stringify({ updated, sourceColumn: 'D', importedAt }, null, 2))
   } finally {
     await sql.end()

@@ -119,7 +119,6 @@ export function ChinaShipmentsBoard({
   selectedStep: ChinaShipmentStage
   showCreate: boolean
 }) {
-  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [stockSearch, setStockSearch] = useState('')
   const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
@@ -200,7 +199,7 @@ export function ChinaShipmentsBoard({
       setDisplayName(defaultShipmentDisplayName(nextDate))
       setDisplayNameIsDateDefault(true)
       setMemo('')
-      router.replace(shipmentHref(result.shipmentId, 'items'), { scroll: false })
+      window.location.replace(shipmentHref(result.shipmentId, 'items'))
     })
   }
 
@@ -212,9 +211,9 @@ export function ChinaShipmentsBoard({
           shipments={shipments}
           selectedShipment={showCreate ? null : selectedShipment?.shipment ?? null}
           showCreate={showCreate}
-          onToggleCreate={() => router.replace(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1', { scroll: false })}
+          onToggleCreate={() => window.location.replace(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1')}
           onSelect={(id) => {
-            router.replace(shipmentHref(id, 'items'), { scroll: false })
+            window.location.replace(shipmentHref(id, 'items'))
           }}
         />
         {showCreate ? (
@@ -291,7 +290,7 @@ export function ChinaShipmentsBoard({
           stage={selectedStep}
           isPending={isPending}
           startTransition={startTransition}
-          onStageChange={(stage) => selectedShipment && router.replace(shipmentHref(selectedShipment.shipment.id, stage), { scroll: false })}
+          onStageChange={(stage) => selectedShipment && window.location.replace(shipmentHref(selectedShipment.shipment.id, stage))}
         /> : null}
       </div>
     </div>
@@ -341,7 +340,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         return
       }
       toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
-      router.replace('/purchasing/china-shipments', { scroll: false })
+      window.location.replace('/purchasing/china-shipments')
     })
   }
 

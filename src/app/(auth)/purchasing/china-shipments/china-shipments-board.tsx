@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation'
 import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
+import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import {
+  addChinaOutboundShipmentItemsAction,
   assignChinaOutboundBoxesToPalletsAction,
   cancelChinaOutboundShipmentAction,
   createChinaOutboundShipmentAction,
@@ -60,6 +62,7 @@ export type ChinaShipmentDetailView = {
   }
   items: Array<{
     id: string
+    inventoryId: string
     warehouseCode: string
     sku: string
     productName: string
@@ -108,15 +111,16 @@ export function ChinaShipmentsBoard({
   shipments,
   selectedShipment,
   selectedStep,
+  showCreate,
 }: {
   inventoryItems: ChinaShipmentStockItem[]
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
+  showCreate: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [showCreate, setShowCreate] = useState(false)
   const [stockSearch, setStockSearch] = useState('')
   const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
@@ -188,7 +192,6 @@ export function ChinaShipmentsBoard({
       }
 
       toast.success('중국출고요청을 만들고 출고 재고를 예약했습니다.')
-      setShowCreate(false)
       setQuantities({})
       setSelectedWarehouseCodes([])
       setDestinationName('')
@@ -205,13 +208,12 @@ export function ChinaShipmentsBoard({
     <div className="space-y-4" aria-busy={isPending}>
       <div className="space-y-3">
         <ShipmentSelector
-          key={selectedShipment?.shipment.id ?? 'no-shipment'}
+          key={showCreate ? 'new-shipment' : selectedShipment?.shipment.id ?? 'no-shipment'}
           shipments={shipments}
-          selectedShipment={selectedShipment?.shipment ?? null}
+          selectedShipment={showCreate ? null : selectedShipment?.shipment ?? null}
           showCreate={showCreate}
-          onToggleCreate={() => setShowCreate((open) => !open)}
+          onToggleCreate={() => router.replace(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1', { scroll: false })}
           onSelect={(id) => {
-            setShowCreate(false)
             router.replace(shipmentHref(id, 'items'), { scroll: false })
           }}
         />
@@ -220,7 +222,7 @@ export function ChinaShipmentsBoard({
           <form onSubmit={createShipment} className="space-y-4 p-4">
             <div className="grid gap-3 md:grid-cols-3">
               <Field label="출고작업명"><input value={displayName} onChange={(event) => { setDisplayName(event.target.value); setDisplayNameIsDateDefault(false) }} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>
-              <Field label="도착지"><input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} placeholder="예: 한국 1창고" /></Field>
+              <Field label="도착지"><select value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} required><option value="">도착지 선택</option>{CHINA_OUTBOUND_DESTINATIONS.map((destination) => <option key={destination} value={destination}>{destination}</option>)}</select></Field>
               <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => changePlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
             </div>
             <Field label="메모"><input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" /></Field>
@@ -278,18 +280,19 @@ export function ChinaShipmentsBoard({
                 </>
               ) : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
             </section>
-            <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 중국출고요청 만들기</button></div>
+            <div className="flex justify-end"><button type="submit" disabled={isPending || !destinationName || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 중국출고요청 만들기</button></div>
           </form>
           </section>
         ) : null}
-        <ShipmentDetailPanel
+        {!showCreate ? <ShipmentDetailPanel
           key={selectedShipment?.shipment.id ?? 'no-shipment'}
           detail={selectedShipment}
+          inventoryItems={inventoryItems}
           stage={selectedStep}
           isPending={isPending}
           startTransition={startTransition}
           onStageChange={(stage) => selectedShipment && router.replace(shipmentHref(selectedShipment.shipment.id, stage), { scroll: false })}
-        />
+        /> : null}
       </div>
     </div>
   )
@@ -370,8 +373,9 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
   )
 }
 
-function ShipmentDetailPanel({ detail, stage, isPending, startTransition, onStageChange }: {
+function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTransition, onStageChange }: {
   detail: ChinaShipmentDetailView | null
+  inventoryItems: ChinaShipmentStockItem[]
   stage: ChinaShipmentStage
   isPending: boolean
   startTransition: ReturnType<typeof useTransition>[1]
@@ -441,7 +445,7 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, onStag
         <StageButton active={stage === 'summary'} step="4단계" title="최종 적재리스트" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('summary')} />
       </nav>
 
-      {stage === 'items' ? <OutboundItemsPanel items={items} boxItemsByItem={boxItemsByItem} /> : null}
+      {stage === 'items' ? <section className="space-y-3"><ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} editable={editable} isPending={isPending} /><OutboundItemsPanel items={items} boxItemsByItem={boxItemsByItem} /></section> : null}
 
       {stage === 'boxes' ? <section className="space-y-4">
         <section className="rounded-lg border bg-muted/20 p-4">
@@ -488,7 +492,54 @@ function OutboundItemsPanel({ items, boxItemsByItem }: {
   boxItemsByItem: Map<string, ChinaShipmentDetailView['boxItems']>
 }) {
   const sortedItems = [...items].sort(compareShipmentItems)
-  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3><p className="mt-1 text-sm text-muted-foreground">중국출고요청에 담긴 품목과 출고수량입니다. 수량을 바꾸려면 새 요청을 만들기 전에 조정해주세요.</p></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
+  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3><p className="mt-1 text-sm text-muted-foreground">추가 품목이나 추가 수량은 위의 품목 추가에서 넣을 수 있습니다. 이미 박스분할한 수량은 그대로 유지됩니다.</p></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
+}
+
+function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPending }: {
+  shipmentId: string
+  inventoryItems: ChinaShipmentStockItem[]
+  editable: boolean
+  isPending: boolean
+}) {
+  const router = useRouter()
+  const [isOpen, setIsOpen] = useState(false)
+  const [isAdding, startAdding] = useTransition()
+  const [search, setSearch] = useState('')
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
+  const searchKeyword = search.trim().toLocaleLowerCase('ko-KR')
+  const availableItems = inventoryItems
+    .filter((item) => item.availableQuantity > 0)
+    .filter((item) => !searchKeyword || [item.sku, item.productName, item.optionName ?? '', item.warehouseCode]
+      .some((value) => value.toLocaleLowerCase('ko-KR').includes(searchKeyword)))
+    .sort(compareShipmentItems)
+  const additionalLines = inventoryItems.flatMap((item) => {
+    const quantity = positiveInteger(quantities[item.id] ?? '')
+    return quantity ? [{ inventoryId: item.id, quantity }] : []
+  })
+  const totalQuantity = additionalLines.reduce((total, line) => total + line.quantity, 0)
+  const disabled = !editable || isPending || isAdding
+
+  function addItems(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (additionalLines.length === 0) {
+      toast.error('추가할 품목과 수량을 입력해주세요.')
+      return
+    }
+    startAdding(async () => {
+      const result = await addChinaOutboundShipmentItemsAction({ shipmentId, lines: additionalLines })
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      setQuantities({})
+      setSearch('')
+      setIsOpen(false)
+      toast.success(`출고품목 ${additionalLines.length.toLocaleString('ko-KR')}종 · ${totalQuantity.toLocaleString('ko-KR')}개를 추가했습니다.`)
+      router.refresh()
+    })
+  }
+
+  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가</h3><p className="mt-1 text-xs text-muted-foreground">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</p></div><button type="button" disabled={disabled} onClick={() => setIsOpen((open) => !open)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
 }
 
 function ProductBoxSplitEditor({ item, allocations, editable, isPending, onSave }: {

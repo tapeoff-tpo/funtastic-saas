@@ -23,7 +23,8 @@ export default async function ChinaShipmentsPage({
   if (!user) return null
 
   const params = await searchParams
-  const selectedShipmentId = parseShipmentId(stringParam(params.shipment))
+  const showCreate = stringParam(params.create) === '1'
+  const selectedShipmentId = showCreate ? undefined : parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [{ items: inventoryItems }, shipments, detail] = await Promise.all([
@@ -71,6 +72,7 @@ export default async function ChinaShipmentsPage({
         shipments={shipmentItems}
         selectedShipment={detail ? toShipmentDetailView(detail) : null}
         selectedStep={selectedStep}
+        showCreate={showCreate}
       />
     </div>
   )
@@ -94,6 +96,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
     },
     items: detail.items.map((item) => ({
       id: item.id,
+      inventoryId: item.inventoryId,
       warehouseCode: item.warehouseCode,
       sku: item.sku,
       productName: item.productName,

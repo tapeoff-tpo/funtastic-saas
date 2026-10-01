@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
+import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import {
+  addChinaOutboundShipmentItems,
   addChinaOutboundBox,
   addChinaOutboundBoxItem,
   addChinaOutboundPallet,
@@ -49,7 +51,7 @@ const adjustSchema = z.object({
 const createShipmentSchema = z.object({
   displayName: optionalText(200),
   shipmentNo: optionalText(100),
-  destinationName: optionalText(1_000),
+  destinationName: z.enum(CHINA_OUTBOUND_DESTINATIONS, { error: '도착지를 선택해주세요.' }),
   destinationAddress: optionalText(2_000),
   forwarderName: optionalText(200),
   externalReference: optionalText(200),
@@ -59,6 +61,14 @@ const createShipmentSchema = z.object({
     inventoryId,
     quantity: z.coerce.number().int().positive('출고 수량은 1 이상의 정수여야 합니다.'),
   })).min(1, '출고할 상품을 하나 이상 선택해주세요.'),
+})
+
+const addShipmentItemsSchema = z.object({
+  shipmentId,
+  lines: z.array(z.object({
+    inventoryId,
+    quantity: z.coerce.number().int().positive('추가 출고 수량은 1 이상의 정수여야 합니다.'),
+  })).min(1, '추가할 상품을 하나 이상 선택해주세요.'),
 })
 
 const updateShipmentSchema = z.object({
@@ -252,6 +262,15 @@ export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Prom
     const value = saveItemBoxSplitsSchema.parse(input)
     const actor = await getActor()
     await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function addChinaOutboundShipmentItemsAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = addShipmentItemsSchema.parse(input)
+    const actor = await getActor()
+    await addChinaOutboundShipmentItems({ ...value, ...actor })
     revalidateSaasChinaPaths()
   })
 }

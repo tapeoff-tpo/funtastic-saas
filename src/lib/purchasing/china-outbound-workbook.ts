@@ -522,7 +522,8 @@ function cellText(cell: ExcelJS.Cell) {
 }
 
 function isEmptyRow(row: ExcelJS.Row) {
-  return !row.values.slice(1).some((value) => cellText({ value } as ExcelJS.Cell).trim())
+  const values = Array.isArray(row.values) ? row.values.slice(1) : Object.values(row.values)
+  return !values.some((value) => cellText({ value } as ExcelJS.Cell).trim())
 }
 
 function positiveInteger(value: string) {

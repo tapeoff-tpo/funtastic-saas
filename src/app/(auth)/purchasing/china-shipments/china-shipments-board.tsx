@@ -84,7 +84,6 @@ export type ChinaShipmentDetailView = {
   boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number }>
 }
 
-type InventorySummary = { onHandQuantity: number; reservedQuantity: number; availableQuantity: number }
 type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string }
 type WorkbookPreview = {
   boxSplits: Array<{ shipmentItemId: string; allocations: Array<{ boxNo: string; quantity: number }> }>
@@ -106,20 +105,18 @@ const statusLabels: Record<string, string> = {
 
 export function ChinaShipmentsBoard({
   inventoryItems,
-  inventorySummary,
   shipments,
   selectedShipment,
   selectedStep,
 }: {
   inventoryItems: ChinaShipmentStockItem[]
-  inventorySummary: InventorySummary
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [showCreate, setShowCreate] = useState(shipments.length === 0)
+  const [showCreate, setShowCreate] = useState(false)
   const [stockSearch, setStockSearch] = useState('')
   const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
@@ -181,8 +178,14 @@ export function ChinaShipmentsBoard({
         memo,
         lines: stagedShipmentLines,
       })
-      if (!result.ok) return toast.error(result.error)
-      if (!result.shipmentId) return toast.error('중국출고요청을 열지 못했습니다. 다시 시도해주세요.')
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      if (!result.shipmentId) {
+        toast.error('중국출고요청을 열지 못했습니다. 다시 시도해주세요.')
+        return
+      }
 
       toast.success('중국출고요청을 만들고 출고 재고를 예약했습니다.')
       setShowCreate(false)
@@ -201,24 +204,17 @@ export function ChinaShipmentsBoard({
 
   return (
     <div className="space-y-4" aria-busy={isPending}>
-      <section className="grid gap-2 sm:grid-cols-3">
-        <SummaryCard label="SaaS 현재고" value={inventorySummary.onHandQuantity} />
-        <SummaryCard label="출고 예약" value={inventorySummary.reservedQuantity} tone="amber" />
-        <SummaryCard label="새 작업 가능" value={inventorySummary.availableQuantity} tone="emerald" />
-      </section>
-
-      <section className="rounded-lg border bg-card">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="font-semibold">1단계 · 중국출고요청 만들기</h2>
-            <p className="mt-1 text-xs text-muted-foreground">출고할 상품과 수량을 먼저 확정합니다. 다음 단계에서 박스분할, 파렛트적재를 순서대로 진행합니다.</p>
-          </div>
-          <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
-            <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : '새 중국출고요청'}
-          </button>
-        </div>
-
+      <div className="space-y-3">
+        <ShipmentSelector
+          key={selectedShipment?.shipment.id ?? 'no-shipment'}
+          shipments={shipments}
+          selectedShipment={selectedShipment?.shipment ?? null}
+          showCreate={showCreate}
+          onToggleCreate={() => setShowCreate((open) => !open)}
+          onSelect={(id) => router.push(shipmentHref(id, 'items'))}
+        />
         {showCreate ? (
+          <section className="rounded-lg border bg-card">
           <form onSubmit={createShipment} className="space-y-4 p-4">
             <div className="grid gap-3 md:grid-cols-3">
               <Field label="출고작업명"><input value={displayName} onChange={(event) => { setDisplayName(event.target.value); setDisplayNameIsDateDefault(false) }} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>
@@ -282,16 +278,8 @@ export function ChinaShipmentsBoard({
             </section>
             <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 중국출고요청 만들기</button></div>
           </form>
+          </section>
         ) : null}
-      </section>
-
-      <div className="space-y-3">
-        <ShipmentSelector
-          key={selectedShipment?.shipment.id ?? 'no-shipment'}
-          shipments={shipments}
-          selectedShipment={selectedShipment?.shipment ?? null}
-          onSelect={(id) => router.push(shipmentHref(id, 'items'))}
-        />
         <ShipmentDetailPanel
           key={selectedShipment?.shipment.id ?? 'no-shipment'}
           detail={selectedShipment}
@@ -305,9 +293,11 @@ export function ChinaShipmentsBoard({
   )
 }
 
-function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
+function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCreate, onSelect }: {
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView['shipment'] | null
+  showCreate: boolean
+  onToggleCreate: () => void
   onSelect: (id: string) => void
 }) {
   const router = useRouter()
@@ -326,7 +316,10 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
         displayName: draftDisplayName.trim() || null,
         plannedOutboundDate: draftPlannedOutboundDate || null,
       })
-      if (!result.ok) return toast.error(result.error)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
       setIsEditing(false)
       toast.success('출고작업 이름과 날짜를 수정했습니다.')
       router.refresh()
@@ -338,7 +331,10 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
     if (!window.confirm(`“${shipmentDisplayName(selectedShipment)}” 출고작업을 정말 삭제할까요?\n예약 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return
     startTransition(async () => {
       const result = await deleteChinaOutboundShipmentAction({ shipmentId: selectedShipment.id })
-      if (!result.ok) return toast.error(result.error)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
       toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
       router.push('/purchasing/china-shipments')
       router.refresh()
@@ -355,6 +351,9 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
             {activeShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
           </select>
         </label>
+        <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">
+          <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : '새 중국출고요청'}
+        </button>
         {selectedShipment ? <div className="flex shrink-0 gap-2">
           <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
@@ -365,7 +364,7 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
         <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
         <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
       </form> : null}
-      {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {String(shipments.length - activeShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
+      {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - activeShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
     </section>
   )
 }
@@ -380,9 +379,7 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, onStag
   const router = useRouter()
   const [boxPage, setBoxPage] = useState(1)
 
-  if (!detail) {
-    return <section className="flex min-h-[300px] items-center justify-center rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">위 목록에서 중국출고요청을 선택하면 출고품목, 박스분할, 파렛트적재 작업을 순서대로 처리할 수 있습니다.</section>
-  }
+  if (!detail) return null
 
   const { shipment, items, pallets, boxes, boxItems } = detail
   const editable = editableStatuses.has(shipment.status)
@@ -409,7 +406,10 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, onStag
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
       const result = await action()
-      if (!result.ok) return toast.error(result.error ?? '처리하지 못했습니다.')
+      if (!result.ok) {
+        toast.error(result.error ?? '처리하지 못했습니다.')
+        return
+      }
       afterSuccess?.()
       toast.success(successMessage)
       router.refresh()
@@ -635,11 +635,6 @@ function PalletSummaryCards({ summaries, detailed = false }: { summaries: Pallet
 
 function EmptyStage({ title, description, onMove, moveLabel }: { title: string; description: string; onMove: () => void; moveLabel: string }) {
   return <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p><button type="button" onClick={onMove} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">{moveLabel}</button></section>
-}
-
-function SummaryCard({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'amber' | 'emerald' }) {
-  const toneClass = tone === 'amber' ? 'border-amber-200 bg-amber-50' : tone === 'emerald' ? 'border-emerald-200 bg-emerald-50' : 'bg-card'
-  return <article className={`rounded-lg border px-4 py-3 ${toneClass}`}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></article>
 }
 
 function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {

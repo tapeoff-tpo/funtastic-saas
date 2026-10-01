@@ -26,7 +26,7 @@ export default async function ChinaShipmentsPage({
   const selectedShipmentId = parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [{ items: inventoryItems, summary }, shipments, detail] = await Promise.all([
+  const [{ items: inventoryItems }, shipments, detail] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
     listChinaOutboundShipments(workspaceUserId),
     selectedShipmentId ? getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId: selectedShipmentId }) : Promise.resolve(null),
@@ -64,14 +64,10 @@ export default async function ChinaShipmentsPage({
           <h1 className="text-2xl font-semibold">중국출고</h1>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">SaaS 재고 전용</span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          중국출고요청 품목을 확정한 뒤 상품별 박스분할·CBM 계산·파렛트 적재를 순서대로 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
-        </p>
       </header>
 
       <ChinaShipmentsBoard
         inventoryItems={stockItems}
-        inventorySummary={summary}
         shipments={shipmentItems}
         selectedShipment={detail ? toShipmentDetailView(detail) : null}
         selectedStep={selectedStep}

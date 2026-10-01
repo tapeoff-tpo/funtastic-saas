@@ -9,6 +9,7 @@ import {
   addChinaOutboundBoxItem,
   addChinaOutboundPallet,
   adjustSaasChinaInventory,
+  assignChinaOutboundBoxesToPallets,
   cancelChinaOutboundShipment,
   configureChinaOutboundPackaging,
   createChinaOutboundShipment,
@@ -18,6 +19,7 @@ import {
   receiveSaasChinaInventory,
   removeChinaOutboundBoxItem,
   saveChinaOutboundBoxDimensions,
+  saveChinaOutboundItemBoxSplits,
   saveChinaOutboundItemPacking,
   updateChinaOutboundShipment,
 } from '@/lib/purchasing/saas-china-outbound'
@@ -93,6 +95,39 @@ const saveItemPackingSchema = z.object({
     boxNumber: z.coerce.number().int().positive('박스 번호는 1 이상의 정수여야 합니다.'),
     quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
   })).max(5_000, '분할 박스는 5,000개 이하로 입력해주세요.'),
+})
+
+const splitDimension = z.coerce.number()
+  .finite('박스 규격은 숫자로 입력해주세요.')
+  .positive('박스 규격은 0보다 커야 합니다.')
+  .max(9_999_999.99, '박스 규격이 너무 큽니다.')
+  .nullable()
+  .optional()
+
+const saveItemBoxSplitsSchema = z.object({
+  shipmentId,
+  shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
+  allocations: z.array(z.object({
+    boxNo: text('박스 번호', 100),
+    quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
+    lengthCm: splitDimension,
+    widthCm: splitDimension,
+    heightCm: splitDimension,
+  }).superRefine((value, context) => {
+    const dimensions = [value.lengthCm, value.widthCm, value.heightCm]
+    const filledCount = dimensions.filter((dimension) => dimension != null).length
+    if (filledCount > 0 && filledCount < dimensions.length) {
+      context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력하거나 모두 비워주세요.' })
+    }
+  })).max(5_000, '분할 박스는 5,000개 이하로 입력해주세요.'),
+})
+
+const assignPalletsSchema = z.object({
+  shipmentId,
+  assignments: z.array(z.object({
+    boxNo: text('박스 번호', 100),
+    palletNo: z.string().trim().max(100, '파렛트 번호는 100자 이하로 입력해주세요.').nullable(),
+  })).max(5_000, '파렛트 배정은 5,000개 이하로 입력해주세요.'),
 })
 
 const configurePackagingSchema = z.object({
@@ -208,6 +243,24 @@ export async function saveChinaOutboundItemPackingAction(input: unknown): Promis
     const value = saveItemPackingSchema.parse(input)
     const actor = await getActor()
     await saveChinaOutboundItemPacking({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = saveItemBoxSplitsSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function assignChinaOutboundBoxesToPalletsAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = assignPalletsSchema.parse(input)
+    const actor = await getActor()
+    await assignChinaOutboundBoxesToPallets({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

@@ -165,6 +165,29 @@ export type ChinaOutboundPackingAllocationInput = {
   quantity: number
 }
 
+/**
+ * The current China-outbound flow deliberately keeps box splitting separate
+ * from pallet loading. A box can be created and filled before the operator
+ * knows which pallet it will be loaded on.
+ */
+export type ChinaOutboundBoxSplitInput = {
+  boxNo: string
+  quantity: number
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+}
+
+export type ChinaOutboundPalletAssignmentInput = {
+  boxNo: string
+  palletNo: string | null
+}
+
+export type ChinaOutboundWorkbookBoxSplitInput = {
+  shipmentItemId: string
+  allocations: ChinaOutboundBoxSplitInput[]
+}
+
 export type ChinaOutboundBoxDimensionsInput = {
   lengthCm: number | null
   widthCm: number | null
@@ -186,7 +209,11 @@ export type CreateChinaOutboundShipmentInput = {
 }
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type ChinaOutboundShipmentRow = typeof chinaOutboundShipments.$inferSelect
 type ChinaOutboundShipmentItemRow = typeof chinaOutboundShipmentItems.$inferSelect
+type ChinaOutboundPalletRow = typeof chinaOutboundPallets.$inferSelect
+type ChinaOutboundBoxRow = typeof chinaOutboundBoxes.$inferSelect
+type ChinaOutboundBoxItemRow = typeof chinaOutboundBoxItems.$inferSelect
 type SaasChinaPurchaseLinkRow = typeof saasChinaPurchaseLinks.$inferSelect
 
 const EDITABLE_SHIPMENT_STATUSES: ChinaOutboundShipmentStatus[] = ['draft', 'packing']
@@ -1384,6 +1411,180 @@ export async function saveChinaOutboundBoxDimensions(input: {
   })
 }
 
+/**
+ * Replaces one item's box split without assigning a pallet. This is the
+ * normal step-two write path; pallet assignment happens only in step three.
+ */
+export async function saveChinaOutboundItemBoxSplits(input: {
+  userId: string
+  shipmentId: string
+  shipmentItemId: string
+  allocations: ChinaOutboundBoxSplitInput[]
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const allocations = normalizeChinaOutboundBoxSplitAllocations(input.allocations)
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const shipmentItem = await getChinaOutboundShipmentItem(tx, input.userId, shipment.id, input.shipmentItemId)
+    const [boxes, boxItems] = await Promise.all([
+      tx
+        .select()
+        .from(chinaOutboundBoxes)
+        .where(and(
+          eq(chinaOutboundBoxes.userId, input.userId),
+          eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        ))
+        .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
+      tx
+        .select()
+        .from(chinaOutboundBoxItems)
+        .where(and(
+          eq(chinaOutboundBoxItems.userId, input.userId),
+          eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+        )),
+    ])
+
+    await replaceChinaOutboundItemBoxSplitsInTransaction({
+      tx,
+      userId: input.userId,
+      shipment,
+      shipmentItem,
+      allocations,
+      boxes,
+      boxItems,
+    })
+  })
+}
+
+/**
+ * Assigns filled boxes to the pallet numbers the operator actually entered.
+ * Empty pallet slots are never pre-created, so the displayed pallet count is
+ * always the real number used for this shipment.
+ */
+export async function assignChinaOutboundBoxesToPallets(input: {
+  userId: string
+  shipmentId: string
+  assignments: ChinaOutboundPalletAssignmentInput[]
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const assignments = normalizeChinaOutboundPalletAssignments(input.assignments)
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const [pallets, boxes] = await Promise.all([
+      tx
+        .select()
+        .from(chinaOutboundPallets)
+        .where(and(
+          eq(chinaOutboundPallets.userId, input.userId),
+          eq(chinaOutboundPallets.shipmentId, shipment.id),
+        ))
+        .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
+      tx
+        .select()
+        .from(chinaOutboundBoxes)
+        .where(and(
+          eq(chinaOutboundBoxes.userId, input.userId),
+          eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        )),
+    ])
+
+    await assignChinaOutboundBoxesToPalletsInTransaction({
+      tx,
+      userId: input.userId,
+      shipment,
+      assignments,
+      pallets,
+      boxes,
+    })
+  })
+}
+
+/** Applies the box and pallet sheets from one downloaded work workbook. */
+export async function applyChinaOutboundWorkbook(input: {
+  userId: string
+  shipmentId: string
+  boxSplits: ChinaOutboundWorkbookBoxSplitInput[]
+  palletAssignments: ChinaOutboundPalletAssignmentInput[]
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const boxSplits = normalizeChinaOutboundWorkbookBoxSplits(input.boxSplits)
+  const palletAssignments = normalizeChinaOutboundPalletAssignments(input.palletAssignments)
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const [shipmentItems, initialBoxes, initialBoxItems, initialPallets] = await Promise.all([
+      tx
+        .select()
+        .from(chinaOutboundShipmentItems)
+        .where(and(
+          eq(chinaOutboundShipmentItems.userId, input.userId),
+          eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
+        )),
+      tx
+        .select()
+        .from(chinaOutboundBoxes)
+        .where(and(
+          eq(chinaOutboundBoxes.userId, input.userId),
+          eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        ))
+        .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
+      tx
+        .select()
+        .from(chinaOutboundBoxItems)
+        .where(and(
+          eq(chinaOutboundBoxItems.userId, input.userId),
+          eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+        )),
+      tx
+        .select()
+        .from(chinaOutboundPallets)
+        .where(and(
+          eq(chinaOutboundPallets.userId, input.userId),
+          eq(chinaOutboundPallets.shipmentId, shipment.id),
+        ))
+        .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
+    ])
+    const itemsById = new Map(shipmentItems.map((item) => [item.id, item]))
+    let boxes = [...initialBoxes]
+    let boxItems = [...initialBoxItems]
+
+    for (const boxSplit of boxSplits) {
+      const shipmentItem = itemsById.get(boxSplit.shipmentItemId)
+      if (!shipmentItem) throw new Error('엑셀의 출고상품 ID가 현재 출고작업과 일치하지 않습니다.')
+      const result = await replaceChinaOutboundItemBoxSplitsInTransaction({
+        tx,
+        userId: input.userId,
+        shipment,
+        shipmentItem,
+        allocations: boxSplit.allocations,
+        boxes,
+        boxItems,
+      })
+      boxes = result.boxes
+      boxItems = result.boxItems
+    }
+
+    await assignChinaOutboundBoxesToPalletsInTransaction({
+      tx,
+      userId: input.userId,
+      shipment,
+      assignments: palletAssignments,
+      pallets: [...initialPallets],
+      boxes,
+    })
+
+    return {
+      updatedItemCount: boxSplits.length,
+      updatedPalletAssignmentCount: palletAssignments.length,
+    }
+  })
+}
+
 export async function addChinaOutboundBoxItem(input: {
   userId: string
   shipmentId: string
@@ -2218,6 +2419,227 @@ function normalizeChinaOutboundPackingAllocations(allocations: ChinaOutboundPack
     })
   }
   return [...quantitiesByBoxNumber.entries()].map(([boxNumber, allocation]) => ({ boxNumber, ...allocation }))
+}
+
+function normalizeChinaOutboundWorkbookBoxSplits(boxSplits: ChinaOutboundWorkbookBoxSplitInput[]) {
+  const allocationsByShipmentItemId = new Map<string, ChinaOutboundBoxSplitInput[]>()
+  for (const boxSplit of boxSplits) {
+    const shipmentItemId = requiredText(boxSplit.shipmentItemId, '출고상품 ID')
+    if (allocationsByShipmentItemId.has(shipmentItemId)) {
+      throw new Error('같은 출고상품 ID가 엑셀에 여러 번 있습니다.')
+    }
+    allocationsByShipmentItemId.set(shipmentItemId, normalizeChinaOutboundBoxSplitAllocations(boxSplit.allocations))
+  }
+  return [...allocationsByShipmentItemId.entries()].map(([shipmentItemId, allocations]) => ({ shipmentItemId, allocations }))
+}
+
+function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBoxSplitInput[]) {
+  const allocationsByBoxNo = new Map<string, ChinaOutboundBoxSplitInput>()
+  for (const allocation of allocations) {
+    const boxNo = requiredText(allocation.boxNo, '박스 번호')
+    const quantity = positiveInteger(allocation.quantity, '박스 적재 수량')
+    const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    const current = allocationsByBoxNo.get(boxNo)
+    if (current) {
+      const currentDimensions = normalizeOptionalChinaOutboundBoxDimensions(current)
+      if (dimensions && currentDimensions && !sameChinaOutboundBoxDimensions(dimensions, currentDimensions)) {
+        throw new Error(`${boxNo}의 가로·세로·높이가 서로 다릅니다.`)
+      }
+      allocationsByBoxNo.set(boxNo, {
+        boxNo,
+        quantity: current.quantity + quantity,
+        ...(currentDimensions ?? dimensions ?? {}),
+      })
+      continue
+    }
+    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(dimensions ?? {}) })
+  }
+  return [...allocationsByBoxNo.values()]
+}
+
+function normalizeChinaOutboundPalletAssignments(assignments: ChinaOutboundPalletAssignmentInput[]) {
+  const palletByBoxNo = new Map<string, string | null>()
+  for (const assignment of assignments) {
+    const boxNo = requiredText(assignment.boxNo, '박스 번호')
+    const palletNo = optionalText(assignment.palletNo)
+    const current = palletByBoxNo.get(boxNo)
+    if (current !== undefined && current !== palletNo) {
+      throw new Error(`${boxNo}에 서로 다른 파렛트 번호가 입력되었습니다.`)
+    }
+    palletByBoxNo.set(boxNo, palletNo)
+  }
+  return [...palletByBoxNo.entries()].map(([boxNo, palletNo]) => ({ boxNo, palletNo }))
+}
+
+function normalizeOptionalChinaOutboundBoxDimensions(input: {
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+}) {
+  const hasValue = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value != null)
+  if (!hasValue) return null
+  return normalizeChinaOutboundBoxDimensions({
+    lengthCm: input.lengthCm ?? null,
+    widthCm: input.widthCm ?? null,
+    heightCm: input.heightCm ?? null,
+  })
+}
+
+function sameChinaOutboundBoxDimensions(
+  left: ChinaOutboundBoxDimensionsInput,
+  right: ChinaOutboundBoxDimensionsInput,
+) {
+  return left.lengthCm === right.lengthCm
+    && left.widthCm === right.widthCm
+    && left.heightCm === right.heightCm
+}
+
+async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
+  tx: DbTransaction
+  userId: string
+  shipment: ChinaOutboundShipmentRow
+  shipmentItem: ChinaOutboundShipmentItemRow
+  allocations: ChinaOutboundBoxSplitInput[]
+  boxes: ChinaOutboundBoxRow[]
+  boxItems: ChinaOutboundBoxItemRow[]
+}) {
+  const totalQuantity = input.allocations.reduce((total, allocation) => total + allocation.quantity, 0)
+  if (totalQuantity > input.shipmentItem.reservedQuantity) {
+    throw new Error(`${input.shipmentItem.sku}의 분할 수량은 출고수량 ${input.shipmentItem.reservedQuantity.toLocaleString('ko-KR')}개를 넘을 수 없습니다.`)
+  }
+
+  const boxesByNo = new Map(input.boxes.map((box) => [box.boxNo, box]))
+  for (const allocation of input.allocations) {
+    const box = boxesByNo.get(allocation.boxNo)
+    if (box?.status === 'sealed') throw new Error(`${box.boxNo}은(는) 봉인되어 수정할 수 없습니다.`)
+  }
+
+  const previousBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId === input.shipmentItem.id)
+  if (previousBoxItems.length > 0) {
+    await input.tx
+      .delete(chinaOutboundBoxItems)
+      .where(and(
+        eq(chinaOutboundBoxItems.userId, input.userId),
+        eq(chinaOutboundBoxItems.shipmentId, input.shipment.id),
+        eq(chinaOutboundBoxItems.shipmentItemId, input.shipmentItem.id),
+      ))
+  }
+  let nextBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId !== input.shipmentItem.id)
+
+  for (const allocation of input.allocations) {
+    let box = boxesByNo.get(allocation.boxNo)
+    const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    if (!box) {
+      const [created] = await input.tx
+        .insert(chinaOutboundBoxes)
+        .values({
+          shipmentId: input.shipment.id,
+          userId: input.userId,
+          palletId: null,
+          boxNo: allocation.boxNo,
+          sortOrder: input.boxes.length,
+          lengthCm: dimensions?.lengthCm == null ? null : String(dimensions.lengthCm),
+          widthCm: dimensions?.widthCm == null ? null : String(dimensions.widthCm),
+          heightCm: dimensions?.heightCm == null ? null : String(dimensions.heightCm),
+        })
+        .returning()
+      if (!created) throw new Error('박스를 저장하지 못했습니다.')
+      box = created
+      input.boxes.push(created)
+      boxesByNo.set(created.boxNo, created)
+    } else if (dimensions) {
+      const [updated] = await input.tx
+        .update(chinaOutboundBoxes)
+        .set({
+          lengthCm: String(dimensions.lengthCm),
+          widthCm: String(dimensions.widthCm),
+          heightCm: String(dimensions.heightCm),
+          updatedAt: new Date(),
+        })
+        .where(eq(chinaOutboundBoxes.id, box.id))
+        .returning()
+      if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
+      const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
+      if (index >= 0) input.boxes[index] = updated
+      box = updated
+      boxesByNo.set(updated.boxNo, updated)
+    }
+
+    const [boxItem] = await input.tx
+      .insert(chinaOutboundBoxItems)
+      .values({
+        boxId: box.id,
+        shipmentId: input.shipment.id,
+        shipmentItemId: input.shipmentItem.id,
+        userId: input.userId,
+        quantity: allocation.quantity,
+      })
+      .returning()
+    if (!boxItem) throw new Error('박스 분할 수량을 저장하지 못했습니다.')
+    nextBoxItems = [...nextBoxItems, boxItem]
+  }
+
+  await input.tx
+    .update(chinaOutboundShipmentItems)
+    .set({ packedQuantity: totalQuantity, updatedAt: new Date() })
+    .where(eq(chinaOutboundShipmentItems.id, input.shipmentItem.id))
+
+  if (input.shipment.status === 'draft' && totalQuantity > 0) {
+    await input.tx
+      .update(chinaOutboundShipments)
+      .set({ status: 'packing', updatedAt: new Date() })
+      .where(eq(chinaOutboundShipments.id, input.shipment.id))
+  }
+
+  return { boxes: input.boxes, boxItems: nextBoxItems }
+}
+
+async function assignChinaOutboundBoxesToPalletsInTransaction(input: {
+  tx: DbTransaction
+  userId: string
+  shipment: ChinaOutboundShipmentRow
+  assignments: ChinaOutboundPalletAssignmentInput[]
+  pallets: ChinaOutboundPalletRow[]
+  boxes: ChinaOutboundBoxRow[]
+}) {
+  const boxesByNo = new Map(input.boxes.map((box) => [box.boxNo, box]))
+  const palletsByNo = new Map(input.pallets.map((pallet) => [pallet.palletNo, pallet]))
+
+  for (const assignment of input.assignments) {
+    const box = boxesByNo.get(assignment.boxNo)
+    if (!box) throw new Error(`${assignment.boxNo}을(를) 현재 출고작업에서 찾을 수 없습니다.`)
+    if (box.status === 'sealed') throw new Error(`${box.boxNo}은(는) 봉인되어 파렛트를 변경할 수 없습니다.`)
+
+    let pallet: ChinaOutboundPalletRow | null = null
+    if (assignment.palletNo) {
+      pallet = palletsByNo.get(assignment.palletNo) ?? null
+      if (!pallet) {
+        const [created] = await input.tx
+          .insert(chinaOutboundPallets)
+          .values({
+            shipmentId: input.shipment.id,
+            userId: input.userId,
+            palletNo: assignment.palletNo,
+            sortOrder: input.pallets.length,
+          })
+          .returning()
+        if (!created) throw new Error('파렛트를 저장하지 못했습니다.')
+        pallet = created
+        input.pallets.push(created)
+        palletsByNo.set(created.palletNo, created)
+      }
+    }
+
+    const [updated] = await input.tx
+      .update(chinaOutboundBoxes)
+      .set({ palletId: pallet?.id ?? null, updatedAt: new Date() })
+      .where(eq(chinaOutboundBoxes.id, box.id))
+      .returning()
+    if (!updated) throw new Error('박스의 파렛트 배정을 저장하지 못했습니다.')
+    const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
+    if (index >= 0) input.boxes[index] = updated
+    boxesByNo.set(updated.boxNo, updated)
+  }
 }
 
 function normalizeChinaOutboundBoxDimensions(input: ChinaOutboundBoxDimensionsInput) {

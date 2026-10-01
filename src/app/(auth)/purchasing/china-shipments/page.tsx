@@ -8,7 +8,7 @@ import {
 } from '@/lib/purchasing/saas-china-outbound'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
-import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem, type ChinaShipmentStockItem } from './china-shipments-board'
+import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem, type ChinaShipmentStage, type ChinaShipmentStockItem } from './china-shipments-board'
 
 export const metadata: Metadata = {
   title: '중국출고',
@@ -24,7 +24,7 @@ export default async function ChinaShipmentsPage({
 
   const params = await searchParams
   const selectedShipmentId = parseShipmentId(stringParam(params.shipment))
-  const selectedStep = stringParam(params.step) === 'packing' ? 'packing' : 'setup'
+  const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [{ items: inventoryItems, summary }, shipments, detail] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
@@ -65,7 +65,7 @@ export default async function ChinaShipmentsPage({
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">SaaS 재고 전용</span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          중국재고(SaaS)의 상품을 한 출고작업에 예약한 뒤, 파렛트·박스 구성과 박스별 적재 상품을 단계별로 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
+          중국출고요청 품목을 확정한 뒤 상품별 박스분할·CBM 계산·파렛트 적재를 순서대로 기록합니다. 기존 중국재고와 로우데이터에는 영향을 주지 않습니다.
         </p>
       </header>
 
@@ -131,4 +131,11 @@ function parseShipmentId(value: string | undefined) {
   return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
     ? value
     : undefined
+}
+
+function parseShipmentStage(value: string | undefined): ChinaShipmentStage {
+  if (value === 'items' || value === 'boxes' || value === 'pallets' || value === 'summary') return value
+  // Keep old bookmarks useful after replacing the former two-step screen.
+  if (value === 'setup' || value === 'packing') return 'boxes'
+  return 'items'
 }

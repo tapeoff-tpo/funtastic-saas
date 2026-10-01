@@ -1,21 +1,18 @@
 'use client'
 
-import { type FormEvent, type ReactNode, type TransitionStartFunction, useState, useTransition } from 'react'
+import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Check, Container, Download, Loader2, PackagePlus, Plus, Send, Trash2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import {
-  addChinaOutboundBoxItemAction,
+  assignChinaOutboundBoxesToPalletsAction,
   cancelChinaOutboundShipmentAction,
-  configureChinaOutboundPackagingAction,
   createChinaOutboundShipmentAction,
   deleteChinaOutboundShipmentAction,
   dispatchChinaOutboundShipmentAction,
   markChinaOutboundShipmentReadyAction,
-  removeChinaOutboundBoxItemAction,
-  saveChinaOutboundBoxDimensionsAction,
-  saveChinaOutboundItemPackingAction,
+  saveChinaOutboundItemBoxSplitsAction,
   updateChinaOutboundShipmentAction,
 } from '../saas-china-actions'
 
@@ -44,7 +41,7 @@ export type ChinaShipmentListItem = {
   packedQuantity: number
 }
 
-export type ChinaShipmentStage = 'setup' | 'packing'
+export type ChinaShipmentStage = 'items' | 'boxes' | 'pallets' | 'summary'
 
 export type ChinaShipmentDetailView = {
   shipment: {
@@ -88,12 +85,23 @@ export type ChinaShipmentDetailView = {
 }
 
 type InventorySummary = { onHandQuantity: number; reservedQuantity: number; availableQuantity: number }
-type PackingSplitRow = { palletNumber: string; boxNumber: string; quantity: string }
-type PackingDraft = { boxId: string; quantity: string }
+type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string }
+type WorkbookPreview = {
+  boxSplits: Array<{ shipmentItemId: string; allocations: Array<{ boxNo: string; quantity: number }> }>
+  palletAssignments: Array<{ boxNo: string; palletNo: string | null }>
+  summary: { boxSplitItemCount: number; boxSplitRowCount: number; palletAssignmentCount: number; boxCount: number }
+  errors: Array<{ sheet: string; row: number; message: string }>
+}
 
+const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60'
+const compactInputClass = 'h-8 w-full rounded-md border bg-background px-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60'
 const editableStatuses = new Set(['draft', 'packing'])
 const statusLabels: Record<string, string> = {
-  draft: '초안', packing: '포장중', ready: '포장완료', dispatched: '출고완료', cancelled: '취소',
+  draft: '초안',
+  packing: '포장중',
+  ready: '포장완료',
+  dispatched: '출고완료',
+  cancelled: '취소',
 }
 
 export function ChinaShipmentsBoard({
@@ -133,7 +141,8 @@ export function ChinaShipmentsBoard({
   const stockSearchKeyword = stockSearch.trim().toLocaleLowerCase('ko-KR')
   const shownInventory = !stockSearchKeyword
     ? selectedWarehouseInventory
-    : selectedWarehouseInventory.filter((item) => [item.sku, item.productName, item.optionName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(stockSearchKeyword)))
+    : selectedWarehouseInventory.filter((item) => [item.sku, item.productName, item.optionName ?? '']
+      .some((value) => value.toLocaleLowerCase('ko-KR').includes(stockSearchKeyword)))
   const stagedShipmentLines = availableInventory.flatMap((item) => {
     const quantity = Number(quantities[item.id] ?? 0)
     return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
@@ -141,11 +150,16 @@ export function ChinaShipmentsBoard({
   const stagedOutboundQuantity = stagedShipmentLines.reduce((total, line) => total + line.quantity, 0)
 
   function fillAllOutboundQuantities() {
-    setQuantities((current) => ({ ...current, ...Object.fromEntries(shownInventory.map((item) => [item.id, String(item.availableQuantity)])) }))
+    setQuantities((current) => ({
+      ...current,
+      ...Object.fromEntries(shownInventory.map((item) => [item.id, String(item.availableQuantity)])),
+    }))
   }
 
   function toggleWarehouseSelection(warehouseCode: string) {
-    setSelectedWarehouseCodes((current) => current.includes(warehouseCode) ? current.filter((code) => code !== warehouseCode) : [...current, warehouseCode])
+    setSelectedWarehouseCodes((current) => current.includes(warehouseCode)
+      ? current.filter((code) => code !== warehouseCode)
+      : [...current, warehouseCode])
   }
 
   function toggleAllWarehouseSelections() {
@@ -168,18 +182,19 @@ export function ChinaShipmentsBoard({
         lines: stagedShipmentLines,
       })
       if (!result.ok) return toast.error(result.error)
-      if (!result.shipmentId) return toast.error('출고작업을 열지 못했습니다. 다시 시도해주세요.')
-      toast.success('중국출고 작업을 만들고 재고를 예약했습니다.')
+      if (!result.shipmentId) return toast.error('중국출고요청을 열지 못했습니다. 다시 시도해주세요.')
+
+      toast.success('중국출고요청을 만들고 출고 재고를 예약했습니다.')
       setShowCreate(false)
       setQuantities({})
       setSelectedWarehouseCodes([])
       setDestinationName('')
-      const nextDefaultDate = today()
-      setPlannedOutboundDate(nextDefaultDate)
-      setDisplayName(defaultShipmentDisplayName(nextDefaultDate))
+      const nextDate = today()
+      setPlannedOutboundDate(nextDate)
+      setDisplayName(defaultShipmentDisplayName(nextDate))
       setDisplayNameIsDateDefault(true)
       setMemo('')
-      router.push(shipmentHref(result.shipmentId, 'setup'))
+      router.push(shipmentHref(result.shipmentId, 'items'))
       router.refresh()
     })
   }
@@ -194,35 +209,80 @@ export function ChinaShipmentsBoard({
 
       <section className="rounded-lg border bg-card">
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-semibold">새 중국출고 작업</h2><p className="mt-1 text-xs text-muted-foreground">상품과 출고수량을 예약한 뒤, 다음 단계에서 박스·파렛트 구성과 포장을 진행합니다.</p></div>
-          <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><PackagePlus className="size-4" />{showCreate ? '작업 생성 닫기' : '새 출고작업'}</button>
-        </div>
-        {showCreate ? <form onSubmit={createShipment} className="space-y-4 p-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <Field label="출고작업명"><input value={displayName} onChange={(event) => { setDisplayName(event.target.value); setDisplayNameIsDateDefault(false) }} className={inputClass} placeholder="예: 2026-09-28 출고" /></Field>
-            <Field label="도착지"><input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} placeholder="예: 한국 1창고" /></Field>
-            <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => changePlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
+          <div>
+            <h2 className="font-semibold">1단계 · 중국출고요청 만들기</h2>
+            <p className="mt-1 text-xs text-muted-foreground">출고할 상품과 수량을 먼저 확정합니다. 다음 단계에서 박스분할, 파렛트적재를 순서대로 진행합니다.</p>
           </div>
-          <Field label="메모"><input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" /></Field>
-          <section className="rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><h3 className="text-sm font-semibold">출고 재고 위치</h3><p className="mt-1 text-xs text-muted-foreground">여러 창고를 체크하면 선택한 창고의 품목을 한 출고작업에 함께 담을 수 있습니다. 체크 해제해도 이미 입력한 출고수량은 유지됩니다.</p></div>
-              <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">{allWarehouseSelected ? '전체 해제' : '전체 선택'}</button>
+          <button type="button" onClick={() => setShowCreate((open) => !open)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
+            <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : '새 중국출고요청'}
+          </button>
+        </div>
+
+        {showCreate ? (
+          <form onSubmit={createShipment} className="space-y-4 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="출고작업명"><input value={displayName} onChange={(event) => { setDisplayName(event.target.value); setDisplayNameIsDateDefault(false) }} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>
+              <Field label="도착지"><input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className={inputClass} placeholder="예: 한국 1창고" /></Field>
+              <Field label="출고예정일"><input type="date" value={plannedOutboundDate} onChange={(event) => changePlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="출고 재고 위치 선택">
-              {warehouseOptions.map((warehouseCode) => <label key={warehouseCode} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${selectedWarehouseCodes.includes(warehouseCode) ? 'border-primary bg-primary/5 text-primary' : 'bg-background hover:bg-muted'}`}><input type="checkbox" checked={selectedWarehouseCodes.includes(warehouseCode)} onChange={() => toggleWarehouseSelection(warehouseCode)} className="size-4 accent-primary" /><span>{warehouseCode}</span><span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span></label>)}
-            </div>
-          </section>
-          <section className="rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고할 상품과 수량</h3><p className="mt-1 text-xs text-muted-foreground">{selectedWarehouseInventory.length > 0 ? `선택한 ${selectedWarehouseCodes.length.toLocaleString('ko-KR')}개 창고의 작업 가능 재고를 표시합니다.` : '출고할 재고 위치를 하나 이상 체크해주세요.'}</p></div><button type="button" onClick={fillAllOutboundQuantities} disabled={selectedWarehouseInventory.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">보이는 상품 전체수량</button></div>
-            {stagedShipmentLines.length > 0 ? <p className="mt-3 text-xs font-medium text-primary">입력된 출고수량: {stagedShipmentLines.length.toLocaleString('ko-KR')}개 품목 · 전체 {stagedOutboundQuantity.toLocaleString('ko-KR')}개 <span className="font-normal text-muted-foreground">(체크 해제한 창고의 입력 수량도 포함)</span></p> : null}
-            {selectedWarehouseInventory.length > 0 ? <><input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
-              <div className="mt-3 max-h-[440px] space-y-2 overflow-y-auto pr-1">
-                {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><div className="text-right text-xs text-muted-foreground"><p>현재고 {item.onHandQuantity.toLocaleString('ko-KR')}개</p><p className="mt-1 font-medium text-emerald-700">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p></div><label className="block"><span className="mb-1 block text-xs text-muted-foreground">이번 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" /></label></div></div></article>)}
-              </div></> : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
-          </section>
-          <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 출고작업 만들기</button></div>
-        </form> : null}
+            <Field label="메모"><input value={memo} onChange={(event) => setMemo(event.target.value)} className={inputClass} placeholder="포워더, 출고 목적 등" /></Field>
+
+            <section className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold">출고 재고 위치</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">여러 창고의 재고를 하나의 중국출고요청에 함께 넣을 수 있습니다.</p>
+                </div>
+                <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">
+                  {allWarehouseSelected ? '전체 해제' : '전체 선택'}
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="출고 재고 위치 선택">
+                {warehouseOptions.map((warehouseCode) => (
+                  <label key={warehouseCode} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${selectedWarehouseCodes.includes(warehouseCode) ? 'border-primary bg-primary/5 text-primary' : 'bg-background hover:bg-muted'}`}>
+                    <input type="checkbox" checked={selectedWarehouseCodes.includes(warehouseCode)} onChange={() => toggleWarehouseSelection(warehouseCode)} className="size-4 accent-primary" />
+                    <span>{warehouseCode}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">출고할 상품과 수량</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{selectedWarehouseInventory.length > 0 ? `선택한 ${selectedWarehouseCodes.length.toLocaleString('ko-KR')}개 창고의 작업 가능 재고입니다.` : '출고할 재고 위치를 하나 이상 체크해주세요.'}</p>
+                </div>
+                <button type="button" onClick={fillAllOutboundQuantities} disabled={selectedWarehouseInventory.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">보이는 상품 전체수량</button>
+              </div>
+              {stagedShipmentLines.length > 0 ? <p className="mt-3 text-xs font-medium text-primary">입력된 출고수량: {stagedShipmentLines.length.toLocaleString('ko-KR')}개 품목 · 전체 {stagedOutboundQuantity.toLocaleString('ko-KR')}개</p> : null}
+              {selectedWarehouseInventory.length > 0 ? (
+                <>
+                  <input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
+                  <div className="mt-3 max-h-[440px] space-y-2 overflow-y-auto pr-1">
+                    {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => (
+                      <article key={item.id} className="rounded-md border bg-background p-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p>
+                            <p className="mt-1 truncate font-medium">{item.productName}</p>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                          </div>
+                          <div className="flex items-end gap-3">
+                            <div className="text-right text-xs text-muted-foreground"><p>현재고 {item.onHandQuantity.toLocaleString('ko-KR')}개</p><p className="mt-1 font-medium text-emerald-700">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p></div>
+                            <label className="block"><span className="mb-1 block text-xs text-muted-foreground">이번 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" /></label>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
+            </section>
+            <div className="flex justify-end"><button type="submit" disabled={isPending || stagedShipmentLines.length === 0} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 중국출고요청 만들기</button></div>
+          </form>
+        ) : null}
       </section>
 
       <div className="space-y-3">
@@ -230,9 +290,16 @@ export function ChinaShipmentsBoard({
           key={selectedShipment?.shipment.id ?? 'no-shipment'}
           shipments={shipments}
           selectedShipment={selectedShipment?.shipment ?? null}
-          onSelect={(id) => router.push(shipmentHref(id, 'setup'))}
+          onSelect={(id) => router.push(shipmentHref(id, 'items'))}
         />
-        <ShipmentDetailPanel key={selectedShipment?.shipment.id ?? 'no-shipment'} detail={selectedShipment} stage={selectedStep} isPending={isPending} startTransition={startTransition} router={router} onStageChange={(stage) => selectedShipment && router.push(shipmentHref(selectedShipment.shipment.id, stage))} />
+        <ShipmentDetailPanel
+          key={selectedShipment?.shipment.id ?? 'no-shipment'}
+          detail={selectedShipment}
+          stage={selectedStep}
+          isPending={isPending}
+          startTransition={startTransition}
+          onStageChange={(stage) => selectedShipment && router.push(shipmentHref(selectedShipment.shipment.id, stage))}
+        />
       </div>
     </div>
   )
@@ -249,7 +316,6 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
   const [draftDisplayName, setDraftDisplayName] = useState(() => selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null))
   const [draftPlannedOutboundDate, setDraftPlannedOutboundDate] = useState(() => selectedShipment?.plannedOutboundDate ?? '')
   const activeShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
-  const selectedShipmentId = selectedShipment?.id ?? ''
 
   function saveShipmentDetails(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -260,7 +326,7 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
         displayName: draftDisplayName.trim() || null,
         plannedOutboundDate: draftPlannedOutboundDate || null,
       })
-      if (!result.ok) return toast.error(result.error ?? '출고작업 정보를 수정하지 못했습니다.')
+      if (!result.ok) return toast.error(result.error)
       setIsEditing(false)
       toast.success('출고작업 이름과 날짜를 수정했습니다.')
       router.refresh()
@@ -269,71 +335,76 @@ function ShipmentSelector({ shipments, selectedShipment, onSelect }: {
 
   function deleteShipment() {
     if (!selectedShipment) return
-    const name = shipmentDisplayName(selectedShipment)
-    if (!window.confirm(`“${name}” 출고작업을 정말 삭제할까요?\n예약된 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return
-
+    if (!window.confirm(`“${shipmentDisplayName(selectedShipment)}” 출고작업을 정말 삭제할까요?\n예약 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return
     startTransition(async () => {
       const result = await deleteChinaOutboundShipmentAction({ shipmentId: selectedShipment.id })
-      if (!result.ok) return toast.error(result.error ?? '출고작업을 삭제하지 못했습니다.')
+      if (!result.ok) return toast.error(result.error)
       toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
       router.push('/purchasing/china-shipments')
       router.refresh()
     })
   }
 
-  return <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-      <label className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
-        <span className="text-xs font-medium text-muted-foreground">출고작업 선택</span>
-        <select
-          value={selectedShipmentId}
-          onChange={(event) => {
-            if (event.target.value) onSelect(event.target.value)
-          }}
-          className={inputClass}
-          disabled={isPending}
-        >
-          <option value="">{activeShipments.length === 0 ? '등록된 출고작업이 없습니다.' : '출고작업을 선택해주세요.'}</option>
-          {activeShipments.map((shipment) => (
-            <option key={shipment.id} value={shipment.id}>
-              {shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}
-            </option>
-          ))}
-        </select>
-      </label>
-      {selectedShipment ? <div className="flex shrink-0 gap-2">
-        <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none"><span aria-hidden="true">✎</span>{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
-        <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} title={selectedShipment.status === 'dispatched' ? '출고완료 작업은 삭제할 수 없습니다.' : undefined} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
-      </div> : null}
-    </div>
-    {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
-      <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-09-28 출고" /></Field>
-      <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
-      <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
-    </form> : null}
-    {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {((shipments.length - activeShipments.length)).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
-  </section>
+  return (
+    <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
+          <span className="text-xs font-medium text-muted-foreground">중국출고요청 선택</span>
+          <select value={selectedShipment?.id ?? ''} onChange={(event) => event.target.value && onSelect(event.target.value)} className={inputClass} disabled={isPending}>
+            <option value="">{activeShipments.length === 0 ? '등록된 중국출고요청이 없습니다.' : '중국출고요청을 선택해주세요.'}</option>
+            {activeShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
+          </select>
+        </label>
+        {selectedShipment ? <div className="flex shrink-0 gap-2">
+          <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
+          <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
+        </div> : null}
+      </div>
+      {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
+        <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>
+        <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
+        <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
+      </form> : null}
+      {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {String(shipments.length - activeShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
+    </section>
+  )
 }
 
-function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router, onStageChange }: { detail: ChinaShipmentDetailView | null; stage: ChinaShipmentStage; isPending: boolean; startTransition: TransitionStartFunction; router: ReturnType<typeof useRouter>; onStageChange: (stage: ChinaShipmentStage) => void }) {
-  const [palletCount, setPalletCount] = useState(() => String(detail?.pallets.length || 1))
-  const [boxCount, setBoxCount] = useState(() => String(detail?.boxes.length || 1))
-  const [packingDrafts, setPackingDrafts] = useState<Record<string, PackingDraft>>({})
+function ShipmentDetailPanel({ detail, stage, isPending, startTransition, onStageChange }: {
+  detail: ChinaShipmentDetailView | null
+  stage: ChinaShipmentStage
+  isPending: boolean
+  startTransition: ReturnType<typeof useTransition>[1]
+  onStageChange: (stage: ChinaShipmentStage) => void
+}) {
+  const router = useRouter()
+  const [boxPage, setBoxPage] = useState(1)
 
-  if (!detail) return <section className="flex min-h-[360px] items-center justify-center rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">위 드롭다운에서 출고작업을 선택하면 박스·파렛트 구성과 상품 포장을 단계별로 처리할 수 있습니다.</section>
+  if (!detail) {
+    return <section className="flex min-h-[300px] items-center justify-center rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">위 목록에서 중국출고요청을 선택하면 출고품목, 박스분할, 파렛트적재 작업을 순서대로 처리할 수 있습니다.</section>
+  }
 
   const { shipment, items, pallets, boxes, boxItems } = detail
   const editable = editableStatuses.has(shipment.status)
   const itemById = new Map(items.map((item) => [item.id, item]))
   const boxById = new Map(boxes.map((box) => [box.id, box]))
   const palletById = new Map(pallets.map((pallet) => [pallet.id, pallet]))
-  const boxesByPallet = new Map(pallets.map((pallet) => [pallet.id, boxes.filter((box) => box.palletId === pallet.id)]))
-  const boxItemsByBox = new Map(boxes.map((box) => [box.id, boxItems.filter((item) => item.boxId === box.id)]))
-  const openBoxes = boxes.filter((box) => box.status === 'open')
-  const firstOpenBoxId = openBoxes[0]?.id ?? ''
+  const boxItemsByItem = new Map(items.map((item) => [item.id, boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id)]))
+  const boxItemsByBox = new Map(boxes.map((box) => [box.id, boxItems.filter((boxItem) => boxItem.boxId === box.id)]))
   const totalOutboundQuantity = items.reduce((total, item) => total + item.reservedQuantity, 0)
   const totalPackedQuantity = items.reduce((total, item) => total + item.packedQuantity, 0)
-  const hasPackaging = pallets.length > 0 && boxes.length > 0
+  const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
+  const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
+  const sortedBoxSplitItems = [...items].sort((left, right) => {
+    const leftComplete = left.packedQuantity === left.reservedQuantity
+    const rightComplete = right.packedQuantity === right.reservedQuantity
+    if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
+    return compareShipmentItems(left, right)
+  })
+  const pageSize = 10
+  const pageCount = Math.max(1, Math.ceil(sortedBoxSplitItems.length / pageSize))
+  const resolvedBoxPage = Math.min(boxPage, pageCount)
+  const pagedBoxSplitItems = sortedBoxSplitItems.slice((resolvedBoxPage - 1) * pageSize, resolvedBoxPage * pageSize)
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
@@ -345,306 +416,287 @@ function ShipmentDetailPanel({ detail, stage, isPending, startTransition, router
     })
   }
 
-  function savePackagingSetup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    run(() => configureChinaOutboundPackagingAction({ shipmentId: shipment.id, palletCount: Number(palletCount), boxCount: Number(boxCount) }), '박스·파렛트 수를 저장했습니다. 이제 상품별로 박스 분할을 입력하세요.', () => onStageChange('packing'))
-  }
-
-  function saveItemPacking(item: ChinaShipmentDetailView['items'][number], allocations: Array<{ palletNumber: number; boxNumber: number; quantity: number }>, afterSuccess: () => void) {
-    run(() => saveChinaOutboundItemPackingAction({ shipmentId: shipment.id, shipmentItemId: item.id, allocations }), `${item.productName}의 박스 분할을 저장했습니다.`, afterSuccess)
-  }
-
-  function setPackingDraft(itemId: string, patch: Partial<PackingDraft>) {
-    setPackingDrafts((current) => ({ ...current, [itemId]: { boxId: current[itemId]?.boxId || firstOpenBoxId, quantity: current[itemId]?.quantity ?? '', ...patch } }))
-  }
-
-  function addPacking(event: FormEvent<HTMLFormElement>, item: ChinaShipmentDetailView['items'][number]) {
-    event.preventDefault()
-    const draft = packingDrafts[item.id]
-    run(() => addChinaOutboundBoxItemAction({ shipmentId: shipment.id, boxId: draft?.boxId || firstOpenBoxId, shipmentItemId: item.id, quantity: Number(draft?.quantity) }), `${item.productName}을(를) 박스에 배정했습니다.`, () => setPackingDrafts((current) => ({ ...current, [item.id]: { boxId: draft?.boxId || firstOpenBoxId, quantity: '' } })))
-  }
-
-  if (stage === 'setup' || stage === 'packing') {
-    return <section className="space-y-4 rounded-lg border bg-card p-4">
-      <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
+  return (
+    <section className="space-y-4 rounded-lg border bg-card p-4">
+      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipmentDisplayName(shipment)}</h2><StatusBadge status={shipment.status} /></div>
           <p className="mt-1 text-sm text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'}</p>
-          <p className="mt-1 text-xs text-muted-foreground">작업번호: {shipment.shipmentNo}</p>
-          <p className="mt-1 text-xs text-muted-foreground">상품 {items.length.toLocaleString('ko-KR')}종 · 전체 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 포장 {totalPackedQuantity.toLocaleString('ko-KR')}개</p>
+          <p className="mt-1 text-xs text-muted-foreground">작업번호: {shipment.shipmentNo} · 상품 {items.length.toLocaleString('ko-KR')}종 · 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 박스분할 {totalPackedQuantity.toLocaleString('ko-KR')}개</p>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 엑셀 다운로드</a>
-          {editable && stage === 'packing' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
+          {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 최종 엑셀 다운로드</a> : null}
+          {editable && stage === 'summary' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
+          {shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('이 출고작업을 취소하고 예약 수량을 풀까요?')) run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}
         </div>
       </div>
 
-      <nav className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-2" aria-label="중국출고 입력 단계"><StageButton active={stage === 'setup'} step="1단계" title="박스 · 파렛트 수" detail={`파렛트 ${pallets.length}개 · 박스 ${boxes.length}개`} onClick={() => onStageChange('setup')} /><StageButton active={stage === 'packing'} step="2단계" title="상품별 박스 분할" detail={`${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개 포장`} onClick={() => onStageChange('packing')} /></nav>
+      <nav className="grid gap-2 rounded-lg border bg-muted/20 p-2 sm:grid-cols-4" aria-label="중국출고 작업 단계">
+        <StageButton active={stage === 'items'} step="1단계" title="출고품목" detail={`${items.length.toLocaleString('ko-KR')}종 · ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('items')} />
+        <StageButton active={stage === 'boxes'} step="2단계" title="박스분할" detail={`${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('boxes')} />
+        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트적재" detail={`사용 파렛트 ${palletSummaries.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('pallets')} />
+        <StageButton active={stage === 'summary'} step="4단계" title="최종 적재리스트" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('summary')} />
+      </nav>
 
-      {stage === 'setup' ? <section className="space-y-4"><div className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">1단계 · 박스와 파렛트 수를 한 번에 구성</h3><p className="mt-1 text-sm text-muted-foreground">번호만 먼저 생성합니다. 박스와 파렛트 연결은 다음 단계에서 상품별로 직접 입력합니다.</p><form onSubmit={savePackagingSetup} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"><Field label="파렛트 수"><input type="number" min="1" max="500" step="1" value={palletCount} onChange={(event) => setPalletCount(event.target.value)} required className={inputClass} /></Field><Field label="박스 수"><input type="number" min="1" max="5000" step="1" value={boxCount} onChange={(event) => setBoxCount(event.target.value)} required className={inputClass} /></Field><button type="submit" disabled={!editable || isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Container className="size-4" />} 구성 저장 후 다음</button></form>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료·출고완료·취소된 작업은 구성 변경 없이 조회만 할 수 있습니다.</p> : null}{pallets.length > 0 || boxes.length > 0 ? <p className="mt-3 text-xs text-muted-foreground">이미 생성된 수량보다 작게 줄일 수는 없습니다. 추가가 필요하면 현재 수량 이상으로 입력하세요.</p> : null}</div><ManualPackagingSetupOverview pallets={pallets} boxes={boxes} /></section> : !hasPackaging ? <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">먼저 박스·파렛트 수를 저장해주세요.</h3><p className="mt-1 text-sm text-muted-foreground">상품별 박스 분할을 하려면 1단계에서 파렛트와 박스 수를 먼저 만들어야 합니다.</p><button type="button" onClick={() => onStageChange('setup')} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">1단계로 이동</button></section> : <section className="space-y-4"><div className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">2단계 · 상품별 박스 분할</h3><p className="mt-1 text-sm text-muted-foreground">상품마다 몇 박스로 나눌지 정한 뒤, 각 박스의 파렛트 번호·박스 번호·수량을 직접 입력하세요.</p></div><div className="space-y-3">{items.map((item) => { const allocations = boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id); return <ProductPackingSplitEditor key={`${item.id}:${allocations.map((allocation) => `${allocation.id}:${allocation.quantity}`).join('|')}`} item={item} allocations={allocations} boxes={boxes} pallets={pallets} boxById={boxById} palletById={palletById} editable={editable} isPending={isPending} onSave={(nextAllocations, afterSuccess) => saveItemPacking(item, nextAllocations, afterSuccess)} /> })}</div><BoxPackingOverview boxes={boxes} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} /></section>}
-    </section>
-  }
+      {stage === 'items' ? <OutboundItemsPanel items={items} boxItemsByItem={boxItemsByItem} /> : null}
 
-  return <section className="space-y-4 rounded-lg border bg-card p-4">
-    <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipment.shipmentNo}</h2><StatusBadge status={shipment.status} /></div><p className="mt-1 text-sm text-muted-foreground">출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'} · 출고예정일: {shipment.plannedOutboundDate || '미입력'}</p><p className="mt-1 text-xs text-muted-foreground">상품 {items.length.toLocaleString('ko-KR')}종 · 전체 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 포장 {totalPackedQuantity.toLocaleString('ko-KR')}개</p>{shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}</div><div className="flex flex-wrap gap-2">{editable && stage === 'packing' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}{shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}{shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('이 출고작업을 취소하고 예약 수량을 풀까요?')) run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}</div></div>
+      {stage === 'boxes' ? <section className="space-y-4">
+        <section className="rounded-lg border bg-muted/20 p-4">
+          <h3 className="font-semibold">2단계 · 상품별 박스분할</h3>
+          <p className="mt-1 text-sm text-muted-foreground">상품을 먼저 박스로 나누고, 박스별 수량과 가로·세로·높이를 입력하세요. 파렛트 번호는 다음 단계에서 적습니다.</p>
+        </section>
+        <WorkbookActions shipmentId={shipment.id} editable={editable} />
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <p className="text-muted-foreground">진행 중인 품목을 먼저, 완료 품목을 마지막에 표시합니다. 품목코드는 오름차순으로 고정됩니다.</p>
+          <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => setBoxPage((current) => Math.max(1, current - 1))} onNext={() => setBoxPage((current) => Math.min(pageCount, current + 1))} />
+        </div>
+        <div className="space-y-3">
+          {pagedBoxSplitItems.map((item) => {
+            const allocations = (boxItemsByItem.get(item.id) ?? []).flatMap((allocation) => {
+              const box = boxById.get(allocation.boxId)
+              return box ? [{ allocation, box }] : []
+            })
+            return <ProductBoxSplitEditor key={`${item.id}:${allocations.map(({ allocation }) => `${allocation.id}:${allocation.quantity}`).join('|')}`} item={item} allocations={allocations} editable={editable} isPending={isPending} onSave={(nextAllocations) => run(() => saveChinaOutboundItemBoxSplitsAction({ shipmentId: shipment.id, shipmentItemId: item.id, allocations: nextAllocations }), `${item.productName}의 박스분할을 저장했습니다.`)} />
+          })}
+        </div>
+        <div className="flex justify-end"><Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => setBoxPage((current) => Math.max(1, current - 1))} onNext={() => setBoxPage((current) => Math.min(pageCount, current + 1))} /></div>
+      </section> : null}
 
-    <nav className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-2" aria-label="중국출고 입력 단계"><StageButton active={stage === 'setup'} step="1단계" title="박스 · 파렛트 구성" detail={`파렛트 ${pallets.length}개 · 박스 ${boxes.length}개`} onClick={() => onStageChange('setup')} /><StageButton active={stage === 'packing'} step="2단계" title="상품별 박스 배정" detail={`${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개 포장`} onClick={() => onStageChange('packing')} /></nav>
+      {stage === 'pallets' ? <section className="space-y-4">
+        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">3단계 · 파렛트적재</h3><p className="mt-1 text-sm text-muted-foreground">박스분할을 마친 박스에 실제 사용한 파렛트 번호를 직접 적으세요. 입력한 번호만 누적되어 총 파렛트 수와 파렛트별 CBM이 계산됩니다.</p></section>
+        <WorkbookActions shipmentId={shipment.id} editable={editable} />
+        {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="박스에 상품이 담긴 뒤 파렛트 번호를 입력할 수 있습니다." onMove={() => onStageChange('boxes')} moveLabel="2단계로 이동" /> : <PalletAssignmentPanel boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} onSave={(assignments) => run(() => assignChinaOutboundBoxesToPalletsAction({ shipmentId: shipment.id, assignments }), '파렛트 적재를 저장했습니다.')} />}
+        <PalletSummaryCards summaries={palletSummaries} />
+      </section> : null}
 
-    {stage === 'setup' ? <section className="space-y-4"><div className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">1단계 · 박스와 파렛트 수를 한 번에 구성</h3><p className="mt-1 text-sm text-muted-foreground">저장하면 `파렛트 1`, `박스 1`처럼 번호가 자동 생성되고 박스는 파렛트 순서대로 나누어 배정됩니다.</p><form onSubmit={savePackagingSetup} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"><Field label="파렛트 수"><input type="number" min="1" max="500" step="1" value={palletCount} onChange={(event) => setPalletCount(event.target.value)} required className={inputClass} /></Field><Field label="박스 수"><input type="number" min="1" max="5000" step="1" value={boxCount} onChange={(event) => setBoxCount(event.target.value)} required className={inputClass} /></Field><button type="submit" disabled={!editable || isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Container className="size-4" />} 구성 저장 후 다음</button></form>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료·출고완료·취소된 작업은 구성 변경 없이 조회만 할 수 있습니다.</p> : null}{pallets.length > 0 || boxes.length > 0 ? <p className="mt-3 text-xs text-muted-foreground">이미 생성된 수량보다 작게 줄일 수는 없습니다. 추가가 필요하면 현재 수량 이상으로 입력하세요.</p> : null}</div><PackagingSetupOverview pallets={pallets} boxesByPallet={boxesByPallet} /></section> : !hasPackaging ? <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">먼저 박스·파렛트 구성을 저장해주세요.</h3><p className="mt-1 text-sm text-muted-foreground">상품을 박스에 배정하려면 1단계에서 파렛트와 박스 수를 먼저 만들어야 합니다.</p><button type="button" onClick={() => onStageChange('setup')} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">1단계로 이동</button></section> : <section className="space-y-4"><div className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">2단계 · 상품별 박스 배정</h3><p className="mt-1 text-sm text-muted-foreground">상품마다 전체 출고수량, 나눠 담은 박스 수, 박스 번호와 수량을 바로 확인하고 추가할 수 있습니다.</p></div><div className="space-y-3">{items.map((item) => { const allocations = boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id); const draft = packingDrafts[item.id] ?? { boxId: firstOpenBoxId, quantity: '' }; const remainingQuantity = item.reservedQuantity - item.packedQuantity; return <article key={item.id} className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><h4 className="truncate font-semibold">{item.productName}</h4><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center sm:min-w-[300px]"><PackingMetric label="전체 출고" value={item.reservedQuantity} /><PackingMetric label="박스 배정" value={item.packedQuantity} tone="emerald" /><PackingMetric label="남은 수량" value={remainingQuantity} tone="amber" /></div></div><div className="mt-3 rounded-md border bg-muted/10 p-3"><p className="text-xs font-medium text-muted-foreground">현재 배정 · {allocations.length.toLocaleString('ko-KR')}개 박스에 나눠 담음</p>{allocations.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">아직 배정한 박스가 없습니다.</p> : <div className="mt-2 flex flex-wrap gap-2">{allocations.map((allocation) => { const box = boxById.get(allocation.boxId); const pallet = box?.palletId ? palletById.get(box.palletId) : null; return <span key={allocation.id} className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 text-xs"><span className="font-medium">{box?.boxNo ?? '박스 확인 필요'}</span><span className="text-muted-foreground">{pallet ? `· ${pallet.palletNo}` : ''} · {allocation.quantity.toLocaleString('ko-KR')}개</span>{editable ? <button type="button" disabled={isPending} aria-label={`${box?.boxNo ?? '박스'} 적재 삭제`} onClick={() => { if (window.confirm(`${box?.boxNo ?? '이 박스'}의 ${item.productName} 적재를 삭제할까요?`)) run(() => removeChinaOutboundBoxItemAction({ shipmentId: shipment.id, boxItemId: allocation.id }), '박스 적재를 삭제했습니다.') }} className="rounded p-0.5 text-red-600 hover:bg-red-50"><Trash2 className="size-3" /></button> : null}</span> })}</div>}</div>{editable && remainingQuantity > 0 ? <form onSubmit={(event) => addPacking(event, item)} className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"><Field label="넣을 박스"><select value={draft.boxId} onChange={(event) => setPackingDraft(item.id, { boxId: event.target.value })} className={inputClass}>{openBoxes.map((box) => { const pallet = box.palletId ? palletById.get(box.palletId) : null; return <option key={box.id} value={box.id}>{box.boxNo}{pallet ? ` · ${pallet.palletNo}` : ''}</option> })}</select></Field><Field label="이번 배정 수량"><input type="number" min="1" max={remainingQuantity} step="1" value={draft.quantity} onChange={(event) => setPackingDraft(item.id, { quantity: event.target.value })} required className={inputClass} placeholder={`최대 ${remainingQuantity}`} /></Field><button type="submit" disabled={isPending || !firstOpenBoxId} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-4 text-sm font-medium hover:bg-muted disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Box className="size-4" />} 박스 배정</button></form> : null}</article> })}</div><BoxPackingOverview boxes={boxes} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} /></section>}
-  </section>
-}
-
-function ManualPackagingSetupOverview({ pallets, boxes }: { pallets: ChinaShipmentDetailView['pallets']; boxes: ChinaShipmentDetailView['boxes'] }) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
-
-  function saveDimensions(box: ChinaShipmentDetailView['boxes'][number], dimensions: { lengthCm: number | null; widthCm: number | null; heightCm: number | null }) {
-    startTransition(async () => {
-      const result = await saveChinaOutboundBoxDimensionsAction({ shipmentId: box.shipmentId, boxId: box.id, ...dimensions })
-      if (!result.ok) {
-        toast.error(result.error ?? '박스 규격을 저장하지 못했습니다.')
-        return
-      }
-      toast.success(`${box.boxNo} 규격과 CBM을 저장했습니다.`)
-      router.refresh()
-    })
-  }
-
-  return <section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">생성된 번호</h3><p className="mt-1 text-xs text-muted-foreground">아직 서로 연결하지 않은 파렛트·박스 번호입니다. 상품별 박스 분할을 저장할 때 직접 연결됩니다.</p></div><div className="grid gap-3 p-3 sm:grid-cols-2"><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Container className="size-4" /> 파렛트 {pallets.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{pallets.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : pallets.map((pallet, index) => <span key={pallet.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {pallet.palletNo}</span>)}</div></article><article className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Box className="size-4" /> 박스 {boxes.length.toLocaleString('ko-KR')}개</p><div className="mt-3 flex flex-wrap gap-1.5">{boxes.length === 0 ? <span className="text-xs text-muted-foreground">아직 생성되지 않았습니다.</span> : boxes.map((box, index) => <span key={box.id} className="rounded-full border bg-background px-2 py-1 text-xs">{index + 1}번 · {box.boxNo}</span>)}</div></article></div>{boxes.length > 0 ? <section className="border-t p-3"><div className="mb-3"><h3 className="font-semibold">박스 규격 · CBM</h3><p className="mt-1 text-xs text-muted-foreground">가로·세로·높이(cm)를 입력하면 CBM을 자동 계산합니다. CBM = 가로 × 세로 × 높이 ÷ 1,000,000</p></div><div className="overflow-x-auto rounded-md border" role="region" aria-label="박스 규격 및 CBM 목록"><div role="table" className="min-w-[720px] divide-y"><div role="row" className="grid grid-cols-[minmax(8rem,1fr)_7rem_7rem_7rem_7rem_5.75rem] items-center gap-2 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground"><span role="columnheader">박스 번호</span><span role="columnheader">가로 (cm)</span><span role="columnheader">세로 (cm)</span><span role="columnheader">높이 (cm)</span><span role="columnheader">CBM</span><span role="columnheader" className="text-center">저장</span></div>{boxes.map((box) => <BoxDimensionsListRow key={`${box.id}:${box.lengthCm ?? ''}:${box.widthCm ?? ''}:${box.heightCm ?? ''}`} box={box} isPending={isPending} onSave={(dimensions) => saveDimensions(box, dimensions)} />)}</div></div></section> : null}</section>
-}
-
-function BoxDimensionsListRow({ box, isPending, onSave }: {
-  box: ChinaShipmentDetailView['boxes'][number]
-  isPending: boolean
-  onSave: (dimensions: { lengthCm: number | null; widthCm: number | null; heightCm: number | null }) => void
-}) {
-  const [lengthCm, setLengthCm] = useState(box.lengthCm?.toString() ?? '')
-  const [widthCm, setWidthCm] = useState(box.widthCm?.toString() ?? '')
-  const [heightCm, setHeightCm] = useState(box.heightCm?.toString() ?? '')
-  const draftCbm = calculateChinaOutboundBoxCbm({ lengthCm, widthCm, heightCm })
-
-  function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const rawValues = [lengthCm.trim(), widthCm.trim(), heightCm.trim()]
-    if (rawValues.every((value) => value === '')) {
-      onSave({ lengthCm: null, widthCm: null, heightCm: null })
-      return
-    }
-    if (rawValues.some((value) => value === '')) {
-      toast.error('가로·세로·높이를 모두 입력해주세요.')
-      return
-    }
-    const [nextLengthCm, nextWidthCm, nextHeightCm] = rawValues.map(Number)
-    if (![nextLengthCm, nextWidthCm, nextHeightCm].every((value) => Number.isFinite(value) && value > 0)) {
-      toast.error('박스 규격은 0보다 큰 숫자로 입력해주세요.')
-      return
-    }
-    onSave({ lengthCm: nextLengthCm, widthCm: nextWidthCm, heightCm: nextHeightCm })
-  }
-
-  return <form role="row" onSubmit={save} className="grid grid-cols-[minmax(8rem,1fr)_7rem_7rem_7rem_7rem_5.75rem] items-center gap-2 px-3 py-2 odd:bg-muted/10"><div role="cell" className="min-w-0"><p className="truncate font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">{box.editable ? '직접 입력' : '조회 전용'}</p></div>{box.editable ? <><div role="cell"><input aria-label={`${box.boxNo} 가로 (cm)`} type="number" min="0.01" step="0.01" inputMode="decimal" value={lengthCm} onChange={(event) => setLengthCm(event.target.value)} className={inputClass} placeholder="가로" /></div><div role="cell"><input aria-label={`${box.boxNo} 세로 (cm)`} type="number" min="0.01" step="0.01" inputMode="decimal" value={widthCm} onChange={(event) => setWidthCm(event.target.value)} className={inputClass} placeholder="세로" /></div><div role="cell"><input aria-label={`${box.boxNo} 높이 (cm)`} type="number" min="0.01" step="0.01" inputMode="decimal" value={heightCm} onChange={(event) => setHeightCm(event.target.value)} className={inputClass} placeholder="높이" /></div></> : <><span role="cell" className="tabular-nums text-sm">{lengthCm || '-'}</span><span role="cell" className="tabular-nums text-sm">{widthCm || '-'}</span><span role="cell" className="tabular-nums text-sm">{heightCm || '-'}</span></>}<output role="cell" className="tabular-nums text-sm font-semibold">{formatChinaOutboundCbm(draftCbm) ?? '-'}</output>{box.editable ? <div role="cell" className="text-center"><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 저장</button></div> : <span role="cell" className="text-center text-xs text-muted-foreground">-</span>}</form>
-}
-
-function ProductPackingSplitEditor({ item, allocations, boxes, pallets, boxById, palletById, editable, isPending, onSave }: {
-  item: ChinaShipmentDetailView['items'][number]
-  allocations: ChinaShipmentDetailView['boxItems']
-  boxes: ChinaShipmentDetailView['boxes']
-  pallets: ChinaShipmentDetailView['pallets']
-  boxById: Map<string, ChinaShipmentDetailView['boxes'][number]>
-  palletById: Map<string, ChinaShipmentDetailView['pallets'][number]>
-  editable: boolean
-  isPending: boolean
-  onSave: (allocations: Array<{ palletNumber: number; boxNumber: number; quantity: number }>, afterSuccess: () => void) => void
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [splitCount, setSplitCount] = useState('1')
-  const [rows, setRows] = useState<PackingSplitRow[]>([])
-  const packedQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
-  const remainingQuantity = item.reservedQuantity - packedQuantity
-
-  function openEditor() {
-    const existingRows = allocations.flatMap((allocation) => {
-      const box = boxById.get(allocation.boxId)
-      const boxNumber = boxes.findIndex((candidate) => candidate.id === box?.id) + 1
-      const palletNumber = pallets.findIndex((candidate) => candidate.id === box?.palletId) + 1
-      return boxNumber > 0 && palletNumber > 0 ? [{ palletNumber: String(palletNumber), boxNumber: String(boxNumber), quantity: String(allocation.quantity) }] : []
-    })
-    const nextRows = existingRows.length > 0 ? existingRows : [createPackingSplitRow()]
-    setRows(nextRows)
-    setSplitCount(String(nextRows.length))
-    setIsEditing(true)
-  }
-
-  function applySplitCount() {
-    const count = Number(splitCount)
-    if (!Number.isInteger(count) || count < 1 || count > boxes.length) {
-      toast.error(`분할 박스 수는 1~${boxes.length.toLocaleString('ko-KR')}개로 입력해주세요.`)
-      return
-    }
-    setRows((current) => count <= current.length ? current.slice(0, count) : [...current, ...Array.from({ length: count - current.length }, createPackingSplitRow)])
-  }
-
-  function updateRow(index: number, patch: Partial<PackingSplitRow>) {
-    setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row))
-  }
-
-  function saveRows() {
-    const nextAllocations = rows.map((row) => ({ palletNumber: Number(row.palletNumber), boxNumber: Number(row.boxNumber), quantity: Number(row.quantity) }))
-    if (nextAllocations.some((allocation) => !Number.isInteger(allocation.palletNumber) || allocation.palletNumber < 1 || allocation.palletNumber > pallets.length || !Number.isInteger(allocation.boxNumber) || allocation.boxNumber < 1 || allocation.boxNumber > boxes.length || !Number.isInteger(allocation.quantity) || allocation.quantity < 1)) {
-      toast.error('각 줄에 파렛트 번호, 박스 번호, 수량을 정확히 입력해주세요.')
-      return
-    }
-    if (new Set(nextAllocations.map((allocation) => allocation.boxNumber)).size !== nextAllocations.length) {
-      toast.error('한 상품의 분할 행에는 같은 박스 번호를 중복 입력할 수 없습니다.')
-      return
-    }
-    const splitQuantity = nextAllocations.reduce((total, allocation) => total + allocation.quantity, 0)
-    if (splitQuantity > item.reservedQuantity) {
-      toast.error(`분할 수량은 출고수량 ${item.reservedQuantity.toLocaleString('ko-KR')}개를 넘을 수 없습니다.`)
-      return
-    }
-    onSave(nextAllocations, () => {
-      setIsEditing(false)
-      setRows([])
-    })
-  }
-
-  return <article className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><h4 className="truncate font-semibold">{item.productName}</h4><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center sm:min-w-[300px]"><PackingMetric label="전체 출고" value={item.reservedQuantity} /><PackingMetric label="박스 배정" value={packedQuantity} tone="emerald" /><PackingMetric label="남은 수량" value={remainingQuantity} tone="amber" /></div></div><div className="mt-3 rounded-md border bg-muted/10 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-muted-foreground">현재 분할 · {allocations.length.toLocaleString('ko-KR')}개 박스</p>{editable && !isEditing ? <button type="button" onClick={openEditor} disabled={isPending} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Box className="size-3.5" /> {allocations.length === 0 ? '박스 분할' : '분할 수정'}</button> : null}</div>{allocations.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">아직 박스 분할을 입력하지 않았습니다.</p> : <div className="mt-2 flex flex-wrap gap-2">{allocations.map((allocation) => { const box = boxById.get(allocation.boxId); const pallet = box?.palletId ? palletById.get(box.palletId) : null; return <span key={allocation.id} className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 text-xs"><span className="font-medium">{box?.boxNo ?? '박스 확인 필요'}</span><span className="text-muted-foreground">{pallet ? `· ${pallet.palletNo}` : '· 파렛트 미지정'} · {allocation.quantity.toLocaleString('ko-KR')}개</span></span> })}</div>}</div>{isEditing ? <div className="mt-3 rounded-md border border-primary/25 bg-primary/5 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><Field label="몇 박스로 나눌까요?"><input type="number" min="1" max={boxes.length} step="1" value={splitCount} onChange={(event) => setSplitCount(event.target.value)} className={`${inputClass} w-full sm:w-36`} /></Field><button type="button" onClick={applySplitCount} disabled={isPending} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">분할 행 만들기</button></div><div className="mt-3 space-y-2">{rows.map((row, index) => <div key={index} className="grid gap-2 rounded-md border bg-background p-2 sm:grid-cols-[8rem_8rem_minmax(0,1fr)_auto] sm:items-end"><Field label={`파렛트 번호 · ${index + 1}번 박스`}><input type="number" min="1" max={pallets.length} step="1" value={row.palletNumber} onChange={(event) => updateRow(index, { palletNumber: event.target.value })} className={inputClass} placeholder={`1~${pallets.length}`} /></Field><Field label="박스 번호"><input type="number" min="1" max={boxes.length} step="1" value={row.boxNumber} onChange={(event) => updateRow(index, { boxNumber: event.target.value })} className={inputClass} placeholder={`1~${boxes.length}`} /></Field><Field label="이 박스 수량"><input type="number" min="1" max={item.reservedQuantity} step="1" value={row.quantity} onChange={(event) => updateRow(index, { quantity: event.target.value })} className={inputClass} placeholder="수량" /></Field><button type="button" disabled={isPending || rows.length === 1} onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))} aria-label={`${index + 1}번 분할 행 삭제`} className="inline-flex h-9 items-center justify-center rounded-md border border-red-200 px-3 text-red-700 hover:bg-red-50 disabled:opacity-40"><Trash2 className="size-4" /></button></div>)}</div><div className="mt-3 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs text-muted-foreground">직접 입력한 분할 수량 합계: <span className="font-semibold tabular-nums text-foreground">{rows.reduce((total, row) => total + (Number(row.quantity) || 0), 0).toLocaleString('ko-KR')}개</span> / 출고 {item.reservedQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" onClick={() => setIsEditing(false)} disabled={isPending} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="button" onClick={saveRows} disabled={isPending} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 분할 저장</button></div></div></div> : null}</article>
-}
-
-function createPackingSplitRow(): PackingSplitRow {
-  return { palletNumber: '', boxNumber: '', quantity: '' }
-}
-
-function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} aria-current={active ? 'step' : undefined} className={`rounded-md border px-3 py-2 text-left transition-all ${active ? 'border-primary bg-primary text-primary-foreground shadow-md ring-2 ring-primary/25' : 'border-transparent text-muted-foreground hover:border-border hover:bg-background/70'}`}><span className="flex items-center justify-between gap-2 text-xs font-medium"><span>{step}</span><span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{active ? '현재 단계' : '선택'}</span></span><span className="mt-0.5 block text-sm font-semibold">{title}</span><span className={`mt-1 block text-xs ${active ? 'text-primary-foreground/80' : ''}`}>{detail}</span></button>
-}
-
-function PackagingSetupOverview({ pallets, boxesByPallet }: { pallets: ChinaShipmentDetailView['pallets']; boxesByPallet: Map<string, ChinaShipmentDetailView['boxes']> }) {
-  return <section className="rounded-lg border"><div className="border-b px-4 py-3"><h3 className="font-semibold">구성 미리보기</h3><p className="mt-1 text-xs text-muted-foreground">생성된 박스가 어떤 파렛트에 배정됐는지 확인합니다.</p></div><div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">{pallets.length === 0 ? <p className="p-5 text-center text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">파렛트와 박스 수를 입력하고 구성 저장을 눌러주세요.</p> : pallets.map((pallet) => { const palletBoxes = boxesByPallet.get(pallet.id) ?? []; return <article key={pallet.id} className="rounded-md border bg-muted/20 p-3"><p className="flex items-center gap-2 font-medium"><Container className="size-4" /> {pallet.palletNo}</p><p className="mt-2 text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개</p><div className="mt-2 flex flex-wrap gap-1.5">{palletBoxes.length === 0 ? <span className="text-xs text-muted-foreground">배정된 박스 없음</span> : palletBoxes.map((box) => <span key={box.id} className="rounded-full border bg-background px-2 py-1 text-xs">{box.boxNo}</span>)}</div></article> })}</div></section>
-}
-
-function BoxPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: { boxes: ChinaShipmentDetailView['boxes']; boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>; itemById: Map<string, ChinaShipmentDetailView['items'][number]>; palletById: Map<string, ChinaShipmentDetailView['pallets'][number]> }) {
-  return <PalletPackingOverview boxes={boxes} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} />
-}
-
-function PalletPackingOverview({ boxes, boxItemsByBox, itemById, palletById }: { boxes: ChinaShipmentDetailView['boxes']; boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>; itemById: Map<string, ChinaShipmentDetailView['items'][number]>; palletById: Map<string, ChinaShipmentDetailView['pallets'][number]> }) {
-  const pallets = Array.from(palletById.values())
-  const unassignedBoxes = boxes.filter((box) => !box.palletId)
-
-  return (
-    <section className="overflow-hidden rounded-lg border">
-      <div className="border-b px-4 py-3">
-        <h3 className="font-semibold">파렛트·박스별 적재 현황</h3>
-        <p className="mt-1 text-xs text-muted-foreground">파렛트 아래 박스와 상품을 한 표에서 확인합니다. CBM은 현황용이며 적재를 제한하지 않습니다.</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">파렛트</th>
-              <th className="px-3 py-2">박스</th>
-              <th className="px-3 py-2">규격 · CBM</th>
-              <th className="px-3 py-2">상품</th>
-              <th className="px-3 py-2">상품코드 · 옵션</th>
-              <th className="px-3 py-2 text-right">적재수량</th>
-              <th className="px-3 py-2 text-right">박스 합계</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {pallets.length === 0 && unassignedBoxes.length === 0 ? <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">생성된 박스와 파렛트가 없습니다.</td></tr> : null}
-            {pallets.flatMap((pallet) => {
-              const palletBoxes = boxes.filter((box) => box.palletId === pallet.id)
-              const palletBoxItems = palletBoxes.flatMap((box) => boxItemsByBox.get(box.id) ?? [])
-              const packedQuantity = palletBoxItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
-              const productCount = new Set(palletBoxItems.map((packedItem) => packedItem.shipmentItemId)).size
-              const cbmByBox = palletBoxes.map((box) => calculateChinaOutboundBoxCbm(box))
-              const palletInfo = <><p className="font-medium">{pallet.palletNo}</p><p className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">박스 {palletBoxes.length.toLocaleString('ko-KR')}개 · 상품 {productCount.toLocaleString('ko-KR')}종 · 총 {packedQuantity.toLocaleString('ko-KR')}개</p><PalletCbmSummary cbmByBox={cbmByBox} boxCount={palletBoxes.length} /></>
-
-              if (palletBoxes.length === 0) return <tr key={pallet.id} className="bg-muted/[0.03]"><td className="px-3 py-2.5 align-top">{palletInfo}</td><td colSpan={5} className="px-3 py-2.5 text-muted-foreground">배정된 박스가 없습니다.</td><td className="px-3 py-2.5 text-right text-muted-foreground">-</td></tr>
-
-              const palletRows = palletBoxes.flatMap((box) => {
-                const packedItems = boxItemsByBox.get(box.id) ?? []
-                const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
-                if (packedItems.length === 0) return [{ box, packedItem: null, boxQuantity, boxRowSpan: 1, isFirstBoxRow: true }]
-                return packedItems.map((packedItem, index) => ({ box, packedItem, boxQuantity, boxRowSpan: packedItems.length, isFirstBoxRow: index === 0 }))
-              })
-
-              return palletRows.map((row, rowIndex) => {
-                const item = row.packedItem ? itemById.get(row.packedItem.shipmentItemId) : null
-                const rowKey = row.packedItem?.id ?? row.box.id
-                const dimensions = formatChinaOutboundBoxDimensions(row.box)
-                const cbm = formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(row.box))
-                const dimensionInfo = <><p className="whitespace-nowrap tabular-nums">{dimensions ?? '규격 미입력'}</p><p className="mt-0.5 text-xs font-medium tabular-nums text-muted-foreground">{cbm ? `${cbm} CBM` : '-'}</p></>
-                return <tr key={rowKey} className={row.packedItem ? undefined : 'bg-muted/[0.03]'}>{rowIndex === 0 ? <td rowSpan={palletRows.length} className="border-r bg-muted/[0.03] px-3 py-2.5 align-top">{palletInfo}</td> : null}{row.isFirstBoxRow ? <><td rowSpan={row.boxRowSpan} className="px-3 py-2.5 align-top"><p className="font-medium">{row.box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {row.boxQuantity.toLocaleString('ko-KR')}개</p></td><td rowSpan={row.boxRowSpan} className="px-3 py-2.5 align-top">{dimensionInfo}</td></> : null}{row.packedItem ? <><td className="px-3 py-2.5"><p className="max-w-[18rem] truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p></td><td className="px-3 py-2.5"><p className="max-w-[16rem] truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">{row.packedItem.quantity.toLocaleString('ko-KR')}개</td></> : <><td colSpan={2} className="px-3 py-2.5 text-muted-foreground">담긴 상품 없음</td><td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">-</td></>}<td className="px-3 py-2.5 text-right text-xs font-semibold tabular-nums text-muted-foreground">{row.boxQuantity.toLocaleString('ko-KR')}개</td></tr>
-              })
-            })}
-            {unassignedBoxes.flatMap((box) => {
-              const packedItems = boxItemsByBox.get(box.id) ?? []
-              const boxQuantity = packedItems.reduce((total, packedItem) => total + packedItem.quantity, 0)
-              const dimensions = formatChinaOutboundBoxDimensions(box)
-              const cbm = formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(box))
-              const dimensionInfo = <><p className="whitespace-nowrap tabular-nums">{dimensions ?? '규격 미입력'}</p><p className="mt-0.5 text-xs font-medium tabular-nums text-muted-foreground">{cbm ? `${cbm} CBM` : '-'}</p></>
-              if (packedItems.length === 0) return <tr key={`unassigned:${box.id}`} className="bg-amber-50/60"><td className="px-3 py-2.5"><p className="font-medium text-amber-900">파렛트 미지정</p><p className="mt-0.5 text-xs text-amber-800">배정 필요</p></td><td className="px-3 py-2.5"><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 0개</p></td><td className="px-3 py-2.5">{dimensionInfo}</td><td colSpan={2} className="px-3 py-2.5 text-muted-foreground">담긴 상품 없음</td><td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">-</td><td className="px-3 py-2.5 text-right text-xs font-semibold tabular-nums text-muted-foreground">0개</td></tr>
-              return packedItems.map((packedItem) => {
-                const item = itemById.get(packedItem.shipmentItemId)
-                return <tr key={`unassigned:${packedItem.id}`} className="bg-amber-50/60"><td className="px-3 py-2.5"><p className="font-medium text-amber-900">파렛트 미지정</p><p className="mt-0.5 text-xs text-amber-800">배정 필요</p></td><td className="px-3 py-2.5"><p className="font-medium">{box.boxNo}</p><p className="mt-0.5 text-xs text-muted-foreground">총 {boxQuantity.toLocaleString('ko-KR')}개</p></td><td className="px-3 py-2.5">{dimensionInfo}</td><td className="px-3 py-2.5"><p className="max-w-[18rem] truncate font-medium">{item?.productName ?? '상품 확인 필요'}</p></td><td className="px-3 py-2.5"><p className="max-w-[16rem] truncate text-xs text-muted-foreground">{item ? `${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}` : '-'}</p></td><td className="px-3 py-2.5 text-right font-semibold tabular-nums">{packedItem.quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-2.5 text-right text-xs font-semibold tabular-nums text-muted-foreground">{boxQuantity.toLocaleString('ko-KR')}개</td></tr>
-              })
-            })}
-          </tbody>
-        </table>
-      </div>
+      {stage === 'summary' ? <section className="space-y-4">
+        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p></section>
+        <WorkbookActions shipmentId={shipment.id} editable={editable} />
+        {items.some((item) => item.packedQuantity !== item.reservedQuantity) ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다.</p> : null}
+        {boxesWithItems.some((box) => !box.palletId) ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 적재된 모든 박스에 파렛트 번호를 입력해주세요.</p> : null}
+        {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
+      </section> : null}
     </section>
   )
 }
 
-function PalletCbmSummary({ cbmByBox, boxCount }: { cbmByBox: Array<number | null>; boxCount: number }) {
-  const cbmInputBoxCount = cbmByBox.filter((cbm) => cbm != null).length
-  const currentCbm = cbmByBox.reduce((total, cbm) => total + (cbm ?? 0), 0)
-  const formattedCurrentCbm = formatChinaOutboundCbm(currentCbm) ?? '-'
-
-  if (boxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 0.0000 CBM · 박스 미배정</p>
-  if (cbmInputBoxCount === 0) return <p className="mt-1 text-xs font-medium text-muted-foreground">현재 적재 - CBM · CBM 미입력 (0/{boxCount}박스)</p>
-  if (cbmInputBoxCount < boxCount) return <p className="mt-1 text-xs font-medium tabular-nums text-muted-foreground">현재 적재 {formattedCurrentCbm} CBM · 부분 입력 ({cbmInputBoxCount}/{boxCount}박스, 입력된 박스 기준)</p>
-
-  return <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">현재 적재 {formattedCurrentCbm} CBM · 박스 CBM {cbmInputBoxCount}/{boxCount} 입력</p>
+function OutboundItemsPanel({ items, boxItemsByItem }: {
+  items: ChinaShipmentDetailView['items']
+  boxItemsByItem: Map<string, ChinaShipmentDetailView['boxItems']>
+}) {
+  const sortedItems = [...items].sort(compareShipmentItems)
+  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3><p className="mt-1 text-sm text-muted-foreground">중국출고요청에 담긴 품목과 출고수량입니다. 수량을 바꾸려면 새 요청을 만들기 전에 조정해주세요.</p></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
 }
 
-function PackingMetric({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
-  const toneClass = tone === 'amber' ? 'text-amber-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-foreground'
-  return <div className="px-2 py-2"><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className={`mt-0.5 text-sm font-semibold tabular-nums ${toneClass}`}>{value.toLocaleString('ko-KR')}개</dd></div>
+function ProductBoxSplitEditor({ item, allocations, editable, isPending, onSave }: {
+  item: ChinaShipmentDetailView['items'][number]
+  allocations: Array<{ allocation: ChinaShipmentDetailView['boxItems'][number]; box: ChinaShipmentDetailView['boxes'][number] }>
+  editable: boolean
+  isPending: boolean
+  onSave: (allocations: Array<{ boxNo: string; quantity: number; lengthCm: number | null; widthCm: number | null; heightCm: number | null }>) => void
+}) {
+  const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => allocations.length > 0
+    ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
+    : [createBoxSplitDraft(item.sku)])
+  const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)
+  const isComplete = item.packedQuantity === item.reservedQuantity
+
+  function patchDraft(key: string, patch: Partial<BoxSplitDraft>) {
+    setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch } : draft))
+  }
+
+  function save() {
+    const nextAllocations = drafts
+      .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm].some((value) => value.trim()))
+      .map((draft) => ({
+        boxNo: draft.boxNo.trim(),
+        quantity: Number(draft.quantity),
+        lengthCm: optionalNumber(draft.lengthCm),
+        widthCm: optionalNumber(draft.widthCm),
+        heightCm: optionalNumber(draft.heightCm),
+      }))
+    onSave(nextAllocations)
+  }
+
+  return <article className="overflow-hidden rounded-lg border bg-background"><div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{item.sku}</p><ProgressBadge completed={isComplete} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} /></div><p className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개</p></div><div className="overflow-x-auto"><table className="min-w-[880px] w-full text-sm"><thead className="bg-muted/10 text-xs text-muted-foreground"><tr><th className="w-[22%] px-3 py-2 text-left font-medium">박스번호</th><th className="w-[14%] px-3 py-2 text-right font-medium">적재수량</th><th className="w-[13%] px-3 py-2 text-right font-medium">가로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">세로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">높이(cm)</th><th className="w-[15%] px-3 py-2 text-right font-medium">CBM</th><th className="w-[10%] px-3 py-2 text-center font-medium">관리</th></tr></thead><tbody>{drafts.map((draft) => { const cbm = calculateChinaOutboundBoxCbm({ lengthCm: optionalNumber(draft.lengthCm), widthCm: optionalNumber(draft.widthCm), heightCm: optionalNumber(draft.heightCm) }); return <tr key={draft.key} className="border-t"><td className="px-3 py-2"><input value={draft.boxNo} onChange={(event) => patchDraft(draft.key, { boxNo: event.target.value })} disabled={!editable || isPending} className={compactInputClass} placeholder="예: A-01" /></td><td className="px-3 py-2"><input type="number" min="1" step="1" value={draft.quantity} onChange={(event) => patchDraft(draft.key, { quantity: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="0" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.lengthCm} onChange={(event) => patchDraft(draft.key, { lengthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.widthCm} onChange={(event) => patchDraft(draft.key, { widthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.heightCm} onChange={(event) => patchDraft(draft.key, { heightCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><button type="button" disabled={!editable || isPending || drafts.length === 1} onClick={() => setDrafts((current) => current.filter((candidate) => candidate.key !== draft.key))} className="h-8 rounded-md border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40">삭제</button></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</p><div className="flex gap-2"><button type="button" disabled={!editable || isPending} onClick={() => setDrafts((current) => [...current, createBoxSplitDraft(item.sku, current.length + 1)])} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> 박스 추가</button><button type="button" disabled={!editable || isPending} onClick={save} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 박스분할 저장</button></div></div></article>
 }
 
-function SummaryCard({ label, value, tone }: { label: string; value: number; tone?: 'amber' | 'emerald' }) {
-  const toneClass = tone === 'amber' ? 'border-amber-200 bg-amber-50/50 text-amber-800' : tone === 'emerald' ? 'border-emerald-200 bg-emerald-50/50 text-emerald-800' : 'bg-card'
-  return <div className={`rounded-md border px-2 py-1.5 ${toneClass}`}><p className="text-[11px] text-muted-foreground">{label}</p><p className="text-base font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></div>
+function PalletAssignmentPanel({ boxes, boxItemsByBox, itemById, palletById, editable, isPending, onSave }: {
+  boxes: ChinaShipmentDetailView['boxes']
+  boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>
+  itemById: Map<string, ChinaShipmentDetailView['items'][number]>
+  palletById: Map<string, ChinaShipmentDetailView['pallets'][number]>
+  editable: boolean
+  isPending: boolean
+  onSave: (assignments: Array<{ boxNo: string; palletNo: string | null }>) => void
+}) {
+  const sortedBoxes = [...boxes].sort((left, right) => left.boxNo.localeCompare(right.boxNo, 'ko-KR', { numeric: true }))
+  const [palletNumbers, setPalletNumbers] = useState<Record<string, string>>(() => Object.fromEntries(sortedBoxes.map((box) => [box.boxNo, box.palletId ? palletById.get(box.palletId)?.palletNo ?? '' : ''])))
+
+  return <section className="overflow-hidden rounded-lg border"><div className="overflow-x-auto"><table className="min-w-[850px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th></tr></thead><tbody>{sortedBoxes.map((box) => { const boxItems = boxItemsByBox.get(box.id) ?? []; const quantity = boxItems.reduce((total, item) => total + item.quantity, 0); const products = boxItems.map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return item ? `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''} (${boxItem.quantity.toLocaleString('ko-KR')}개)` : '' }).filter(Boolean); const cbm = calculateChinaOutboundBoxCbm(box); return <tr key={box.id} className="border-t align-top"><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.join('\n')}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2"><input value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!editable || isPending} className={`${compactInputClass} mx-auto max-w-32 text-center`} placeholder="예: 1" /></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">빈칸으로 저장하면 파렛트 배정을 해제합니다. 파렛트 번호는 숫자뿐 아니라 `A`, `B`, `1-2`처럼 자유롭게 입력할 수 있습니다.</p><button type="button" disabled={!editable || isPending} onClick={() => onSave(sortedBoxes.map((box) => ({ boxNo: box.boxNo, palletNo: palletNumbers[box.boxNo]?.trim() || null })))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 파렛트 적재 저장</button></div></section>
+}
+
+function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editable: boolean }) {
+  const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<WorkbookPreview | null>(null)
+  const [isWorking, setIsWorking] = useState(false)
+
+  async function uploadWorkbook(mode: 'preview' | 'apply') {
+    if (!selectedFile) return toast.error('업로드할 엑셀 파일을 선택해주세요.')
+    setIsWorking(true)
+    try {
+      const form = new FormData()
+      form.set('file', selectedFile)
+      form.set('mode', mode)
+      const response = await fetch(`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/workbook`, { method: 'POST', body: form })
+      const body = await response.json().catch(() => ({})) as { error?: string; preview?: WorkbookPreview }
+      if (body.preview) setPreview(body.preview)
+      if (!response.ok) {
+        toast.error(body.error ?? '엑셀을 확인하지 못했습니다.')
+        return
+      }
+      if (mode === 'preview') {
+        toast.success(body.preview?.errors.length ? '엑셀에서 확인할 항목을 찾았습니다.' : '엑셀 검토가 끝났습니다. 반영할 수 있습니다.')
+      } else {
+        toast.success('엑셀 작업 내용을 반영했습니다.')
+        setSelectedFile(null)
+        setPreview(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        router.refresh()
+      }
+    } catch {
+      toast.error('엑셀 업로드 중 연결 오류가 발생했습니다.')
+    } finally {
+      setIsWorking(false)
+    }
+  }
+
+  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+    setSelectedFile(event.target.files?.[0] ?? null)
+    setPreview(null)
+  }
+
+  return <section className="rounded-lg border border-dashed bg-muted/10 p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><FileSpreadsheet className="size-4 text-emerald-700" /><h3 className="text-sm font-semibold">엑셀로 작업</h3></div><p className="mt-1 text-xs text-muted-foreground">현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.</p></div><div className="flex flex-wrap items-center gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/workbook`} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted"><Download className="size-3.5" /> 작업용 엑셀</a><label className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted ${!editable ? 'pointer-events-none opacity-50' : ''}`}><Upload className="size-3.5" /> {selectedFile ? selectedFile.name : '엑셀 선택'}<input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={chooseFile} disabled={!editable || isWorking} className="sr-only" /></label><button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => uploadWorkbook('preview')} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <FileSpreadsheet className="size-3.5" />} 엑셀 검토</button></div></div>{preview ? <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}><div className="flex flex-wrap items-center justify-between gap-2"><p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>{preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => uploadWorkbook('apply')} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}</div>{preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={`${error.sheet}:${error.row}:${index}`}>{error.sheet}{error.row ? ` ${error.row}행` : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}</div> : null}</section>
+}
+
+type PalletSummary = {
+  palletNo: string
+  boxes: ChinaShipmentDetailView['boxes']
+  quantity: number
+  cbm: number
+  boxesWithoutDimensions: number
+  products: Array<{ sku: string; productName: string; optionName: string | null; quantity: number }>
+}
+
+function buildPalletSummaries({ pallets, boxes, boxItemsByBox, itemById, palletById }: {
+  pallets: ChinaShipmentDetailView['pallets']
+  boxes: ChinaShipmentDetailView['boxes']
+  boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>
+  itemById: Map<string, ChinaShipmentDetailView['items'][number]>
+  palletById: Map<string, ChinaShipmentDetailView['pallets'][number]>
+}): PalletSummary[] {
+  void pallets
+  const grouped = new Map<string, ChinaShipmentDetailView['boxes']>()
+  for (const box of boxes) {
+    const pallet = box.palletId ? palletById.get(box.palletId) : null
+    if (!pallet) continue
+    grouped.set(pallet.palletNo, [...(grouped.get(pallet.palletNo) ?? []), box])
+  }
+  return [...grouped.entries()].map(([palletNo, palletBoxes]) => {
+    const products = new Map<string, { sku: string; productName: string; optionName: string | null; quantity: number }>()
+    let quantity = 0
+    let cbm = 0
+    let boxesWithoutDimensions = 0
+    for (const box of palletBoxes) {
+      const boxCbm = calculateChinaOutboundBoxCbm(box)
+      if (boxCbm == null) boxesWithoutDimensions += 1
+      else cbm += boxCbm
+      for (const allocation of boxItemsByBox.get(box.id) ?? []) {
+        const item = itemById.get(allocation.shipmentItemId)
+        if (!item) continue
+        quantity += allocation.quantity
+        const key = `${item.sku}\u0000${item.optionName ?? ''}`
+        const current = products.get(key)
+        products.set(key, { sku: item.sku, productName: item.productName, optionName: item.optionName, quantity: (current?.quantity ?? 0) + allocation.quantity })
+      }
+    }
+    return { palletNo, boxes: palletBoxes.sort((left, right) => left.boxNo.localeCompare(right.boxNo, 'ko-KR', { numeric: true })), quantity, cbm, boxesWithoutDimensions, products: [...products.values()].sort(compareShipmentItems) }
+  }).sort((left, right) => left.palletNo.localeCompare(right.palletNo, 'ko-KR', { numeric: true }))
+}
+
+function PalletSummaryCards({ summaries, detailed = false }: { summaries: PalletSummary[]; detailed?: boolean }) {
+  if (summaries.length === 0) return null
+  return <section className="space-y-3"><div className="flex items-center justify-between"><div><h3 className="font-semibold">사용 파렛트</h3><p className="mt-1 text-xs text-muted-foreground">실제로 박스가 배정된 파렛트만 집계합니다.</p></div><p className="text-sm font-medium">총 {summaries.length.toLocaleString('ko-KR')}파렛트</p></div><div className="grid gap-3 lg:grid-cols-2">{summaries.map((summary) => <article key={summary.palletNo} className="rounded-lg border bg-background p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">파렛트 {summary.palletNo}</p><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length.toLocaleString('ko-KR')}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p></div><p className="text-right text-sm font-semibold tabular-nums">{formatChinaOutboundCbm(summary.cbm) ?? '0.0000'} CBM</p></div>{summary.boxesWithoutDimensions > 0 ? <p className="mt-2 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions.toLocaleString('ko-KR')}개는 CBM 합계에서 제외되었습니다.</p> : null}{detailed ? <div className="mt-3 space-y-2 border-t pt-3 text-xs"><p className="font-medium text-muted-foreground">적재 박스: {summary.boxes.map((box) => box.boxNo).join(', ')}</p><ul className="space-y-1">{summary.products.map((product) => <li key={`${product.sku}:${product.optionName ?? ''}`}>{product.sku} · {product.productName}{product.optionName ? ` · ${product.optionName}` : ''} <span className="tabular-nums text-muted-foreground">{product.quantity.toLocaleString('ko-KR')}개</span></li>)}</ul></div> : null}</article>)}</div></section>
+}
+
+function EmptyStage({ title, description, onMove, moveLabel }: { title: string; description: string; onMove: () => void; moveLabel: string }) {
+  return <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p><button type="button" onClick={onMove} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">{moveLabel}</button></section>
+}
+
+function SummaryCard({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'amber' | 'emerald' }) {
+  const toneClass = tone === 'amber' ? 'border-amber-200 bg-amber-50' : tone === 'emerald' ? 'border-emerald-200 bg-emerald-50' : 'bg-card'
+  return <article className={`rounded-lg border px-4 py-3 ${toneClass}`}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-semibold tabular-nums">{value.toLocaleString('ko-KR')}개</p></article>
+}
+
+function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {
+  return <button type="button" onClick={onClick} className={`rounded-md border px-3 py-2.5 text-left transition-colors ${active ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-background hover:border-border hover:bg-muted'}`}><p className={`text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{step}</p><p className="mt-0.5 text-sm font-semibold">{title}</p><p className={`mt-1 text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{detail}</p></button>
+}
+
+function ProgressBadge({ completed, detail }: { completed: boolean; detail: string }) {
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${completed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{completed ? '완료' : '진행'} · {detail}</span>
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const tone = status === 'dispatched' ? 'bg-emerald-100 text-emerald-800' : status === 'cancelled' ? 'bg-zinc-100 text-zinc-700' : status === 'ready' ? 'bg-blue-100 text-blue-800' : status === 'packing' ? 'bg-amber-100 text-amber-800' : 'bg-muted text-muted-foreground'
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{statusLabels[status] ?? status}</span>
+  const className = status === 'dispatched' ? 'bg-emerald-100 text-emerald-800' : status === 'ready' ? 'bg-sky-100 text-sky-800' : status === 'cancelled' ? 'bg-zinc-100 text-zinc-700' : 'bg-amber-100 text-amber-800'
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{statusLabels[status] ?? status}</span>
+}
+
+function Pagination({ page, pageCount, onPrevious, onNext }: { page: number; pageCount: number; onPrevious: () => void; onNext: () => void }) {
+  return <div className="flex items-center gap-2 text-sm"><button type="button" disabled={page <= 1} onClick={onPrevious} className="inline-flex size-8 items-center justify-center rounded-md border hover:bg-muted disabled:opacity-40" aria-label="이전 페이지"><ChevronLeft className="size-4" /></button><span className="min-w-16 text-center tabular-nums">{page} / {pageCount}</span><button type="button" disabled={page >= pageCount} onClick={onNext} className="inline-flex size-8 items-center justify-center rounded-md border hover:bg-muted disabled:opacity-40" aria-label="다음 페이지"><ChevronRight className="size-4" /></button></div>
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label><span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>{children}</label>
+  return <label className="block"><span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>{children}</label>
 }
 
-function shipmentHref(shipmentId: string, stage: ChinaShipmentStage) {
-  return `/purchasing/china-shipments?shipment=${encodeURIComponent(shipmentId)}&step=${stage}`
+function shipmentHref(id: string, stage: ChinaShipmentStage) {
+  return `/purchasing/china-shipments?shipment=${encodeURIComponent(id)}&step=${stage}`
 }
 
-function shipmentDisplayName(shipment: Pick<ChinaShipmentListItem, 'displayName' | 'shipmentNo'>) {
+function shipmentDisplayName(shipment: Pick<ChinaShipmentListItem, 'displayName' | 'shipmentNo'> | ChinaShipmentDetailView['shipment']) {
   return shipment.displayName?.trim() || shipment.shipmentNo
 }
 
-function defaultShipmentDisplayName(plannedOutboundDate: string | null | undefined) {
-  return plannedOutboundDate ? `${plannedOutboundDate} 출고` : '새 출고작업'
+function defaultShipmentDisplayName(date: string | null | undefined) {
+  return date ? `${date} 중국출고` : '중국출고'
 }
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
 
-const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30'
+function createBoxSplitDraft(sku: string, order = 1): BoxSplitDraft {
+  return { key: `${sku}-${Date.now()}-${Math.random()}`, boxNo: `${sku}-${order}`, quantity: '', lengthCm: '', widthCm: '', heightCm: '' }
+}
+
+function optionalNumber(value: string) {
+  const normalized = value.trim()
+  return normalized ? Number(normalized) : null
+}
+
+function positiveInteger(value: string) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function compareShipmentItems(
+  left: Pick<ChinaShipmentDetailView['items'][number], 'sku' | 'productName'>,
+  right: Pick<ChinaShipmentDetailView['items'][number], 'sku' | 'productName'>,
+) {
+  return left.sku.localeCompare(right.sku, 'ko-KR', { numeric: true })
+    || left.productName.localeCompare(right.productName, 'ko-KR')
+}

@@ -197,8 +197,7 @@ export function ChinaShipmentsBoard({
       setDisplayName(defaultShipmentDisplayName(nextDate))
       setDisplayNameIsDateDefault(true)
       setMemo('')
-      router.push(shipmentHref(result.shipmentId, 'items'))
-      router.refresh()
+      router.replace(shipmentHref(result.shipmentId, 'items'), { scroll: false })
     })
   }
 
@@ -211,7 +210,10 @@ export function ChinaShipmentsBoard({
           selectedShipment={selectedShipment?.shipment ?? null}
           showCreate={showCreate}
           onToggleCreate={() => setShowCreate((open) => !open)}
-          onSelect={(id) => router.push(shipmentHref(id, 'items'))}
+          onSelect={(id) => {
+            setShowCreate(false)
+            router.replace(shipmentHref(id, 'items'), { scroll: false })
+          }}
         />
         {showCreate ? (
           <section className="rounded-lg border bg-card">
@@ -286,7 +288,7 @@ export function ChinaShipmentsBoard({
           stage={selectedStep}
           isPending={isPending}
           startTransition={startTransition}
-          onStageChange={(stage) => selectedShipment && router.push(shipmentHref(selectedShipment.shipment.id, stage))}
+          onStageChange={(stage) => selectedShipment && router.replace(shipmentHref(selectedShipment.shipment.id, stage), { scroll: false })}
         />
       </div>
     </div>
@@ -336,8 +338,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         return
       }
       toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
-      router.push('/purchasing/china-shipments')
-      router.refresh()
+      router.replace('/purchasing/china-shipments', { scroll: false })
     })
   }
 

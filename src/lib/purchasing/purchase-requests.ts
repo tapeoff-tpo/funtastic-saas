@@ -73,7 +73,7 @@ export type PurchaseCostSummary = {
 export type PurchaseReviewHistory = {
   lastPurchaseDate: string
   lastPurchaseQuantity: number
-  outgoingQuantityAtLastPurchase: number
+  threeMonthAverageOutgoingAtLastPurchase: number
 }
 
 export type PurchaseReviewHistoryCandidate = {
@@ -82,6 +82,7 @@ export type PurchaseReviewHistoryCandidate = {
   actualPurchaseQuantity: number | null
   requestDate: string | null
   outboundExpectedDate: string | null
+  rawData: Record<string, unknown>
   createdAt: Date
 }
 
@@ -1108,6 +1109,7 @@ export async function getPurchaseReviewHistoryBySku(
       actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
       requestDate: purchaseRequestItems.requestDate,
       outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
+      rawData: purchaseRequestItems.rawData,
       createdAt: purchaseRequestItems.createdAt,
     })
     .from(purchaseRequestItems)
@@ -1130,38 +1132,48 @@ export async function getPurchaseReviewHistoryBySku(
     Array.from(latestHistoryBySku.values()).map((row) => sql`(${row.sku}, ${purchaseReviewHistoryDate(row)}::date)`),
     sql`, `,
   )
-  const outgoingResult = await db.execute<{
+  const threeMonthAverageResult = await db.execute<{
     sku: string
-    outgoingQuantity: string | number | null
+    threeMonthAverageOutgoing: string | number | null
   }>(sql`
     WITH purchase_history (sku, purchase_date) AS (
       VALUES ${historyValues}
     )
     SELECT
       history.sku AS "sku",
-      COALESCE(SUM(
+      (COALESCE(SUM(
         CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
-      ), 0)::numeric AS "outgoingQuantity"
+      ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
     FROM purchase_history history
     LEFT JOIN outbound_reflection_lines line
       ON line.user_id = ${userId}::uuid
       AND line.sku = history.sku
       AND line.reflection_status = 'applied'
-      AND line.shipment_date >= date_trunc('month', history.purchase_date)::date
-      AND line.shipment_date <= history.purchase_date
+      AND line.shipment_date >= (date_trunc('month', history.purchase_date) - INTERVAL '3 months')::date
+      AND line.shipment_date < date_trunc('month', history.purchase_date)::date
     GROUP BY history.sku
   `)
-  const outgoingBySku = new Map(resultRows<{ sku: string; outgoingQuantity: string | number | null }>(outgoingResult)
-    .map((row) => [row.sku, positiveInteger(row.outgoingQuantity)]))
+  const calculatedAverageBySku = new Map(resultRows<{
+    sku: string
+    threeMonthAverageOutgoing: string | number | null
+  }>(threeMonthAverageResult).map((row) => [row.sku, positiveOneDecimal(row.threeMonthAverageOutgoing)]))
 
   return new Map(Array.from(latestHistoryBySku.entries()).map(([sku, row]) => [
     sku,
     {
       lastPurchaseDate: purchaseReviewHistoryDate(row),
       lastPurchaseQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
-      outgoingQuantityAtLastPurchase: outgoingBySku.get(sku) ?? 0,
+      threeMonthAverageOutgoingAtLastPurchase: getStoredPurchaseReviewAverage(row.rawData)
+        ?? calculatedAverageBySku.get(sku)
+        ?? 0,
     },
   ]))
+}
+
+export function getStoredPurchaseReviewAverage(rawData: Record<string, unknown>): number | null {
+  const averageMonthlyOutgoing = Number(rawData.averageMonthlyOutgoing)
+  if (!Number.isFinite(averageMonthlyOutgoing) || averageMonthlyOutgoing < 0) return null
+  return Math.round(averageMonthlyOutgoing * 10) / 10
 }
 
 export function getLatestPurchaseReviewHistoryCandidates(
@@ -2529,9 +2541,9 @@ function todayKstDate() {
   return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}`
 }
 
-function positiveInteger(value: string | number | null) {
+function positiveOneDecimal(value: string | number | null) {
   const numeric = Number(value)
-  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0
+  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric * 10) / 10) : 0
 }
 
 function resultRows<T>(result: unknown): T[] {

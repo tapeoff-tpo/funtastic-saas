@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateBulkPaymentBalance,
+  getStoredPurchaseReviewAverage,
   getPurchasePaymentFlowViewSummary,
   getLatestPurchaseReviewHistoryCandidates,
   isPurchasePaymentFlowViewItem,
@@ -81,6 +82,7 @@ describe('purchase review history', () => {
       actualPurchaseQuantity: null,
       requestDate: '2026-08-20',
       outboundExpectedDate: null,
+      rawData: {},
       createdAt: new Date('2026-08-20T01:00:00.000Z'),
     }
     const latest = {
@@ -89,6 +91,7 @@ describe('purchase review history', () => {
       actualPurchaseQuantity: 180,
       requestDate: '2026-09-10',
       outboundExpectedDate: '2026-09-12',
+      rawData: {},
       createdAt: new Date('2026-09-10T01:00:00.000Z'),
     }
 
@@ -101,6 +104,7 @@ describe('purchase review history', () => {
         actualPurchaseQuantity: 50,
         requestDate: null,
         outboundExpectedDate: '2026-09-08',
+        rawData: {},
         createdAt: new Date('2026-09-08T01:00:00.000Z'),
       },
     ])
@@ -117,6 +121,7 @@ describe('purchase review history', () => {
         actualPurchaseQuantity: 10,
         requestDate: '2026-09-15',
         outboundExpectedDate: null,
+        rawData: {},
         createdAt: new Date('2026-09-15T01:00:00.000Z'),
       },
       {
@@ -125,11 +130,19 @@ describe('purchase review history', () => {
         actualPurchaseQuantity: 20,
         requestDate: '2026-09-15',
         outboundExpectedDate: null,
+        rawData: {},
         createdAt: new Date('2026-09-15T02:00:00.000Z'),
       },
     ])
 
     expect(history.get('109733-9999')?.actualPurchaseQuantity).toBe(20)
+  })
+
+  it('uses the recommendation average saved with the historical purchase', () => {
+    expect(getStoredPurchaseReviewAverage({ averageMonthlyOutgoing: 31.26 })).toBe(31.3)
+    expect(getStoredPurchaseReviewAverage({ averageMonthlyOutgoing: 0 })).toBe(0)
+    expect(getStoredPurchaseReviewAverage({ averageMonthlyOutgoing: 'not-a-number' })).toBeNull()
+    expect(getStoredPurchaseReviewAverage({})).toBeNull()
   })
 })
 

@@ -913,11 +913,11 @@ function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHist
   return (
     <div
       className="space-y-0.5 text-xs tabular-nums"
-      title="최근 구매완료 이후 이력과 발주일 기준 당월 출고반영 수량입니다."
+      title="최근 구매 이력과 발주 당시 직전 완료 3개월 평균 출고수량입니다. 자동 추천으로 생성된 이력은 당시 저장된 평균값을 우선 표시합니다."
     >
       <div className="font-medium text-foreground">구매 {formatNumber(history.lastPurchaseQuantity)}개</div>
       <div className="text-muted-foreground">발주 {formatPurchaseHistoryDate(history.lastPurchaseDate)}</div>
-      <div className="text-muted-foreground">당시 출고 {formatNumber(history.outgoingQuantityAtLastPurchase)}개</div>
+      <div className="text-muted-foreground">당시 3개월 평균 {formatNumber(history.threeMonthAverageOutgoingAtLastPurchase)}개</div>
     </div>
   )
 }

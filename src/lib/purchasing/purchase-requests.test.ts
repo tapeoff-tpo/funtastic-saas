@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateBulkPaymentBalance,
   getPurchasePaymentFlowViewSummary,
+  getLatestPurchaseReviewHistoryCandidates,
   isPurchasePaymentFlowViewItem,
   getOutboundRequestedQuantity,
   normalizeOptionalPurchaseRequestQuantity,
@@ -69,6 +70,66 @@ describe('purchase request stage quantities', () => {
       actualPurchaseQuantity: 3,
       requestedQuantity: 1,
     })).toBe(3)
+  })
+})
+
+describe('purchase review history', () => {
+  it('keeps the newest completed purchase for each SKU', () => {
+    const older = {
+      sku: '100560-0001',
+      requestedQuantity: 100,
+      actualPurchaseQuantity: null,
+      requestDate: '2026-08-20',
+      outboundExpectedDate: null,
+      createdAt: new Date('2026-08-20T01:00:00.000Z'),
+    }
+    const latest = {
+      sku: '100560-0001',
+      requestedQuantity: 200,
+      actualPurchaseQuantity: 180,
+      requestDate: '2026-09-10',
+      outboundExpectedDate: '2026-09-12',
+      createdAt: new Date('2026-09-10T01:00:00.000Z'),
+    }
+
+    const history = getLatestPurchaseReviewHistoryCandidates([
+      older,
+      latest,
+      {
+        sku: '100560-0002',
+        requestedQuantity: 50,
+        actualPurchaseQuantity: 50,
+        requestDate: null,
+        outboundExpectedDate: '2026-09-08',
+        createdAt: new Date('2026-09-08T01:00:00.000Z'),
+      },
+    ])
+
+    expect(history.get('100560-0001')).toEqual(latest)
+    expect(history.get('100560-0002')?.outboundExpectedDate).toBe('2026-09-08')
+  })
+
+  it('uses the newest creation time when purchase dates match', () => {
+    const history = getLatestPurchaseReviewHistoryCandidates([
+      {
+        sku: '109733-9999',
+        requestedQuantity: 10,
+        actualPurchaseQuantity: 10,
+        requestDate: '2026-09-15',
+        outboundExpectedDate: null,
+        createdAt: new Date('2026-09-15T01:00:00.000Z'),
+      },
+      {
+        sku: '109733-9999',
+        requestedQuantity: 20,
+        actualPurchaseQuantity: 20,
+        requestDate: '2026-09-15',
+        outboundExpectedDate: null,
+        createdAt: new Date('2026-09-15T02:00:00.000Z'),
+      },
+    ])
+
+    expect(history.get('109733-9999')?.actualPurchaseQuantity).toBe(20)
   })
 })
 

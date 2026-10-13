@@ -11,6 +11,7 @@ import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
   getPurchaseRequests,
+  type PurchaseReviewHistory,
 } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
@@ -187,6 +188,7 @@ export async function PurchasingOrdersView({
   const visibleColumnCount =
     8 +
     (showCosts ? (isRequestedStatus ? 3 : 4) : 0) +
+    (isRequestedStatus ? 1 : 0) +
     (isRequestedStatus ? 1 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
@@ -470,7 +472,7 @@ export async function PurchasingOrdersView({
           </div>
 
           <div className="max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="min-w-[1040px] w-full table-auto text-left text-sm">
+            <table className="min-w-[1180px] w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
@@ -489,6 +491,7 @@ export async function PurchasingOrdersView({
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
                   </th>
+                  {isRequestedStatus ? <th className="min-w-[176px] px-3 py-2 text-center font-medium">최근 구매 이력</th> : null}
                   {isRequestedStatus ? (
                     <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                       <SortHeader label="총 금액(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
@@ -653,6 +656,11 @@ export async function PurchasingOrdersView({
                             </div>
                           ) : null}
                       </td>
+                      {isRequestedStatus ? (
+                        <td className="px-3 py-2 text-center align-middle">
+                          <PurchaseReviewHistorySummary history={item.purchaseReviewHistory} />
+                        </td>
+                      ) : null}
                       {isRequestedStatus ? (
                         <td className="px-3 py-2 text-right font-medium tabular-nums align-middle">
                           {formatCost(costs.totalCostKrw, 0)}
@@ -897,6 +905,23 @@ function getStageQuantity(
   return item.requestedQuantity
 }
 
+function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHistory | null }) {
+  if (!history) {
+    return <span className="text-xs text-muted-foreground">구매 이력 없음</span>
+  }
+
+  return (
+    <div
+      className="space-y-0.5 text-xs tabular-nums"
+      title="최근 구매완료 이후 이력과 발주일 기준 당월 출고반영 수량입니다."
+    >
+      <div className="font-medium text-foreground">구매 {formatNumber(history.lastPurchaseQuantity)}개</div>
+      <div className="text-muted-foreground">발주 {formatPurchaseHistoryDate(history.lastPurchaseDate)}</div>
+      <div className="text-muted-foreground">당시 출고 {formatNumber(history.outgoingQuantityAtLastPurchase)}개</div>
+    </div>
+  )
+}
+
 function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
   const anomalyNote = rawData.salesAnomalyDetected === true
@@ -1074,6 +1099,10 @@ function formatNumber(value: unknown) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return '-'
   return number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+}
+
+function formatPurchaseHistoryDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.replaceAll('-', '.') : value
 }
 
 function numericRawDataValue(rawData: Record<string, unknown>, key: string) {

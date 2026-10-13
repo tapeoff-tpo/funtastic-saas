@@ -70,6 +70,21 @@ export type PurchaseCostSummary = {
   missingKrwCostCount: number
 }
 
+export type PurchaseReviewHistory = {
+  lastPurchaseDate: string
+  lastPurchaseQuantity: number
+  outgoingQuantityAtLastPurchase: number
+}
+
+export type PurchaseReviewHistoryCandidate = {
+  sku: string
+  requestedQuantity: number
+  actualPurchaseQuantity: number | null
+  requestDate: string | null
+  outboundExpectedDate: string | null
+  createdAt: Date
+}
+
 export type PurchasePaymentFlowSummary = {
   total: PurchaseCostSummary
   purchaseBefore: PurchaseCostSummary
@@ -1043,6 +1058,9 @@ export async function getPurchaseRequests(input: {
       exchangeRateKrw: item.costExchangeRateKrw ?? input.exchangeRateKrw,
     }),
   }))
+  const purchaseReviewHistoryBySku = input.status === 'requested'
+    ? await getPurchaseReviewHistoryBySku(input.userId, pricedItems.map((item) => item.sku))
+    : new Map<string, PurchaseReviewHistory>()
   const missingCostItems = costRows
     .map((row) => ({ row, costs: calculatePurchaseCost(row, input.exchangeRateKrw) }))
     .filter(({ costs }) => costs.unitCostYuan === null || costs.unitCostKrw === null)
@@ -1054,7 +1072,10 @@ export async function getPurchaseRequests(input: {
     }))
 
   return {
-    items: pricedItems,
+    items: pricedItems.map((item) => ({
+      ...item,
+      purchaseReviewHistory: purchaseReviewHistoryBySku.get(item.sku) ?? null,
+    })),
     total,
     costTotals: summarizePurchaseCosts(costRows, input.exchangeRateKrw),
     missingCostItems,
@@ -1064,6 +1085,110 @@ export async function getPurchaseRequests(input: {
     overdueTotalCount: overduePurchaseRequestCount + overduePurchaseCompletedCount,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.total])) as Partial<Record<PurchaseRequestStatus, number>>,
   }
+}
+
+const PURCHASE_REVIEW_HISTORY_STATUSES = [
+  'purchase_completed',
+  'china_arrived',
+  'outbound_requested',
+  'completed',
+] as const satisfies PurchaseRequestStatus[]
+
+export async function getPurchaseReviewHistoryBySku(
+  userId: string,
+  skus: readonly string[],
+): Promise<Map<string, PurchaseReviewHistory>> {
+  const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
+  if (uniqueSkus.length === 0) return new Map()
+
+  const historyRows = await db
+    .select({
+      sku: purchaseRequestItems.sku,
+      requestedQuantity: purchaseRequestItems.requestedQuantity,
+      actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+      requestDate: purchaseRequestItems.requestDate,
+      outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
+      createdAt: purchaseRequestItems.createdAt,
+    })
+    .from(purchaseRequestItems)
+    .where(and(
+      eq(purchaseRequestItems.userId, userId),
+      inArray(purchaseRequestItems.sku, uniqueSkus),
+      or(
+        inArray(purchaseRequestItems.status, [...PURCHASE_REVIEW_HISTORY_STATUSES]),
+        and(
+          eq(purchaseRequestItems.status, 'purchased'),
+          eq(purchaseRequestItems.purchaseConfirmed, true),
+        ),
+      )!,
+    ))
+
+  const latestHistoryBySku = getLatestPurchaseReviewHistoryCandidates(historyRows)
+  if (latestHistoryBySku.size === 0) return new Map()
+
+  const historyValues = sql.join(
+    Array.from(latestHistoryBySku.values()).map((row) => sql`(${row.sku}, ${purchaseReviewHistoryDate(row)}::date)`),
+    sql`, `,
+  )
+  const outgoingResult = await db.execute<{
+    sku: string
+    outgoingQuantity: string | number | null
+  }>(sql`
+    WITH purchase_history (sku, purchase_date) AS (
+      VALUES ${historyValues}
+    )
+    SELECT
+      history.sku AS "sku",
+      COALESCE(SUM(
+        CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+      ), 0)::numeric AS "outgoingQuantity"
+    FROM purchase_history history
+    LEFT JOIN outbound_reflection_lines line
+      ON line.user_id = ${userId}::uuid
+      AND line.sku = history.sku
+      AND line.reflection_status = 'applied'
+      AND line.shipment_date >= date_trunc('month', history.purchase_date)::date
+      AND line.shipment_date <= history.purchase_date
+    GROUP BY history.sku
+  `)
+  const outgoingBySku = new Map(resultRows<{ sku: string; outgoingQuantity: string | number | null }>(outgoingResult)
+    .map((row) => [row.sku, positiveInteger(row.outgoingQuantity)]))
+
+  return new Map(Array.from(latestHistoryBySku.entries()).map(([sku, row]) => [
+    sku,
+    {
+      lastPurchaseDate: purchaseReviewHistoryDate(row),
+      lastPurchaseQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
+      outgoingQuantityAtLastPurchase: outgoingBySku.get(sku) ?? 0,
+    },
+  ]))
+}
+
+export function getLatestPurchaseReviewHistoryCandidates(
+  rows: readonly PurchaseReviewHistoryCandidate[],
+): Map<string, PurchaseReviewHistoryCandidate> {
+  const latestBySku = new Map<string, PurchaseReviewHistoryCandidate>()
+  for (const row of rows) {
+    const current = latestBySku.get(row.sku)
+    if (!current || comparePurchaseReviewHistoryCandidates(row, current) > 0) {
+      latestBySku.set(row.sku, row)
+    }
+  }
+  return latestBySku
+}
+
+function comparePurchaseReviewHistoryCandidates(
+  left: PurchaseReviewHistoryCandidate,
+  right: PurchaseReviewHistoryCandidate,
+) {
+  const leftDate = purchaseReviewHistoryDate(left)
+  const rightDate = purchaseReviewHistoryDate(right)
+  if (leftDate !== rightDate) return leftDate.localeCompare(rightDate)
+  return left.createdAt.getTime() - right.createdAt.getTime()
+}
+
+function purchaseReviewHistoryDate(row: PurchaseReviewHistoryCandidate) {
+  return row.requestDate ?? row.outboundExpectedDate ?? row.createdAt.toISOString().slice(0, 10)
 }
 
 export async function getCompletedOutboundDateOptions(userId: string) {
@@ -2402,6 +2527,19 @@ function formatSeoulDateKey(value: Date) {
 function todayKstDate() {
   const key = formatSeoulDateKey(new Date())
   return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}`
+}
+
+function positiveInteger(value: string | number | null) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0
+}
+
+function resultRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[]
+  if (result && typeof result === 'object' && 'rows' in result && Array.isArray((result as { rows: unknown }).rows)) {
+    return (result as { rows: T[] }).rows
+  }
+  return []
 }
 
 function emptyToNull(value: string | null | undefined): string | null {

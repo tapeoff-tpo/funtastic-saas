@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import {
   ESA009M_HEADERS,
+  ensurePurchasingItemIdentity,
   getOutgoingMetricWindows,
   PURCHASE_URL_HEADER,
   parseEsa009mWorkbook,
@@ -9,6 +10,7 @@ import {
   purchaseUrlVerification,
   resolveOutgoingMetrics,
 } from './items'
+import type { Esa009mData } from './items'
 
 describe('parseEsa009mWorkbook', () => {
   it('includes product-information fields in the item schema', () => {
@@ -87,6 +89,24 @@ describe('parseEsa009mWorkbook', () => {
     const result = await parseEsa009mWorkbook(buffer as ArrayBuffer)
 
     expect(result.rows[0][PURCHASE_URL_HEADER]).toBeNull()
+  })
+})
+
+describe('ensurePurchasingItemIdentity', () => {
+  it('keeps the existing product identity when a cost import initializes item metadata', () => {
+    const itemData = Object.fromEntries(ESA009M_HEADERS.map((header) => [header, null])) as Esa009mData
+    itemData['신규원가(元)'] = '16.51'
+
+    const result = ensurePurchasingItemIdentity(itemData, {
+      internalSku: '112456-0001',
+      name: '카반 2단 더블 컵홀더',
+    })
+
+    expect(result).toMatchObject({
+      '품목코드': '112456-0001',
+      '품목명': '카반 2단 더블 컵홀더',
+      '신규원가(元)': '16.51',
+    })
   })
 })
 

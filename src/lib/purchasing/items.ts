@@ -255,16 +255,22 @@ export async function importPurchasingItems(input: {
     if (options.mode === 'new-only') continue
     const headers = updateHeadersForImport(options)
     const currentData = normalizeEsaData(current.metadata?.esa009m)
-    const nextData = mergeEsaData(currentData, row, headers, false)
+    const nextData = ensurePurchasingItemIdentity(
+      mergeEsaData(currentData, row, headers, false),
+      current,
+    )
     const changedHeaders = headers.filter((header) => currentData[header] !== nextData[header])
-    if (changedHeaders.length === 0) continue
+    const identityChanged = purchasingItemIdentityChangedHeaders(currentData, nextData)
+    if (changedHeaders.length === 0 && identityChanged.length === 0) continue
 
     const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
     const set: Partial<typeof products.$inferInsert> = {
       metadata,
       updatedAt: new Date(),
     }
-    if (changedHeaders.includes('품목명')) set.name = nextData['품목명'] || current.name
+    if (changedHeaders.includes('품목명') || identityChanged.includes('품목명')) {
+      set.name = nextData['품목명'] || current.name
+    }
     if (changedHeaders.includes('한국창고기준 위치')) set.warehouseLocation = nextData['한국창고기준 위치']
     if (changedHeaders.includes('works 신규 원가') || changedHeaders.includes('works 기존 원가')) {
       set.costPrice = numericText(nextData['works 신규 원가'] || nextData['works 기존 원가'])
@@ -346,7 +352,7 @@ export async function updatePurchasingItem(input: {
 
   if (!current) return null
 
-  const nextData = {
+  const mergedData = {
     ...normalizeEsaData(current.metadata?.esa009m),
     ...Object.fromEntries(
       Object.entries(input.data)
@@ -355,8 +361,8 @@ export async function updatePurchasingItem(input: {
     ),
   } as Esa009mData
 
-  nextData['품목코드'] = current.internalSku
-  const nextName = nextData['품목명'] || current.name
+  const nextData = ensurePurchasingItemIdentity(mergedData, current)
+  const nextName = nextData['품목명']
   const warehouseLocation = nextData['한국창고기준 위치']
   const costPrice = numericText(nextData['works 신규 원가'] || nextData['works 기존 원가'])
   const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
@@ -738,19 +744,24 @@ function buildPurchasingItemsImportPreview(
 
     updateItems += 1
     const currentData = normalizeEsaData(current.metadata?.esa009m)
-    const nextData = mergeEsaData(currentData, row, headers, false)
+    const nextData = ensurePurchasingItemIdentity(
+      mergeEsaData(currentData, row, headers, false),
+      current,
+    )
     const changedHeaders = headers.filter((header) => currentData[header] !== nextData[header])
-    if (changedHeaders.length === 0) {
+    const identityChanged = purchasingItemIdentityChangedHeaders(currentData, nextData)
+    const allChangedHeaders = [...changedHeaders, ...identityChanged]
+    if (allChangedHeaders.length === 0) {
       unchangedItems += 1
       continue
     }
     changedItems += 1
-    for (const header of changedHeaders) fieldChanges[header] = (fieldChanges[header] ?? 0) + 1
+    for (const header of allChangedHeaders) fieldChanges[header] = (fieldChanges[header] ?? 0) + 1
     pushSample(sampleChanges, {
       sku,
       name: row['품목명'] || current.name,
       type: 'update',
-      changedHeaders,
+      changedHeaders: allChangedHeaders,
     })
   }
 
@@ -790,6 +801,23 @@ function updateHeadersForImport(options: Required<PurchasingItemImportOptions>):
 
 function shouldCreateMissing(options: Required<PurchasingItemImportOptions>) {
   return options.mode === 'new-only' || options.createMissing
+}
+
+const PURCHASING_ITEM_IDENTITY_HEADERS = ['품목코드', '품목명'] as const satisfies readonly Esa009mHeader[]
+
+export function ensurePurchasingItemIdentity(
+  data: Esa009mData,
+  item: { internalSku: string; name: string },
+) {
+  return {
+    ...data,
+    '품목코드': item.internalSku,
+    '품목명': data['품목명']?.trim() || item.name,
+  } satisfies Esa009mData
+}
+
+function purchasingItemIdentityChangedHeaders(current: Esa009mData, next: Esa009mData) {
+  return PURCHASING_ITEM_IDENTITY_HEADERS.filter((header) => current[header] !== next[header])
 }
 
 function mergeEsaData(

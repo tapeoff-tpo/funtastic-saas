@@ -39,6 +39,11 @@ export const ECOUNT_CHINA_ARRIVED_SOURCE = 'ecount_purchasing_snapshot_china_arr
 export const ECOUNT_OUTBOUND_SOURCE = 'ecount_purchasing_snapshot_outbound'
 export const ECOUNT_OUTBOUND_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_outbound_completed'
 
+// China-arrival history through August 2026 has already been reflected in the
+// domestic inventory baseline. Keep it out of the China-arrival stage and the
+// temporary purchasing pipeline for snapshots on or after this cutoff.
+const CHINA_ARRIVAL_HISTORY_RETAIN_FROM = '2026-09-01'
+
 const REPLACEABLE_ECOUNT_SOURCES = [
   ECOUNT_PURCHASING_LEGACY_SOURCE,
   ECOUNT_PENDING_REQUEST_SOURCE,
@@ -589,13 +594,16 @@ export async function parseEcountPurchasingSnapshot(input: {
     historyItems,
     rawChinaOutboundItems,
   )
+  const retainedHistoryRemainingAfterOutbound = asOfDate < CHINA_ARRIVAL_HISTORY_RETAIN_FROM
+    ? historyRemainingAfterOutbound
+    : historyRemainingAfterOutbound.filter(isRetainedChinaArrivalHistory)
   // China inventory is an aggregate current-state snapshot rather than an
   // order-level report. Attribute that stock to the newest eligible arrivals,
   // so older purchase-history rows disappear first. Purchases newer than the
   // printed snapshot date are deliberately protected: that inventory file
   // could not have included them yet.
   const chinaInventoryReconciliation = reconcilePurchaseHistoryWithChinaInventory(
-    historyRemainingAfterOutbound,
+    retainedHistoryRemainingAfterOutbound,
     chinaInventoryItems,
     chinaInventory.fileName ? chinaInventorySnapshotAsOfDate : null,
     reflectedThrough,
@@ -2263,6 +2271,12 @@ function parseDate(value: string) {
     || parsed.getUTCDate() !== Number(day)
   ) return null
   return `${year}-${month}-${day}`
+}
+
+function isRetainedChinaArrivalHistory(
+  item: Pick<EcountPurchaseCompletedItem, 'purchaseDate'>,
+) {
+  return item.purchaseDate === null || item.purchaseDate >= CHINA_ARRIVAL_HISTORY_RETAIN_FROM
 }
 
 function normalizeDateOnly(value: string) {

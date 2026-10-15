@@ -1452,6 +1452,36 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.chinaArrived).toEqual([])
   })
 
+  it('excludes China-arrival history through August while keeping September arrivals', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260831-1', '100001-0001', '8월 이전 입고 상품', '기본', '', 100, '', 'PO-OLD', 'P-OLD', '확인', '웨이신'],
+        ['20260901-1', '100002-0001', '9월 이후 도착 상품', '기본', '', 120, '', 'PO-NEW', 'P-NEW', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory-empty.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [], '회사명 : 테이포프 / 20260915'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-15',
+      asOfDate: '2026-09-15',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260901-1',
+        sku: '100002-0001',
+        quantity: 120,
+      }),
+    ])
+  })
+
   it('does not infer shipment from an empty or same-day China inventory snapshot', async () => {
     const history = await makeUpload('purchase-history.xlsx', [
       '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',

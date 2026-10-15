@@ -411,6 +411,37 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.warnings.join(' ')).not.toContain('[object Object]')
   })
 
+  it('consumes an accumulated pending request when Ecount reissues its dated management code as completed', async () => {
+    const request = await makeUpload('purchase-request.xlsx', [
+      '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
+      '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사원(담당)명',
+    ], [
+      ['20260923-112', '112187-0001', 'Fitple Lab 강도조절 악력기', '블랙', 'Y', 20, '20260928', '20260923-110151-131', '', '진행중', '오지은'],
+      ['20260923-113', '112187-0001', 'Fitple Lab 강도조절 악력기', '블랙', 'Y', 10, '20260928', '20260923-110151-132', '', '진행중', '오지은'],
+      ['20260928-107', '112187-0001', 'Fitple Lab 강도조절 악력기', '블랙', 'Y', 20, '20260928', '20260928-110151-131', '', '완료', '오지은'],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [request],
+      domesticInventoryReflectedThrough: '2026-09-28',
+      asOfDate: '2026-10-15',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.activeRequests).toEqual([
+      expect.objectContaining({
+        purchaseManagementCode: '20260923-110151-132',
+        requestedQuantity: 10,
+      }),
+    ])
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        purchaseManagementCode: '20260928-110151-131',
+        quantity: 20,
+      }),
+    ])
+  })
+
   it('keeps plan rows regardless of their arrival target date and preserves the source purchase date', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [

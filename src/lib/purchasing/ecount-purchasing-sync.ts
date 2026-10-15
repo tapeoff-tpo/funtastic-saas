@@ -900,11 +900,35 @@ function pendingRequestMatchesProgressed(
   if (request.sku !== progressed.sku) return false
   if (request.purchaseManagementCode && progressed.purchaseManagementCode) {
     return request.purchaseManagementCode === progressed.purchaseManagementCode
+      || isSameDatedPurchaseManagementCode(
+        request.purchaseManagementCode,
+        progressed.purchaseManagementCode,
+      )
   }
   const requestOption = request.optionName?.trim() ?? ''
   const progressedOption = progressed.optionName?.trim() ?? ''
   if (requestOption && progressedOption && requestOption !== progressedOption) return false
   return true
+}
+
+/**
+ * Ecount can reissue a request on a later date while keeping the workflow
+ * identifier after the leading YYYYMMDD prefix. The old request row remains
+ * in the accumulated raw file, so treat that dated revision as the same
+ * purchase only while the SKU still matches.
+ */
+function isSameDatedPurchaseManagementCode(left: string, right: string) {
+  const workflowReference = (value: string) => (
+    value
+      .normalize('NFKC')
+      .replace(/[‐‑‒–—−]/g, '-')
+      .replace(/[\s\u200B-\u200D\uFEFF]+/g, '')
+      .match(/^20\d{6}-(.+)$/)?.[1] ?? null
+  )
+
+  const leftReference = workflowReference(left)
+  const rightReference = workflowReference(right)
+  return Boolean(leftReference && rightReference && leftReference === rightReference)
 }
 
 function sameManagedSku(

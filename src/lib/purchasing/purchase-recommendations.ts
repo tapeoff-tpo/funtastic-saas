@@ -11,6 +11,7 @@ import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics, type PurchasingSpecialBulkOutgoingAdjustment } from './items'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 import { cleanupExpiredEcountPurchaseOrderRows } from './purchase-order-retention'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 
 type ProductGroupMoqRule = {
   productName: string
@@ -429,7 +430,10 @@ export async function generatePurchaseRecommendations(input: {
   const now = input.now ?? new Date()
 
   // Expired order rows must not inflate the in-progress pipeline quantity.
-  await cleanupExpiredEcountPurchaseOrderRows({ userId: input.userId, now })
+  const [exchangeRateReference] = await Promise.all([
+    getLatestCnyKrwReferenceRate(),
+    cleanupExpiredEcountPurchaseOrderRows({ userId: input.userId, now }),
+  ])
 
   const [domesticInventoryRows, chinaInventoryRows] = await Promise.all([
     db
@@ -520,8 +524,8 @@ export async function generatePurchaseRecommendations(input: {
     getSkuOutgoingMetrics(input.userId, recommendationInventoryRows.map((row) => row.sku), now),
     db.select({
       sku: products.internalSku,
-      unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-      unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+      specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+      newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
       metadata: products.metadata,
       createdAt: products.createdAt,
     }).from(products).where(and(
@@ -559,8 +563,9 @@ export async function generatePurchaseRecommendations(input: {
     })
     const costs = calculatePurchaseCosts({
       requestedQuantity: 1,
-      unitCostYuan: productCosts?.unitCostYuan,
-      unitCostKrw: productCosts?.unitCostKrw,
+      specialPriceCny: productCosts?.specialPriceCny,
+      newCostCny: productCosts?.newCostCny,
+      exchangeRateKrw: exchangeRateReference.rate,
     })
 
     return buildAssessedPurchaseRow({

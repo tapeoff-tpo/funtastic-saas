@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import ExcelJS from 'exceljs'
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
@@ -58,6 +59,29 @@ export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
   specialBulkOutgoingAdjustment?: PurchasingSpecialBulkOutgoingAdjustment | null
+}
+export type AverageSalesWorkbookRow = {
+  internalSku: string
+  currentMonthWorkbookOutgoing: number
+  completedMonthOutgoing: Record<string, number>
+  threeMonthSales: number
+  threeMonthAverageOutgoing: number
+}
+export type ParsedAverageSalesWorkbook = {
+  referenceMonth: string
+  completedMonths: [string, string, string]
+  rows: AverageSalesWorkbookRow[]
+}
+export type PurchasingRollingAverageBaseline = {
+  source: 'average_sales_workbook'
+  sourceFileName: string
+  sourceFileHash: string
+  importedAt: string
+  referenceMonth: string
+  completedMonthOutgoing: Record<string, number>
+  threeMonthSales: number
+  threeMonthAverageOutgoing: number
+  currentMonthWorkbookOutgoing: number
 }
 export type PurchaseUrlVerificationStatus = 'confirm_required' | null
 export type PurchaseUrlVerification = {
@@ -421,6 +445,158 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   return { rows, total, skipped, headers: ESA009M_HEADERS.filter((header) => columnByHeader.has(header)) }
 }
 
+/**
+ * Reads the supplier-maintained monthly sales workbook. Its three completed
+ * months are authoritative only for the workbook's reference month; after
+ * that, the live outbound-reflection ledger provides the rolling window.
+ */
+export async function parseAverageSalesWorkbook(fileBuffer: ArrayBuffer): Promise<ParsedAverageSalesWorkbook> {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(fileBuffer)
+  const sheet = workbook.worksheets[0]
+  if (!sheet) throw new Error('평균판매 엑셀 시트를 찾을 수 없습니다.')
+
+  const headerRowNumber = findAverageSalesHeaderRow(sheet)
+  if (!headerRowNumber) throw new Error('평균판매 엑셀에서 사방넷상품코드 헤더를 찾을 수 없습니다.')
+
+  let skuColumn: number | null = null
+  let threeMonthSalesColumn: number | null = null
+  const monthColumns = new Map<string, number>()
+  const headerRow = sheet.getRow(headerRowNumber)
+  headerRow.eachCell((cell, column) => {
+    const header = normalizeAverageSalesHeader(cellText(cell.value))
+    if (header.startsWith('사방넷상품코드')) skuColumn = column
+    if (header === '3개월판매') threeMonthSalesColumn = column
+
+    const month = workbookMonthKey(cell.value)
+    if (!month) return
+    if (monthColumns.has(month)) throw new Error(`평균판매 엑셀에 중복된 월 헤더가 있습니다: ${month}`)
+    monthColumns.set(month, column)
+  })
+
+  if (!skuColumn) throw new Error('평균판매 엑셀에 사방넷상품코드 열이 없습니다.')
+  if (!threeMonthSalesColumn) throw new Error('평균판매 엑셀에 3개월판매 열이 없습니다.')
+  const referenceMonth = Array.from(monthColumns.keys()).sort().at(-1)
+  if (!referenceMonth) throw new Error('평균판매 엑셀에서 월별 출고수량 열을 찾을 수 없습니다.')
+
+  const completedMonths = previousMonthKeys(referenceMonth, 3)
+  const missingMonths = completedMonths.filter((month) => !monthColumns.has(month))
+  if (missingMonths.length > 0) {
+    throw new Error(`평균판매 엑셀에 직전 3개월 출고수량 열이 없습니다: ${missingMonths.join(', ')}`)
+  }
+
+  const rows: AverageSalesWorkbookRow[] = []
+  const rowNumbersBySku = new Map<string, number>()
+  for (let rowNumber = headerRowNumber + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber)
+    const internalSku = cellText(row.getCell(skuColumn).value)
+    if (!internalSku) continue
+    if (rowNumbersBySku.has(internalSku)) {
+      throw new Error(`평균판매 엑셀에 중복 품목코드가 있습니다: ${internalSku} (${rowNumbersBySku.get(internalSku)}행, ${rowNumber}행)`)
+    }
+    rowNumbersBySku.set(internalSku, rowNumber)
+
+    const completedMonthOutgoing = Object.fromEntries(completedMonths.map((month) => [
+      month,
+      averageSalesQuantity(row.getCell(monthColumns.get(month)!).value, `${internalSku} ${month}`),
+    ]))
+    const expectedThreeMonthSales = Object.values(completedMonthOutgoing)
+      .reduce((total, quantity) => total + quantity, 0)
+    const threeMonthSales = averageSalesQuantity(
+      row.getCell(threeMonthSalesColumn).value,
+      `${internalSku} 3개월판매`,
+    )
+    if (Math.abs(threeMonthSales - expectedThreeMonthSales) > 0.001) {
+      throw new Error(`${internalSku}: 3개월판매(${threeMonthSales})가 직전 3개월 합계(${expectedThreeMonthSales})와 다릅니다.`)
+    }
+
+    rows.push({
+      internalSku,
+      currentMonthWorkbookOutgoing: averageSalesQuantity(
+        row.getCell(monthColumns.get(referenceMonth)!).value,
+        `${internalSku} ${referenceMonth}`,
+      ),
+      completedMonthOutgoing,
+      threeMonthSales,
+      threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthSales / 3),
+    })
+  }
+
+  return {
+    referenceMonth,
+    completedMonths: completedMonths as [string, string, string],
+    rows,
+  }
+}
+
+export async function applyAverageSalesBaseline(input: {
+  userId: string
+  fileName: string
+  fileBuffer: ArrayBuffer
+  importedAt?: Date
+}) {
+  const parsed = await parseAverageSalesWorkbook(input.fileBuffer)
+  const existingBySku = await getExistingPurchasingItemsBySku(
+    input.userId,
+    parsed.rows.map((row) => row.internalSku),
+  )
+  const missingSkus = parsed.rows
+    .map((row) => row.internalSku)
+    .filter((sku) => !existingBySku.has(sku))
+  if (missingSkus.length > 0) {
+    throw new Error(`등록되지 않은 품목코드가 있습니다: ${missingSkus.slice(0, 20).join(', ')}${missingSkus.length > 20 ? ` 외 ${missingSkus.length - 20}건` : ''}`)
+  }
+
+  const importedAt = input.importedAt ?? new Date()
+  const sourceFileHash = createHash('sha256').update(Buffer.from(input.fileBuffer)).digest('hex')
+  let updated = 0
+
+  await db.transaction(async (tx) => {
+    for (const rowChunk of chunks(parsed.rows, 200)) {
+      const baselineValues = sql.join(rowChunk.map((row) => {
+        const baseline: PurchasingRollingAverageBaseline = {
+          source: 'average_sales_workbook',
+          sourceFileName: input.fileName,
+          sourceFileHash,
+          importedAt: importedAt.toISOString(),
+          referenceMonth: parsed.referenceMonth,
+          completedMonthOutgoing: row.completedMonthOutgoing,
+          threeMonthSales: row.threeMonthSales,
+          threeMonthAverageOutgoing: row.threeMonthAverageOutgoing,
+          currentMonthWorkbookOutgoing: row.currentMonthWorkbookOutgoing,
+        }
+        return sql`(${row.internalSku}, ${JSON.stringify(baseline)}::jsonb)`
+      }), sql`, `)
+      const result = await tx.execute<{ internalSku: string }>(sql`
+        UPDATE products AS product
+        SET metadata = jsonb_set(
+          COALESCE(product.metadata, '{}'::jsonb),
+          '{purchasingRollingAverageBaseline}',
+          baseline.data,
+          true
+        ),
+        updated_at = ${importedAt}
+        FROM (VALUES ${baselineValues}) AS baseline(internal_sku, data)
+        WHERE product.user_id = ${input.userId}::uuid
+          AND product.internal_sku = baseline.internal_sku
+        RETURNING product.internal_sku AS "internalSku"
+      `)
+      const updatedRows = resultRows<{ internalSku: string }>(result)
+      if (updatedRows.length !== rowChunk.length) {
+        throw new Error(`평균판매 기준값 저장 중 일부 품목을 찾지 못했습니다. (${updatedRows.length}/${rowChunk.length})`)
+      }
+      updated += updatedRows.length
+    }
+  })
+
+  return {
+    updated,
+    referenceMonth: parsed.referenceMonth,
+    completedMonths: parsed.completedMonths,
+    sourceFileHash,
+  }
+}
+
 function findHeaderRow(sheet: ExcelJS.Worksheet): number | null {
   for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
     const values = new Set<string>()
@@ -428,6 +604,62 @@ function findHeaderRow(sheet: ExcelJS.Worksheet): number | null {
     if (values.has('품목코드')) return rowNumber
   }
   return null
+}
+
+function findAverageSalesHeaderRow(sheet: ExcelJS.Worksheet): number | null {
+  for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
+    let hasSkuHeader = false
+    sheet.getRow(rowNumber).eachCell((cell) => {
+      if (normalizeAverageSalesHeader(cellText(cell.value)).startsWith('사방넷상품코드')) {
+        hasSkuHeader = true
+      }
+    })
+    if (hasSkuHeader) return rowNumber
+  }
+  return null
+}
+
+function normalizeAverageSalesHeader(value: string) {
+  return value.replace(/\s+/g, '').trim()
+}
+
+function workbookMonthKey(value: ExcelJS.CellValue): string | null {
+  if (value instanceof Date) return monthKeyFromDate(value)
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 30_000) {
+    return monthKeyFromDate(new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000))
+  }
+
+  const dateMatch = cellText(value).match(/^(\d{4})[-/.](\d{1,2})(?:[-/.]\d{1,2})?/)
+  if (!dateMatch) return null
+  const year = Number(dateMatch[1])
+  const month = Number(dateMatch[2])
+  if (month < 1 || month > 12) return null
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function monthKeyFromDate(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function previousMonthKeys(referenceMonth: string, count: number): string[] {
+  const match = referenceMonth.match(/^(\d{4})-(\d{2})$/)
+  if (!match) throw new Error(`잘못된 기준월입니다: ${referenceMonth}`)
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year, monthIndex - count + index, 1))
+    return monthKeyFromDate(date)
+  })
+}
+
+function averageSalesQuantity(value: ExcelJS.CellValue, label: string): number {
+  const text = cellText(value).replace(/,/g, '')
+  if (!text || text === '-') return 0
+  const quantity = Number(text)
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(`${label}의 출고수량이 올바른 숫자가 아닙니다.`)
+  }
+  return quantity
 }
 
 function normalizeEsaData(value: unknown): Esa009mData {
@@ -498,7 +730,10 @@ export async function getSkuOutgoingMetrics(
   ]))
   for (const row of storedRows) {
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
-    metricsBySku.set(row.internalSku, resolveOutgoingMetrics(row.metadata, calculated))
+    metricsBySku.set(
+      row.internalSku,
+      resolveOutgoingMetrics(row.metadata, calculated, currentMonthDate.slice(0, 7)),
+    )
   }
   return metricsBySku
 }
@@ -553,9 +788,22 @@ function metadataWithPurchasingItemData(metadata: unknown, esa009m: Esa009mData)
 export function resolveOutgoingMetrics(
   metadata: unknown,
   calculated: PurchasingItemOutgoingMetrics,
+  currentMonth?: string,
 ): PurchasingItemOutgoingMetrics {
   if (!metadata || typeof metadata !== 'object') return calculated
-  const stored = (metadata as Record<string, unknown>).purchasingOutgoingMetrics
+  const root = metadata as Record<string, unknown>
+  const rollingBaseline = parseRollingAverageBaseline(root.purchasingRollingAverageBaseline)
+  if (rollingBaseline && currentMonth) {
+    if (currentMonth === rollingBaseline.referenceMonth) {
+      return {
+        currentMonthOutgoing: calculated.currentMonthOutgoing,
+        threeMonthAverageOutgoing: rollingBaseline.threeMonthAverageOutgoing,
+      }
+    }
+    if (currentMonth > rollingBaseline.referenceMonth) return calculated
+  }
+
+  const stored = root.purchasingOutgoingMetrics
   if (!stored || typeof stored !== 'object') return calculated
 
   const values = stored as Record<string, unknown>
@@ -573,6 +821,25 @@ export function resolveOutgoingMetrics(
     ...(specialBulkOutgoingAdjustment
       ? { specialBulkOutgoingAdjustment }
       : {}),
+  }
+}
+
+function parseRollingAverageBaseline(value: unknown): Pick<
+  PurchasingRollingAverageBaseline,
+  'referenceMonth' | 'threeMonthAverageOutgoing'
+> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const baseline = value as Record<string, unknown>
+  const referenceMonth = typeof baseline.referenceMonth === 'string'
+    ? baseline.referenceMonth.trim()
+    : ''
+  const threeMonthAverageOutgoing = Number(baseline.threeMonthAverageOutgoing)
+  if (!/^\d{4}-\d{2}$/.test(referenceMonth)
+    || !Number.isFinite(threeMonthAverageOutgoing)
+    || threeMonthAverageOutgoing < 0) return null
+  return {
+    referenceMonth,
+    threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
   }
 }
 

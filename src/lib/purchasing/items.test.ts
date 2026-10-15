@@ -5,6 +5,7 @@ import {
   ensurePurchasingItemIdentity,
   getOutgoingMetricWindows,
   PURCHASE_URL_HEADER,
+  parseAverageSalesWorkbook,
   parseEsa009mWorkbook,
   purchaseUrlExportStatus,
   purchaseUrlVerification,
@@ -89,6 +90,60 @@ describe('parseEsa009mWorkbook', () => {
     const result = await parseEsa009mWorkbook(buffer as ArrayBuffer)
 
     expect(result.rows[0][PURCHASE_URL_HEADER]).toBeNull()
+  })
+})
+
+describe('parseAverageSalesWorkbook', () => {
+  it('uses the three completed months before the latest workbook month', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('평균판매')
+    sheet.addRow([
+      '사방넷상품코드\n[수정불가]',
+      '상품약어\n[수정불가]',
+      '옵션상세명칭',
+      '1달 평균판매',
+      '3개월판매',
+      new Date('2026-10-01T00:00:00.000Z'),
+      new Date('2026-09-01T00:00:00.000Z'),
+      new Date('2026-08-01T00:00:00.000Z'),
+      new Date('2026-07-01T00:00:00.000Z'),
+    ])
+    sheet.addRow(['A001', '상품', '옵션', 20, 60, 11, 30, 20, 10])
+    const buffer = await workbook.xlsx.writeBuffer()
+
+    const result = await parseAverageSalesWorkbook(buffer as ArrayBuffer)
+
+    expect(result.referenceMonth).toBe('2026-10')
+    expect(result.completedMonths).toEqual(['2026-07', '2026-08', '2026-09'])
+    expect(result.rows).toEqual([{
+      internalSku: 'A001',
+      currentMonthWorkbookOutgoing: 11,
+      completedMonthOutgoing: {
+        '2026-07': 10,
+        '2026-08': 20,
+        '2026-09': 30,
+      },
+      threeMonthSales: 60,
+      threeMonthAverageOutgoing: 20,
+    }])
+  })
+
+  it('rejects a row when the stored three-month total does not match its months', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('평균판매')
+    sheet.addRow([
+      '사방넷상품코드',
+      '3개월판매',
+      new Date('2026-10-01T00:00:00.000Z'),
+      new Date('2026-09-01T00:00:00.000Z'),
+      new Date('2026-08-01T00:00:00.000Z'),
+      new Date('2026-07-01T00:00:00.000Z'),
+    ])
+    sheet.addRow(['A001', 99, 3, 30, 20, 10])
+    const buffer = await workbook.xlsx.writeBuffer()
+
+    await expect(parseAverageSalesWorkbook(buffer as ArrayBuffer))
+      .rejects.toThrow('3개월판매(99)가 직전 3개월 합계(60)와 다릅니다.')
   })
 })
 
@@ -202,6 +257,28 @@ describe('resolveOutgoingMetrics', () => {
         specialBulkIncludedQuantity: 0,
       },
     })
+  })
+
+  it('uses the workbook baseline only during its reference month, then resumes live rolling data', () => {
+    const metadata = {
+      purchasingOutgoingMetrics: {
+        threeMonthAverageOutgoing: 999,
+      },
+      purchasingRollingAverageBaseline: {
+        referenceMonth: '2026-10',
+        threeMonthAverageOutgoing: 12.3,
+      },
+    }
+    const calculated = {
+      currentMonthOutgoing: 8,
+      threeMonthAverageOutgoing: 7.7,
+    }
+
+    expect(resolveOutgoingMetrics(metadata, calculated, '2026-10')).toEqual({
+      currentMonthOutgoing: 8,
+      threeMonthAverageOutgoing: 12.3,
+    })
+    expect(resolveOutgoingMetrics(metadata, calculated, '2026-11')).toEqual(calculated)
   })
 })
 

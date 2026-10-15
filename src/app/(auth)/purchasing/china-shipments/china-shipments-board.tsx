@@ -98,6 +98,7 @@ type WorkbookPreview = {
 const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60'
 const compactInputClass = 'h-8 w-full rounded-md border bg-background px-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60'
 const editableStatuses = new Set(['draft', 'packing'])
+const activeShipmentStatuses = new Set(['draft', 'packing', 'ready'])
 const statusLabels: Record<string, string> = {
   draft: '초안',
   packing: '포장중',
@@ -148,6 +149,8 @@ export function ChinaShipmentsBoard({
     return Number.isInteger(quantity) && quantity > 0 ? [{ inventoryId: item.id, quantity }] : []
   })
   const stagedOutboundQuantity = stagedShipmentLines.reduce((total, line) => total + line.quantity, 0)
+  const activeWorkShipments = shipments.filter((shipment) => activeShipmentStatuses.has(shipment.status))
+  const activeWorkShipment = activeWorkShipments[0] ?? null
 
   function fillAllOutboundQuantities() {
     setQuantities((current) => ({
@@ -216,7 +219,14 @@ export function ChinaShipmentsBoard({
             window.location.replace(shipmentHref(id, 'items'))
           }}
         />
-        {showCreate ? (
+        {showCreate && activeWorkShipment ? (
+          <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950">
+            <h2 className="font-semibold">진행 중인 중국출고작업이 있습니다</h2>
+            <p className="mt-1 text-sm">“{shipmentDisplayName(activeWorkShipment)}”을(를) 먼저 출고완료 또는 취소한 뒤 새 요청을 만들 수 있습니다.</p>
+            {activeWorkShipments.length > 1 ? <p className="mt-1 text-sm">기존에 진행 중인 작업이 {activeWorkShipments.length.toLocaleString('ko-KR')}건 있습니다. 필요한 작업만 남기고 나머지는 직접 취소 또는 삭제해주세요.</p> : null}
+            <button type="button" onClick={() => window.location.replace(shipmentHref(activeWorkShipment.id, 'items'))} className="mt-3 inline-flex h-9 items-center gap-2 rounded-md border border-amber-300 bg-background px-3 text-sm font-medium hover:bg-amber-100"><ChevronRight className="size-4" /> 진행 중 작업 열기</button>
+          </section>
+        ) : showCreate ? (
           <section className="rounded-lg border bg-card">
           <form onSubmit={createShipment} className="space-y-4 p-4">
             <div className="grid gap-3 md:grid-cols-3">
@@ -309,7 +319,9 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
   const [isEditing, setIsEditing] = useState(false)
   const [draftDisplayName, setDraftDisplayName] = useState(() => selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null))
   const [draftPlannedOutboundDate, setDraftPlannedOutboundDate] = useState(() => selectedShipment?.plannedOutboundDate ?? '')
-  const activeShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const visibleShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const activeWorkShipments = shipments.filter((shipment) => activeShipmentStatuses.has(shipment.status))
+  const activeWorkShipment = activeWorkShipments[0] ?? null
 
   function saveShipmentDetails(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -350,12 +362,12 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         <label className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
           <span className="text-xs font-medium text-muted-foreground">중국출고요청 선택</span>
           <select value={selectedShipment?.id ?? ''} onChange={(event) => event.target.value && onSelect(event.target.value)} className={inputClass} disabled={isPending}>
-            <option value="">{activeShipments.length === 0 ? '등록된 중국출고요청이 없습니다.' : '중국출고요청을 선택해주세요.'}</option>
-            {activeShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
+            <option value="">{visibleShipments.length === 0 ? '등록된 중국출고요청이 없습니다.' : '중국출고요청을 선택해주세요.'}</option>
+            {visibleShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
           </select>
         </label>
-        <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">
-          <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : '새 중국출고요청'}
+        <button type="button" disabled={isPending} onClick={() => activeWorkShipment && !showCreate ? onSelect(activeWorkShipment.id) : onToggleCreate()} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">
+          <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : activeWorkShipment ? '진행 중 작업 열기' : '새 중국출고요청'}
         </button>
         {selectedShipment ? <div className="flex shrink-0 gap-2">
           <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
@@ -367,7 +379,8 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
         <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
       </form> : null}
-      {shipments.length !== activeShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - activeShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
+      {activeWorkShipment ? <p className="mt-2 text-xs text-amber-800">진행 중인 중국출고작업이 있어 새 요청은 만들 수 없습니다. 출고완료 또는 취소 후 새 작업을 시작하세요.</p> : null}
+      {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
     </section>
   )
 }

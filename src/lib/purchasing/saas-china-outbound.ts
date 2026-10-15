@@ -30,12 +30,18 @@ export const CHINA_OUTBOUND_SHIPMENT_STATUSES = [
 
 export type ChinaOutboundShipmentStatus = (typeof CHINA_OUTBOUND_SHIPMENT_STATUSES)[number]
 
+export const CHINA_OUTBOUND_ACTIVE_SHIPMENT_STATUSES = ['draft', 'packing', 'ready'] as const satisfies readonly ChinaOutboundShipmentStatus[]
+
 export const CHINA_OUTBOUND_SHIPMENT_STATUS_LABELS: Record<ChinaOutboundShipmentStatus, string> = {
   draft: '초안',
   packing: '포장중',
   ready: '포장완료',
   dispatched: '출고완료',
   cancelled: '취소',
+}
+
+export function isChinaOutboundShipmentActive(status: ChinaOutboundShipmentStatus | string) {
+  return status === 'draft' || status === 'packing' || status === 'ready'
 }
 
 /**
@@ -1094,6 +1100,23 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
   const normalizedLines = normalizeShipmentLines(input.lines)
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const [activeShipment] = await tx
+      .select({
+        displayName: chinaOutboundShipments.displayName,
+        shipmentNo: chinaOutboundShipments.shipmentNo,
+      })
+      .from(chinaOutboundShipments)
+      .where(and(
+        eq(chinaOutboundShipments.userId, input.userId),
+        inArray(chinaOutboundShipments.status, CHINA_OUTBOUND_ACTIVE_SHIPMENT_STATUSES),
+      ))
+      .orderBy(desc(chinaOutboundShipments.updatedAt), desc(chinaOutboundShipments.createdAt))
+      .limit(1)
+    if (activeShipment) {
+      const activeShipmentName = activeShipment.displayName?.trim() || activeShipment.shipmentNo
+      throw new Error(`진행 중인 중국출고요청 “${activeShipmentName}”이(가) 있습니다. 출고완료 또는 취소한 뒤 새 요청을 만들 수 있습니다.`)
+    }
+
     const inventoryIds = normalizedLines.map((line) => line.inventoryId)
     const inventories = await tx
       .select()

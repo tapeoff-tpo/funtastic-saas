@@ -6,6 +6,7 @@ import {
   allocateSaasChinaPurchaseLots,
   getChinaOutboundOriginWarehouseCode,
   getSaasChinaPurchaseLifecycleStatus,
+  isChinaOutboundShipmentActive,
   isChinaOutboundShipmentDeletable,
 } from './saas-china-outbound'
 
@@ -105,5 +106,15 @@ describe('SaaS China outbound deletion guard', () => {
     expect(isChinaOutboundShipmentDeletable('ready')).toBe(true)
     expect(isChinaOutboundShipmentDeletable('cancelled')).toBe(true)
     expect(isChinaOutboundShipmentDeletable('dispatched')).toBe(false)
+  })
+})
+
+describe('SaaS China outbound active-work guard', () => {
+  it('allows only one in-progress workflow by treating draft, packing, and ready as active', () => {
+    expect(isChinaOutboundShipmentActive('draft')).toBe(true)
+    expect(isChinaOutboundShipmentActive('packing')).toBe(true)
+    expect(isChinaOutboundShipmentActive('ready')).toBe(true)
+    expect(isChinaOutboundShipmentActive('dispatched')).toBe(false)
+    expect(isChinaOutboundShipmentActive('cancelled')).toBe(false)
   })
 })

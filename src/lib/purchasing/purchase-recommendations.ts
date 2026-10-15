@@ -8,7 +8,11 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
-import { getSkuOutgoingMetrics, type PurchasingSpecialBulkOutgoingAdjustment } from './items'
+import {
+  getSkuOutgoingMetrics,
+  type PurchasingItemOutgoingMetrics,
+  type PurchasingSpecialBulkOutgoingAdjustment,
+} from './items'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 import { cleanupExpiredEcountPurchaseOrderRows } from './purchase-order-retention'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
@@ -127,6 +131,48 @@ export type PurchaseBudgetCandidate = {
 }
 
 type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
+
+export type RecommendationInventoryRow = {
+  sku: string
+  productName: string
+  optionName: string | null
+  availableStock: number
+  domesticAvailableStock: number
+  chinaAvailableStock: number
+}
+
+/**
+ * A SKU with recent outbound demand or a saved manual three-month average must
+ * still be reviewed when its inventory row is absent. It represents zero stock,
+ * not an unknown or ignored SKU.
+ */
+export function includeDemandOnlyRecommendationInventoryRows(input: {
+  inventoryRows: readonly RecommendationInventoryRow[]
+  productRows: ReadonlyArray<{ sku: string; productName: string }>
+  outgoingMetricsBySku: ReadonlyMap<string, PurchasingItemOutgoingMetrics>
+}) {
+  const rowsBySku = new Map(input.inventoryRows.map((row) => [row.sku, row]))
+
+  for (const product of input.productRows) {
+    if (rowsBySku.has(product.sku)) continue
+
+    const outgoingMetrics = input.outgoingMetricsBySku.get(product.sku)
+    const hasOutgoingDemand = (outgoingMetrics?.currentMonthOutgoing ?? 0) > 0
+      || (outgoingMetrics?.threeMonthAverageOutgoing ?? 0) > 0
+    if (!hasOutgoingDemand) continue
+
+    rowsBySku.set(product.sku, {
+      sku: product.sku,
+      productName: product.productName,
+      optionName: null,
+      availableStock: 0,
+      domesticAvailableStock: 0,
+      chinaAvailableStock: 0,
+    })
+  }
+
+  return [...rowsBySku.values()]
+}
 
 export function isDomesticPurchaseProduct(productName: string | null | undefined) {
   const normalizedName = productName?.trim() ?? ''
@@ -435,41 +481,45 @@ export async function generatePurchaseRecommendations(input: {
     cleanupExpiredEcountPurchaseOrderRows({ userId: input.userId, now }),
   ])
 
-  const [domesticInventoryRows, chinaInventoryRows] = await Promise.all([
+  const [[domesticInventoryRows, chinaInventoryRows], canonicalProductRows] = await Promise.all([
+    Promise.all([
+      db
+        .select({
+          sku: inventory.sku,
+          productName: sql<string>`MAX(${inventory.productName})`,
+          optionName: sql<string | null>`MAX(${inventory.optionName})`,
+          availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+        })
+        .from(inventory)
+        .where(eq(inventory.userId, input.userId))
+        .groupBy(inventory.sku),
+      db
+        .select({
+          sku: chinaWarehouseInventory.sku,
+          productName: sql<string>`MAX(${chinaWarehouseInventory.productName})`,
+          optionName: sql<string | null>`MAX(${chinaWarehouseInventory.optionName})`,
+          availableStock: sql<number>`COALESCE(SUM(${chinaWarehouseInventory.availableQuantity}), 0)::int`,
+        })
+        .from(chinaWarehouseInventory)
+        .where(and(
+          eq(chinaWarehouseInventory.userId, input.userId),
+          // Negative China stock is a real shortage and must reduce the
+          // available quantity used by purchase recommendations.
+          sql`${chinaWarehouseInventory.availableQuantity} <> 0`,
+        ))
+        .groupBy(chinaWarehouseInventory.sku),
+    ]),
     db
       .select({
-        sku: inventory.sku,
-        productName: sql<string>`MAX(${inventory.productName})`,
-        optionName: sql<string | null>`MAX(${inventory.optionName})`,
-        availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+        sku: products.internalSku,
+        productName: products.name,
+        metadata: products.metadata,
+        purchasingStatus: products.purchasingStatus,
       })
-      .from(inventory)
-      .where(eq(inventory.userId, input.userId))
-      .groupBy(inventory.sku),
-    db
-      .select({
-        sku: chinaWarehouseInventory.sku,
-        productName: sql<string>`MAX(${chinaWarehouseInventory.productName})`,
-        optionName: sql<string | null>`MAX(${chinaWarehouseInventory.optionName})`,
-        availableStock: sql<number>`COALESCE(SUM(${chinaWarehouseInventory.availableQuantity}), 0)::int`,
-      })
-      .from(chinaWarehouseInventory)
-      .where(and(
-        eq(chinaWarehouseInventory.userId, input.userId),
-        // Negative China stock is a real shortage and must reduce the
-        // available quantity used by purchase recommendations.
-        sql`${chinaWarehouseInventory.availableQuantity} <> 0`,
-      ))
-      .groupBy(chinaWarehouseInventory.sku),
+      .from(products)
+      .where(eq(products.userId, input.userId)),
   ])
-  const inventoryBySku = new Map<string, {
-    sku: string
-    productName: string
-    optionName: string | null
-    availableStock: number
-    domesticAvailableStock: number
-    chinaAvailableStock: number
-  }>()
+  const inventoryBySku = new Map<string, RecommendationInventoryRow>()
   for (const row of domesticInventoryRows) {
     inventoryBySku.set(row.sku, {
       ...row,
@@ -490,24 +540,21 @@ export async function generatePurchaseRecommendations(input: {
       chinaAvailableStock: row.availableStock,
     })
   }
-  const inventoryRows = [...inventoryBySku.values()]
+  const outgoingMetricsBySku = await getSkuOutgoingMetrics(
+    input.userId,
+    canonicalProductRows.map((row) => row.sku),
+    now,
+  )
+  const inventoryRows = includeDemandOnlyRecommendationInventoryRows({
+    inventoryRows: [...inventoryBySku.values()],
+    productRows: canonicalProductRows,
+    outgoingMetricsBySku,
+  })
 
   if (inventoryRows.length === 0) {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
-  const canonicalProductRows = await db
-    .select({
-      sku: products.internalSku,
-      productName: products.name,
-      metadata: products.metadata,
-      purchasingStatus: products.purchasingStatus,
-    })
-    .from(products)
-    .where(and(
-      eq(products.userId, input.userId),
-      inArray(products.internalSku, inventoryRows.map((row) => row.sku)),
-    ))
   const excludedCanonicalProductSkus = new Set(canonicalProductRows
     .filter((row) => isExcludedPurchaseRecommendation(row.sku, row.productName)
       || isDiscontinuedPurchaseProduct(row.metadata)
@@ -520,19 +567,16 @@ export async function generatePurchaseRecommendations(input: {
       !excludedCanonicalProductSkus.has(row.sku),
   )
 
-  const [outgoingMetricsBySku, productCostRows] = await Promise.all([
-    getSkuOutgoingMetrics(input.userId, recommendationInventoryRows.map((row) => row.sku), now),
-    db.select({
-      sku: products.internalSku,
-      specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
-      newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-      metadata: products.metadata,
-      createdAt: products.createdAt,
-    }).from(products).where(and(
-      eq(products.userId, input.userId),
-      inArray(products.internalSku, recommendationInventoryRows.map((row) => row.sku)),
-    )),
-  ])
+  const productCostRows = await db.select({
+    sku: products.internalSku,
+    specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+    newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+    metadata: products.metadata,
+    createdAt: products.createdAt,
+  }).from(products).where(and(
+    eq(products.userId, input.userId),
+    inArray(products.internalSku, recommendationInventoryRows.map((row) => row.sku)),
+  ))
   const productCostsBySku = new Map(productCostRows.map((row) => [row.sku, row]))
   const assessedRows = recommendationInventoryRows.map((row) => {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)

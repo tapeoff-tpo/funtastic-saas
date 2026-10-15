@@ -11,6 +11,7 @@ import {
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   getProductGroupMoqRule,
+  includeDemandOnlyRecommendationInventoryRows,
   isDomesticPurchaseProduct,
   isDiscontinuedPurchaseProduct,
   isExcludedPurchaseRecommendation,
@@ -53,6 +54,59 @@ describe('China-arrival purchase pipeline', () => {
       chinaReceivedQuantity: 400,
       rawData: { pendingChinaInventorySnapshot: false },
     })).toBe(0)
+  })
+})
+
+describe('purchase recommendation candidate coverage', () => {
+  it('adds products with outbound demand but no inventory row as zero-stock candidates', () => {
+    const rows = includeDemandOnlyRecommendationInventoryRows({
+      inventoryRows: [{
+        sku: 'in-stock',
+        productName: '재고 보유 상품',
+        optionName: '기본',
+        availableStock: 8,
+        domesticAvailableStock: 8,
+        chinaAvailableStock: 0,
+      }],
+      productRows: [
+        { sku: 'in-stock', productName: '재고 보유 상품' },
+        { sku: 'sales-only', productName: '출고 이력만 있는 상품' },
+        { sku: 'manual-average', productName: '수동 평균만 있는 상품' },
+        { sku: 'no-demand', productName: '수요 없는 상품' },
+      ],
+      outgoingMetricsBySku: new Map([
+        ['sales-only', { currentMonthOutgoing: 12, threeMonthAverageOutgoing: 4 }],
+        ['manual-average', { currentMonthOutgoing: 0, threeMonthAverageOutgoing: 7.5 }],
+        ['no-demand', { currentMonthOutgoing: 0, threeMonthAverageOutgoing: 0 }],
+      ]),
+    })
+
+    expect(rows).toEqual([
+      {
+        sku: 'in-stock',
+        productName: '재고 보유 상품',
+        optionName: '기본',
+        availableStock: 8,
+        domesticAvailableStock: 8,
+        chinaAvailableStock: 0,
+      },
+      {
+        sku: 'sales-only',
+        productName: '출고 이력만 있는 상품',
+        optionName: null,
+        availableStock: 0,
+        domesticAvailableStock: 0,
+        chinaAvailableStock: 0,
+      },
+      {
+        sku: 'manual-average',
+        productName: '수동 평균만 있는 상품',
+        optionName: null,
+        availableStock: 0,
+        domesticAvailableStock: 0,
+        chinaAvailableStock: 0,
+      },
+    ])
   })
 })
 

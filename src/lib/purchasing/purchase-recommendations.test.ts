@@ -298,6 +298,7 @@ describe('seasonal purchase demand reduction', () => {
 
   it('does not treat all-season products as winter-only products', () => {
     expect(isWinterSeasonalPurchaseProduct('린블 사계절 이불')).toBe(false)
+    expect(isWinterSeasonalPurchaseProduct('TYESO 이중보온보냉 텀블러')).toBe(false)
     expect(getSeasonalPurchaseDemandMultiplier(
       '린블 사계절 이불',
       new Date('2026-10-15T12:00:00+09:00'),

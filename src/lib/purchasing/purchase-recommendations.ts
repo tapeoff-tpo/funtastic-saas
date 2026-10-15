@@ -61,7 +61,6 @@ const WINTER_SEASONAL_PRODUCT_KEYWORDS = [
   '겨울',
   '방한',
   '기모',
-  '보온',
   '핫팩',
   '워터팩',
 ] as const

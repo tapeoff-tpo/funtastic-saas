@@ -452,7 +452,9 @@ export async function generatePurchaseRecommendations(input: {
       .from(chinaWarehouseInventory)
       .where(and(
         eq(chinaWarehouseInventory.userId, input.userId),
-        sql`${chinaWarehouseInventory.availableQuantity} > 0`,
+        // Negative China stock is a real shortage and must reduce the
+        // available quantity used by purchase recommendations.
+        sql`${chinaWarehouseInventory.availableQuantity} <> 0`,
       ))
       .groupBy(chinaWarehouseInventory.sku),
   ])

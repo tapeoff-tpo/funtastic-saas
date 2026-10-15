@@ -50,6 +50,27 @@ const SUMMER_SEASONAL_PRODUCT_KEYWORDS = [
   '아쿠아슈즈',
   '선풍기',
 ] as const
+const WINTER_SEASON_START = '10-01'
+const WINTER_SEASON_END = '01-31'
+const WINTER_SEASON_DEMAND_MULTIPLIER = 1.2
+const CHRISTMAS_DEMAND_BOOST_START = '10-01'
+const CHRISTMAS_DEMAND_BOOST_END = '11-30'
+const CHRISTMAS_DEMAND_MULTIPLIER = 1.3
+const WINTER_SEASONAL_PRODUCT_KEYWORDS = [
+  '담요',
+  '겨울',
+  '방한',
+  '기모',
+  '보온',
+  '핫팩',
+  '워터팩',
+] as const
+const CHRISTMAS_SEASONAL_PRODUCT_KEYWORDS = [
+  '크리스마스',
+  '성탄',
+  '산타',
+  '트리',
+] as const
 const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
 
 export function isExcludedPurchaseRecommendation(sku: string, productName?: string | null) {
@@ -127,6 +148,19 @@ export function isSummerSeasonalPurchaseProduct(productName: string | null | und
   return SUMMER_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
 }
 
+export function isWinterSeasonalPurchaseProduct(productName: string | null | undefined) {
+  const normalizedName = productName?.trim() ?? ''
+  if (normalizedName.includes('사계절')) return false
+
+  return WINTER_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+    || CHRISTMAS_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+}
+
+function isChristmasSeasonalPurchaseProduct(productName: string | null | undefined) {
+  const normalizedName = productName?.trim() ?? ''
+  return CHRISTMAS_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+}
+
 export function isSeasonallyExcludedFromPurchaseRecommendation(
   productName: string | null | undefined,
   now: Date,
@@ -138,12 +172,26 @@ export function isSeasonallyExcludedFromPurchaseRecommendation(
 
 export function getSeasonalPurchaseDemandMultiplier(productName: string, now: Date) {
   const monthDay = formatSeoulDate(now).slice(5)
-  if (!isSummerSeasonalPurchaseProduct(productName)) return 1
-  if (isSeasonallyExcludedFromPurchaseRecommendation(productName, now)) return 0
+  if (isSummerSeasonalPurchaseProduct(productName)) {
+    if (isSeasonallyExcludedFromPurchaseRecommendation(productName, now)) return 0
 
-  return monthDay >= SUMMER_SEASON_REDUCTION_START
-    ? SUMMER_SEASON_DEMAND_MULTIPLIER
-    : 1
+    return monthDay >= SUMMER_SEASON_REDUCTION_START
+      ? SUMMER_SEASON_DEMAND_MULTIPLIER
+      : 1
+  }
+
+  if (isChristmasSeasonalPurchaseProduct(productName)
+    && monthDay >= CHRISTMAS_DEMAND_BOOST_START
+    && monthDay <= CHRISTMAS_DEMAND_BOOST_END) {
+    return CHRISTMAS_DEMAND_MULTIPLIER
+  }
+
+  if (isWinterSeasonalPurchaseProduct(productName)
+    && (monthDay >= WINTER_SEASON_START || monthDay <= WINTER_SEASON_END)) {
+    return WINTER_SEASON_DEMAND_MULTIPLIER
+  }
+
+  return 1
 }
 
 export function calculateStableMonthlyOutgoing(input: {

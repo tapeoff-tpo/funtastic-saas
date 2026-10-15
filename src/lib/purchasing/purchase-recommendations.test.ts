@@ -7,6 +7,7 @@ import {
   calculatePurchaseSalesTrend,
   getSeasonalPurchaseDemandMultiplier,
   isSeasonallyExcludedFromPurchaseRecommendation,
+  isWinterSeasonalPurchaseProduct,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   getProductGroupMoqRule,
@@ -275,6 +276,32 @@ describe('seasonal purchase demand reduction', () => {
       '프레스 플랫 선풍기',
       new Date('2027-05-01T12:00:00+09:00'),
     )).toBe(false)
+  })
+
+  it('increases winter-product demand during the winter selling season', () => {
+    const october = new Date('2026-10-15T12:00:00+09:00')
+    expect(isWinterSeasonalPurchaseProduct('수니 웨이볼라 담요')).toBe(true)
+    expect(getSeasonalPurchaseDemandMultiplier('수니 웨이볼라 담요', october)).toBe(1.2)
+    expect(getSeasonalPurchaseDemandMultiplier('무스터 겨울 실내 슬리퍼', october)).toBe(1.2)
+  })
+
+  it('uses a higher pre-peak multiplier for Christmas products', () => {
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '크리스마스 파티 장식 세트',
+      new Date('2026-10-15T12:00:00+09:00'),
+    )).toBe(1.3)
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '크리스마스 파티 장식 세트',
+      new Date('2026-12-01T12:00:00+09:00'),
+    )).toBe(1.2)
+  })
+
+  it('does not treat all-season products as winter-only products', () => {
+    expect(isWinterSeasonalPurchaseProduct('린블 사계절 이불')).toBe(false)
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '린블 사계절 이불',
+      new Date('2026-10-15T12:00:00+09:00'),
+    )).toBe(1)
   })
 })
 

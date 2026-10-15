@@ -928,9 +928,11 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
     : null
   const seasonalDemandMultiplier = Number(rawData.seasonalDemandMultiplier)
-  const seasonalNote = Number.isFinite(seasonalDemandMultiplier) && seasonalDemandMultiplier < 1
-    ? `여름 시즌 감산 ${formatNumber(seasonalDemandMultiplier * 100)}%`
-    : null
+  const seasonalNote = !Number.isFinite(seasonalDemandMultiplier) || seasonalDemandMultiplier === 1
+    ? null
+    : seasonalDemandMultiplier < 1
+      ? `여름 시즌 감산 ${formatNumber(seasonalDemandMultiplier * 100)}%`
+      : `겨울 시즌 증산 +${formatNumber((seasonalDemandMultiplier - 1) * 100)}%`
   const moqAdjustedQuantity = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
   const budgetNote = moqAdjustedQuantity > Number(rawData.allocatedQuantity)
     ? `예산 조정 ${formatNumber(moqAdjustedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
@@ -969,7 +971,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
-          {seasonalNote ? <span className="text-sky-700">{seasonalNote}</span> : null}
+          {seasonalNote ? <span className={seasonalDemandMultiplier < 1 ? 'text-sky-700' : 'text-rose-700'}>{seasonalNote}</span> : null}
           {specialBulkOutgoingNote ? <span className="text-fuchsia-700">{specialBulkOutgoingNote}</span> : null}
           {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
         </div>

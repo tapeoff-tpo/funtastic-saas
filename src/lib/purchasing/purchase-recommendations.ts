@@ -40,12 +40,15 @@ const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
 const INCREASING_TREND_AVERAGE_WEIGHT = 0.6
 const INCREASING_TREND_CURRENT_MONTH_WEIGHT = 0.4
 const SUMMER_SEASON_REDUCTION_START = '08-15'
+const SUMMER_SEASON_EXCLUSION_START = '10-01'
+const SUMMER_SEASON_EXCLUSION_END = '04-30'
 const SUMMER_SEASON_DEMAND_MULTIPLIER = 0.25
 const SUMMER_SEASONAL_PRODUCT_KEYWORDS = [
-  '자외선차단 루즈핏 쿨토시',
-  '핸드폰 미니팬',
-  '빙수기 얼음틀',
-  'LUX 아쿠아슈즈',
+  '쿨토시',
+  '미니팬',
+  '빙수기',
+  '아쿠아슈즈',
+  '선풍기',
 ] as const
 const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
 
@@ -119,11 +122,26 @@ export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
   )
 }
 
+export function isSummerSeasonalPurchaseProduct(productName: string | null | undefined) {
+  const normalizedName = productName?.trim() ?? ''
+  return SUMMER_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+}
+
+export function isSeasonallyExcludedFromPurchaseRecommendation(
+  productName: string | null | undefined,
+  now: Date,
+) {
+  const monthDay = formatSeoulDate(now).slice(5)
+  return isSummerSeasonalPurchaseProduct(productName)
+    && (monthDay >= SUMMER_SEASON_EXCLUSION_START || monthDay <= SUMMER_SEASON_EXCLUSION_END)
+}
+
 export function getSeasonalPurchaseDemandMultiplier(productName: string, now: Date) {
   const monthDay = formatSeoulDate(now).slice(5)
-  const isSummerOffSeason = monthDay >= SUMMER_SEASON_REDUCTION_START
-  const isSummerSeasonalProduct = SUMMER_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => productName.includes(keyword))
-  return isSummerOffSeason && isSummerSeasonalProduct
+  if (!isSummerSeasonalPurchaseProduct(productName)) return 1
+  if (isSeasonallyExcludedFromPurchaseRecommendation(productName, now)) return 0
+
+  return monthDay >= SUMMER_SEASON_REDUCTION_START
     ? SUMMER_SEASON_DEMAND_MULTIPLIER
     : 1
 }
@@ -194,7 +212,7 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
 
   const items: Array<T & { allocatedQuantity: number }> = []
   let spentBudgetKrw = 0
-  let missingCostExcluded = 0
+  let missingCostUnbudgeted = 0
   let budgetLimitedCount = 0
   let moqBudgetExcludedGroupCount = 0
 
@@ -204,8 +222,10 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
         (candidate) => candidate.unitCostKrw === null || candidate.unitCostKrw <= 0,
       ).length
       if (missingCostCount > 0) {
-        missingCostExcluded += missingCostCount
-        moqBudgetExcludedGroupCount += 1
+        missingCostUnbudgeted += missingCostCount
+        for (const candidate of unit.candidates) {
+          items.push({ ...candidate, allocatedQuantity: candidate.recommendedQuantity })
+        }
         continue
       }
 
@@ -228,7 +248,8 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
 
     const [candidate] = unit.candidates
     if (candidate.unitCostKrw === null || candidate.unitCostKrw <= 0) {
-      missingCostExcluded += 1
+      missingCostUnbudgeted += 1
+      items.push({ ...candidate, allocatedQuantity: candidate.recommendedQuantity })
       continue
     }
     const affordableQuantity = Math.max(
@@ -250,7 +271,7 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
     items,
     spentBudgetKrw,
     remainingBudgetKrw: Math.max(0, budgetKrw - spentBudgetKrw),
-    missingCostExcluded,
+    missingCostUnbudgeted,
     budgetLimitedCount,
     moqBudgetExcludedGroupCount,
   }
@@ -301,7 +322,7 @@ function comparePurchaseBudgetCandidates(
 
 export function calculatePurchaseRecommendation(input: PurchaseRecommendationInput): PurchaseRecommendationCalculation {
   const averageMonthlyOutgoing = Math.max(0, finiteNumber(input.averageMonthlyOutgoing))
-  const availableStock = Math.max(0, Math.trunc(finiteNumber(input.availableStock)))
+  const availableStock = Math.trunc(finiteNumber(input.availableStock))
   const targetStockMonths = Math.max(0, finiteNumber(input.targetStockMonths))
 
   if (averageMonthlyOutgoing <= 0 || targetStockMonths <= 0) {
@@ -337,16 +358,13 @@ export function calculatePurchaseRecommendationWithSpikeGuard(
     availableStock: input.availableStock,
     targetStockMonths: input.targetStockMonths,
   })
-  const spikeGuardAdjustedToMinimum = originalCalculation.recommendedQuantity > 0
-    && adjustedCalculation.recommendedQuantity === 0
-
   return {
     ...adjustedCalculation,
-    recommendedQuantity: spikeGuardAdjustedToMinimum
-      ? 1
-      : adjustedCalculation.recommendedQuantity,
+    // The effective demand basis is final. A historical spike must not revive a
+    // recommendation once stock plus pipeline already covers the target.
+    recommendedQuantity: adjustedCalculation.recommendedQuantity,
     originalRecommendedQuantity: originalCalculation.recommendedQuantity,
-    spikeGuardAdjustedToMinimum,
+    spikeGuardAdjustedToMinimum: false,
   }
 }
 
@@ -445,6 +463,7 @@ export async function generatePurchaseRecommendations(input: {
   const recommendationInventoryRows = inventoryRows.filter(
     (row) => !isDomesticPurchaseProduct(row.productName) &&
       !isExcludedPurchaseRecommendation(row.sku, row.productName) &&
+      !isSeasonallyExcludedFromPurchaseRecommendation(row.productName, now) &&
       !excludedCanonicalProductSkus.has(row.sku),
   )
 
@@ -615,7 +634,7 @@ export async function generatePurchaseRecommendations(input: {
             0,
           ),
           remainingBudgetKrw: null,
-          missingCostExcluded: 0,
+          missingCostUnbudgeted: 0,
           budgetLimitedCount: 0,
           moqBudgetExcludedGroupCount: 0,
         }
@@ -675,7 +694,7 @@ export async function generatePurchaseRecommendations(input: {
       budgetKrw,
       spentBudgetKrw: allocation.spentBudgetKrw,
       remainingBudgetKrw: allocation.remainingBudgetKrw,
-      missingCostExcluded: allocation.missingCostExcluded,
+      missingCostUnbudgeted: allocation.missingCostUnbudgeted,
       budgetLimitedCount: allocation.budgetLimitedCount,
       moqBudgetExcludedGroupCount: allocation.moqBudgetExcludedGroupCount,
       salesAnomalyCount,
@@ -895,15 +914,13 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
     if (totalQuantity >= rule.minimumOrderQuantity) continue
 
     const allocationTargets = groupItems
-      .filter((item) => purchaseMoqDemandScore(item) > 0)
+      .filter((item) => item.baseRecommendedQuantity > 0)
       .sort((left, right) => {
         const scoreDifference = purchaseMoqDemandScore(right) - purchaseMoqDemandScore(left)
         if (scoreDifference !== 0) return scoreDifference
         return left.row.sku.localeCompare(right.row.sku)
       })
-    const targets = allocationTargets.length > 0
-      ? allocationTargets
-      : [...groupItems].sort((left, right) => left.row.sku.localeCompare(right.row.sku))
+    const targets = allocationTargets
 
     let targetIndex = 0
     while (totalQuantity < rule.minimumOrderQuantity && targets.length > 0) {

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPurchaseMinimumQuantity,
   allocatePurchaseBudget,
+  calculatePurchaseRecommendation,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculatePurchaseSalesTrend,
   getSeasonalPurchaseDemandMultiplier,
+  isSeasonallyExcludedFromPurchaseRecommendation,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   getProductGroupMoqRule,
@@ -260,10 +262,24 @@ describe('seasonal purchase demand reduction', () => {
       new Date('2026-08-27T12:00:00+09:00'),
     )).toBe(1)
   })
+
+  it('excludes known summer products from recommendations in the October-to-April off-season', () => {
+    const october = new Date('2026-10-15T12:00:00+09:00')
+    expect(isSeasonallyExcludedFromPurchaseRecommendation('빙수기 얼음틀', october)).toBe(true)
+    expect(getSeasonalPurchaseDemandMultiplier('빙수기 얼음틀', october)).toBe(0)
+    expect(isSeasonallyExcludedFromPurchaseRecommendation(
+      '프레스 플랫 선풍기',
+      new Date('2027-04-30T12:00:00+09:00'),
+    )).toBe(true)
+    expect(isSeasonallyExcludedFromPurchaseRecommendation(
+      '프레스 플랫 선풍기',
+      new Date('2027-05-01T12:00:00+09:00'),
+    )).toBe(false)
+  })
 })
 
 describe('purchase recommendation with sales spike guard', () => {
-  it('keeps an item recommended when only the spike-adjusted quantity falls to zero', () => {
+  it('does not recommend when the effective target is already covered', () => {
     const result = calculatePurchaseRecommendationWithSpikeGuard({
       averageMonthlyOutgoing: 50,
       effectiveMonthlyOutgoing: 25,
@@ -272,9 +288,24 @@ describe('purchase recommendation with sales spike guard', () => {
       targetStockMonths: 1.2,
     })
 
-    expect(result.recommendedQuantity).toBe(1)
+    expect(result.recommendedQuantity).toBe(0)
     expect(result.originalRecommendedQuantity).toBe(20)
-    expect(result.spikeGuardAdjustedToMinimum).toBe(true)
+    expect(result.spikeGuardAdjustedToMinimum).toBe(false)
+  })
+})
+
+describe('negative inventory', () => {
+  it('uses negative inventory as a real shortage instead of clamping it to zero', () => {
+    expect(calculatePurchaseRecommendation({
+      averageMonthlyOutgoing: 10,
+      currentMonthOutgoing: 0,
+      availableStock: -3,
+      targetStockMonths: 1.5,
+    })).toEqual({
+      targetStockQuantity: 15,
+      recommendedQuantity: 18,
+      stockCoverageMonths: -0.3,
+    })
   })
 })
 
@@ -307,6 +338,7 @@ describe('purchase budget allocation', () => {
     const result = allocatePurchaseBudget(candidates, 12000)
 
     expect(result.items.map((item) => [item.sku, item.allocatedQuantity])).toEqual([
+      ['missing-cost', 10],
       ['urgent', 10],
       ['steady', 4],
     ])
@@ -314,11 +346,11 @@ describe('purchase budget allocation', () => {
     expect(result.remainingBudgetKrw).toBe(0)
   })
 
-  it('excludes items without a won unit cost from budget allocation', () => {
+  it('keeps items without a won unit cost in the recommendation outside the budget total', () => {
     const result = allocatePurchaseBudget(candidates, 50000)
 
-    expect(result.items.some((item) => item.sku === 'missing-cost')).toBe(false)
-    expect(result.missingCostExcluded).toBe(1)
+    expect(result.items.some((item) => item.sku === 'missing-cost')).toBe(true)
+    expect(result.missingCostUnbudgeted).toBe(1)
   })
 
   it('does not allocate below a purchase minimum or outside its rounding unit', () => {

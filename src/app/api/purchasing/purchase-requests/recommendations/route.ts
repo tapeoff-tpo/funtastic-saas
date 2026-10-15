@@ -120,6 +120,9 @@ function recommendationProgressMessage(
   const moqBudgetExcludedGroupCount = 'moqBudgetExcludedGroupCount' in result
     ? result.moqBudgetExcludedGroupCount
     : 0
+  const missingCostUnbudgeted = 'missingCostUnbudgeted' in result
+    ? result.missingCostUnbudgeted
+    : 0
   const parts = [
     `재고 ${result.evaluated.toLocaleString('ko-KR')}개 검토`,
     `추천 ${result.created.toLocaleString('ko-KR')}건 생성`,
@@ -128,6 +131,9 @@ function recommendationProgressMessage(
   if (monitoring > 0) parts.push(`발주 보류 ${monitoring.toLocaleString('ko-KR')}건`)
   if (moqBudgetExcludedGroupCount > 0) {
     parts.push(`예산 부족 MOQ 그룹 ${moqBudgetExcludedGroupCount.toLocaleString('ko-KR')}개 제외`)
+  }
+  if (missingCostUnbudgeted > 0) {
+    parts.push(`원가 미입력 ${missingCostUnbudgeted.toLocaleString('ko-KR')}건 예산외 포함`)
   }
   return parts.join(' · ')
 }

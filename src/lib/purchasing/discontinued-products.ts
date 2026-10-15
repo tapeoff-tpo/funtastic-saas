@@ -42,27 +42,33 @@ export async function applyDiscontinuedProductActions(input: {
   let hiddenAutoRecommendationRows = 0
   await db.transaction(async (tx) => {
     for (const chunk of chunks(actions, PRODUCT_CHUNK_SIZE)) {
-      const values = sql.join(chunk.map((action) => sql`(
-        ${action.sku}::text
-      )`), sql`, `)
-      await tx.execute(sql`
-        UPDATE products AS product
-        SET
-          purchasing_status = 'discontinued',
-          purchasing_status_note = '단종 원본 반영',
-          purchasing_status_updated_at = ${now},
-          metadata = jsonb_set(
-            COALESCE(product.metadata, '{}'::jsonb),
+      await tx
+        .update(products)
+        .set({
+          purchasingStatus: 'discontinued',
+          purchasingStatusNote: '단종 원본 반영',
+          purchasingStatusUpdatedAt: now,
+          // Some legacy rows have a non-object value at this key. Keep the
+          // existing metadata and replace only this purchasing flag safely.
+          metadata: sql`jsonb_set(
+            COALESCE(${products.metadata}, '{}'::jsonb),
             '{purchasingOutgoingMetrics}',
-            COALESCE(product.metadata->'purchasingOutgoingMetrics', '{}'::jsonb)
-              || jsonb_build_object('isDiscontinued', true),
+            (
+              CASE
+                WHEN jsonb_typeof(${products.metadata}->'purchasingOutgoingMetrics') = 'object'
+                  THEN ${products.metadata}->'purchasingOutgoingMetrics'
+                ELSE '{}'::jsonb
+              END
+              || jsonb_build_object('isDiscontinued', true)
+            ),
             true
-          ),
-          updated_at = ${now}
-        FROM (VALUES ${values}) AS source(sku)
-        WHERE product.user_id = ${input.userId}::uuid
-          AND product.internal_sku = source.sku
-      `)
+          )`,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(products.userId, input.userId),
+          inArray(products.internalSku, chunk.map((action) => action.sku)),
+        ))
     }
 
     for (const chunk of chunks(actions.map((action) => action.sku), PRODUCT_CHUNK_SIZE)) {

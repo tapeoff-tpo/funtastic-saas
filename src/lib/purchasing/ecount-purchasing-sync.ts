@@ -1508,10 +1508,17 @@ function pipelineMatchScore(
   const managementKeyAvailableOnBothSides = Boolean(
     left.purchaseManagementCode && right.purchaseManagementCode,
   )
+  const managementKeyAvailableOnEitherSide = Boolean(
+    left.purchaseManagementCode || right.purchaseManagementCode,
+  )
   const supplierOrderAvailableOnBothSides = Boolean(leftSupplierOrderKey && rightSupplierOrderKey)
   // Management code is authoritative whenever both reports carry it. Supplier
   // order only breaks ties when the management key is unavailable on a side.
   if (managementKeyAvailableOnBothSides && managementConflicts) return 0
+  // A managed plan must never be consumed merely because an older history row
+  // has the same SKU/option but no management code. When one side is missing a
+  // code, a real matching supplier-order number is the only safe fallback.
+  if (managementKeyAvailableOnEitherSide && !managementKeyAvailableOnBothSides && !orderMatches) return 0
   if (!managementKeyAvailableOnBothSides && supplierOrderAvailableOnBothSides && orderConflicts) return 0
 
   const leftOption = left.optionName?.trim() ?? ''

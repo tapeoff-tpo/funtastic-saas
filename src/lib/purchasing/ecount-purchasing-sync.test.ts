@@ -583,6 +583,36 @@ describe('parseEcountPurchasingSnapshot', () => {
     }))
   })
 
+  it('does not consume a managed plan with an unkeyed older purchase history row', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260928-78', '중국창고', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 400, '웨이신', '', '20260928-110151-1', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260202-30', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', '', '', '확인', ''],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-10-16',
+      asOfDate: '2026-10-16',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
+      sku: '101542-0001',
+      quantity: 400,
+      purchaseManagementCode: '20260928-110151-1',
+    }))
+  })
+
   it('matches by supplier order number and sku regardless of quantity differences', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [

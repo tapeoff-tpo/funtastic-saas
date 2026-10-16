@@ -209,6 +209,7 @@ export type EcountPurchasingSnapshot = {
     activeRequestsMatchedToPlan: number
     activeRequestsMatchedToPurchase: number
     planRowsWithIdentifierMismatch: number
+    planRowsSupersededByReissuedManagementCode: number
     outboundRowsWithSupplierOrder: number
     outboundRowsMatchedToPurchase: number
     outboundRowsWithIdentifierMismatch: number
@@ -663,6 +664,9 @@ export async function parseEcountPurchasingSnapshot(input: {
   const planRowsWithIdentifierMismatch = planItems.filter((plan) => (
     hasManagementGroupSupplierMismatch(plan, historyItems)
   )).length
+  const planRowsSupersededByReissuedManagementCode = planItems.filter((plan) => (
+    historyItems.some((history) => isSupersededManagementCodeMatch(plan, history))
+  )).length
   const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => (
     supplierKey(row.supplierOrderNumber, row.sku) !== null
   ))
@@ -694,6 +698,9 @@ export async function parseEcountPurchasingSnapshot(input: {
   if (planRowsWithIdentifierMismatch > 0) {
     warnings.push(`발주계획 ${planRowsWithIdentifierMismatch.toLocaleString('ko-KR')}건은 구입관리코드는 구매현황과 일치하지만 주문서번호가 다릅니다. 구입관리코드 기준으로 연결했으니 원본을 확인해주세요.`)
   }
+  if (planRowsSupersededByReissuedManagementCode > 0) {
+    warnings.push(`발주계획 ${planRowsSupersededByReissuedManagementCode.toLocaleString('ko-KR')}건은 같은 품목·수량의 구입관리코드가 날짜만 바뀌어 재발행된 것으로 확인되어 최신 구매현황 코드로 대체했습니다.`)
+  }
   if (outboundRowsWithIdentifierMismatch > 0) {
     warnings.push(`중국출고 ${outboundRowsWithIdentifierMismatch.toLocaleString('ko-KR')}건은 구입관리코드는 구매현황과 일치하지만 주문서번호가 다릅니다. 구입관리코드 기준으로 연결했으니 원본을 확인해주세요.`)
   }
@@ -721,6 +728,7 @@ export async function parseEcountPurchasingSnapshot(input: {
       activeRequestsMatchedToPlan,
       activeRequestsMatchedToPurchase,
       planRowsWithIdentifierMismatch,
+      planRowsSupersededByReissuedManagementCode,
       outboundRowsWithSupplierOrder: outboundRowsWithSupplierOrder.length,
       outboundRowsMatchedToPurchase,
       outboundRowsWithIdentifierMismatch,
@@ -988,6 +996,32 @@ function purchasingItemsMatch(
   const leftSupplierOrderKey = supplierKey(left.supplierOrderNumber, left.sku)
   const rightSupplierOrderKey = supplierKey(right.supplierOrderNumber, right.sku)
   return Boolean(leftSupplierOrderKey && rightSupplierOrderKey && leftSupplierOrderKey === rightSupplierOrderKey)
+}
+
+/**
+ * Ecount can correct a completed purchase by reissuing its management code
+ * with a newer YYYYMMDD prefix while retaining the workflow suffix. Exact
+ * management-code matching remains the default. This narrow fallback is only
+ * used to consume an older plan row when the same SKU and quantity are now
+ * confirmed under the newer reissued code.
+ */
+function isSupersededManagementCodeMatch(
+  plan: EcountPurchaseCompletedItem,
+  history: EcountPurchaseCompletedItem,
+) {
+  if (plan.sku !== history.sku || plan.quantity !== history.quantity) return false
+  if (!plan.purchaseManagementCode || !history.purchaseManagementCode) return false
+  if (plan.purchaseManagementCode === history.purchaseManagementCode) return false
+  if (!isSameDatedPurchaseManagementCode(plan.purchaseManagementCode, history.purchaseManagementCode)) return false
+
+  const planDate = managementCodeDate(plan.purchaseManagementCode)
+  const historyDate = managementCodeDate(history.purchaseManagementCode)
+  return planDate !== null && historyDate !== null && historyDate > planDate
+}
+
+function managementCodeDate(value: string) {
+  const matched = value.normalize('NFKC').match(/^(20\d{2})(\d{2})(\d{2})-/)
+  return matched ? `${matched[1]}-${matched[2]}-${matched[3]}` : null
 }
 
 function hasManagementGroupSupplierMismatch(
@@ -1274,9 +1308,9 @@ function reconcilePlanWithPurchaseHistory(
     // order + SKU is only used where one side lacks that management key. A
     // strong match means the plan has progressed despite report quantities
     // being different.
-    const strongMatch = orderedHistory.some(({ item }) => {
-      return purchasingItemsMatch(plan, item)
-    })
+    const strongMatch = orderedHistory.some(({ item }) => (
+      purchasingItemsMatch(plan, item) || isSupersededManagementCodeMatch(plan, item)
+    ))
     if (strongMatch) return []
 
     let remaining = plan.quantity

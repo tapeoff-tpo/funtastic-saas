@@ -56,9 +56,17 @@ export async function mergeEcountRawFiles(
     if (existingReport.kind !== incoming.kind || incomingReport.kind !== incoming.kind) return incoming
 
     const headers = mergeHeaders(existingReport.headers, incomingReport.headers)
+    // Ecount exports describe a complete date window. When the same window is
+    // downloaded again, rows removed or corrected in Ecount must disappear
+    // from our accumulated source as well; merging only by management code
+    // leaves a stale lifecycle row behind when that code was reissued.
+    const incomingDateRange = await getEcountRawFileDateRange(incoming)
+    const existingRows = incomingDateRange
+      ? existingReport.rows.filter((row) => !isRowWithinDateRange(row, incomingDateRange))
+      : existingReport.rows
     const rows = incoming.kind === 'chinaOutbound'
-      ? mergeChinaOutboundRows(existingReport.rows, incomingReport.rows)
-      : mergeRowsByIdentity(incoming.kind, existingReport.rows, incomingReport.rows)
+      ? mergeChinaOutboundRows(existingRows, incomingReport.rows)
+      : mergeRowsByIdentity(incoming.kind, existingRows, incomingReport.rows)
 
     return {
       ...incoming,
@@ -193,6 +201,62 @@ function mergeHeaders(existing: string[], incoming: string[]) {
     }
   }
   return headers
+}
+
+type EcountRawFileDateRange = {
+  start: string
+  end: string
+}
+
+/**
+ * Ecount report titles use a date range such as `20260915 ~ 20261015`.
+ * Treat that range as authoritative only when both endpoints are present; a
+ * one-date snapshot title (for example China inventory) must never prune
+ * accumulated history.
+ */
+async function getEcountRawFileDateRange(file: EcountPurchasingUpload): Promise<EcountRawFileDateRange | null> {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(file.fileBuffer)
+  const worksheet = workbook.worksheets[0]
+  if (!worksheet) return null
+
+  for (let rowNumber = 1; rowNumber <= Math.min(worksheet.rowCount, 12); rowNumber += 1) {
+    const values: string[] = []
+    worksheet.getRow(rowNumber).eachCell({ includeEmpty: false }, (cell) => {
+      if (cell.text.trim()) values.push(cell.text)
+    })
+    const range = parseEcountDateRange(values.join(' '))
+    if (range) return range
+  }
+
+  return null
+}
+
+function parseEcountDateRange(value: string): EcountRawFileDateRange | null {
+  const normalized = value.normalize('NFKC').replace(/\s+/g, ' ')
+  if (!/[~～∼]/.test(normalized)) return null
+
+  const dates = [...normalized.matchAll(/(20\d{2})[.\-/\s]?(\d{1,2})[.\-/\s]?(\d{1,2})/g)]
+    .map((match) => dateFromParts(match[1], match[2], match[3]))
+    .filter((date): date is string => date !== null)
+  if (dates.length < 2) return null
+
+  const [start, end] = dates
+  return start <= end ? { start, end } : { start: end, end: start }
+}
+
+function isRowWithinDateRange(row: Record<string, string>, range: EcountRawFileDateRange) {
+  const value = row['일자-No.']?.trim() ?? ''
+  const date = canonicalEcountDate(value)
+  return /^20\d{2}-\d{2}-\d{2}$/.test(date) && date >= range.start && date <= range.end
+}
+
+function dateFromParts(year: string, month: string, day: string) {
+  const paddedMonth = month.padStart(2, '0')
+  const paddedDay = day.padStart(2, '0')
+  return isValidDateParts(year, paddedMonth, paddedDay)
+    ? `${year}-${paddedMonth}-${paddedDay}`
+    : null
 }
 
 function mergeRowsByIdentity(

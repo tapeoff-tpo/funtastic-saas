@@ -39,6 +39,31 @@ describe('mergeEcountRawFiles', () => {
     ])
   })
 
+  it('replaces stale rows across an explicit Ecount report date window', async () => {
+    const headers = ['일자-No.', '품목코드', '창고명', '품목명', '규격', '발주계획일자', '구매수량(EA)', '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)']
+    const storedHistory = await makeUpload('구매현황-기존.xlsx', headers, [
+      ['20260930-8', '111199-0001', '중국창고', '텐드론 고압분사 워터건', '메탈블랙 세트', '', 80, '20260928', 'PO-OLD', '20260923-110151-67', '확인', ''],
+      ['20260914-1', '100001-0001', '중국창고', '기간 밖 상품', '기본', '', 10, '', 'PO-OLDER', '20260914-110151-1', '확인', ''],
+    ], '회사명 : 테이포프 / 20260901 ~ 20260930')
+    const incomingHistory = await makeUpload('구매현황-최신.xlsx', headers, [
+      ['20260930-8', '111199-0001', '중국창고', '텐드론 고압분사 워터건', '메탈블랙 세트', '', 80, '20260928', 'PO-NEW', '20260928-110151-67', '확인', ''],
+    ], '회사명 : 테이포프 / 20260915 ~ 20261015')
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('purchaseHistory', storedHistory)],
+      [stored('purchaseHistory', incomingHistory)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ '품목코드': '100001-0001', '구입관리코드': '20260914-110151-1' }),
+      expect.objectContaining({ '품목코드': '111199-0001', '구입관리코드': '20260928-110151-67' }),
+    ]))
+    expect(report.rows).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ '구입관리코드': '20260923-110151-67' }),
+    ]))
+  })
+
   it('uses the newest outbound row for the same outbound management code', async () => {
     const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
     const first = await makeUpload('중국출고-7월.xlsx', headers, [
@@ -297,10 +322,11 @@ async function makeUpload(
   fileName: string,
   headers: string[],
   rows: Array<Array<string | number>>,
+  title = 'Ecount report title',
 ): Promise<EcountPurchasingUpload> {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('원본')
-  sheet.addRow(['Ecount report title'])
+  sheet.addRow([title])
   sheet.addRow(headers)
   for (const row of rows) sheet.addRow(row)
   const buffer = await workbook.xlsx.writeBuffer()

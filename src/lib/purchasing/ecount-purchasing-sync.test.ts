@@ -442,6 +442,34 @@ describe('parseEcountPurchasingSnapshot', () => {
     ])
   })
 
+  it('consumes a stale purchase-plan row when the completed code was reissued on a later date', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260923-23', '중국창고', '111199-0001', '텐드론 고압분사 워터건', '40B', 80, '', '', '20260923-110151-67', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260930-8', '111199-0001', '텐드론 고압분사 워터건', '메탈블랙 세트', '', 80, '20260928', 'PO-NEW', '20260928-110151-67', '확인', '3316900405176018761'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-30',
+      asOfDate: '2026-10-15',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).toEqual([])
+    expect(snapshot.validation.planRowsSupersededByReissuedManagementCode).toBe(1)
+    expect(snapshot.warnings.join(' ')).toContain('재발행')
+  })
+
   it('keeps plan rows regardless of their arrival target date and preserves the source purchase date', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [

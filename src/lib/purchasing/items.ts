@@ -548,6 +548,7 @@ export async function applyAverageSalesBaseline(input: {
   }
 
   const importedAt = input.importedAt ?? new Date()
+  const importedAtIso = importedAt.toISOString()
   const sourceFileHash = createHash('sha256').update(Buffer.from(input.fileBuffer)).digest('hex')
   let updated = 0
 
@@ -558,7 +559,7 @@ export async function applyAverageSalesBaseline(input: {
           source: 'average_sales_workbook',
           sourceFileName: input.fileName,
           sourceFileHash,
-          importedAt: importedAt.toISOString(),
+          importedAt: importedAtIso,
           referenceMonth: parsed.referenceMonth,
           completedMonthOutgoing: row.completedMonthOutgoing,
           threeMonthSales: row.threeMonthSales,
@@ -575,7 +576,7 @@ export async function applyAverageSalesBaseline(input: {
           baseline.data,
           true
         ),
-        updated_at = ${importedAt}
+        updated_at = ${importedAtIso}::timestamptz
         FROM (VALUES ${baselineValues}) AS baseline(internal_sku, data)
         WHERE product.user_id = ${input.userId}::uuid
           AND product.internal_sku = baseline.internal_sku

@@ -39,8 +39,10 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
   '\uD45C\uBC31\uC81C',
 ] as const
 
-const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
+const HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY = 10
+const LOW_COST_OR_MISSING_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY = 20
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
+const NEW_PRODUCT_INVENTORY_LIMIT = 50
 const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
 const INCREASING_TREND_AVERAGE_WEIGHT = 0.6
 const INCREASING_TREND_CURRENT_MONTH_WEIGHT = 0.4
@@ -75,7 +77,11 @@ const CHRISTMAS_SEASONAL_PRODUCT_KEYWORDS = [
   '산타',
   '트리',
 ] as const
-const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
+const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set([
+  '100287-0001', // 촬영조명 전구(램프) - 장수램프, 국내구매
+  '100287-0002', // 촬영조명 전구(램프) - cityo 전구, 국내구매
+  '109055-0001',
+])
 
 export function isExcludedPurchaseRecommendation(sku: string, productName?: string | null) {
   return EXCLUDED_PURCHASE_RECOMMENDATION_SKUS.has(sku.trim())
@@ -179,14 +185,25 @@ export function isDomesticPurchaseProduct(productName: string | null | undefined
   return DOMESTIC_PURCHASE_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
 }
 
-export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
+export function applyPurchaseMinimumQuantity(
+  recommendedQuantity: number,
+  options?: {
+    isNewProduct?: boolean
+    unitCostKrw?: number | null
+  },
+) {
   const normalizedQuantity = Math.max(0, Math.trunc(finiteNumber(recommendedQuantity)))
   if (normalizedQuantity === 0) return 0
 
-  return Math.max(
-    DEFAULT_PURCHASE_MINIMUM_QUANTITY,
-    roundUpToUnit(normalizedQuantity, DEFAULT_PURCHASE_ROUNDING_UNIT),
-  )
+  if (options?.isNewProduct) {
+    return normalizedQuantity <= 3 ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY : normalizedQuantity
+  }
+
+  const existingProductMinimumQuantity = (options?.unitCostKrw ?? 0) >= 7000
+    ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
+    : LOW_COST_OR_MISSING_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
+
+  return Math.max(existingProductMinimumQuantity, roundToPurchaseTenUnit(normalizedQuantity))
 }
 
 export function isSummerSeasonalPurchaseProduct(productName: string | null | undefined) {
@@ -481,7 +498,7 @@ export async function generatePurchaseRecommendations(input: {
     cleanupExpiredEcountPurchaseOrderRows({ userId: input.userId, now }),
   ])
 
-  const [[domesticInventoryRows, chinaInventoryRows], canonicalProductRows] = await Promise.all([
+  const [[domesticInventoryRows, chinaInventoryRows], canonicalProductRows, newestInventoryRows] = await Promise.all([
     Promise.all([
       db
         .select({
@@ -518,7 +535,17 @@ export async function generatePurchaseRecommendations(input: {
       })
       .from(products)
       .where(eq(products.userId, input.userId)),
+    db
+      .select({
+        sku: inventory.sku,
+      })
+      .from(inventory)
+      .where(eq(inventory.userId, input.userId))
+      .groupBy(inventory.sku)
+      .orderBy(sql`MIN(${inventory.createdAt}) DESC`, sql`${inventory.sku} DESC`)
+      .limit(NEW_PRODUCT_INVENTORY_LIMIT),
   ])
+  const newestInventorySkus = new Set(newestInventoryRows.map((row) => row.sku))
   const inventoryBySku = new Map<string, RecommendationInventoryRow>()
   for (const row of domesticInventoryRows) {
     inventoryBySku.set(row.sku, {
@@ -571,8 +598,6 @@ export async function generatePurchaseRecommendations(input: {
     sku: products.internalSku,
     specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
     newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-    metadata: products.metadata,
-    createdAt: products.createdAt,
   }).from(products).where(and(
     eq(products.userId, input.userId),
     inArray(products.internalSku, recommendationInventoryRows.map((row) => row.sku)),
@@ -584,7 +609,7 @@ export async function generatePurchaseRecommendations(input: {
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
     const specialBulkOutgoingAdjustment = outgoingMetrics?.specialBulkOutgoingAdjustment ?? null
     const productCosts = productCostsBySku.get(row.sku)
-    const isNewProduct = isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now)
+    const isNewProduct = newestInventorySkus.has(row.sku)
     const stableOutgoingBeforeSeason = calculateStableMonthlyOutgoing({
       currentMonthOutgoing,
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
@@ -946,6 +971,7 @@ function buildAutoRecommendationRawData(input: {
     stockCoverageMonths: input.item.calculation.stockCoverageMonths,
     recommendationState,
     evaluatedAt: input.now.toISOString(),
+    newProductSource: input.item.isNewProduct ? 'sabangnet_inventory_last_50' : null,
     newProductFirstSaleDetected: firstSaleDetected,
     newProductFirstSaleDetectedAt: firstSaleDetected
       ? existingFirstSaleAt ?? input.now.toISOString()
@@ -961,17 +987,6 @@ function buildAutoRecommendationRawData(input: {
       },
     ],
   }
-}
-
-function isNewProductForPurchaseRecommendation(
-  metadata: Record<string, unknown> | null | undefined,
-  createdAt: Date | null | undefined,
-  now: Date,
-) {
-  if (isRecord(metadata?.sourcing)) return true
-  if (!createdAt) return false
-  const ageMilliseconds = now.getTime() - createdAt.getTime()
-  return ageMilliseconds >= 0 && ageMilliseconds <= 120 * 24 * 60 * 60 * 1000
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1038,13 +1053,25 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
 
 function applyPurchaseMinimumQuantities<T extends {
   recommendedQuantity: number
+  isNewProduct: boolean
+  unitCostKrw: number | null
 }>(items: T[]) {
   return items.map((item) => {
-    const purchaseMinimumAdjustedQuantity = applyPurchaseMinimumQuantity(item.recommendedQuantity)
+    const purchaseMinimumAdjustedQuantity = applyPurchaseMinimumQuantity(item.recommendedQuantity, {
+      isNewProduct: item.isNewProduct,
+      unitCostKrw: item.unitCostKrw,
+    })
+    const purchaseMinimumQuantity = item.isNewProduct
+      ? item.recommendedQuantity <= 3
+        ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
+        : Math.max(1, Math.trunc(finiteNumber(item.recommendedQuantity)))
+      : (item.unitCostKrw ?? 0) >= 7000
+        ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
+        : LOW_COST_OR_MISSING_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
     return {
       ...item,
-      purchaseMinimumQuantity: DEFAULT_PURCHASE_MINIMUM_QUANTITY,
-      purchaseRoundingUnit: DEFAULT_PURCHASE_ROUNDING_UNIT,
+      purchaseMinimumQuantity,
+      purchaseRoundingUnit: item.isNewProduct ? 1 : DEFAULT_PURCHASE_ROUNDING_UNIT,
       purchaseMinimumAdjustedQuantity,
       recommendedQuantity: purchaseMinimumAdjustedQuantity,
     }
@@ -1065,6 +1092,13 @@ function roundUpToUnit(value: number, unit: number) {
   const safeValue = Math.max(0, Math.trunc(finiteNumber(value)))
   if (safeValue === 0) return 0
   return Math.ceil(safeValue / safeUnit) * safeUnit
+}
+
+function roundToPurchaseTenUnit(value: number) {
+  const normalizedQuantity = Math.max(0, Math.trunc(finiteNumber(value)))
+  const quotient = Math.floor(normalizedQuantity / DEFAULT_PURCHASE_ROUNDING_UNIT)
+  const remainder = normalizedQuantity % DEFAULT_PURCHASE_ROUNDING_UNIT
+  return (remainder >= 3 ? quotient + 1 : quotient) * DEFAULT_PURCHASE_ROUNDING_UNIT
 }
 
 function clampTargetMonths(value: number) {

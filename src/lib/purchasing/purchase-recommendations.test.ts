@@ -21,13 +21,21 @@ import {
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
 describe('purchase minimum quantities', () => {
-  it('applies a minimum of 10 and rounds up to 10-unit purchase quantities', () => {
+  it('uses the cost-based existing-product minimum and the 3-unit 10-rounding rule', () => {
     expect(applyPurchaseMinimumQuantity(0)).toBe(0)
-    expect(applyPurchaseMinimumQuantity(1)).toBe(10)
-    expect(applyPurchaseMinimumQuantity(9)).toBe(10)
-    expect(applyPurchaseMinimumQuantity(10)).toBe(10)
-    expect(applyPurchaseMinimumQuantity(11)).toBe(20)
-    expect(applyPurchaseMinimumQuantity(27)).toBe(30)
+    expect(applyPurchaseMinimumQuantity(1, { unitCostKrw: 7000 })).toBe(10)
+    expect(applyPurchaseMinimumQuantity(12, { unitCostKrw: 7000 })).toBe(10)
+    expect(applyPurchaseMinimumQuantity(13, { unitCostKrw: 7000 })).toBe(20)
+    expect(applyPurchaseMinimumQuantity(22, { unitCostKrw: 7000 })).toBe(20)
+    expect(applyPurchaseMinimumQuantity(23, { unitCostKrw: 7000 })).toBe(30)
+    expect(applyPurchaseMinimumQuantity(1, { unitCostKrw: 6999 })).toBe(20)
+    expect(applyPurchaseMinimumQuantity(11, { unitCostKrw: null })).toBe(20)
+  })
+
+  it('keeps a new-product shortage above three units as its whole quantity', () => {
+    expect(applyPurchaseMinimumQuantity(3, { isNewProduct: true })).toBe(10)
+    expect(applyPurchaseMinimumQuantity(4, { isNewProduct: true })).toBe(4)
+    expect(applyPurchaseMinimumQuantity(13, { isNewProduct: true })).toBe(13)
   })
 })
 
@@ -122,6 +130,11 @@ describe('product-specific purchasing rules', () => {
   it('excludes the gift package material from purchase recommendations', () => {
     expect(isExcludedPurchaseRecommendation('109055-0001')).toBe(true)
     expect(isExcludedPurchaseRecommendation('109055-0002')).toBe(false)
+  })
+
+  it('excludes the domestic-purchase light bulb SKUs from China purchase recommendations', () => {
+    expect(isExcludedPurchaseRecommendation('100287-0001')).toBe(true)
+    expect(isExcludedPurchaseRecommendation('100287-0002')).toBe(true)
   })
 
   it('excludes all WeUse products by their product-name suffix', () => {

@@ -280,6 +280,46 @@ describe('resolveOutgoingMetrics', () => {
     })
     expect(resolveOutgoingMetrics(metadata, calculated, '2026-11')).toEqual(calculated)
   })
+
+  it('keeps a one-off M테이포프 bulk order out of the current workbook baseline', () => {
+    const result = resolveOutgoingMetrics({
+      purchasingOutgoingMetrics: {
+        specialBulkOutgoingAdjustment: {
+          specialMall: 'M테이포프(대량)',
+          policy: 'one_month_excluded_repeat_half',
+          sourceMonths: ['26년9월', '26년8월', '26년7월'],
+          rawThreeMonthAverageOutgoing: 21.3,
+          specialBulkQuantity: 900,
+          specialBulkMonthCount: 1,
+          specialBulkIncludedQuantity: 0,
+          specialBulkExcludedQuantity: 900,
+          adjustedThreeMonthAverageOutgoing: 0,
+        },
+      },
+      purchasingRollingAverageBaseline: {
+        referenceMonth: '2026-10',
+        completedMonthOutgoing: {
+          '2026-07': 27,
+          '2026-08': 19,
+          '2026-09': 912,
+        },
+        threeMonthSales: 958,
+        threeMonthAverageOutgoing: 319.3,
+      },
+    }, {
+      currentMonthOutgoing: 2,
+      threeMonthAverageOutgoing: 0,
+    }, '2026-10')
+
+    expect(result).toMatchObject({
+      currentMonthOutgoing: 2,
+      threeMonthAverageOutgoing: 19.3,
+      specialBulkOutgoingAdjustment: {
+        specialBulkExcludedQuantity: 900,
+        adjustedThreeMonthAverageOutgoing: 19.3,
+      },
+    })
+  })
 })
 
 describe('getOutgoingMetricWindows', () => {

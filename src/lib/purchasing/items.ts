@@ -793,29 +793,40 @@ export function resolveOutgoingMetrics(
 ): PurchasingItemOutgoingMetrics {
   if (!metadata || typeof metadata !== 'object') return calculated
   const root = metadata as Record<string, unknown>
+  const stored = root.purchasingOutgoingMetrics
+  const storedValues = stored && typeof stored === 'object'
+    ? stored as Record<string, unknown>
+    : null
+  const specialBulkOutgoingAdjustment = parseSpecialBulkOutgoingAdjustment(
+    storedValues?.specialBulkOutgoingAdjustment,
+  )
   const rollingBaseline = parseRollingAverageBaseline(root.purchasingRollingAverageBaseline)
   if (rollingBaseline && currentMonth) {
     if (currentMonth === rollingBaseline.referenceMonth) {
+      const rollingBulkAdjustment = specialBulkOutgoingAdjustment
+        ? applySpecialBulkAdjustmentToRollingBaseline(rollingBaseline, specialBulkOutgoingAdjustment)
+        : null
       return {
         currentMonthOutgoing: calculated.currentMonthOutgoing,
-        threeMonthAverageOutgoing: rollingBaseline.threeMonthAverageOutgoing,
+        threeMonthAverageOutgoing: rollingBulkAdjustment?.adjustedThreeMonthAverageOutgoing
+          ?? rollingBaseline.threeMonthAverageOutgoing,
+        ...(rollingBulkAdjustment
+          ? { specialBulkOutgoingAdjustment: rollingBulkAdjustment }
+          : {}),
       }
     }
     if (currentMonth > rollingBaseline.referenceMonth) return calculated
   }
 
-  const stored = root.purchasingOutgoingMetrics
-  if (!stored || typeof stored !== 'object') return calculated
+  if (!storedValues) return calculated
 
-  const values = stored as Record<string, unknown>
-  const threeMonthAverageOutgoing = Number(values.threeMonthAverageOutgoing)
+  const threeMonthAverageOutgoing = Number(storedValues.threeMonthAverageOutgoing)
   if (
     !Number.isFinite(threeMonthAverageOutgoing)
     || threeMonthAverageOutgoing < 0
   ) {
     return calculated
   }
-  const specialBulkOutgoingAdjustment = parseSpecialBulkOutgoingAdjustment(values.specialBulkOutgoingAdjustment)
   return {
     currentMonthOutgoing: calculated.currentMonthOutgoing,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
@@ -825,10 +836,15 @@ export function resolveOutgoingMetrics(
   }
 }
 
-function parseRollingAverageBaseline(value: unknown): Pick<
+type ParsedRollingAverageBaseline = Pick<
   PurchasingRollingAverageBaseline,
   'referenceMonth' | 'threeMonthAverageOutgoing'
-> | null {
+> & {
+  completedMonthOutgoing: Record<string, number> | null
+  threeMonthSales: number | null
+}
+
+function parseRollingAverageBaseline(value: unknown): ParsedRollingAverageBaseline | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const baseline = value as Record<string, unknown>
   const referenceMonth = typeof baseline.referenceMonth === 'string'
@@ -838,10 +854,68 @@ function parseRollingAverageBaseline(value: unknown): Pick<
   if (!/^\d{4}-\d{2}$/.test(referenceMonth)
     || !Number.isFinite(threeMonthAverageOutgoing)
     || threeMonthAverageOutgoing < 0) return null
+  const completedMonthOutgoing = parseCompletedMonthOutgoing(baseline.completedMonthOutgoing)
+  const threeMonthSales = Number(baseline.threeMonthSales)
   return {
     referenceMonth,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
+    completedMonthOutgoing,
+    threeMonthSales: Number.isFinite(threeMonthSales) && threeMonthSales >= 0
+      ? cleanOutgoingNumber(threeMonthSales)
+      : null,
   }
+}
+
+function parseCompletedMonthOutgoing(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const values = Object.entries(value as Record<string, unknown>)
+    .flatMap(([month, quantity]) => {
+      const normalizedMonth = normalizeMonthKey(month)
+      const parsedQuantity = Number(quantity)
+      if (!normalizedMonth || !Number.isFinite(parsedQuantity) || parsedQuantity < 0) return []
+      return [[normalizedMonth, cleanOutgoingNumber(parsedQuantity)] as const]
+    })
+  return values.length > 0 ? Object.fromEntries(values) : null
+}
+
+function applySpecialBulkAdjustmentToRollingBaseline(
+  baseline: ParsedRollingAverageBaseline,
+  adjustment: PurchasingSpecialBulkOutgoingAdjustment,
+): PurchasingSpecialBulkOutgoingAdjustment | null {
+  if (!baseline.completedMonthOutgoing || baseline.threeMonthSales == null) return null
+  const baselineMonths = Object.keys(baseline.completedMonthOutgoing).sort()
+  const adjustmentMonths = adjustment.sourceMonths
+    .map(normalizeMonthKey)
+    .filter((month): month is string => Boolean(month))
+    .sort()
+  if (
+    baselineMonths.length === 0
+    || adjustmentMonths.length !== baselineMonths.length
+    || baselineMonths.some((month, index) => month !== adjustmentMonths[index])
+  ) return null
+
+  const excludedQuantity = Math.min(
+    baseline.threeMonthSales,
+    Math.max(0, adjustment.specialBulkExcludedQuantity),
+  )
+  if (excludedQuantity <= 0) return null
+  return {
+    ...adjustment,
+    rawThreeMonthAverageOutgoing: baseline.threeMonthAverageOutgoing,
+    adjustedThreeMonthAverageOutgoing: cleanOutgoingNumber(
+      (baseline.threeMonthSales - excludedQuantity) / baselineMonths.length,
+    ),
+  }
+}
+
+function normalizeMonthKey(value: string) {
+  const trimmed = value.trim()
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})$/)
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}`
+  const koreanMatch = trimmed.match(/^(\d{2}|\d{4})년\s*(\d{1,2})월$/)
+  if (!koreanMatch) return null
+  const year = koreanMatch[1].length === 2 ? `20${koreanMatch[1]}` : koreanMatch[1]
+  return `${year}-${koreanMatch[2].padStart(2, '0')}`
 }
 
 function parseSpecialBulkOutgoingAdjustment(value: unknown): PurchasingSpecialBulkOutgoingAdjustment | null {

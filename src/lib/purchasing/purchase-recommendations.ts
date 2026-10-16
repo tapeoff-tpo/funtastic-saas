@@ -42,6 +42,10 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
 const HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY = 10
 const LOW_COST_OR_MISSING_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY = 20
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
+const NEAR_TARGET_DEFER_COVERAGE_TOLERANCE_MONTHS = 0.1
+const NEAR_TARGET_DEFER_MINIMUM_SHORTFALL_QUANTITY = 3
+const NEAR_TARGET_DEFER_AVERAGE_RATIO = 0.1
+const SIBLING_OPTION_BUNDLE_QUANTITY = 10
 const NEW_PRODUCT_INVENTORY_LIMIT = 50
 const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
 const INCREASING_TREND_AVERAGE_WEIGHT = 0.6
@@ -132,6 +136,7 @@ export type PurchaseBudgetCandidate = {
   effectiveMonthlyOutgoing: number
   unitCostKrw: number | null
   moqProductGroupName?: string | null
+  siblingOptionBundleGroupName?: string | null
   purchaseMinimumQuantity?: number | null
   purchaseRoundingUnit?: number | null
 }
@@ -190,10 +195,18 @@ export function applyPurchaseMinimumQuantity(
   options?: {
     isNewProduct?: boolean
     unitCostKrw?: number | null
+    siblingOptionBundle?: boolean
   },
 ) {
   const normalizedQuantity = Math.max(0, Math.trunc(finiteNumber(recommendedQuantity)))
   if (normalizedQuantity === 0) return 0
+
+  if (options?.siblingOptionBundle) {
+    return Math.max(
+      SIBLING_OPTION_BUNDLE_QUANTITY,
+      roundToPurchaseTenUnit(normalizedQuantity),
+    )
+  }
 
   if (options?.isNewProduct) {
     return normalizedQuantity <= 3 ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY : normalizedQuantity
@@ -204,6 +217,82 @@ export function applyPurchaseMinimumQuantity(
     : LOW_COST_OR_MISSING_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
 
   return Math.max(existingProductMinimumQuantity, roundToPurchaseTenUnit(normalizedQuantity))
+}
+
+export function getNearTargetDeferShortfallThreshold(averageMonthlyOutgoing: number) {
+  return Math.max(
+    NEAR_TARGET_DEFER_MINIMUM_SHORTFALL_QUANTITY,
+    Math.ceil(Math.max(0, finiteNumber(averageMonthlyOutgoing)) * NEAR_TARGET_DEFER_AVERAGE_RATIO),
+  )
+}
+
+export function shouldDeferNearTargetPurchaseRecommendation(input: {
+  shortfallQuantity: number
+  effectiveMonthlyOutgoing: number
+  availableStockWithPipeline: number
+  targetStockMonths: number
+  isNewProduct: boolean
+  hasProductGroupMoq: boolean
+}) {
+  const shortfallQuantity = Math.max(0, Math.trunc(finiteNumber(input.shortfallQuantity)))
+  const effectiveMonthlyOutgoing = Math.max(0, finiteNumber(input.effectiveMonthlyOutgoing))
+  const availableStockWithPipeline = Math.trunc(finiteNumber(input.availableStockWithPipeline))
+  const targetStockMonths = Math.max(0, finiteNumber(input.targetStockMonths))
+
+  if (
+    input.isNewProduct
+    || input.hasProductGroupMoq
+    || shortfallQuantity === 0
+    || effectiveMonthlyOutgoing <= 0
+    || availableStockWithPipeline <= 0
+  ) return false
+
+  const stockCoverageMonths = availableStockWithPipeline / effectiveMonthlyOutgoing
+  return shortfallQuantity <= getNearTargetDeferShortfallThreshold(effectiveMonthlyOutgoing)
+    && stockCoverageMonths >= Math.max(0, targetStockMonths - NEAR_TARGET_DEFER_COVERAGE_TOLERANCE_MONTHS)
+}
+
+export type SiblingOptionBundleCandidate = {
+  sku: string
+  productName: string
+  isNewProduct: boolean
+  moqProductGroupName: string | null
+  recommendedQuantity: number
+  availableStockWithPipeline: number
+  averageMonthlyOutgoing: number
+}
+
+export function getSiblingOptionBundleSkus<T extends SiblingOptionBundleCandidate>(
+  items: readonly T[],
+  targetStockMonths: number,
+) {
+  const itemsByProductName = new Map<string, T[]>()
+  for (const item of items) {
+    const productName = item.productName.trim()
+    if (!productName) continue
+    const group = itemsByProductName.get(productName) ?? []
+    group.push(item)
+    itemsByProductName.set(productName, group)
+  }
+
+  const bundleSkus = new Set<string>()
+  for (const groupItems of itemsByProductName.values()) {
+    if (groupItems.length < 2 || groupItems.some((item) => item.moqProductGroupName !== null)) continue
+    if (!groupItems.some((item) => item.recommendedQuantity > 0)) continue
+
+    const eligibleItems = groupItems.filter((item) => {
+      if (item.isNewProduct) return false
+      const averageMonthlyOutgoing = Math.max(0, finiteNumber(item.averageMonthlyOutgoing))
+      if (averageMonthlyOutgoing <= 0) return false
+      const stockCoverageMonths = Math.trunc(finiteNumber(item.availableStockWithPipeline))
+        / averageMonthlyOutgoing
+      return item.recommendedQuantity > 0 || stockCoverageMonths <= targetStockMonths
+    })
+    if (eligibleItems.length < 2) continue
+
+    for (const item of eligibleItems) bundleSkus.add(item.sku)
+  }
+  return bundleSkus
 }
 
 export function isSummerSeasonalPurchaseProduct(productName: string | null | undefined) {
@@ -328,7 +417,7 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
   let moqBudgetExcludedGroupCount = 0
 
   for (const unit of allocationUnits) {
-    if (unit.moqProductGroupName) {
+    if (unit.atomicGroupName) {
       const missingCostCount = unit.candidates.filter(
         (candidate) => candidate.unitCostKrw === null || candidate.unitCostKrw <= 0,
       ).length
@@ -346,7 +435,7 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
       )
       if (spentBudgetKrw + groupCostKrw > budgetKrw) {
         budgetLimitedCount += unit.candidates.length
-        moqBudgetExcludedGroupCount += 1
+        if (unit.isMoqGroup) moqBudgetExcludedGroupCount += 1
         continue
       }
 
@@ -389,25 +478,35 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
 }
 
 function buildBudgetAllocationUnits<T extends PurchaseBudgetCandidate>(candidates: T[]) {
-  const standaloneUnits: Array<{ moqProductGroupName: null; candidates: T[] }> = []
-  const moqGroups = new Map<string, T[]>()
+  const standaloneUnits: Array<{
+    atomicGroupName: null
+    isMoqGroup: false
+    candidates: T[]
+  }> = []
+  const atomicGroups = new Map<string, { isMoqGroup: boolean; candidates: T[] }>()
 
   for (const candidate of candidates) {
-    const groupName = candidate.moqProductGroupName?.trim()
+    const moqProductGroupName = candidate.moqProductGroupName?.trim()
+    const siblingOptionBundleGroupName = candidate.siblingOptionBundleGroupName?.trim()
+    const groupName = moqProductGroupName || siblingOptionBundleGroupName
     if (!groupName) {
-      standaloneUnits.push({ moqProductGroupName: null, candidates: [candidate] })
+      standaloneUnits.push({ atomicGroupName: null, isMoqGroup: false, candidates: [candidate] })
       continue
     }
-    const group = moqGroups.get(groupName) ?? []
-    group.push(candidate)
-    moqGroups.set(groupName, group)
+    const group = atomicGroups.get(groupName) ?? {
+      isMoqGroup: Boolean(moqProductGroupName),
+      candidates: [],
+    }
+    group.candidates.push(candidate)
+    atomicGroups.set(groupName, group)
   }
 
   return [
     ...standaloneUnits,
-    ...Array.from(moqGroups, ([moqProductGroupName, groupedCandidates]) => ({
-      moqProductGroupName,
-      candidates: groupedCandidates,
+    ...Array.from(atomicGroups, ([atomicGroupName, group]) => ({
+      atomicGroupName,
+      isMoqGroup: group.isMoqGroup,
+      candidates: group.candidates,
     })),
   ].sort((left, right) => comparePurchaseBudgetCandidates(
     mostUrgentBudgetCandidate(left.candidates),
@@ -744,7 +843,14 @@ export async function generatePurchaseRecommendations(input: {
         stockCoverageMonths: calculation.stockCoverageMonths,
       }
     })
-    const allRecommendationRows = applyPurchaseMinimumQuantities(applyProductGroupMoq(adjustedRows))
+    const productMoqAdjustedRows = applyProductGroupMoq(adjustedRows)
+    const nearTargetAdjustedRows = applyNearTargetDeferrals(
+      productMoqAdjustedRows,
+      targetStockMonths,
+    )
+    const allRecommendationRows = applyPurchaseMinimumQuantities(
+      applySiblingOptionPurchaseBundles(nearTargetAdjustedRows, targetStockMonths),
+    )
     const recommendationCandidates = allRecommendationRows.filter((item) => item.recommendedQuantity > 0)
     const allocation = budgetKrw === null
       ? {
@@ -912,6 +1018,12 @@ function buildAutoRecommendationRawData(input: {
     moqMinimumOrderQuantity: number | null
     moqRoundingUnit: number | null
     moqAddedQuantity: number
+    nearTargetDeferred: boolean
+    nearTargetShortfallQuantity: number
+    nearTargetDeferThreshold: number | null
+    siblingOptionBundleGroupName: string | null
+    siblingOptionBundleQuantity: number | null
+    siblingOptionBundleAddedQuantity: number
     purchaseMinimumQuantity: number
     purchaseRoundingUnit: number
     purchaseMinimumAdjustedQuantity: number
@@ -931,6 +1043,8 @@ function buildAutoRecommendationRawData(input: {
     : []
   const recommendationState = input.item.allocatedQuantity > 0
     ? 'purchase_recommended'
+    : input.item.nearTargetDeferred
+      ? 'near_target_deferred'
     : firstSaleDetected
       ? 'new_product_first_sale'
       : 'monitoring'
@@ -961,6 +1075,12 @@ function buildAutoRecommendationRawData(input: {
     moqMinimumOrderQuantity: input.item.moqMinimumOrderQuantity,
     moqRoundingUnit: input.item.moqRoundingUnit,
     moqAddedQuantity: input.item.moqAddedQuantity,
+    nearTargetDeferred: input.item.nearTargetDeferred,
+    nearTargetShortfallQuantity: input.item.nearTargetShortfallQuantity,
+    nearTargetDeferThreshold: input.item.nearTargetDeferThreshold,
+    siblingOptionBundleGroupName: input.item.siblingOptionBundleGroupName,
+    siblingOptionBundleQuantity: input.item.siblingOptionBundleQuantity,
+    siblingOptionBundleAddedQuantity: input.item.siblingOptionBundleAddedQuantity,
     purchaseMinimumQuantity: input.item.purchaseMinimumQuantity,
     purchaseRoundingUnit: input.item.purchaseRoundingUnit,
     purchaseMinimumAdjustedQuantity: input.item.purchaseMinimumAdjustedQuantity,
@@ -1051,17 +1171,94 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
   }))
 }
 
+function applyNearTargetDeferrals<T extends AssessedPurchaseRow & {
+  pipelineQuantity: number
+  availableStockWithPipeline: number
+  baseRecommendedQuantity: number
+  moqProductGroupName: string | null
+}>(items: T[], targetStockMonths: number) {
+  return items.map((item) => {
+    const shortfallQuantity = Math.max(0, Math.trunc(finiteNumber(item.baseRecommendedQuantity)))
+    const nearTargetDeferred = shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity,
+      effectiveMonthlyOutgoing: item.effectiveMonthlyOutgoing,
+      availableStockWithPipeline: item.availableStockWithPipeline,
+      targetStockMonths,
+      isNewProduct: item.isNewProduct,
+      hasProductGroupMoq: item.moqProductGroupName !== null,
+    })
+    return {
+      ...item,
+      nearTargetDeferred,
+      nearTargetShortfallQuantity: shortfallQuantity,
+      nearTargetDeferThreshold: nearTargetDeferred
+        ? getNearTargetDeferShortfallThreshold(item.effectiveMonthlyOutgoing)
+        : null,
+      recommendedQuantity: nearTargetDeferred ? 0 : item.recommendedQuantity,
+    }
+  })
+}
+
+function applySiblingOptionPurchaseBundles<T extends AssessedPurchaseRow & {
+  pipelineQuantity: number
+  availableStockWithPipeline: number
+  moqProductGroupName: string | null
+  nearTargetDeferred: boolean
+}>(items: T[], targetStockMonths: number) {
+  const bundleSkus = getSiblingOptionBundleSkus(items.map((item) => ({
+    sku: item.row.sku,
+    productName: item.row.productName,
+    isNewProduct: item.isNewProduct,
+    moqProductGroupName: item.moqProductGroupName,
+    recommendedQuantity: item.recommendedQuantity,
+    availableStockWithPipeline: item.availableStockWithPipeline,
+    averageMonthlyOutgoing: item.averageMonthlyOutgoing,
+  })), targetStockMonths)
+
+  return items.map((item) => {
+    if (!bundleSkus.has(item.row.sku)) {
+      return {
+        ...item,
+        siblingOptionBundleGroupName: null,
+        siblingOptionBundleQuantity: null,
+        siblingOptionBundleAddedQuantity: 0,
+      }
+    }
+
+    const bundledQuantity = Math.max(
+      Math.max(0, Math.trunc(finiteNumber(item.recommendedQuantity))),
+      SIBLING_OPTION_BUNDLE_QUANTITY,
+    )
+    return {
+      ...item,
+      nearTargetDeferred: false,
+      nearTargetDeferThreshold: null,
+      recommendedQuantity: bundledQuantity,
+      siblingOptionBundleGroupName: item.row.productName,
+      siblingOptionBundleQuantity: SIBLING_OPTION_BUNDLE_QUANTITY,
+      siblingOptionBundleAddedQuantity: bundledQuantity - item.recommendedQuantity,
+    }
+  })
+}
+
 function applyPurchaseMinimumQuantities<T extends {
   recommendedQuantity: number
   isNewProduct: boolean
   unitCostKrw: number | null
+  siblingOptionBundleGroupName: string | null
+  siblingOptionBundleQuantity: number | null
 }>(items: T[]) {
   return items.map((item) => {
+    const isSiblingOptionBundle = item.siblingOptionBundleGroupName !== null
+      && item.siblingOptionBundleQuantity !== null
     const purchaseMinimumAdjustedQuantity = applyPurchaseMinimumQuantity(item.recommendedQuantity, {
       isNewProduct: item.isNewProduct,
       unitCostKrw: item.unitCostKrw,
+      siblingOptionBundle: isSiblingOptionBundle,
     })
-    const purchaseMinimumQuantity = item.isNewProduct
+    const purchaseMinimumQuantity = isSiblingOptionBundle
+      ? SIBLING_OPTION_BUNDLE_QUANTITY
+      : item.isNewProduct
       ? item.recommendedQuantity <= 3
         ? HIGH_COST_EXISTING_PRODUCT_MINIMUM_QUANTITY
         : Math.max(1, Math.trunc(finiteNumber(item.recommendedQuantity)))

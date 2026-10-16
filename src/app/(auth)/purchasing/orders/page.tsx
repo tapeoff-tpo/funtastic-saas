@@ -949,10 +949,21 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
     : null
+  const siblingOptionBundleGroupName = typeof rawData.siblingOptionBundleGroupName === 'string'
+    ? rawData.siblingOptionBundleGroupName.trim()
+    : ''
+  const siblingOptionBundleQuantity = Number(rawData.siblingOptionBundleQuantity)
+  const siblingOptionBundleNote = siblingOptionBundleGroupName
+    && Number.isFinite(siblingOptionBundleQuantity)
+    && siblingOptionBundleQuantity > 0
+    ? `동일상품 옵션 동시 발주 · ${formatNumber(siblingOptionBundleQuantity)}개`
+    : null
   const specialBulkOutgoingNote = specialBulkOutgoingText(rawData.specialBulkOutgoingAdjustment)
   const trendNote = recommendationTrendText(rawData.salesTrend, rawData.effectiveMonthlyOutgoing)
   const stateNote = rawData.recommendationState === 'new_product_first_sale'
     ? '신규상품 첫 판매 감지'
+    : rawData.recommendationState === 'near_target_deferred'
+      ? '목표 재고 근접 · 이번 회차 보류'
     : rawData.recommendationState === 'monitoring'
       ? '현재 발주 보류 · 계속 관찰'
       : null
@@ -963,13 +974,14 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
+      {stockNote || pipelineNote || moqNote || siblingOptionBundleNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
           {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
           {stockNote ? <span className="text-emerald-700">{stockNote}</span> : null}
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
+          {siblingOptionBundleNote ? <span className="text-cyan-700">{siblingOptionBundleNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
           {seasonalNote ? <span className={seasonalDemandMultiplier < 1 ? 'text-sky-700' : 'text-rose-700'}>{seasonalNote}</span> : null}
           {specialBulkOutgoingNote ? <span className="text-fuchsia-700">{specialBulkOutgoingNote}</span> : null}

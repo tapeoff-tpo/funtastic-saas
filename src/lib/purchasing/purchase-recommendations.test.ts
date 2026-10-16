@@ -5,6 +5,8 @@ import {
   calculatePurchaseRecommendation,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculatePurchaseSalesTrend,
+  getNearTargetDeferShortfallThreshold,
+  getSiblingOptionBundleSkus,
   getSeasonalPurchaseDemandMultiplier,
   isSeasonallyExcludedFromPurchaseRecommendation,
   isWinterSeasonalPurchaseProduct,
@@ -17,6 +19,7 @@ import {
   isExcludedPurchaseRecommendation,
   isPendingChinaInventorySnapshot,
   purchasePipelineQuantity,
+  shouldDeferNearTargetPurchaseRecommendation,
 } from './purchase-recommendations'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
@@ -30,12 +33,113 @@ describe('purchase minimum quantities', () => {
     expect(applyPurchaseMinimumQuantity(23, { unitCostKrw: 7000 })).toBe(30)
     expect(applyPurchaseMinimumQuantity(1, { unitCostKrw: 6999 })).toBe(20)
     expect(applyPurchaseMinimumQuantity(11, { unitCostKrw: null })).toBe(20)
+    expect(applyPurchaseMinimumQuantity(10, {
+      unitCostKrw: 1000,
+      siblingOptionBundle: true,
+    })).toBe(10)
   })
 
   it('keeps a new-product shortage above three units as its whole quantity', () => {
     expect(applyPurchaseMinimumQuantity(3, { isNewProduct: true })).toBe(10)
     expect(applyPurchaseMinimumQuantity(4, { isNewProduct: true })).toBe(4)
     expect(applyPurchaseMinimumQuantity(13, { isNewProduct: true })).toBe(13)
+  })
+})
+
+describe('near-target deferral and sibling option bundles', () => {
+  it('defers only a small shortage that is within 0.1 month of the target', () => {
+    expect(getNearTargetDeferShortfallThreshold(20.3)).toBe(3)
+    expect(shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity: 1,
+      effectiveMonthlyOutgoing: 20.3,
+      availableStockWithPipeline: 30,
+      targetStockMonths: 1.5,
+      isNewProduct: false,
+      hasProductGroupMoq: false,
+    })).toBe(true)
+    expect(shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity: 1,
+      effectiveMonthlyOutgoing: 5.3,
+      availableStockWithPipeline: 7,
+      targetStockMonths: 1.5,
+      isNewProduct: false,
+      hasProductGroupMoq: false,
+    })).toBe(false)
+    expect(shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity: 1,
+      effectiveMonthlyOutgoing: 20.3,
+      availableStockWithPipeline: 0,
+      targetStockMonths: 1.5,
+      isNewProduct: false,
+      hasProductGroupMoq: false,
+    })).toBe(false)
+    expect(shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity: 1,
+      effectiveMonthlyOutgoing: 20.3,
+      availableStockWithPipeline: 30,
+      targetStockMonths: 1.5,
+      isNewProduct: true,
+      hasProductGroupMoq: false,
+    })).toBe(false)
+  })
+
+  it('adds only the near-target sibling options when another option is being purchased', () => {
+    const bundleSkus = getSiblingOptionBundleSkus([
+      {
+        sku: '109020-0001',
+        productName: '로딕슨 오픈형 폴딩 박스',
+        isNewProduct: false,
+        moqProductGroupName: null,
+        recommendedQuantity: 1,
+        availableStockWithPipeline: 7,
+        averageMonthlyOutgoing: 5.3,
+      },
+      {
+        sku: '109020-0002',
+        productName: '로딕슨 오픈형 폴딩 박스',
+        isNewProduct: false,
+        moqProductGroupName: null,
+        recommendedQuantity: 0,
+        availableStockWithPipeline: 14,
+        averageMonthlyOutgoing: 2,
+      },
+      {
+        sku: '109020-0003',
+        productName: '로딕슨 오픈형 폴딩 박스',
+        isNewProduct: false,
+        moqProductGroupName: null,
+        recommendedQuantity: 0,
+        availableStockWithPipeline: 4,
+        averageMonthlyOutgoing: 3,
+      },
+    ], 1.5)
+
+    expect([...bundleSkus].sort()).toEqual(['109020-0001', '109020-0003'])
+  })
+
+  it('does not create a sibling bundle for MOQ product groups', () => {
+    const bundleSkus = getSiblingOptionBundleSkus([
+      {
+        sku: 'moq-a',
+        productName: 'MOQ 상품',
+        isNewProduct: false,
+        moqProductGroupName: 'MOQ 상품',
+        recommendedQuantity: 1,
+        availableStockWithPipeline: 7,
+        averageMonthlyOutgoing: 5,
+      },
+      {
+        sku: 'moq-b',
+        productName: 'MOQ 상품',
+        isNewProduct: false,
+        moqProductGroupName: 'MOQ 상품',
+        recommendedQuantity: 0,
+        availableStockWithPipeline: 6,
+        averageMonthlyOutgoing: 5,
+      },
+    ], 1.5)
+
+    expect([...bundleSkus]).toEqual([])
   })
 })
 
@@ -495,6 +599,37 @@ describe('purchase budget allocation', () => {
     ])
     expect(sufficient.spentBudgetKrw).toBe(200000)
     expect(sufficient.moqBudgetExcludedGroupCount).toBe(0)
+  })
+
+  it('keeps a sibling option bundle together when a budget is set', () => {
+    const siblingOptionBundle = [
+      {
+        sku: 'bundle-white',
+        recommendedQuantity: 10,
+        stockCoverageMonths: 1.3,
+        effectiveMonthlyOutgoing: 5,
+        unitCostKrw: 1000,
+        siblingOptionBundleGroupName: '폴딩 박스',
+        purchaseMinimumQuantity: 10,
+        purchaseRoundingUnit: 10,
+      },
+      {
+        sku: 'bundle-yellow',
+        recommendedQuantity: 10,
+        stockCoverageMonths: 1.4,
+        effectiveMonthlyOutgoing: 3,
+        unitCostKrw: 1000,
+        siblingOptionBundleGroupName: '폴딩 박스',
+        purchaseMinimumQuantity: 10,
+        purchaseRoundingUnit: 10,
+      },
+    ]
+
+    expect(allocatePurchaseBudget(siblingOptionBundle, 19000).items).toHaveLength(0)
+    expect(allocatePurchaseBudget(siblingOptionBundle, 20000).items.map((item) => item.sku)).toEqual([
+      'bundle-white',
+      'bundle-yellow',
+    ])
   })
 })
 

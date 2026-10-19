@@ -304,6 +304,30 @@ describe('resolveOutgoingMetrics', () => {
     expect(resolveOutgoingMetrics(metadata, calculated, '2026-11')).toEqual(calculated)
   })
 
+  it('keeps the latest two completed months for sustained-demand review', () => {
+    const result = resolveOutgoingMetrics({
+      purchasingRollingAverageBaseline: {
+        referenceMonth: '2026-10',
+        completedMonthOutgoing: {
+          '2026-07': 3,
+          '2026-08': 20,
+          '2026-09': 20,
+        },
+        threeMonthSales: 43,
+        threeMonthAverageOutgoing: 14.3,
+      },
+    }, {
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 0,
+    }, '2026-10')
+
+    expect(result).toMatchObject({
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 14.3,
+      recentCompletedMonthOutgoing: [20, 20],
+    })
+  })
+
   it('keeps a one-off M테이포프 bulk order out of the current workbook baseline', () => {
     const result = resolveOutgoingMetrics({
       purchasingOutgoingMetrics: {
@@ -350,6 +374,8 @@ describe('getOutgoingMetricWindows', () => {
     const result = getOutgoingMetricWindows(new Date('2026-07-31T15:30:00.000Z'))
 
     expect(result.currentMonthDate).toBe('2026-08-01')
+    expect(result.twoMonthsAgoDate).toBe('2026-06-01')
+    expect(result.previousMonthDate).toBe('2026-07-01')
     expect(result.nextMonthDate).toBe('2026-09-01')
     expect(result.currentMonthStart.toISOString()).toBe('2026-07-31T15:00:00.000Z')
     expect(result.nextMonthStart.toISOString()).toBe('2026-08-31T15:00:00.000Z')

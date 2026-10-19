@@ -58,6 +58,7 @@ export type PurchasingSpecialBulkOutgoingAdjustment = {
 export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  recentCompletedMonthOutgoing?: number[]
   currentMonthOrderCount?: number
   currentMonthLargestOrderQuantity?: number
   specialBulkOutgoingAdjustment?: PurchasingSpecialBulkOutgoingAdjustment | null
@@ -93,6 +94,10 @@ export type PurchaseUrlVerification = {
 } | null
 export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
+}
+type PurchasingItemOutgoingMetricQueryRow = PurchasingItemOutgoingMetricRow & {
+  twoMonthsAgoOutgoing: number
+  previousMonthOutgoing: number
 }
 const NUMERIC_HEADERS = new Set<Esa009mHeader>([
   '특가(元)',
@@ -683,6 +688,8 @@ export async function getSkuOutgoingMetrics(
 
   const {
     previousThreeMonthDate,
+    twoMonthsAgoDate,
+    previousMonthDate,
     currentMonthDate,
     nextMonthDate,
   } = getOutgoingMetricWindows(now)
@@ -714,6 +721,22 @@ export async function getSkuOutgoingMetrics(
             ELSE 0
           END
         ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+        , COALESCE(SUM(
+          CASE
+            WHEN line.shipment_date >= ${twoMonthsAgoDate}::date
+             AND line.shipment_date < ${previousMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+            ELSE 0
+          END
+        ), 0)::numeric AS "twoMonthsAgoOutgoing"
+        , COALESCE(SUM(
+          CASE
+            WHEN line.shipment_date >= ${previousMonthDate}::date
+             AND line.shipment_date < ${currentMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+            ELSE 0
+          END
+        ), 0)::numeric AS "previousMonthOutgoing"
         , COUNT(DISTINCT CASE
           WHEN line.shipment_date >= ${currentMonthDate}::date
            AND line.shipment_date < ${nextMonthDate}::date
@@ -739,11 +762,15 @@ export async function getSkuOutgoingMetrics(
   ])
 
   const metricsBySku = new Map<string, PurchasingItemOutgoingMetrics>(
-    resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
+    resultRows<PurchasingItemOutgoingMetricQueryRow>(result).map((row) => [
       row.internalSku,
       {
         currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
         threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
+        recentCompletedMonthOutgoing: [
+          cleanOutgoingNumber(row.twoMonthsAgoOutgoing),
+          cleanOutgoingNumber(row.previousMonthOutgoing),
+        ],
         ...currentMonthOrderSignals(row),
       },
     ]),
@@ -825,10 +852,16 @@ export function resolveOutgoingMetrics(
       const rollingBulkAdjustment = specialBulkOutgoingAdjustment
         ? applySpecialBulkAdjustmentToRollingBaseline(rollingBaseline, specialBulkOutgoingAdjustment)
         : null
+      const recentCompletedMonthOutgoing = recentCompletedMonthValues(
+        rollingBaseline.completedMonthOutgoing,
+      )
       return {
         currentMonthOutgoing: calculated.currentMonthOutgoing,
         threeMonthAverageOutgoing: rollingBulkAdjustment?.adjustedThreeMonthAverageOutgoing
           ?? rollingBaseline.threeMonthAverageOutgoing,
+        ...(recentCompletedMonthOutgoing.length > 0
+          ? { recentCompletedMonthOutgoing }
+          : {}),
         ...currentMonthOrderSignals(calculated),
         ...(rollingBulkAdjustment
           ? { specialBulkOutgoingAdjustment: rollingBulkAdjustment }
@@ -850,6 +883,9 @@ export function resolveOutgoingMetrics(
   return {
     currentMonthOutgoing: calculated.currentMonthOutgoing,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
+    ...(calculated.recentCompletedMonthOutgoing?.length
+      ? { recentCompletedMonthOutgoing: calculated.recentCompletedMonthOutgoing }
+      : {}),
     ...currentMonthOrderSignals(calculated),
     ...(specialBulkOutgoingAdjustment
       ? { specialBulkOutgoingAdjustment }
@@ -867,6 +903,16 @@ function currentMonthOrderSignals(metrics: PurchasingItemOutgoingMetrics) {
   if (currentMonthOrderCount <= 0 || currentMonthLargestOrderQuantity <= 0) return {}
 
   return { currentMonthOrderCount, currentMonthLargestOrderQuantity }
+}
+
+function recentCompletedMonthValues(value: Record<string, number> | null) {
+  if (!value) return []
+
+  return Object.entries(value)
+    .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-2)
+    .map(([, quantity]) => cleanOutgoingNumber(quantity))
 }
 
 type ParsedRollingAverageBaseline = Pick<
@@ -1243,6 +1289,8 @@ export function getOutgoingMetricWindows(now: Date) {
     previousThreeMonthStart: seoulMonthStart(-3),
     nextMonthStart: seoulMonthStart(1),
     previousThreeMonthDate: monthDate(-3),
+    twoMonthsAgoDate: monthDate(-2),
+    previousMonthDate: monthDate(-1),
     currentMonthDate: monthDate(0),
     nextMonthDate: monthDate(1),
   }

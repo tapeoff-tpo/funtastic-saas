@@ -271,15 +271,17 @@ describe('domestic purchase product exclusions', () => {
 })
 
 describe('stable monthly outgoing', () => {
-  it('removes a sudden current-month spike from recommendation demand', () => {
+  it('blends a sharp increase when current-month sales are spread across orders', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 100,
       threeMonthAverageOutgoing: 50,
+      currentMonthOrderCount: 20,
+      currentMonthLargestOrderQuantity: 5,
     })).toEqual({
-      effectiveMonthlyOutgoing: 50,
+      effectiveMonthlyOutgoing: 75,
       baselineMonthlyOutgoing: 50,
-      salesAnomalyDetected: true,
-      salesTrend: 'steady',
+      salesAnomalyDetected: false,
+      salesTrend: 'increasing',
     })
   })
 
@@ -288,34 +290,34 @@ describe('stable monthly outgoing', () => {
       currentMonthOutgoing: 70,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 58,
+      effectiveMonthlyOutgoing: 60,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
       salesTrend: 'increasing',
     })
   })
 
-  it('uses the 60/40 trend basis for a 33.3-average item that reaches 43 this month', () => {
+  it('uses the 50/50 trend basis for a 33.3-average item that reaches 43 this month', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 43,
       threeMonthAverageOutgoing: 33.3,
     })).toEqual({
-      effectiveMonthlyOutgoing: 37.2,
+      effectiveMonthlyOutgoing: 38.2,
       baselineMonthlyOutgoing: 33.3,
       salesAnomalyDetected: false,
       salesTrend: 'increasing',
     })
   })
 
-  it('does not raise the demand basis when the current-month increase is below the trend threshold', () => {
+  it('blends even a small current-month increase with the completed-period average', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 39,
       threeMonthAverageOutgoing: 33.3,
     })).toEqual({
-      effectiveMonthlyOutgoing: 33.3,
+      effectiveMonthlyOutgoing: 36.2,
       baselineMonthlyOutgoing: 33.3,
       salesAnomalyDetected: false,
-      salesTrend: 'steady',
+      salesTrend: 'increasing',
     })
   })
 
@@ -331,15 +333,15 @@ describe('stable monthly outgoing', () => {
     })
   })
 
-  it('uses current-month outgoing as the main demand basis below a five-unit average', () => {
+  it('keeps the completed-period average for a low-volume product when current sales fall', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 2,
       threeMonthAverageOutgoing: 4,
     })).toEqual({
-      effectiveMonthlyOutgoing: 2,
+      effectiveMonthlyOutgoing: 4,
       baselineMonthlyOutgoing: 4,
       salesAnomalyDetected: false,
-      salesTrend: 'steady',
+      salesTrend: 'decreasing',
     })
   })
 
@@ -357,17 +359,29 @@ describe('stable monthly outgoing', () => {
     })
   })
 
-  it('keeps a low-baseline increase when current-month sales are spread across multiple orders', () => {
+  it('caps an extreme established-product increase at twice the three-month average', () => {
     expect(calculateStableMonthlyOutgoing({
-      currentMonthOutgoing: 101,
-      threeMonthAverageOutgoing: 1.3,
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 3,
       currentMonthOrderCount: 24,
-      currentMonthLargestOrderQuantity: 8,
+      currentMonthLargestOrderQuantity: 4,
     })).toEqual({
-      effectiveMonthlyOutgoing: 101,
-      baselineMonthlyOutgoing: 1.3,
+      effectiveMonthlyOutgoing: 6,
+      baselineMonthlyOutgoing: 3,
       salesAnomalyDetected: false,
-      salesTrend: 'increasing',
+      salesTrend: 'capped_increase',
+    })
+  })
+
+  it('caps the low-average current-month jump from the purchase review case', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 15,
+      threeMonthAverageOutgoing: 4.3,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 8.6,
+      baselineMonthlyOutgoing: 4.3,
+      salesAnomalyDetected: false,
+      salesTrend: 'capped_increase',
     })
   })
 
@@ -396,15 +410,16 @@ describe('stable monthly outgoing', () => {
     })
   })
 
-  it('switches to the three-month average at exactly five units', () => {
+  it('uses the current-month basis after higher demand continues for three months', () => {
     expect(calculateStableMonthlyOutgoing({
-      currentMonthOutgoing: 2,
-      threeMonthAverageOutgoing: 5,
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 14.3,
+      recentCompletedMonthOutgoing: [20, 20],
     })).toEqual({
-      effectiveMonthlyOutgoing: 5,
-      baselineMonthlyOutgoing: 5,
+      effectiveMonthlyOutgoing: 20,
+      baselineMonthlyOutgoing: 14.3,
       salesAnomalyDetected: false,
-      salesTrend: 'decreasing',
+      salesTrend: 'sustained_increase',
     })
   })
 

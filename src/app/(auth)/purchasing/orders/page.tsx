@@ -998,13 +998,25 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
 }
 
 function recommendationTrendText(value: unknown, effectiveMonthlyOutgoing?: unknown) {
+  if (value === 'sustained_increase') {
+    return {
+      label: `판매 증가 3개월 지속 · 당월 기준 (${formatNumber(effectiveMonthlyOutgoing)})`,
+      className: 'text-emerald-700',
+    }
+  }
+  if (value === 'capped_increase') {
+    return {
+      label: `판매 급증 · 평균 2배 상한 (${formatNumber(effectiveMonthlyOutgoing)})`,
+      className: 'text-amber-700',
+    }
+  }
   if (value === 'increasing') {
     return {
-      label: `판매 증가 · 평균 60% + 당월 40% (${formatNumber(effectiveMonthlyOutgoing)})`,
+      label: `판매 증가 · 평균 50% + 당월 50% (${formatNumber(effectiveMonthlyOutgoing)})`,
       className: 'text-blue-700',
     }
   }
-  if (value === 'decreasing') return { label: '판매 감소 · 발주량 하향 반영', className: 'text-amber-700' }
+  if (value === 'decreasing') return { label: '판매 감소 · 3개월 평균 유지', className: 'text-amber-700' }
   if (value === 'new_product') return { label: '신규상품 판매 발생', className: 'text-emerald-700' }
   return value === 'steady' ? { label: '판매 유지', className: 'text-slate-700' } : null
 }

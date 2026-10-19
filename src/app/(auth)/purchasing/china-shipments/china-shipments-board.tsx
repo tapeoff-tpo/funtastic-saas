@@ -366,9 +366,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
             {visibleShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
           </select>
         </label>
-        <button type="button" disabled={isPending} onClick={() => activeWorkShipment && !showCreate ? onSelect(activeWorkShipment.id) : onToggleCreate()} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">
-          <PackagePlus className="size-4" />{showCreate ? '요청 닫기' : activeWorkShipment ? '진행 중 작업 열기' : '새 중국출고요청'}
-        </button>
+        {showCreate ? <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> 요청 닫기</button> : activeWorkShipment ? <div className="flex shrink-0 flex-wrap gap-2"><button type="button" disabled={isPending} onClick={() => onSelect(activeWorkShipment.id)} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><ChevronRight className="size-4" /> 진행 중 작업 열기</button><button type="button" disabled title="진행 중 작업을 출고완료 또는 취소하면 새 요청을 만들 수 있습니다." className="inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><PackagePlus className="size-4" /> 새 중국출고요청</button></div> : <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> 새 중국출고요청</button>}
         {selectedShipment ? <div className="flex shrink-0 gap-2">
           <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
@@ -409,6 +407,10 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const totalPackedQuantity = items.reduce((total, item) => total + item.packedQuantity, 0)
   const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
+  const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
+  const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
+  const canDownloadShipmentLabels = boxesWithItems.length > 0 && !hasIncompleteBoxSplit
+  const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
     const leftComplete = left.packedQuantity === left.reservedQuantity
     const rightComplete = right.packedQuantity === right.reservedQuantity
@@ -443,7 +445,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {stage === 'summary' ? <><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</a><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a></> : null}
+          {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</a> : <button type="button" disabled title="모든 박스분할을 완료하면 생성할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</button>}
+          {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {editable && stage === 'summary' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
           {shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('이 출고작업을 취소하고 예약 수량을 풀까요?')) run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}
@@ -489,10 +492,10 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">부착용 쉽먼트 엑셀은 박스·파렛트별로 한 장씩 인쇄됩니다. 노란색 칸에 중국어 상품명과 로케이션을 직접 입력한 뒤 인쇄하세요.</p></section>
+        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 모두 저장하면 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼이 활성화됩니다. 노란색 칸에 중국어 상품명과 로케이션을 적어 박스 쉬트를 인쇄하고, 파렛트 번호까지 입력하면 파렛트 쉬트도 함께 인쇄하세요.</p></section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
-        {items.some((item) => item.packedQuantity !== item.reservedQuantity) ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다.</p> : null}
-        {boxesWithItems.some((box) => !box.palletId) ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 적재된 모든 박스에 파렛트 번호를 입력해주세요.</p> : null}
+        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료와 부착용 쉽먼트 엑셀 생성이 가능합니다.</p> : null}
+        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
       </section> : null}
     </section>

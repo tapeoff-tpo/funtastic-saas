@@ -48,6 +48,8 @@ const NEAR_TARGET_DEFER_AVERAGE_RATIO = 0.1
 const SIBLING_OPTION_BUNDLE_QUANTITY = 10
 const NEW_PRODUCT_INVENTORY_LIMIT = 50
 const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
+const ONE_OFF_CURRENT_MONTH_SPIKE_MINIMUM_QUANTITY = 20
+const ONE_OFF_CURRENT_MONTH_SPIKE_DOMINANT_ORDER_RATIO = 0.8
 const INCREASING_TREND_AVERAGE_WEIGHT = 0.6
 const INCREASING_TREND_CURRENT_MONTH_WEIGHT = 0.4
 const SUMMER_SEASON_REDUCTION_START = '08-15'
@@ -350,6 +352,8 @@ export function calculateStableMonthlyOutgoing(input: {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
   isNewProduct?: boolean
+  currentMonthOrderCount?: number
+  currentMonthLargestOrderQuantity?: number
 }) {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
@@ -359,9 +363,16 @@ export function calculateStableMonthlyOutgoing(input: {
   const fallbackToAverageWhenCurrentMonthIsZero = input.isNewProduct !== true
     && currentMonthOutgoing === 0
     && baselineMonthlyOutgoing > 0
-  const salesAnomalyDetected = !prioritizeCurrentMonth
-    && currentMonthOutgoing >= baselineMonthlyOutgoing * 2
-    && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
+  const oneOffCurrentMonthSpikeDetected = isOneOffCurrentMonthSalesSpike({
+    currentMonthOutgoing,
+    threeMonthAverageOutgoing: baselineMonthlyOutgoing,
+    currentMonthOrderCount: input.currentMonthOrderCount,
+    currentMonthLargestOrderQuantity: input.currentMonthLargestOrderQuantity,
+  })
+  const salesAnomalyDetected = oneOffCurrentMonthSpikeDetected
+    || (!prioritizeCurrentMonth
+      && currentMonthOutgoing >= baselineMonthlyOutgoing * 2
+      && currentMonthOutgoing - baselineMonthlyOutgoing >= 20)
   const salesTrend = input.isNewProduct === true
     ? 'new_product' as const
     : calculatePurchaseSalesTrend({
@@ -373,6 +384,8 @@ export function calculateStableMonthlyOutgoing(input: {
     && salesTrend === 'increasing'
   const effectiveMonthlyOutgoing = fallbackToAverageWhenCurrentMonthIsZero
     ? baselineMonthlyOutgoing
+    : salesAnomalyDetected
+      ? baselineMonthlyOutgoing
     : prioritizeCurrentMonth
     ? currentMonthOutgoing
     : increasingTrendDetected
@@ -386,6 +399,35 @@ export function calculateStableMonthlyOutgoing(input: {
     salesAnomalyDetected,
     salesTrend: salesAnomalyDetected ? 'steady' as const : salesTrend,
   }
+}
+
+export function isOneOffCurrentMonthSalesSpike(input: {
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+  currentMonthOrderCount?: number
+  currentMonthLargestOrderQuantity?: number
+}) {
+  const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
+  const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
+  const currentMonthOrderCount = Math.max(0, Math.trunc(finiteNumber(input.currentMonthOrderCount ?? 0)))
+  const currentMonthLargestOrderQuantity = Math.max(
+    0,
+    finiteNumber(input.currentMonthLargestOrderQuantity ?? 0),
+  )
+
+  if (
+    currentMonthOrderCount <= 0
+    || currentMonthLargestOrderQuantity <= 0
+    || currentMonthOutgoing < ONE_OFF_CURRENT_MONTH_SPIKE_MINIMUM_QUANTITY
+  ) return false
+
+  const isSharpIncrease = currentMonthOutgoing >= Math.max(
+    ONE_OFF_CURRENT_MONTH_SPIKE_MINIMUM_QUANTITY,
+    threeMonthAverageOutgoing * 2,
+  )
+  const isDominatedByOneOrder = currentMonthLargestOrderQuantity
+    >= currentMonthOutgoing * ONE_OFF_CURRENT_MONTH_SPIKE_DOMINANT_ORDER_RATIO
+  return isSharpIncrease && isDominatedByOneOrder
 }
 
 export function calculatePurchaseSalesTrend(input: {
@@ -713,6 +755,14 @@ export async function generatePurchaseRecommendations(input: {
       currentMonthOutgoing,
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
       isNewProduct,
+      currentMonthOrderCount: outgoingMetrics?.currentMonthOrderCount,
+      currentMonthLargestOrderQuantity: outgoingMetrics?.currentMonthLargestOrderQuantity,
+    })
+    const oneOffCurrentMonthSpikeDetected = isOneOffCurrentMonthSalesSpike({
+      currentMonthOutgoing,
+      threeMonthAverageOutgoing: averageMonthlyOutgoing,
+      currentMonthOrderCount: outgoingMetrics?.currentMonthOrderCount,
+      currentMonthLargestOrderQuantity: outgoingMetrics?.currentMonthLargestOrderQuantity,
     })
     const seasonalDemandMultiplier = getSeasonalPurchaseDemandMultiplier(row.productName, now)
     const stableOutgoing = {
@@ -741,6 +791,9 @@ export async function generatePurchaseRecommendations(input: {
       previousThreeMonthOutgoing,
       averageMonthlyOutgoing,
       currentMonthOutgoing,
+      currentMonthOrderCount: outgoingMetrics?.currentMonthOrderCount ?? null,
+      currentMonthLargestOrderQuantity: outgoingMetrics?.currentMonthLargestOrderQuantity ?? null,
+      oneOffCurrentMonthSpikeDetected,
       specialBulkOutgoingAdjustment,
       stableOutgoing,
       calculation,
@@ -877,6 +930,7 @@ export async function generatePurchaseRecommendations(input: {
         autoReviewRowBySku.has(item.row.sku)
         || allocatedQuantityBySku.has(item.row.sku)
         || (item.isNewProduct && item.currentMonthOutgoing > 0)
+        || item.oneOffCurrentMonthSpikeDetected
       ))
       .map((item) => ({
         ...item,
@@ -982,6 +1036,9 @@ function buildAssessedPurchaseRow(input: {
   previousThreeMonthOutgoing: number
   averageMonthlyOutgoing: number
   currentMonthOutgoing: number
+  currentMonthOrderCount: number | null
+  currentMonthLargestOrderQuantity: number | null
+  oneOffCurrentMonthSpikeDetected: boolean
   specialBulkOutgoingAdjustment: PurchasingSpecialBulkOutgoingAdjustment | null
   stableOutgoing: ReturnType<typeof calculateStableMonthlyOutgoing>
   calculation: SpikeGuardPurchaseRecommendationCalculation
@@ -995,6 +1052,9 @@ function buildAssessedPurchaseRow(input: {
     previousThreeMonthOutgoing: input.previousThreeMonthOutgoing,
     averageMonthlyOutgoing: input.averageMonthlyOutgoing,
     currentMonthOutgoing: input.currentMonthOutgoing,
+    currentMonthOrderCount: input.currentMonthOrderCount,
+    currentMonthLargestOrderQuantity: input.currentMonthLargestOrderQuantity,
+    oneOffCurrentMonthSpikeDetected: input.oneOffCurrentMonthSpikeDetected,
     specialBulkOutgoingAdjustment: input.specialBulkOutgoingAdjustment,
     ...input.stableOutgoing,
     calculation: input.calculation,
@@ -1034,7 +1094,9 @@ function buildAutoRecommendationRawData(input: {
   now: Date
   existingRawData?: Record<string, unknown>
 }) {
-  const firstSaleDetected = input.item.isNewProduct && input.item.currentMonthOutgoing > 0
+  const firstSaleDetected = input.item.isNewProduct
+    && input.item.currentMonthOutgoing > 0
+    && !input.item.oneOffCurrentMonthSpikeDetected
   const existingFirstSaleAt = typeof input.existingRawData?.newProductFirstSaleDetectedAt === 'string'
     ? input.existingRawData.newProductFirstSaleDetectedAt
     : null
@@ -1059,6 +1121,9 @@ function buildAutoRecommendationRawData(input: {
     baselineMonthlyOutgoing: input.item.baselineMonthlyOutgoing,
     previousThreeMonthOutgoing: input.item.previousThreeMonthOutgoing,
     currentMonthOutgoing: input.item.currentMonthOutgoing,
+    currentMonthOrderCount: input.item.currentMonthOrderCount,
+    currentMonthLargestOrderQuantity: input.item.currentMonthLargestOrderQuantity,
+    oneOffCurrentMonthSpikeDetected: input.item.oneOffCurrentMonthSpikeDetected,
     specialBulkOutgoingAdjustment: input.item.specialBulkOutgoingAdjustment,
     salesAnomalyDetected: input.item.salesAnomalyDetected,
     salesTrend: input.item.salesTrend,

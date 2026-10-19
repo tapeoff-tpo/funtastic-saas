@@ -343,6 +343,34 @@ describe('stable monthly outgoing', () => {
     })
   })
 
+  it('excludes a low-baseline spike when one order accounts for nearly all current-month sales', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 101,
+      threeMonthAverageOutgoing: 1.3,
+      currentMonthOrderCount: 1,
+      currentMonthLargestOrderQuantity: 101,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 1.3,
+      baselineMonthlyOutgoing: 1.3,
+      salesAnomalyDetected: true,
+      salesTrend: 'steady',
+    })
+  })
+
+  it('keeps a low-baseline increase when current-month sales are spread across multiple orders', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 101,
+      threeMonthAverageOutgoing: 1.3,
+      currentMonthOrderCount: 24,
+      currentMonthLargestOrderQuantity: 8,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 101,
+      baselineMonthlyOutgoing: 1.3,
+      salesAnomalyDetected: false,
+      salesTrend: 'increasing',
+    })
+  })
+
   it('falls back to the three-month average when a low-sales item has no current-month outgoing', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 0,

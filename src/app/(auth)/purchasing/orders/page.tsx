@@ -924,8 +924,13 @@ function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHist
 
 function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
+  const oneOffCurrentMonthSpikeDetected = rawData.oneOffCurrentMonthSpikeDetected === true
+  const currentMonthOrderCount = Number(rawData.currentMonthOrderCount)
+  const currentMonthLargestOrderQuantity = Number(rawData.currentMonthLargestOrderQuantity)
   const anomalyNote = rawData.salesAnomalyDetected === true
-    ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
+    ? oneOffCurrentMonthSpikeDetected
+      ? `단일 주문 급증 ${formatNumber(currentMonthLargestOrderQuantity)}개 / ${formatNumber(currentMonthOrderCount)}건 · 평균 제외`
+      : `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
     : null
   const seasonalDemandMultiplier = Number(rawData.seasonalDemandMultiplier)
   const seasonalNote = !Number.isFinite(seasonalDemandMultiplier) || seasonalDemandMultiplier === 1

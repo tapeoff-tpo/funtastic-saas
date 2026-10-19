@@ -212,6 +212,29 @@ describe('resolveOutgoingMetrics', () => {
     })
   })
 
+  it('keeps current-month order concentration when applying a stored baseline', () => {
+    const result = resolveOutgoingMetrics(
+      {
+        purchasingOutgoingMetrics: {
+          threeMonthAverageOutgoing: 1.3,
+        },
+      },
+      {
+        currentMonthOutgoing: 101,
+        threeMonthAverageOutgoing: 1.3,
+        currentMonthOrderCount: 1,
+        currentMonthLargestOrderQuantity: 101,
+      },
+    )
+
+    expect(result).toEqual({
+      currentMonthOutgoing: 101,
+      threeMonthAverageOutgoing: 1.3,
+      currentMonthOrderCount: 1,
+      currentMonthLargestOrderQuantity: 101,
+    })
+  })
+
   it('uses calculated metrics when stored values are invalid', () => {
     const calculated = {
       currentMonthOutgoing: 4,

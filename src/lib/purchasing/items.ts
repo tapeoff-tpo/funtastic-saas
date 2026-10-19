@@ -58,6 +58,8 @@ export type PurchasingSpecialBulkOutgoingAdjustment = {
 export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  currentMonthOrderCount?: number
+  currentMonthLargestOrderQuantity?: number
   specialBulkOutgoingAdjustment?: PurchasingSpecialBulkOutgoingAdjustment | null
 }
 export type AverageSalesWorkbookRow = {
@@ -712,6 +714,20 @@ export async function getSkuOutgoingMetrics(
             ELSE 0
           END
         ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+        , COUNT(DISTINCT CASE
+          WHEN line.shipment_date >= ${currentMonthDate}::date
+           AND line.shipment_date < ${nextMonthDate}::date
+           AND line.claim_type IS DISTINCT FROM 'return'
+          THEN COALESCE(NULLIF(BTRIM(line.source_order_number), ''), line.id::text)
+          ELSE NULL
+        END)::int AS "currentMonthOrderCount"
+        , COALESCE(MAX(CASE
+          WHEN line.shipment_date >= ${currentMonthDate}::date
+           AND line.shipment_date < ${nextMonthDate}::date
+           AND line.claim_type IS DISTINCT FROM 'return'
+          THEN line.quantity
+          ELSE 0
+        END), 0)::numeric AS "currentMonthLargestOrderQuantity"
       FROM outbound_reflection_lines line
       WHERE line.user_id = ${userId}::uuid
         AND line.reflection_status = 'applied'
@@ -722,13 +738,16 @@ export async function getSkuOutgoingMetrics(
     `),
   ])
 
-  const metricsBySku = new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
-    row.internalSku,
-    {
-      currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
-      threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
-    },
-  ]))
+  const metricsBySku = new Map<string, PurchasingItemOutgoingMetrics>(
+    resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
+      row.internalSku,
+      {
+        currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
+        threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
+        ...currentMonthOrderSignals(row),
+      },
+    ]),
+  )
   for (const row of storedRows) {
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
     metricsBySku.set(
@@ -810,6 +829,7 @@ export function resolveOutgoingMetrics(
         currentMonthOutgoing: calculated.currentMonthOutgoing,
         threeMonthAverageOutgoing: rollingBulkAdjustment?.adjustedThreeMonthAverageOutgoing
           ?? rollingBaseline.threeMonthAverageOutgoing,
+        ...currentMonthOrderSignals(calculated),
         ...(rollingBulkAdjustment
           ? { specialBulkOutgoingAdjustment: rollingBulkAdjustment }
           : {}),
@@ -830,10 +850,23 @@ export function resolveOutgoingMetrics(
   return {
     currentMonthOutgoing: calculated.currentMonthOutgoing,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
+    ...currentMonthOrderSignals(calculated),
     ...(specialBulkOutgoingAdjustment
       ? { specialBulkOutgoingAdjustment }
       : {}),
   }
+}
+
+function currentMonthOrderSignals(metrics: PurchasingItemOutgoingMetrics) {
+  const currentMonthOrderCount = Math.max(0, Math.trunc(cleanOutgoingNumber(
+    metrics.currentMonthOrderCount ?? 0,
+  )))
+  const currentMonthLargestOrderQuantity = Math.max(0, cleanOutgoingNumber(
+    metrics.currentMonthLargestOrderQuantity ?? 0,
+  ))
+  if (currentMonthOrderCount <= 0 || currentMonthLargestOrderQuantity <= 0) return {}
+
+  return { currentMonthOrderCount, currentMonthLargestOrderQuantity }
 }
 
 type ParsedRollingAverageBaseline = Pick<

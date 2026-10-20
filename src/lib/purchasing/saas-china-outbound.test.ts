@@ -109,8 +109,8 @@ describe('SaaS China outbound deletion guard', () => {
   })
 })
 
-describe('SaaS China outbound active-work guard', () => {
-  it('allows only one in-progress workflow by treating draft, packing, and ready as active', () => {
+describe('SaaS China outbound active-work statuses', () => {
+  it('treats draft, packing, and ready as active without implying a creation limit', () => {
     expect(isChinaOutboundShipmentActive('draft')).toBe(true)
     expect(isChinaOutboundShipmentActive('packing')).toBe(true)
     expect(isChinaOutboundShipmentActive('ready')).toBe(true)

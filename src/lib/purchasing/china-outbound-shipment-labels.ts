@@ -11,6 +11,13 @@ export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDe
   items: Array<ChinaOutboundPackingExportDetail['items'][number] & { location?: string | null }>
 }
 
+export type ChinaOutboundShipmentLabelWorkbookOptions = {
+  /** Restrict box label sheets to these saved box IDs. */
+  boxIds?: readonly string[]
+  /** Include pallet label sheets. Defaults to true for the bulk download. */
+  includePalletLabels?: boolean
+}
+
 type LabelRow = Array<string | number>
 type LabelProductRow = {
   sku: string
@@ -61,6 +68,7 @@ const PRINT_MARGINS = {
  */
 export function createChinaOutboundShipmentLabelWorkbook(
   detail: ChinaOutboundShipmentLabelDetail,
+  options: ChinaOutboundShipmentLabelWorkbookOptions = {},
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
@@ -69,32 +77,51 @@ export function createChinaOutboundShipmentLabelWorkbook(
   const itemById = new Map(detail.items.map((item) => [item.id, item]))
   const palletById = new Map(detail.pallets.map((pallet) => [pallet.id, pallet]))
   const boxItemsByBoxId = groupBoxItemsByBox(detail)
+  const includePalletLabels = options.includePalletLabels !== false
 
-  addGuideSheet(workbook, detail)
-  addBoxLabelSheets(workbook, detail, itemById, boxItemsByBoxId)
-  addPalletLabelSheets(workbook, detail, itemById, palletById, boxItemsByBoxId)
+  addGuideSheet(workbook, detail, includePalletLabels)
+  addBoxLabelSheets(workbook, detail, itemById, boxItemsByBoxId, options.boxIds)
+  if (includePalletLabels) {
+    addPalletLabelSheets(workbook, detail, itemById, palletById, boxItemsByBoxId)
+  }
 
   return workbook
 }
 
 export async function exportChinaOutboundShipmentLabelWorkbook(
   detail: ChinaOutboundShipmentLabelDetail,
+  options: ChinaOutboundShipmentLabelWorkbookOptions = {},
 ): Promise<Buffer> {
-  const workbook = createChinaOutboundShipmentLabelWorkbook(detail)
+  const workbook = createChinaOutboundShipmentLabelWorkbook(detail, options)
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 
 export function chinaOutboundShipmentLabelFilename(shipmentNo: string, now = new Date()) {
+  return `${safeFilenameSegment(shipmentNo, '중국출고')}_부착용쉽먼트_${labelFilenameDate(now)}.xlsx`
+}
+
+export function chinaOutboundShipmentBoxLabelFilename(shipmentNo: string, boxNo: string, now = new Date()) {
+  return `${safeFilenameSegment(shipmentNo, '중국출고')}_${safeFilenameSegment(boxNo, '박스')}_부착용쉽먼트_${labelFilenameDate(now)}.xlsx`
+}
+
+function labelFilenameDate(now: Date) {
   const date = [
     now.getFullYear(),
     String(now.getMonth() + 1).padStart(2, '0'),
     String(now.getDate()).padStart(2, '0'),
   ].join('')
-  const safeShipmentNo = shipmentNo.replace(/[\\/:*?"<>|]/g, '_').trim() || '중국출고'
-  return `${safeShipmentNo}_부착용쉽먼트_${date}.xlsx`
+  return date
 }
 
-function addGuideSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundShipmentLabelDetail) {
+function safeFilenameSegment(value: string, fallback: string) {
+  return value.replace(/[\\/:*?"<>|]/g, '_').trim() || fallback
+}
+
+function addGuideSheet(
+  workbook: ExcelJS.Workbook,
+  detail: ChinaOutboundShipmentLabelDetail,
+  includePalletLabels: boolean,
+) {
   const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.guide)
   sheet.columns = [{ width: 24 }, { width: 82 }]
   sheet.views = [{ showGridLines: false }]
@@ -110,8 +137,12 @@ function addGuideSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundShipment
     ['도착지', detail.shipment.destinationName ?? '미입력'],
     ['출고예정일', detail.shipment.plannedOutboundDate ?? '미입력'],
     ['입력', '중국어 상품명은 직접 입력하세요. 위치는 품목에서 자동 입력되며 수정할 수 있습니다. 엑셀 수정 내용은 품목에 저장되지 않습니다.'],
-    ['출력 범위', '현재 내용이 저장된 박스만 박스 쉽먼트에, 현재 배정된 박스만 파렛트 쉽먼트에 포함됩니다. 박스 내용이나 파렛트 배정이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'],
-    ['인쇄', '박스와 파렛트 라벨은 각각 별도 시트이며, 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'],
+    ['출력 범위', includePalletLabels
+      ? '현재 내용이 저장된 박스만 박스 쉽먼트에, 현재 배정된 박스만 파렛트 쉽먼트에 포함됩니다. 박스 내용이나 파렛트 배정이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'
+      : '선택한 내용 저장 박스만 박스 쉽먼트에 포함됩니다. 박스 내용이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'],
+    ['인쇄', includePalletLabels
+      ? '박스와 파렛트 라벨은 각각 별도 시트이며, 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'
+      : '박스 라벨은 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'],
   ]
 
   for (const [label, value] of rows) {
@@ -132,8 +163,11 @@ function addBoxLabelSheets(
   detail: ChinaOutboundShipmentLabelDetail,
   itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
   boxItemsByBoxId: Map<string, ChinaOutboundShipmentLabelDetail['boxItems']>,
+  scopedBoxIds?: readonly string[],
 ) {
+  const scopedBoxIdSet = scopedBoxIds ? new Set(scopedBoxIds) : null
   const boxes = [...detail.boxes]
+    .filter((box) => !scopedBoxIdSet || scopedBoxIdSet.has(box.id))
     .filter((box) => (boxItemsByBoxId.get(box.id)?.length ?? 0) > 0)
     .sort((left, right) => left.boxNo.localeCompare(right.boxNo, 'ko-KR', { numeric: true }))
 

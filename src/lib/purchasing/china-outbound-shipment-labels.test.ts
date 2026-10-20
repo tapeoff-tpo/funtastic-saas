@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS,
   type ChinaOutboundShipmentLabelDetail,
+  chinaOutboundShipmentBoxLabelFilename,
   chinaOutboundShipmentLabelFilename,
   exportChinaOutboundShipmentLabelWorkbook,
 } from './china-outbound-shipment-labels'
@@ -145,6 +146,28 @@ describe('China outbound shipment label workbook', () => {
   it('creates a Windows-safe attachment filename', () => {
     expect(chinaOutboundShipmentLabelFilename('CN:10/15', new Date('2026-10-15T00:00:00.000Z')))
       .toBe('CN_10_15_부착용쉽먼트_20261015.xlsx')
+    expect(chinaOutboundShipmentBoxLabelFilename('CN:10/15', '박스? 1', new Date('2026-10-15T00:00:00.000Z')))
+      .toBe('CN_10_15_박스_ 1_부착용쉽먼트_20261015.xlsx')
+  })
+
+  it('creates only the selected saved box labels without pallet labels', async () => {
+    const buffer = await exportChinaOutboundShipmentLabelWorkbook(detail, {
+      boxIds: ['box-2', 'box-4'],
+      includePalletLabels: false,
+    })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.guide,
+      '박스 쉽먼트 01',
+      '박스 쉽먼트 02',
+    ])
+    expect(workbook.getWorksheet('박스 쉽먼트 01')!.getCell('A1').value).toBe('박스 쉽먼트 · 박스 2')
+    expect(workbook.getWorksheet('박스 쉽먼트 02')!.getCell('A1').value).toBe('박스 쉽먼트 · 박스 4')
+    expect(workbook.getWorksheet('파렛트 쉽먼트 01')).toBeUndefined()
+    expect(workbook.getWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.guide)!.getCell('B7').value)
+      .toContain('선택한 내용 저장 박스만')
   })
 
   it('creates labels for saved boxes before every shipment item is fully packed', async () => {

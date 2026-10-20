@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getChinaOutboundShipmentDetail: vi.fn(),
   getPurchasingItemLocationsBySku: vi.fn(),
   exportChinaOutboundShipmentLabelWorkbook: vi.fn(),
+  chinaOutboundShipmentBoxLabelFilename: vi.fn(),
   chinaOutboundShipmentLabelFilename: vi.fn(),
 }))
 
@@ -16,6 +17,7 @@ vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmen
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLocationsBySku: mocks.getPurchasingItemLocationsBySku }))
 vi.mock('@/lib/purchasing/china-outbound-shipment-labels', () => ({
   exportChinaOutboundShipmentLabelWorkbook: mocks.exportChinaOutboundShipmentLabelWorkbook,
+  chinaOutboundShipmentBoxLabelFilename: mocks.chinaOutboundShipmentBoxLabelFilename,
   chinaOutboundShipmentLabelFilename: mocks.chinaOutboundShipmentLabelFilename,
 }))
 
@@ -42,6 +44,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
       ['SKU-2', 'B-02'],
     ]))
     mocks.exportChinaOutboundShipmentLabelWorkbook.mockResolvedValue(Buffer.from('workbook'))
+    mocks.chinaOutboundShipmentBoxLabelFilename.mockReturnValue('box-labels.xlsx')
     mocks.chinaOutboundShipmentLabelFilename.mockReturnValue('labels.xlsx')
   })
 
@@ -74,11 +77,89 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     }
   })
 
+  it('downloads only the selected saved box without pallet labels', async () => {
+    const boxId = '22222222-2222-4222-8222-222222222222'
+    mocks.getChinaOutboundShipmentDetail.mockResolvedValue({
+      shipment: { shipmentNo: 'OUT-1' },
+      items: [{ id: 'one', sku: 'SKU-1', productName: '물품 1' }],
+      pallets: [{ id: 'pallet-1', palletNo: '파렛트 1' }],
+      boxes: [{ id: boxId, palletId: 'pallet-1', boxNo: '박스 1', status: 'open' }],
+      boxItems: [{ id: 'box-item-1', boxId, shipmentItemId: 'one', quantity: 2 }],
+    })
+
+    const response = await GET(
+      new Request(`http://localhost/labels?boxId=${boxId}`),
+      { params: Promise.resolve({ shipmentId }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).toHaveBeenCalledWith(expect.objectContaining({
+      items: [{ id: 'one', sku: 'SKU-1', productName: '물품 1', location: 'A-01' }],
+    }), { boxIds: [boxId], includePalletLabels: false })
+    expect(mocks.chinaOutboundShipmentBoxLabelFilename).toHaveBeenCalledWith('OUT-1', '박스 1')
+    expect(mocks.chinaOutboundShipmentLabelFilename).not.toHaveBeenCalled()
+    expect(response.headers.get('content-disposition')).toContain('box-labels.xlsx')
+  })
+
+  it('rejects an invalid selected box ID before loading or exporting a workbook', async () => {
+    const response = await GET(
+      new Request('http://localhost/labels?boxId=not-a-uuid'),
+      { params: Promise.resolve({ shipmentId }) },
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.getChinaOutboundShipmentDetail).not.toHaveBeenCalled()
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty selected box ID before loading or exporting a workbook', async () => {
+    const response = await GET(
+      new Request('http://localhost/labels?boxId='),
+      { params: Promise.resolve({ shipmentId }) },
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.getChinaOutboundShipmentDetail).not.toHaveBeenCalled()
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+  })
+
+  it('rejects a box that is not part of the requested shipment', async () => {
+    const response = await GET(
+      new Request('http://localhost/labels?boxId=22222222-2222-4222-8222-222222222222'),
+      { params: Promise.resolve({ shipmentId }) },
+    )
+
+    expect(response.status).toBe(404)
+    expect(mocks.getPurchasingItemLocationsBySku).not.toHaveBeenCalled()
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+  })
+
+  it('rejects a selected box with no saved contents', async () => {
+    const boxId = '22222222-2222-4222-8222-222222222222'
+    mocks.getChinaOutboundShipmentDetail.mockResolvedValue({
+      shipment: { shipmentNo: 'OUT-1' },
+      items: [],
+      pallets: [],
+      boxes: [{ id: boxId, palletId: null, boxNo: '박스 1', status: 'open' }],
+      boxItems: [],
+    })
+
+    const response = await GET(
+      new Request(`http://localhost/labels?boxId=${boxId}`),
+      { params: Promise.resolve({ shipmentId }) },
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.getPurchasingItemLocationsBySku).not.toHaveBeenCalled()
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+  })
+
   it('downloads a real workbook with the item-master location on both label types', async () => {
     const generator = await vi.importActual<typeof import('@/lib/purchasing/china-outbound-shipment-labels')>(
       '@/lib/purchasing/china-outbound-shipment-labels',
     )
     mocks.exportChinaOutboundShipmentLabelWorkbook.mockImplementation(generator.exportChinaOutboundShipmentLabelWorkbook)
+    mocks.chinaOutboundShipmentBoxLabelFilename.mockImplementation(generator.chinaOutboundShipmentBoxLabelFilename)
     mocks.chinaOutboundShipmentLabelFilename.mockImplementation(generator.chinaOutboundShipmentLabelFilename)
     mocks.getChinaOutboundShipmentDetail.mockResolvedValue({
       shipment: {

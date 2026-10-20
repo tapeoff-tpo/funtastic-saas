@@ -218,21 +218,25 @@ describe('ChinaShipmentsBoard', () => {
   it('shows saved box contents and lets users include empty boxes', () => {
     renderShipment(makeShipmentWithCompletionFilters())
 
+    expect(screen.getByRole('link', { name: '부착용 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels')
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
     expect(within(savedBoxPanel).getByText('BOX-01')).toBeInTheDocument()
+    expect(within(savedBoxPanel).getByRole('link', { name: 'BOX-01 박스 부착용 쉽먼트 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-saved')
     const sharedBoxRow = within(savedBoxPanel).getByText('BOX-02').closest('tr')
     if (!sharedBoxRow) throw new Error('공유 박스 행을 찾을 수 없습니다.')
     expect(within(sharedBoxRow).getByText(/DONE-01 · 완료 상품 · 대형/)).toBeInTheDocument()
     expect(within(sharedBoxRow).getByText(/WORK-01 · 진행 상품 · 소형/)).toBeInTheDocument()
     expect(within(sharedBoxRow).getByText('4개')).toBeInTheDocument()
     expect(within(sharedBoxRow).getByText('미배정')).toBeInTheDocument()
+    expect(within(sharedBoxRow).getByRole('link', { name: 'BOX-02 박스 부착용 쉽먼트 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-shared')
     expect(within(savedBoxPanel).queryByText('BOX-03')).not.toBeInTheDocument()
 
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: /전체 박스/ }))
     const emptyBoxRow = within(savedBoxPanel).getByText('BOX-03').closest('tr')
     if (!emptyBoxRow) throw new Error('빈 박스 행을 찾을 수 없습니다.')
     expect(within(emptyBoxRow).getByText('내용 없음')).toBeInTheDocument()
+    expect(within(emptyBoxRow).queryByRole('link', { name: /부착용 쉽먼트 다운로드/ })).not.toBeInTheDocument()
   })
 
   it('filters completed items without losing a hidden box split draft', () => {

@@ -411,7 +411,7 @@ describe('ChinaShipmentsBoard', () => {
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
     expect(screen.getByPlaceholderText('0')).toHaveValue(3)
-    expect(screen.getByText('2단계 · 상품별 박스분할')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /2단계.*박스분할/ })).toHaveAttribute('aria-current', 'step')
   })
 
   it('does not lose an invalid quantity merely because it cannot be saved yet', () => {
@@ -617,6 +617,15 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(download)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('0')).toHaveValue(3)
+  })
+
+  it('shows compact workbook controls in the top actions for every work stage', () => {
+    renderShipment(shipmentA, 'items')
+
+    expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
+    expect(screen.getByLabelText('엑셀 선택')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '엑셀 검토' })).toBeDisabled()
+    expect(screen.queryByText('현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.')).not.toBeInTheDocument()
   })
 
   it('warns on browser unload only while a box draft is unsaved', () => {

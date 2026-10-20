@@ -509,15 +509,19 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
 
   return (
     <section className="space-y-4 rounded-lg border bg-card p-4">
-      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2"><h2 className="text-lg font-semibold">{shipmentDisplayName(shipment)}</h2><StatusBadge status={shipment.status} /></div>
-          <p className="mt-1 text-sm text-muted-foreground">출고예정일: {shipment.plannedOutboundDate || '미입력'} · 출고 창고: {shipment.originWarehouseCode} · 도착지: {shipment.destinationName || '미입력'}</p>
-          <p className="mt-1 text-xs text-muted-foreground">작업번호: {shipment.shipmentNo} · 상품 {items.length.toLocaleString('ko-KR')}종 · 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 박스분할 {totalPackedQuantity.toLocaleString('ko-KR')}개</p>
+      <div className="flex flex-col gap-3 border-b pb-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h2 className="text-lg font-semibold">{shipmentDisplayName(shipment)}</h2>
+            <StatusBadge status={shipment.status} />
+            <span className="text-sm text-muted-foreground">{shipment.plannedOutboundDate || '날짜 미입력'} · {shipment.originWarehouseCode} → {shipment.destinationName || '도착지 미입력'}</span>
+            <span className="text-xs text-muted-foreground">{shipment.shipmentNo} · 상품 {items.length.toLocaleString('ko-KR')}종 · 출고 {totalOutboundQuantity.toLocaleString('ko-KR')}개 · 포장 {totalPackedQuantity.toLocaleString('ko-KR')}개</span>
+          </div>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
           {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</a> : <button type="button" disabled title="박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</button>}
+          <WorkbookActions shipmentId={shipment.id} editable={editable} />
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {editable && stage === 'summary' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
@@ -525,7 +529,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         </div>
       </div>
 
-      <nav className="grid gap-2 rounded-lg border bg-muted/20 p-2 sm:grid-cols-4" aria-label="중국출고 작업 단계">
+      <nav className="grid gap-1 rounded-lg border bg-muted/20 p-1 sm:grid-cols-4" aria-label="중국출고 작업 단계">
         <StageButton active={stage === 'items'} step="1단계" title="출고품목" detail={`${items.length.toLocaleString('ko-KR')}종 · ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('items')} />
         <StageButton active={stage === 'boxes'} step="2단계" title="박스분할" detail={`${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('boxes')} />
         <StageButton active={stage === 'pallets'} step="3단계" title="파렛트적재" detail={`사용 파렛트 ${palletSummaries.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('pallets')} />
@@ -535,23 +539,12 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       {stage === 'items' ? <section className="space-y-3"><ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} editable={editable} isPending={isPending} /><OutboundItemsPanel items={items} boxItemsByItem={boxItemsByItem} /></section> : null}
 
       {stage === 'boxes' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4">
-          <h3 className="font-semibold">2단계 · 상품별 박스분할</h3>
-          <p className="mt-1 text-sm text-muted-foreground">상품을 먼저 박스로 나누고, 박스별 수량과 가로·세로·높이를 입력하세요. 파렛트 번호는 다음 단계에서 적습니다.</p>
-          <p className="mt-2 text-xs text-muted-foreground">박스 1·2처럼 분할을 저장한 박스는 전체 작업이 끝나기 전에도 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span>로 바로 인쇄할 수 있습니다. 이후 박스 내용이 바뀌면 해당 박스 시트를 다시 내려받아 인쇄하세요.</p>
-          <p className="mt-1 text-xs text-muted-foreground">엑셀의 로케이션은 품목에 등록된 한국창고기준 위치가 자동 입력됩니다. 비어 있으면 품목을 확인하거나 엑셀에서 직접 입력하세요.</p>
-        </section>
-        <WorkbookActions shipmentId={shipment.id} editable={editable} />
         <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} onFilterChange={(filter) => setSavedBoxFilter(filter)} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <div>
-            <p className="text-muted-foreground">진행 중인 품목을 먼저, 완료 품목을 마지막에 표시합니다. 품목코드는 오름차순으로 고정됩니다.</p>
-            <div role="group" aria-label="박스분할 품목 상태 필터" className="mt-2 flex flex-wrap gap-2">
+          <div role="group" aria-label="박스분할 품목 상태 필터" className="flex flex-wrap gap-2">
               <button type="button" aria-pressed={boxSplitItemFilter === 'all'} onClick={() => changeBoxSplitItemFilter('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 품목 {sortedBoxSplitItems.length.toLocaleString('ko-KR')}</button>
               <button type="button" aria-pressed={boxSplitItemFilter === 'incomplete'} onClick={() => changeBoxSplitItemFilter('incomplete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'incomplete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>진행 중 {incompleteBoxSplitItems.length.toLocaleString('ko-KR')}</button>
               <button type="button" aria-pressed={boxSplitItemFilter === 'complete'} onClick={() => changeBoxSplitItemFilter('complete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'complete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>박스분할 완료 {completeBoxSplitItems.length.toLocaleString('ko-KR')}</button>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">박스분할 완료는 저장된 박스분할 수량이 출고수량과 같은 품목입니다. 필터를 바꿔도 입력 중인 박스분할은 유지됩니다.</p>
           </div>
           <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} />
         </div>
@@ -569,15 +562,11 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">3단계 · 파렛트적재</h3><p className="mt-1 text-sm text-muted-foreground">박스분할을 마친 박스에 실제 사용한 파렛트 번호를 직접 적으세요. 입력한 번호만 누적되어 총 파렛트 수와 파렛트별 CBM이 계산됩니다.</p></section>
-        <WorkbookActions shipmentId={shipment.id} editable={editable} />
         {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="박스에 상품이 담긴 뒤 파렛트 번호를 입력할 수 있습니다." onMove={() => onStageChange('boxes')} moveLabel="2단계로 이동" /> : <PalletAssignmentPanel shipmentId={shipment.id} boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} />}
         <PalletSummaryCards summaries={palletSummaries} />
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 저장한 박스부터 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼으로 바로 내려받을 수 있습니다. 현재 내용이 들어 있는 박스만 파일에 포함되고, 파렛트 시트에는 현재 배정된 박스만 합산됩니다. 로케이션은 품목에 등록된 한국창고기준 위치가 자동 입력되며, 비어 있으면 직접 입력하세요. 중국어 상품명도 입력한 뒤 인쇄하세요.</p></section>
-        <WorkbookActions shipmentId={shipment.id} editable={editable} />
         {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
         {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
@@ -591,7 +580,7 @@ function OutboundItemsPanel({ items, boxItemsByItem }: {
   boxItemsByItem: Map<string, ChinaShipmentDetailView['boxItems']>
 }) {
   const sortedItems = [...items].sort(compareShipmentItems)
-  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3><p className="mt-1 text-sm text-muted-foreground">추가 품목이나 추가 수량은 위의 품목 추가에서 넣을 수 있습니다. 이미 박스분할한 수량은 그대로 유지됩니다.</p></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
+  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
 }
 
 function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPending }: {
@@ -766,7 +755,10 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   return <section className="overflow-hidden rounded-lg border"><div className="overflow-x-auto"><table className="min-w-[850px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th></tr></thead><tbody>{sortedBoxes.map((box) => { const boxItems = boxItemsByBox.get(box.id) ?? []; const quantity = boxItems.reduce((total, item) => total + item.quantity, 0); const products = boxItems.map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return item ? `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''} (${boxItem.quantity.toLocaleString('ko-KR')}개)` : '' }).filter(Boolean); const cbm = calculateChinaOutboundBoxCbm(box); return <tr key={box.id} className="border-t align-top"><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.join('\n')}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2"><input value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!editable || isPending} className={`${compactInputClass} mx-auto max-w-32 text-center`} placeholder="예: 1" /></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">빈칸으로 저장하면 파렛트 배정을 해제합니다. 파렛트 번호는 숫자뿐 아니라 `A`, `B`, `1-2`처럼 자유롭게 입력할 수 있습니다.</p><button type="button" disabled={!editable || isPending} onClick={() => void guard.runTask(saveDraft)} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 파렛트 적재 저장</button></div></section>
 }
 
-function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editable: boolean }) {
+function WorkbookActions({ shipmentId, editable }: {
+  shipmentId: string
+  editable: boolean
+}) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -830,7 +822,43 @@ function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editabl
     kind: 'workbook', label: '엑셀 검토 결과', snapshot: selectedFile, save: () => uploadWorkbook('apply'), discard: clearWorkbook,
   } : null)
 
-  return <section className="rounded-lg border border-dashed bg-muted/10 p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><FileSpreadsheet className="size-4 text-emerald-700" /><h3 className="text-sm font-semibold">엑셀로 작업</h3></div><p className="mt-1 text-xs text-muted-foreground">현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.</p></div><div className="flex flex-wrap items-center gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/workbook`} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted"><Download className="size-3.5" /> 작업용 엑셀</a><label className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted ${!editable ? 'pointer-events-none opacity-50' : ''}`}><Upload className="size-3.5" /> {selectedFile ? selectedFile.name : '엑셀 선택'}<input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={chooseFile} disabled={!editable || isWorking} className="sr-only" /></label>{selectedFile ? <button type="button" disabled={isWorking} onClick={clearWorkbook} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">선택 취소</button> : null}<button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('preview'))} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <FileSpreadsheet className="size-3.5" />} 엑셀 검토</button></div></div>{preview ? <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}><div className="flex flex-wrap items-center justify-between gap-2"><p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>{preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('apply'))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}</div>{preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={`${error.sheet}:${error.row}:${index}`}>{error.sheet}{error.row ? ` ${error.row}행` : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}</div> : null}</section>
+  const toolbar = (
+    <>
+      <a
+        href={'/api/purchasing/china-shipments/' + encodeURIComponent(shipmentId) + '/workbook'}
+        className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"
+      >
+        <Download className="size-4" />
+        작업용 엑셀
+      </a>
+      <label className={'inline-flex h-9 max-w-48 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted ' + (!editable ? 'pointer-events-none opacity-50' : '')}>
+        <Upload className="size-4 shrink-0" />
+        <span className="truncate">{selectedFile ? selectedFile.name : '엑셀 선택'}</span>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={chooseFile}
+          disabled={!editable || isWorking}
+          className="sr-only"
+        />
+      </label>
+      {selectedFile ? <button type="button" disabled={isWorking} onClick={clearWorkbook} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">선택 취소</button> : null}
+      <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('preview'))} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">
+        {isWorking ? <Loader2 className="size-4 animate-spin" /> : <FileSpreadsheet className="size-4" />}
+        엑셀 검토
+      </button>
+      {preview ? <div className={'basis-full w-full rounded-md border px-3 py-2 text-xs ' + (preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900')}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>
+          {preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('apply'))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}
+        </div>
+        {preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={error.sheet + ':' + error.row + ':' + index}>{error.sheet}{error.row ? ' ' + error.row + '행' : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}
+      </div> : null}
+    </>
+  )
+
+  return toolbar
 }
 
 type SavedBoxSummary = {
@@ -874,11 +902,8 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, onFilterChange }
   const visibleBoxes = filter === 'saved' ? savedBoxes : summaries
 
   return <section className="overflow-hidden rounded-lg border bg-background" aria-labelledby="saved-box-contents-title">
-    <div className="flex flex-col gap-3 border-b bg-muted/20 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
-        <p className="mt-1 text-xs text-muted-foreground">박스에 상품을 저장하면 <span className="font-medium text-foreground">내용 있음</span>으로 표시됩니다. 봉인 완료와는 별개이며, 파렛트 배정 여부도 함께 확인할 수 있습니다.</p>
-      </div>
+    <div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+      <h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
       <div role="group" aria-label="저장된 박스 필터" className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={filter === 'saved'} onClick={() => onFilterChange('saved')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'saved' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>저장된 박스 (내용 있음) {savedBoxes.length.toLocaleString('ko-KR')}</button>
         <button type="button" aria-pressed={filter === 'all'} onClick={() => onFilterChange('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 박스 {summaries.length.toLocaleString('ko-KR')}</button>
@@ -935,7 +960,7 @@ function buildPalletSummaries({ pallets, boxes, boxItemsByBox, itemById, palletB
 
 function PalletSummaryCards({ summaries, detailed = false }: { summaries: PalletSummary[]; detailed?: boolean }) {
   if (summaries.length === 0) return null
-  return <section className="space-y-3"><div className="flex items-center justify-between"><div><h3 className="font-semibold">사용 파렛트</h3><p className="mt-1 text-xs text-muted-foreground">실제로 박스가 배정된 파렛트만 집계합니다.</p></div><p className="text-sm font-medium">총 {summaries.length.toLocaleString('ko-KR')}파렛트</p></div><div className="grid gap-3 lg:grid-cols-2">{summaries.map((summary) => <article key={summary.palletNo} className="rounded-lg border bg-background p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">파렛트 {summary.palletNo}</p><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length.toLocaleString('ko-KR')}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p></div><p className="text-right text-sm font-semibold tabular-nums">{formatChinaOutboundCbm(summary.cbm) ?? '0.0000'} CBM</p></div>{summary.boxesWithoutDimensions > 0 ? <p className="mt-2 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions.toLocaleString('ko-KR')}개는 CBM 합계에서 제외되었습니다.</p> : null}{detailed ? <div className="mt-3 space-y-2 border-t pt-3 text-xs"><p className="font-medium text-muted-foreground">적재 박스: {summary.boxes.map((box) => box.boxNo).join(', ')}</p><ul className="space-y-1">{summary.products.map((product) => <li key={`${product.sku}:${product.optionName ?? ''}`}>{product.sku} · {product.productName}{product.optionName ? ` · ${product.optionName}` : ''} <span className="tabular-nums text-muted-foreground">{product.quantity.toLocaleString('ko-KR')}개</span></li>)}</ul></div> : null}</article>)}</div></section>
+  return <section className="space-y-3"><div className="flex items-center justify-between"><h3 className="font-semibold">사용 파렛트</h3><p className="text-sm font-medium">총 {summaries.length.toLocaleString('ko-KR')}파렛트</p></div><div className="grid gap-3 lg:grid-cols-2">{summaries.map((summary) => <article key={summary.palletNo} className="rounded-lg border bg-background p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">파렛트 {summary.palletNo}</p><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length.toLocaleString('ko-KR')}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p></div><p className="text-right text-sm font-semibold tabular-nums">{formatChinaOutboundCbm(summary.cbm) ?? '0.0000'} CBM</p></div>{summary.boxesWithoutDimensions > 0 ? <p className="mt-2 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions.toLocaleString('ko-KR')}개는 CBM 합계에서 제외되었습니다.</p> : null}{detailed ? <div className="mt-3 space-y-2 border-t pt-3 text-xs"><p className="font-medium text-muted-foreground">적재 박스: {summary.boxes.map((box) => box.boxNo).join(', ')}</p><ul className="space-y-1">{summary.products.map((product) => <li key={`${product.sku}:${product.optionName ?? ''}`}>{product.sku} · {product.productName}{product.optionName ? ` · ${product.optionName}` : ''} <span className="tabular-nums text-muted-foreground">{product.quantity.toLocaleString('ko-KR')}개</span></li>)}</ul></div> : null}</article>)}</div></section>
 }
 
 function EmptyStage({ title, description, onMove, moveLabel }: { title: string; description: string; onMove: () => void; moveLabel: string }) {
@@ -943,7 +968,7 @@ function EmptyStage({ title, description, onMove, moveLabel }: { title: string; 
 }
 
 function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className={`rounded-md border px-3 py-2.5 text-left transition-colors ${active ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-background hover:border-border hover:bg-muted'}`}><p className={`text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{step}</p><p className="mt-0.5 text-sm font-semibold">{title}</p><p className={`mt-1 text-xs ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{detail}</p></button>
+  return <button type="button" onClick={onClick} aria-current={active ? 'step' : undefined} className={`flex min-h-16 flex-col items-center justify-center rounded-md border px-2 py-1.5 text-center transition-colors ${active ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-background hover:border-border hover:bg-muted'}`}><p className={`text-[11px] leading-tight ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{step}</p><p className="mt-0.5 text-sm font-semibold leading-tight">{title}</p><p className={`mt-0.5 text-[11px] leading-tight ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{detail}</p></button>
 }
 
 function ProgressBadge({ completed, detail }: { completed: boolean; detail: string }) {

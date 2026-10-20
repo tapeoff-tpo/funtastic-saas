@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import * as XLSX from 'xlsx'
 
 export type DiscontinuedProductAction = {
   sku: string
@@ -20,7 +21,7 @@ export type DiscontinuedProductUpload = {
 }
 
 const SKU_HEADER = '품목코드'
-const PRODUCT_NAME_HEADER = '품목명'
+const PRODUCT_NAME_HEADERS = ['품목명', '상품명']
 const OPTION_HEADER = '옵션'
 
 /**
@@ -30,32 +31,28 @@ const OPTION_HEADER = '옵션'
 export async function parseDiscontinuedProductFile(
   input: DiscontinuedProductUpload,
 ): Promise<ParsedDiscontinuedProductFile> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(Buffer.from(input.fileBuffer) as unknown as ExcelJS.Buffer)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error(`${input.fileName}: 시트를 찾을 수 없습니다.`)
-
-  const header = findHeader(sheet)
-  if (!header) {
-    throw new Error(`${input.fileName}: 단종상품 양식이 아닙니다. 1~20행에 "품목코드", "품목명", "옵션" 열이 모두 있어야 합니다.`)
+  const workbook = XLSX.read(Buffer.from(input.fileBuffer), { type: 'buffer', cellDates: true })
+  const matchedSheet = findSheetWithHeader(workbook)
+  if (!matchedSheet) {
+    throw new Error(`${input.fileName}: 단종상품 양식이 아닙니다. 모든 시트의 1~20행에 "품목코드", "품목명" 또는 "상품명", "옵션" 열이 모두 있어야 합니다.`)
   }
 
   const actionsBySku = new Map<string, DiscontinuedProductAction>()
   const duplicateSkus = new Set<string>()
   let totalDataRows = 0
 
-  for (let rowNumber = header.rowNumber + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
-    const row = sheet.getRow(rowNumber)
-    const sku = cellText(row.getCell(header.skuColumn).value)
+  for (let rowIndex = matchedSheet.header.rowIndex + 1; rowIndex < matchedSheet.rows.length; rowIndex += 1) {
+    const row = matchedSheet.rows[rowIndex] ?? []
+    const sku = cellText(row[matchedSheet.header.skuColumn - 1])
     if (!sku) continue
 
     totalDataRows += 1
     if (actionsBySku.has(sku)) duplicateSkus.add(sku)
     actionsBySku.set(sku, {
       sku,
-      productName: optionalText(row, header.productNameColumn),
-      optionName: optionalText(row, header.optionNameColumn),
-      sourceRowNumber: rowNumber,
+      productName: optionalText(row, matchedSheet.header.productNameColumn),
+      optionName: optionalText(row, matchedSheet.header.optionNameColumn),
+      sourceRowNumber: matchedSheet.firstRowNumber + rowIndex,
     })
   }
 
@@ -93,19 +90,50 @@ export async function createDiscontinuedProductTemplate() {
   return Buffer.from(await workbook.xlsx.writeBuffer() as unknown as Uint8Array)
 }
 
-function findHeader(sheet: ExcelJS.Worksheet) {
-  for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
-    const headers = new Map<string, number>()
-    sheet.getRow(rowNumber).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
-      const value = normalizeHeader(cellText(cell.value))
-      if (value && !headers.has(value)) headers.set(value, columnNumber)
+type DiscontinuedHeader = {
+  rowIndex: number
+  skuColumn: number
+  productNameColumn: number
+  optionNameColumn: number
+}
+
+type MatchedDiscontinuedSheet = {
+  header: DiscontinuedHeader
+  rows: unknown[][]
+  firstRowNumber: number
+}
+
+function findSheetWithHeader(workbook: XLSX.WorkBook): MatchedDiscontinuedSheet | null {
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) continue
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: '',
+      raw: false,
+      blankrows: true,
     })
+    const firstRowNumber = XLSX.utils.decode_range(sheet['!ref'] ?? 'A1').s.r + 1
+    const header = findHeader(rows)
+    if (header) return { header, rows, firstRowNumber }
+  }
+  return null
+}
+
+function findHeader(rows: unknown[][]): DiscontinuedHeader | null {
+  for (let rowIndex = 0; rowIndex < Math.min(rows.length, 20); rowIndex += 1) {
+    const headers = new Map<string, number>()
+    for (let columnIndex = 0; columnIndex < (rows[rowIndex]?.length ?? 0); columnIndex += 1) {
+      const value = normalizeHeader(cellText(rows[rowIndex]?.[columnIndex]))
+      const columnNumber = columnIndex + 1
+      if (value && !headers.has(value)) headers.set(value, columnNumber)
+    }
     const skuColumn = findColumn(headers, SKU_HEADER)
-    const productNameColumn = findColumn(headers, PRODUCT_NAME_HEADER)
+    const productNameColumn = findFirstColumn(headers, PRODUCT_NAME_HEADERS)
     const optionNameColumn = findColumn(headers, OPTION_HEADER)
     if (!skuColumn || !productNameColumn || !optionNameColumn) continue
     return {
-      rowNumber,
+      rowIndex,
       skuColumn,
       productNameColumn,
       optionNameColumn,
@@ -118,9 +146,17 @@ function findColumn(headers: Map<string, number>, header: string) {
   return headers.get(normalizeHeader(header)) ?? null
 }
 
-function optionalText(row: ExcelJS.Row, columnNumber: number | null) {
+function findFirstColumn(headers: Map<string, number>, headersToFind: string[]) {
+  for (const header of headersToFind) {
+    const column = findColumn(headers, header)
+    if (column) return column
+  }
+  return null
+}
+
+function optionalText(row: unknown[], columnNumber: number | null) {
   if (!columnNumber) return null
-  const value = cellText(row.getCell(columnNumber).value)
+  const value = cellText(row[columnNumber - 1])
   return value || null
 }
 
@@ -128,14 +164,9 @@ function normalizeHeader(value: string) {
   return value.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
-function cellText(value: ExcelJS.CellValue | undefined): string {
+function cellText(value: unknown): string {
   if (value == null) return ''
   if (value instanceof Date) return formatDate(value)
-  if (typeof value === 'object') {
-    if ('result' in value && value.result != null) return cellText(value.result as ExcelJS.CellValue)
-    if ('text' in value && typeof value.text === 'string') return value.text.trim()
-    if ('richText' in value && Array.isArray(value.richText)) return value.richText.map((part) => part.text).join('').trim()
-  }
   return String(value).trim()
 }
 

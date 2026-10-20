@@ -6,6 +6,8 @@ import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, P
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
+import { navigateChinaWork } from './china-work-navigation'
+import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
   addChinaOutboundShipmentItemsAction,
   assignChinaOutboundBoxesToPalletsAction,
@@ -88,6 +90,7 @@ export type ChinaShipmentDetailView = {
 }
 
 type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string }
+type BoxSplitDraftSnapshot = { drafts: BoxSplitDraft[]; baseline: BoxSplitDraft[] }
 type WorkbookPreview = {
   boxSplits: Array<{ shipmentItemId: string; allocations: Array<{ boxNo: string; quantity: number }> }>
   palletAssignments: Array<{ boxNo: string; palletNo: string | null }>
@@ -106,7 +109,17 @@ const statusLabels: Record<string, string> = {
   cancelled: '취소',
 }
 
-export function ChinaShipmentsBoard({
+export function ChinaShipmentsBoard(props: {
+  inventoryItems: ChinaShipmentStockItem[]
+  shipments: ChinaShipmentListItem[]
+  selectedShipment: ChinaShipmentDetailView | null
+  selectedStep: ChinaShipmentStage
+  showCreate: boolean
+}) {
+  return <ChinaWorkGuardProvider><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
+}
+
+function ChinaShipmentsBoardContent({
   inventoryItems,
   shipments,
   selectedShipment,
@@ -119,7 +132,11 @@ export function ChinaShipmentsBoard({
   selectedStep: ChinaShipmentStage
   showCreate: boolean
 }) {
+  const guard = useChinaWorkGuard()
   const [isPending, startTransition] = useTransition()
+  const [initialDate] = useState(() => today())
+  const createdShipmentId = useRef<string | null>(null)
+  const creationMayExist = useRef(false)
   const [stockSearch, setStockSearch] = useState('')
   const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
@@ -170,49 +187,76 @@ export function ChinaShipmentsBoard({
     if (displayNameIsDateDefault) setDisplayName(defaultShipmentDisplayName(nextDate))
   }
 
-  function createShipment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    startTransition(async () => {
-      const result = await createChinaOutboundShipmentAction({
+  const isCreateDirty = showCreate && (selectedWarehouseCodes.length > 0 || Object.values(quantities).some((value) => value.trim() !== '') || destinationName !== '' || plannedOutboundDate !== initialDate || displayName !== defaultShipmentDisplayName(initialDate) || memo !== '')
+
+  async function saveNewShipment() {
+      if (creationMayExist.current) {
+        toast.error('요청이 이미 생성됐을 수 있습니다. 목록을 먼저 확인한 뒤 다시 시도해주세요.')
+        return false
+      }
+      if (!destinationName || stagedShipmentLines.length === 0 || Object.values(quantities).some((value) => value.trim() !== '' && !positiveInteger(value))) {
+        toast.error('도착지와 올바른 출고수량을 입력한 뒤 저장해주세요.')
+        return false
+      }
+      let result: Awaited<ReturnType<typeof createChinaOutboundShipmentAction>>
+      try { result = await createChinaOutboundShipmentAction({
         displayName,
         destinationName,
         plannedOutboundDate: plannedOutboundDate || null,
         memo,
         lines: stagedShipmentLines,
-      })
+      }) } catch {
+        creationMayExist.current = true
+        toast.error('응답이 끊겼지만 요청이 생성됐을 수 있습니다. 중복 생성을 막기 위해 목록을 먼저 확인해주세요.')
+        return false
+      }
       if (!result.ok) {
         toast.error(result.error)
-        return
+        return false
       }
       if (!result.shipmentId) {
-        toast.error('중국출고요청을 열지 못했습니다. 다시 시도해주세요.')
-        return
+        creationMayExist.current = true
+        toast.error('요청이 생성됐을 수 있지만 열지 못했습니다. 중복 생성을 막기 위해 목록을 먼저 확인해주세요.')
+        return false
       }
 
+      createdShipmentId.current = result.shipmentId
       toast.success('중국출고요청을 만들고 출고 재고를 예약했습니다.')
+      guard.setDraft('new-shipment', null)
       setQuantities({})
       setSelectedWarehouseCodes([])
       setDestinationName('')
-      const nextDate = today()
+      const nextDate = initialDate
       setPlannedOutboundDate(nextDate)
       setDisplayName(defaultShipmentDisplayName(nextDate))
       setDisplayNameIsDateDefault(true)
       setMemo('')
-      window.location.replace(shipmentHref(result.shipmentId, 'items'))
+      return true
+  }
+
+  useChinaWorkDraft('new-shipment', isCreateDirty ? {
+    kind: 'create', label: '새 출고요청', snapshot: null, save: saveNewShipment,
+    discard: () => { setQuantities({}); setSelectedWarehouseCodes([]); setDestinationName(''); setPlannedOutboundDate(initialDate); setDisplayName(defaultShipmentDisplayName(initialDate)); setDisplayNameIsDateDefault(true); setMemo('') },
+  } : null)
+
+  function createShipment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    startTransition(async () => {
+      if (await guard.runTask(saveNewShipment) && createdShipmentId.current) navigateChinaWork(shipmentHref(createdShipmentId.current, 'items'))
     })
   }
 
   return (
-    <div className="space-y-4" aria-busy={isPending}>
+    <fieldset disabled={isPending || guard.busy} className="min-w-0 space-y-4 border-0 p-0" aria-busy={isPending || guard.busy}>
       <div className="space-y-3">
         <ShipmentSelector
           key={`selector:${showCreate ? 'new-shipment' : selectedShipment?.shipment.id ?? 'no-shipment'}`}
           shipments={shipments}
           selectedShipment={showCreate ? null : selectedShipment?.shipment ?? null}
           showCreate={showCreate}
-          onToggleCreate={() => window.location.replace(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1')}
+          onToggleCreate={() => guard.requestNavigation(() => navigateChinaWork(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1'))}
           onSelect={(id) => {
-            window.location.replace(shipmentHref(id, 'items'))
+            if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => navigateChinaWork(shipmentHref(id, 'items')))
           }}
         />
         {showCreate ? (
@@ -287,12 +331,12 @@ export function ChinaShipmentsBoard({
           detail={selectedShipment}
           inventoryItems={inventoryItems}
           stage={selectedStep}
-          isPending={isPending}
+          isPending={isPending || guard.busy}
           startTransition={startTransition}
-          onStageChange={(stage) => selectedShipment && window.location.replace(shipmentHref(selectedShipment.shipment.id, stage))}
+          onStageChange={(stage) => selectedShipment && stage !== selectedStep && guard.requestNavigation(() => navigateChinaWork(shipmentHref(selectedShipment.shipment.id, stage)))}
         /> : null}
       </div>
-    </div>
+    </fieldset>
   )
 }
 
@@ -304,15 +348,15 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
   onSelect: (id: string) => void
 }) {
   const router = useRouter()
+  const guard = useChinaWorkGuard()
   const [isPending, startTransition] = useTransition()
   const [isEditing, setIsEditing] = useState(false)
   const [draftDisplayName, setDraftDisplayName] = useState(() => selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null))
   const [draftPlannedOutboundDate, setDraftPlannedOutboundDate] = useState(() => selectedShipment?.plannedOutboundDate ?? '')
+  const [detailsBaseline, setDetailsBaseline] = useState(() => ({ displayName: selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null), plannedOutboundDate: selectedShipment?.plannedOutboundDate ?? '' }))
   const visibleShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
-  function saveShipmentDetails(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!selectedShipment) return
-    startTransition(async () => {
+  async function saveShipmentDetailsDraft() {
+      if (!selectedShipment) return false
       const result = await updateChinaOutboundShipmentAction({
         shipmentId: selectedShipment.id,
         displayName: draftDisplayName.trim() || null,
@@ -320,25 +364,44 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
       })
       if (!result.ok) {
         toast.error(result.error)
-        return
+        return false
       }
+      setDetailsBaseline({ displayName: draftDisplayName, plannedOutboundDate: draftPlannedOutboundDate })
+      guard.setDraft('shipment-details', null)
       setIsEditing(false)
       toast.success('출고작업 이름과 날짜를 수정했습니다.')
       router.refresh()
+      return true
+  }
+
+  const detailsDirty = isEditing && (draftDisplayName !== detailsBaseline.displayName || draftPlannedOutboundDate !== detailsBaseline.plannedOutboundDate)
+  useChinaWorkDraft('shipment-details', detailsDirty ? {
+    kind: 'details', label: '출고작업 이름·날짜', snapshot: null, save: saveShipmentDetailsDraft,
+    discard: () => { setDraftDisplayName(detailsBaseline.displayName); setDraftPlannedOutboundDate(detailsBaseline.plannedOutboundDate); setIsEditing(false) },
+  } : null)
+
+  function saveShipmentDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    startTransition(async () => {
+      await guard.runTask(saveShipmentDetailsDraft)
     })
   }
 
   function deleteShipment() {
     if (!selectedShipment) return
     if (!window.confirm(`“${shipmentDisplayName(selectedShipment)}” 출고작업을 정말 삭제할까요?\n예약 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return
-    startTransition(async () => {
+    guard.requestNavigation(() => {
+      startTransition(async () => { const deleted = await guard.runTask(async () => {
       const result = await deleteChinaOutboundShipmentAction({ shipmentId: selectedShipment.id })
       if (!result.ok) {
         toast.error(result.error)
-        return
+        return false
       }
       toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
-      window.location.replace('/purchasing/china-shipments')
+      return true
+      })
+      if (deleted) navigateChinaWork('/purchasing/china-shipments')
+      })
     })
   }
 
@@ -354,7 +417,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         </label>
         <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> {showCreate ? '요청 닫기' : '새 중국출고요청'}</button>
         {selectedShipment ? <div className="flex shrink-0 gap-2">
-          <button type="button" disabled={isPending} onClick={() => setIsEditing((open) => !open)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
+          <button type="button" disabled={isPending} onClick={() => isEditing ? guard.requestNavigation(() => setIsEditing(false), ['details']) : setIsEditing(true)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
         </div> : null}
       </div>
@@ -363,7 +426,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
         <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
         <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
       </form> : null}
-      <p className="mt-2 text-xs text-muted-foreground">선택한 출고작업만 화면에 표시됩니다. 다른 작업으로 전환하기 전에 입력 내용을 저장해주세요.</p>
+      <p className="mt-2 text-xs text-muted-foreground">선택한 출고작업만 화면에 표시됩니다. 저장하지 않은 내용이 있으면 이동 전에 확인합니다.</p>
       {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
     </section>
   )
@@ -378,6 +441,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   onStageChange: (stage: ChinaShipmentStage) => void
 }) {
   const router = useRouter()
+  const guard = useChinaWorkGuard()
   const [boxPage, setBoxPage] = useState(1)
 
   if (!detail) return null
@@ -410,14 +474,17 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
+      await guard.runTask(async () => {
       const result = await action()
       if (!result.ok) {
         toast.error(result.error ?? '처리하지 못했습니다.')
-        return
+        return false
       }
       afterSuccess?.()
       toast.success(successMessage)
       router.refresh()
+      return true
+      })
     })
   }
 
@@ -458,7 +525,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <p className="text-muted-foreground">진행 중인 품목을 먼저, 완료 품목을 마지막에 표시합니다. 품목코드는 오름차순으로 고정됩니다.</p>
-          <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => setBoxPage((current) => Math.max(1, current - 1))} onNext={() => setBoxPage((current) => Math.min(pageCount, current + 1))} />
+          <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} />
         </div>
         <div className="space-y-3">
           {pagedBoxSplitItems.map((item) => {
@@ -466,16 +533,16 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
               const box = boxById.get(allocation.boxId)
               return box ? [{ allocation, box }] : []
             })
-            return <ProductBoxSplitEditor key={`${item.id}:${allocations.map(({ allocation }) => `${allocation.id}:${allocation.quantity}`).join('|')}`} item={item} allocations={allocations} editable={editable} isPending={isPending} onSave={(nextAllocations) => run(() => saveChinaOutboundItemBoxSplitsAction({ shipmentId: shipment.id, shipmentItemId: item.id, allocations: nextAllocations }), `${item.productName}의 박스분할을 저장했습니다.`)} />
+            return <ProductBoxSplitEditor key={item.id} shipmentId={shipment.id} item={item} allocations={allocations} editable={editable} isPending={isPending} />
           })}
         </div>
-        <div className="flex justify-end"><Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => setBoxPage((current) => Math.max(1, current - 1))} onNext={() => setBoxPage((current) => Math.min(pageCount, current + 1))} /></div>
+        <div className="flex justify-end"><Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} /></div>
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
         <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">3단계 · 파렛트적재</h3><p className="mt-1 text-sm text-muted-foreground">박스분할을 마친 박스에 실제 사용한 파렛트 번호를 직접 적으세요. 입력한 번호만 누적되어 총 파렛트 수와 파렛트별 CBM이 계산됩니다.</p></section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
-        {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="박스에 상품이 담긴 뒤 파렛트 번호를 입력할 수 있습니다." onMove={() => onStageChange('boxes')} moveLabel="2단계로 이동" /> : <PalletAssignmentPanel boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} onSave={(assignments) => run(() => assignChinaOutboundBoxesToPalletsAction({ shipmentId: shipment.id, assignments }), '파렛트 적재를 저장했습니다.')} />}
+        {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="박스에 상품이 담긴 뒤 파렛트 번호를 입력할 수 있습니다." onMove={() => onStageChange('boxes')} moveLabel="2단계로 이동" /> : <PalletAssignmentPanel shipmentId={shipment.id} boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} />}
         <PalletSummaryCards summaries={palletSummaries} />
       </section> : null}
 
@@ -505,8 +572,10 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPen
   isPending: boolean
 }) {
   const router = useRouter()
+  const guard = useChinaWorkGuard()
   const [isOpen, setIsOpen] = useState(false)
   const [isAdding, startAdding] = useTransition()
+  const additionMayExist = useRef(false)
   const [search, setSearch] = useState('')
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const searchKeyword = search.trim().toLocaleLowerCase('ko-KR')
@@ -522,39 +591,64 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPen
   const totalQuantity = additionalLines.reduce((total, line) => total + line.quantity, 0)
   const disabled = !editable || isPending || isAdding
 
-  function addItems(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (additionalLines.length === 0) {
-      toast.error('추가할 품목과 수량을 입력해주세요.')
-      return
-    }
-    startAdding(async () => {
-      const result = await addChinaOutboundShipmentItemsAction({ shipmentId, lines: additionalLines })
+  async function saveAdditionalItems() {
+      if (additionMayExist.current) {
+        toast.error('품목이 이미 추가됐을 수 있습니다. 현재 출고품목을 먼저 확인해주세요.')
+        return false
+      }
+      if (additionalLines.length === 0 || Object.values(quantities).some((value) => value.trim() !== '' && !positiveInteger(value))) {
+        toast.error('추가할 품목과 올바른 수량을 입력해주세요.')
+        return false
+      }
+      let result: Awaited<ReturnType<typeof addChinaOutboundShipmentItemsAction>>
+      try { result = await addChinaOutboundShipmentItemsAction({ shipmentId, lines: additionalLines }) } catch {
+        additionMayExist.current = true
+        toast.error('응답이 끊겼지만 품목이 추가됐을 수 있습니다. 중복 추가를 막기 위해 출고품목을 먼저 확인해주세요.')
+        return false
+      }
       if (!result.ok) {
         toast.error(result.error)
-        return
+        return false
       }
+      guard.setDraft('additional-items', null)
       setQuantities({})
       setSearch('')
       setIsOpen(false)
       toast.success(`출고품목 ${additionalLines.length.toLocaleString('ko-KR')}종 · ${totalQuantity.toLocaleString('ko-KR')}개를 추가했습니다.`)
       router.refresh()
+      return true
+  }
+
+  useChinaWorkDraft('additional-items', Object.values(quantities).some((value) => value.trim() !== '') ? {
+    kind: 'items', label: '추가 출고품목', snapshot: quantities, save: saveAdditionalItems,
+    discard: () => { setQuantities({}); setSearch(''); setIsOpen(false) },
+  } : null)
+
+  function addItems(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    startAdding(async () => {
+      await guard.runTask(saveAdditionalItems)
     })
   }
 
-  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가</h3><p className="mt-1 text-xs text-muted-foreground">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</p></div><button type="button" disabled={disabled} onClick={() => setIsOpen((open) => !open)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
+  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가</h3><p className="mt-1 text-xs text-muted-foreground">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</p></div><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : setIsOpen(true)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
 }
 
-function ProductBoxSplitEditor({ item, allocations, editable, isPending, onSave }: {
+function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPending }: {
+  shipmentId: string
   item: ChinaShipmentDetailView['items'][number]
   allocations: Array<{ allocation: ChinaShipmentDetailView['boxItems'][number]; box: ChinaShipmentDetailView['boxes'][number] }>
   editable: boolean
   isPending: boolean
-  onSave: (allocations: Array<{ boxNo: string; quantity: number; lengthCm: number | null; widthCm: number | null; heightCm: number | null }>) => void
 }) {
-  const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => allocations.length > 0
+  const router = useRouter()
+  const guard = useChinaWorkGuard()
+  const draftId = `box:${item.id}`
+  const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
+  const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
     ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
-    : [createBoxSplitDraft(item.sku)])
+    : [createBoxSplitDraft(item.sku)])))
+  const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)
   const isComplete = item.packedQuantity === item.reservedQuantity
 
@@ -562,46 +656,105 @@ function ProductBoxSplitEditor({ item, allocations, editable, isPending, onSave 
     setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch } : draft))
   }
 
-  function save() {
+  async function saveDraft() {
     const nextAllocations = drafts
       .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm].some((value) => value.trim()))
-      .map((draft) => ({
-        boxNo: draft.boxNo.trim(),
-        quantity: Number(draft.quantity),
-        lengthCm: optionalNumber(draft.lengthCm),
-        widthCm: optionalNumber(draft.widthCm),
-        heightCm: optionalNumber(draft.heightCm),
-      }))
-    onSave(nextAllocations)
+      .map((draft) => {
+        const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
+        const dimensionsChanged = !previous || [draft.lengthCm, draft.widthCm, draft.heightCm].some((value, index) => value !== [previous.lengthCm, previous.widthCm, previous.heightCm][index])
+        return {
+          boxNo: draft.boxNo.trim(),
+          quantity: Number(draft.quantity),
+          // Existing shared boxes keep their current dimensions unless this editor actually changed them.
+          lengthCm: dimensionsChanged ? optionalNumber(draft.lengthCm) : null,
+          widthCm: dimensionsChanged ? optionalNumber(draft.widthCm) : null,
+          heightCm: dimensionsChanged ? optionalNumber(draft.heightCm) : null,
+        }
+      })
+    const result = await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId: item.id, allocations: nextAllocations })
+    if (!result.ok) {
+      toast.error(result.error ?? '박스분할을 저장하지 못했습니다.')
+      return false
+    }
+    setInitialDrafts(cloneBoxSplitDrafts(drafts))
+    guard.setDraft(draftId, null)
+    toast.success(`${item.productName}의 박스분할을 저장했습니다.`)
+    router.refresh()
+    return true
   }
+
+  const dirty = boxDraftValues(drafts) !== boxDraftValues(initialDrafts)
+  useChinaWorkDraft(draftId, dirty ? {
+    kind: 'box', label: `${item.productName} 박스분할`, snapshot: { drafts: cloneBoxSplitDrafts(drafts), baseline: cloneBoxSplitDrafts(initialDrafts) }, save: saveDraft,
+    boxDimensions: drafts.flatMap((draft) => {
+      const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
+      const dimensions = [draft.lengthCm, draft.widthCm, draft.heightCm]
+      const changed = !previous || dimensions.some((value, index) => value !== [previous.lengthCm, previous.widthCm, previous.heightCm][index])
+      return changed && draft.boxNo.trim() && dimensions.every((value) => value.trim() && Number.isFinite(Number(value)))
+        ? [{ boxNo: draft.boxNo.trim(), dimensions: dimensions.map((value) => String(Number(value))).join(':') }] : []
+    }),
+    discard: () => setDrafts(cloneBoxSplitDrafts(initialDrafts)),
+  } : null)
+
+  function save() { void guard.runTask(saveDraft) }
 
   return <article className="overflow-hidden rounded-lg border bg-background"><div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{item.sku}</p><ProgressBadge completed={isComplete} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} /></div><p className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개</p></div><div className="overflow-x-auto"><table className="min-w-[880px] w-full text-sm"><thead className="bg-muted/10 text-xs text-muted-foreground"><tr><th className="w-[22%] px-3 py-2 text-left font-medium">박스번호</th><th className="w-[14%] px-3 py-2 text-right font-medium">적재수량</th><th className="w-[13%] px-3 py-2 text-right font-medium">가로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">세로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">높이(cm)</th><th className="w-[15%] px-3 py-2 text-right font-medium">CBM</th><th className="w-[10%] px-3 py-2 text-center font-medium">관리</th></tr></thead><tbody>{drafts.map((draft) => { const cbm = calculateChinaOutboundBoxCbm({ lengthCm: optionalNumber(draft.lengthCm), widthCm: optionalNumber(draft.widthCm), heightCm: optionalNumber(draft.heightCm) }); return <tr key={draft.key} className="border-t"><td className="px-3 py-2"><input value={draft.boxNo} onChange={(event) => patchDraft(draft.key, { boxNo: event.target.value })} disabled={!editable || isPending} className={compactInputClass} placeholder="예: A-01" /></td><td className="px-3 py-2"><input type="number" min="1" step="1" value={draft.quantity} onChange={(event) => patchDraft(draft.key, { quantity: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="0" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.lengthCm} onChange={(event) => patchDraft(draft.key, { lengthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.widthCm} onChange={(event) => patchDraft(draft.key, { widthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.heightCm} onChange={(event) => patchDraft(draft.key, { heightCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><button type="button" disabled={!editable || isPending || drafts.length === 1} onClick={() => setDrafts((current) => current.filter((candidate) => candidate.key !== draft.key))} className="h-8 rounded-md border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40">삭제</button></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</p><div className="flex gap-2"><button type="button" disabled={!editable || isPending} onClick={() => setDrafts((current) => [...current, createBoxSplitDraft(item.sku, current.length + 1)])} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> 박스 추가</button><button type="button" disabled={!editable || isPending} onClick={save} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 박스분할 저장</button></div></div></article>
 }
 
-function PalletAssignmentPanel({ boxes, boxItemsByBox, itemById, palletById, editable, isPending, onSave }: {
+function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, palletById, editable, isPending }: {
+  shipmentId: string
   boxes: ChinaShipmentDetailView['boxes']
   boxItemsByBox: Map<string, ChinaShipmentDetailView['boxItems']>
   itemById: Map<string, ChinaShipmentDetailView['items'][number]>
   palletById: Map<string, ChinaShipmentDetailView['pallets'][number]>
   editable: boolean
   isPending: boolean
-  onSave: (assignments: Array<{ boxNo: string; palletNo: string | null }>) => void
 }) {
+  const router = useRouter()
+  const guard = useChinaWorkGuard()
   const sortedBoxes = [...boxes].sort((left, right) => left.boxNo.localeCompare(right.boxNo, 'ko-KR', { numeric: true }))
-  const [palletNumbers, setPalletNumbers] = useState<Record<string, string>>(() => Object.fromEntries(sortedBoxes.map((box) => [box.boxNo, box.palletId ? palletById.get(box.palletId)?.palletNo ?? '' : ''])))
+  const [initialNumbers, setInitialNumbers] = useState<Record<string, string>>(() => Object.fromEntries(sortedBoxes.map((box) => [box.boxNo, box.palletId ? palletById.get(box.palletId)?.palletNo ?? '' : ''])))
+  const [palletNumbers, setPalletNumbers] = useState<Record<string, string>>(() => ({ ...initialNumbers }))
+  const changedBoxes = sortedBoxes.filter((box) => (palletNumbers[box.boxNo] ?? '').trim() !== (initialNumbers[box.boxNo] ?? '').trim())
 
-  return <section className="overflow-hidden rounded-lg border"><div className="overflow-x-auto"><table className="min-w-[850px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th></tr></thead><tbody>{sortedBoxes.map((box) => { const boxItems = boxItemsByBox.get(box.id) ?? []; const quantity = boxItems.reduce((total, item) => total + item.quantity, 0); const products = boxItems.map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return item ? `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''} (${boxItem.quantity.toLocaleString('ko-KR')}개)` : '' }).filter(Boolean); const cbm = calculateChinaOutboundBoxCbm(box); return <tr key={box.id} className="border-t align-top"><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.join('\n')}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2"><input value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!editable || isPending} className={`${compactInputClass} mx-auto max-w-32 text-center`} placeholder="예: 1" /></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">빈칸으로 저장하면 파렛트 배정을 해제합니다. 파렛트 번호는 숫자뿐 아니라 `A`, `B`, `1-2`처럼 자유롭게 입력할 수 있습니다.</p><button type="button" disabled={!editable || isPending} onClick={() => onSave(sortedBoxes.map((box) => ({ boxNo: box.boxNo, palletNo: palletNumbers[box.boxNo]?.trim() || null })))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 파렛트 적재 저장</button></div></section>
+  async function saveDraft() {
+    if (!changedBoxes.length) return true
+    const assignments = changedBoxes.map((box) => ({ boxNo: box.boxNo, palletNo: palletNumbers[box.boxNo]?.trim() || null }))
+    const result = await assignChinaOutboundBoxesToPalletsAction({ shipmentId, assignments })
+    if (!result.ok) { toast.error(result.error ?? '파렛트 적재를 저장하지 못했습니다.'); return false }
+    setInitialNumbers({ ...palletNumbers })
+    guard.setDraft('pallet-assignments', null)
+    toast.success('파렛트 적재를 저장했습니다.')
+    router.refresh()
+    return true
+  }
+
+  useChinaWorkDraft('pallet-assignments', changedBoxes.length > 0 ? {
+    kind: 'pallet', label: '파렛트 적재', snapshot: palletNumbers, save: saveDraft,
+    discard: () => setPalletNumbers({ ...initialNumbers }),
+  } : null)
+
+  return <section className="overflow-hidden rounded-lg border"><div className="overflow-x-auto"><table className="min-w-[850px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th></tr></thead><tbody>{sortedBoxes.map((box) => { const boxItems = boxItemsByBox.get(box.id) ?? []; const quantity = boxItems.reduce((total, item) => total + item.quantity, 0); const products = boxItems.map((boxItem) => { const item = itemById.get(boxItem.shipmentItemId); return item ? `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''} (${boxItem.quantity.toLocaleString('ko-KR')}개)` : '' }).filter(Boolean); const cbm = calculateChinaOutboundBoxCbm(box); return <tr key={box.id} className="border-t align-top"><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.join('\n')}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2"><input value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!editable || isPending} className={`${compactInputClass} mx-auto max-w-32 text-center`} placeholder="예: 1" /></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">빈칸으로 저장하면 파렛트 배정을 해제합니다. 파렛트 번호는 숫자뿐 아니라 `A`, `B`, `1-2`처럼 자유롭게 입력할 수 있습니다.</p><button type="button" disabled={!editable || isPending} onClick={() => void guard.runTask(saveDraft)} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 파렛트 적재 저장</button></div></section>
 }
 
 function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editable: boolean }) {
   const router = useRouter()
+  const guard = useChinaWorkGuard()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<WorkbookPreview | null>(null)
   const [isWorking, setIsWorking] = useState(false)
 
   async function uploadWorkbook(mode: 'preview' | 'apply') {
-    if (!selectedFile) return toast.error('업로드할 엑셀 파일을 선택해주세요.')
+    if (!selectedFile) { toast.error('업로드할 엑셀 파일을 선택해주세요.'); return false }
+    if (mode === 'apply' && (!preview || preview.errors.length > 0)) {
+      toast.error('엑셀을 먼저 검토하고 오류를 해결한 뒤 반영해주세요.')
+      return false
+    }
+    if (mode === 'apply' && (guard.hasDraftKind('box') || guard.hasDraftKind('pallet'))) {
+      toast.error('직접 입력한 박스·파렛트 초안을 먼저 확인하고 저장하거나 취소해주세요.')
+      return false
+    }
     setIsWorking(true)
     try {
       const form = new FormData()
@@ -612,7 +765,7 @@ function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editabl
       if (body.preview) setPreview(body.preview)
       if (!response.ok) {
         toast.error(body.error ?? '엑셀을 확인하지 못했습니다.')
-        return
+        return false
       }
       if (mode === 'preview') {
         toast.success(body.preview?.errors.length ? '엑셀에서 확인할 항목을 찾았습니다.' : '엑셀 검토가 끝났습니다. 반영할 수 있습니다.')
@@ -620,11 +773,14 @@ function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editabl
         toast.success('엑셀 작업 내용을 반영했습니다.')
         setSelectedFile(null)
         setPreview(null)
+        guard.setDraft('workbook', null)
         if (fileInputRef.current) fileInputRef.current.value = ''
         router.refresh()
       }
+      return true
     } catch {
       toast.error('엑셀 업로드 중 연결 오류가 발생했습니다.')
+      return false
     } finally {
       setIsWorking(false)
     }
@@ -635,7 +791,17 @@ function WorkbookActions({ shipmentId, editable }: { shipmentId: string; editabl
     setPreview(null)
   }
 
-  return <section className="rounded-lg border border-dashed bg-muted/10 p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><FileSpreadsheet className="size-4 text-emerald-700" /><h3 className="text-sm font-semibold">엑셀로 작업</h3></div><p className="mt-1 text-xs text-muted-foreground">현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.</p></div><div className="flex flex-wrap items-center gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/workbook`} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted"><Download className="size-3.5" /> 작업용 엑셀</a><label className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted ${!editable ? 'pointer-events-none opacity-50' : ''}`}><Upload className="size-3.5" /> {selectedFile ? selectedFile.name : '엑셀 선택'}<input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={chooseFile} disabled={!editable || isWorking} className="sr-only" /></label><button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => uploadWorkbook('preview')} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <FileSpreadsheet className="size-3.5" />} 엑셀 검토</button></div></div>{preview ? <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}><div className="flex flex-wrap items-center justify-between gap-2"><p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>{preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => uploadWorkbook('apply')} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}</div>{preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={`${error.sheet}:${error.row}:${index}`}>{error.sheet}{error.row ? ` ${error.row}행` : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}</div> : null}</section>
+  function clearWorkbook() {
+    setSelectedFile(null)
+    setPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  useChinaWorkDraft('workbook', selectedFile ? {
+    kind: 'workbook', label: '엑셀 검토 결과', snapshot: selectedFile, save: () => uploadWorkbook('apply'), discard: clearWorkbook,
+  } : null)
+
+  return <section className="rounded-lg border border-dashed bg-muted/10 p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><FileSpreadsheet className="size-4 text-emerald-700" /><h3 className="text-sm font-semibold">엑셀로 작업</h3></div><p className="mt-1 text-xs text-muted-foreground">현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.</p></div><div className="flex flex-wrap items-center gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/workbook`} className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted"><Download className="size-3.5" /> 작업용 엑셀</a><label className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted ${!editable ? 'pointer-events-none opacity-50' : ''}`}><Upload className="size-3.5" /> {selectedFile ? selectedFile.name : '엑셀 선택'}<input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={chooseFile} disabled={!editable || isWorking} className="sr-only" /></label>{selectedFile ? <button type="button" disabled={isWorking} onClick={clearWorkbook} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">선택 취소</button> : null}<button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('preview'))} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <FileSpreadsheet className="size-3.5" />} 엑셀 검토</button></div></div>{preview ? <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}><div className="flex flex-wrap items-center justify-between gap-2"><p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>{preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('apply'))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}</div>{preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={`${error.sheet}:${error.row}:${index}`}>{error.sheet}{error.row ? ` ${error.row}행` : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}</div> : null}</section>
 }
 
 type PalletSummary = {
@@ -731,6 +897,20 @@ function today() {
 
 function createBoxSplitDraft(sku: string, order = 1): BoxSplitDraft {
   return { key: `${sku}-${Date.now()}-${Math.random()}`, boxNo: `${sku}-${order}`, quantity: '', lengthCm: '', widthCm: '', heightCm: '' }
+}
+
+function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const snapshot = value as Partial<BoxSplitDraftSnapshot>
+  return Array.isArray(snapshot.drafts) && Array.isArray(snapshot.baseline) ? snapshot as BoxSplitDraftSnapshot : null
+}
+
+function cloneBoxSplitDrafts(drafts: BoxSplitDraft[]) {
+  return drafts.map((draft) => ({ ...draft }))
+}
+
+function boxDraftValues(drafts: BoxSplitDraft[]) {
+  return JSON.stringify(drafts.map(({ boxNo, quantity, lengthCm, widthCm, heightCm }) => ({ boxNo, quantity, lengthCm, widthCm, heightCm })))
 }
 
 function optionalNumber(value: string) {

@@ -104,6 +104,28 @@ function makeShipmentWithBox(): ChinaShipmentDetailView {
   }
 }
 
+function makeShipmentWithCompletionFilters(): ChinaShipmentDetailView {
+  return {
+    ...shipmentA,
+    items: [
+      { ...shipmentA.items[0], id: 'complete-item', sku: 'DONE-01', productName: '완료 상품', optionName: '대형', reservedQuantity: 5, packedQuantity: 5 },
+      { ...shipmentA.items[0], id: 'progress-item', sku: 'WORK-01', productName: '진행 상품', optionName: '소형', reservedQuantity: 5, packedQuantity: 2 },
+      { ...shipmentA.items[0], id: 'waiting-item', sku: 'WAIT-01', productName: '미작업 상품', optionName: null, reservedQuantity: 5, packedQuantity: 0 },
+    ],
+    pallets: [{ id: 'pallet-1', palletNo: 'P1', note: null }],
+    boxes: [
+      { id: 'box-saved', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: 'BOX-01', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
+      { id: 'box-shared', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-02', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
+      { id: 'box-empty', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-03', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
+    ],
+    boxItems: [
+      { id: 'allocation-done-1', boxId: 'box-saved', shipmentItemId: 'complete-item', quantity: 3 },
+      { id: 'allocation-done-2', boxId: 'box-shared', shipmentItemId: 'complete-item', quantity: 2 },
+      { id: 'allocation-work', boxId: 'box-shared', shipmentItemId: 'progress-item', quantity: 2 },
+    ],
+  }
+}
+
 function makeShipmentWithSharedBoxDimensions(lengthCm = 10, widthCm = 20, heightCm = 30): ChinaShipmentDetailView {
   return {
     ...shipmentA,
@@ -191,6 +213,42 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getAllByRole('navigation', { name: '중국출고 작업 단계' })).toHaveLength(1)
     expect(screen.getByPlaceholderText('예: A-01')).toHaveValue('SKU-B-1')
     expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('b')
+  })
+
+  it('shows saved box contents and lets users include empty boxes', () => {
+    renderShipment(makeShipmentWithCompletionFilters())
+
+    const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
+    if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
+    expect(within(savedBoxPanel).getByText('BOX-01')).toBeInTheDocument()
+    const sharedBoxRow = within(savedBoxPanel).getByText('BOX-02').closest('tr')
+    if (!sharedBoxRow) throw new Error('공유 박스 행을 찾을 수 없습니다.')
+    expect(within(sharedBoxRow).getByText(/DONE-01 · 완료 상품 · 대형/)).toBeInTheDocument()
+    expect(within(sharedBoxRow).getByText(/WORK-01 · 진행 상품 · 소형/)).toBeInTheDocument()
+    expect(within(sharedBoxRow).getByText('4개')).toBeInTheDocument()
+    expect(within(sharedBoxRow).getByText('미배정')).toBeInTheDocument()
+    expect(within(savedBoxPanel).queryByText('BOX-03')).not.toBeInTheDocument()
+
+    fireEvent.click(within(savedBoxPanel).getByRole('button', { name: /전체 박스/ }))
+    const emptyBoxRow = within(savedBoxPanel).getByText('BOX-03').closest('tr')
+    if (!emptyBoxRow) throw new Error('빈 박스 행을 찾을 수 없습니다.')
+    expect(within(emptyBoxRow).getByText('내용 없음')).toBeInTheDocument()
+  })
+
+  it('filters completed items without losing a hidden box split draft', () => {
+    renderShipment(makeShipmentWithCompletionFilters())
+    const itemFilter = screen.getByRole('group', { name: '박스분할 품목 상태 필터' })
+    fireEvent.change(itemEditor('WORK-01').getByPlaceholderText('0'), { target: { value: '3' } })
+
+    fireEvent.click(within(itemFilter).getByRole('button', { name: /박스분할 완료/ }))
+    expect(screen.getByText('DONE-01')).toBeInTheDocument()
+    expect(screen.queryByText('WORK-01')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    fireEvent.click(within(itemFilter).getByRole('button', { name: /진행 중/ }))
+    expect(screen.getByText('WORK-01')).toBeInTheDocument()
+    expect(screen.getByText('WAIT-01')).toBeInTheDocument()
+    expect(itemEditor('WORK-01').getByPlaceholderText('0')).toHaveValue(3)
   })
 
   it('switches immediately with a clean draft, including an untouched default box number', () => {

@@ -409,7 +409,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
   const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
   const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
-  const canDownloadShipmentLabels = boxesWithItems.length > 0 && !hasIncompleteBoxSplit
+  const canDownloadShipmentLabels = boxesWithItems.length > 0
   const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
     const leftComplete = left.packedQuantity === left.reservedQuantity
@@ -445,7 +445,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</a> : <button type="button" disabled title="모든 박스분할을 완료하면 생성할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</button>}
+          {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</a> : <button type="button" disabled title="박스분할을 저장한 박스가 하나 이상 있어야 생성할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 엑셀</button>}
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {editable && stage === 'summary' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
@@ -466,6 +466,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         <section className="rounded-lg border bg-muted/20 p-4">
           <h3 className="font-semibold">2단계 · 상품별 박스분할</h3>
           <p className="mt-1 text-sm text-muted-foreground">상품을 먼저 박스로 나누고, 박스별 수량과 가로·세로·높이를 입력하세요. 파렛트 번호는 다음 단계에서 적습니다.</p>
+          <p className="mt-2 text-xs text-muted-foreground">박스 1·2처럼 분할을 저장한 박스는 전체 작업이 끝나기 전에도 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span>로 바로 인쇄할 수 있습니다. 이후 박스 내용이 바뀌면 해당 박스 시트를 다시 내려받아 인쇄하세요.</p>
         </section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -492,9 +493,9 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 모두 저장하면 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼이 활성화됩니다. 노란색 칸에 중국어 상품명과 로케이션을 적어 박스 쉬트를 인쇄하고, 파렛트 번호까지 입력하면 파렛트 쉬트도 함께 인쇄하세요.</p></section>
+        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 저장한 박스부터 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼으로 바로 내려받을 수 있습니다. 현재 내용이 들어 있는 박스만 파일에 포함되고, 파렛트 쉬트에는 현재 배정된 박스만 합산됩니다. 노란색 칸에 중국어 상품명과 로케이션을 적어 박스 쉬트를 인쇄하고, 파렛트 번호까지 입력하면 파렛트 쉬트도 함께 인쇄하세요.</p></section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
-        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료와 부착용 쉽먼트 엑셀 생성이 가능합니다.</p> : null}
+        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
         {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
       </section> : null}

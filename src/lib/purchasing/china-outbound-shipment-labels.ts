@@ -101,12 +101,13 @@ function addGuideSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundShipment
     ['도착지', detail.shipment.destinationName ?? '미입력'],
     ['출고예정일', detail.shipment.plannedOutboundDate ?? '미입력'],
     ['입력', '박스 쉽먼트의 중국어 상품명·로케이션, 파렛트 쉽먼트의 위치는 노란색 칸에 직접 입력하세요.'],
+    ['출력 범위', '현재 내용이 저장된 박스만 박스 쉽먼트에, 현재 배정된 박스만 파렛트 쉽먼트에 포함됩니다. 박스 내용이나 파렛트 배정이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'],
     ['인쇄', '박스와 파렛트 라벨은 각각 별도 시트이며, 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'],
   ]
 
   for (const [label, value] of rows) {
     const row = sheet.addRow([label, value])
-    row.height = label === '입력' || label === '인쇄' ? 32 : 22
+    row.height = label === '출력 범위' ? 46 : label === '입력' || label === '인쇄' ? 32 : 22
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.border = ALL_BORDERS
       cell.alignment = { vertical: 'middle', wrapText: true }

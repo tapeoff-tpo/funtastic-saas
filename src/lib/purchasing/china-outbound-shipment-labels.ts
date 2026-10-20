@@ -7,9 +7,18 @@ export const CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS = {
   pallets: '파렛트 쉽먼트',
 } as const
 
-export type ChinaOutboundShipmentLabelDetail = ChinaOutboundPackingExportDetail
+export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDetail, 'items'> & {
+  items: Array<ChinaOutboundPackingExportDetail['items'][number] & { location?: string | null }>
+}
 
 type LabelRow = Array<string | number>
+type LabelProductRow = {
+  sku: string
+  productName: string
+  optionName: string | null
+  location: string
+  quantity: number
+}
 
 const DARK_FILL: ExcelJS.FillPattern = {
   type: 'pattern',
@@ -48,7 +57,7 @@ const PRINT_MARGINS = {
 /**
  * Produces a separately printable workbook for labels that are attached to
  * physical boxes and pallets. Yellow cells deliberately remain editable in
- * Excel because Chinese names and warehouse locations are not shipment data.
+ * Excel so Chinese names can be entered and item-master locations corrected.
  */
 export function createChinaOutboundShipmentLabelWorkbook(
   detail: ChinaOutboundShipmentLabelDetail,
@@ -100,14 +109,14 @@ function addGuideSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundShipment
     ['출고 창고', detail.shipment.originWarehouseCode],
     ['도착지', detail.shipment.destinationName ?? '미입력'],
     ['출고예정일', detail.shipment.plannedOutboundDate ?? '미입력'],
-    ['입력', '박스 쉽먼트의 중국어 상품명·로케이션, 파렛트 쉽먼트의 위치는 노란색 칸에 직접 입력하세요.'],
+    ['입력', '중국어 상품명은 직접 입력하세요. 위치는 품목에서 자동 입력되며 수정할 수 있습니다. 엑셀 수정 내용은 품목에 저장되지 않습니다.'],
     ['출력 범위', '현재 내용이 저장된 박스만 박스 쉽먼트에, 현재 배정된 박스만 파렛트 쉽먼트에 포함됩니다. 박스 내용이나 파렛트 배정이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'],
     ['인쇄', '박스와 파렛트 라벨은 각각 별도 시트이며, 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'],
   ]
 
   for (const [label, value] of rows) {
     const row = sheet.addRow([label, value])
-    row.height = label === '출력 범위' ? 46 : label === '입력' || label === '인쇄' ? 32 : 22
+    row.height = label === '출력 범위' || label === '입력' ? 46 : label === '인쇄' ? 32 : 22
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.border = ALL_BORDERS
       cell.alignment = { vertical: 'middle', wrapText: true }
@@ -146,7 +155,7 @@ function addBoxLabelSheets(
       lastColumn: 'E',
       title: `박스 쉽먼트 · ${box.boxNo}`,
       subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
-      inputNotice: '노란색 칸에 중국어 상품명과 로케이션을 입력한 뒤, 이 박스에 부착하세요.',
+      inputNotice: '중국어 상품명 직접 입력 · 로케이션 자동 입력 및 수정 가능',
       headers: ['중국어 상품명', '수량', '한국어 상품명', '박스번호', '로케이션'],
       rows,
       inputColumns: new Set([1, 5]),
@@ -192,7 +201,7 @@ function addPalletLabelSheets(
       lastColumn: 'F',
       title: `파렛트 쉽먼트 · ${pallet.palletNo}`,
       subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
-      inputNotice: '노란색 위치 칸을 입력한 뒤, 이 파렛트에 부착하세요.',
+      inputNotice: '품목 위치 자동 입력 · 빈칸 입력 및 수정 가능',
       headers: ['번호', '박스수량', '위치', '품명', '옵션', '수량'],
       rows,
       inputColumns: new Set([3]),
@@ -214,21 +223,8 @@ function aggregateBoxLabelRows(
   itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
   boxNo: string,
 ): LabelRow[] {
-  const rows = new Map<string, { productName: string; optionName: string | null; quantity: number }>()
-  for (const allocation of allocations) {
-    const item = itemById.get(allocation.shipmentItemId)
-    if (!item) continue
-    const key = `${item.productName}\u0000${item.optionName ?? ''}`
-    const current = rows.get(key)
-    rows.set(key, {
-      productName: item.productName,
-      optionName: item.optionName,
-      quantity: (current?.quantity ?? 0) + allocation.quantity,
-    })
-  }
-  return [...rows.values()]
-    .sort(compareProductRows)
-    .map((row) => ['', row.quantity, koreanProductName(row.productName, row.optionName), boxNo, ''])
+  return aggregateLabelProducts(allocations, itemById)
+    .map((row) => ['', row.quantity, koreanProductName(row.productName, row.optionName), boxNo, row.location])
 }
 
 function aggregatePalletLabelRows(
@@ -237,32 +233,40 @@ function aggregatePalletLabelRows(
   itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
   palletNo: string,
 ): LabelRow[] {
-  const products = new Map<string, { productName: string; optionName: string | null; quantity: number }>()
-  for (const box of boxes) {
-    for (const allocation of boxItemsByBoxId.get(box.id) ?? []) {
-      const item = itemById.get(allocation.shipmentItemId)
-      if (!item) continue
-      const key = `${item.productName}\u0000${item.optionName ?? ''}`
-      const current = products.get(key)
-      products.set(key, {
-        productName: item.productName,
-        optionName: item.optionName,
-        quantity: (current?.quantity ?? 0) + allocation.quantity,
-      })
-    }
-  }
-
-  const productRows = [...products.values()].sort(compareProductRows)
+  const allocations = boxes.flatMap((box) => boxItemsByBoxId.get(box.id) ?? [])
+  const productRows = aggregateLabelProducts(allocations, itemById)
   if (productRows.length === 0) return [[palletNo, boxes.length, '', '', '', '']]
-  return productRows.map((row) => [palletNo, boxes.length, '', row.productName, row.optionName ?? '', row.quantity])
+  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, row.optionName ?? '', row.quantity])
 }
 
-function compareProductRows(
-  left: { productName: string; optionName: string | null },
-  right: { productName: string; optionName: string | null },
-) {
+function aggregateLabelProducts(
+  allocations: ChinaOutboundShipmentLabelDetail['boxItems'],
+  itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
+): LabelProductRow[] {
+  const products = new Map<string, LabelProductRow>()
+  for (const allocation of allocations) {
+    const item = itemById.get(allocation.shipmentItemId)
+    if (!item) continue
+    const sku = item.sku.trim()
+    const location = item.location ?? ''
+    const key = JSON.stringify([sku, item.productName, item.optionName ?? '', location])
+    const current = products.get(key)
+    products.set(key, {
+      sku,
+      productName: item.productName,
+      optionName: item.optionName,
+      location,
+      quantity: (current?.quantity ?? 0) + allocation.quantity,
+    })
+  }
+  return [...products.values()].sort(compareProductRows)
+}
+
+function compareProductRows(left: LabelProductRow, right: LabelProductRow) {
   return left.productName.localeCompare(right.productName, 'ko-KR')
     || (left.optionName ?? '').localeCompare(right.optionName ?? '', 'ko-KR')
+    || left.sku.localeCompare(right.sku, 'ko-KR')
+    || left.location.localeCompare(right.location, 'ko-KR')
 }
 
 function koreanProductName(productName: string, optionName: string | null) {

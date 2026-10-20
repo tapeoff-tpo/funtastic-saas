@@ -63,6 +63,7 @@ export type PurchasingItemOutgoingMetrics = {
   currentMonthLargestOrderQuantity?: number
   specialBulkOutgoingAdjustment?: PurchasingSpecialBulkOutgoingAdjustment | null
 }
+
 export type AverageSalesWorkbookRow = {
   internalSku: string
   currentMonthWorkbookOutgoing: number
@@ -233,6 +234,31 @@ export async function getAllPurchasingItems(
     outgoingMetrics: metricsBySku?.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))
+}
+
+/** Returns the same location shown on the purchasing item master for each SKU. */
+export async function getPurchasingItemLocationsBySku(userId: string, skus: string[]) {
+  const uniqueSkus = Array.from(new Set(skus.map((sku) => sku.trim()).filter(Boolean)))
+  const locationsBySku = new Map<string, string>()
+
+  for (const skuChunk of chunks(uniqueSkus, 500)) {
+    const rows = await db.select({
+      internalSku: products.internalSku,
+      metadata: products.metadata,
+    }).from(products).where(and(
+      eq(products.userId, userId),
+      inArray(products.internalSku, skuChunk),
+    ))
+
+    for (const row of rows) {
+      locationsBySku.set(
+        row.internalSku,
+        normalizeEsaData(row.metadata?.esa009m)['한국창고기준 위치'] ?? '',
+      )
+    }
+  }
+
+  return locationsBySku
 }
 
 export async function previewPurchasingItemsImport(input: {

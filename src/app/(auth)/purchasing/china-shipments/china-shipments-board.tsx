@@ -467,6 +467,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           <h3 className="font-semibold">2단계 · 상품별 박스분할</h3>
           <p className="mt-1 text-sm text-muted-foreground">상품을 먼저 박스로 나누고, 박스별 수량과 가로·세로·높이를 입력하세요. 파렛트 번호는 다음 단계에서 적습니다.</p>
           <p className="mt-2 text-xs text-muted-foreground">박스 1·2처럼 분할을 저장한 박스는 전체 작업이 끝나기 전에도 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span>로 바로 인쇄할 수 있습니다. 이후 박스 내용이 바뀌면 해당 박스 시트를 다시 내려받아 인쇄하세요.</p>
+          <p className="mt-1 text-xs text-muted-foreground">엑셀의 로케이션은 품목에 등록된 한국창고기준 위치가 자동 입력됩니다. 비어 있으면 품목을 확인하거나 엑셀에서 직접 입력하세요.</p>
         </section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -493,7 +494,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 저장한 박스부터 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼으로 바로 내려받을 수 있습니다. 현재 내용이 들어 있는 박스만 파일에 포함되고, 파렛트 쉬트에는 현재 배정된 박스만 합산됩니다. 노란색 칸에 중국어 상품명과 로케이션을 적어 박스 쉬트를 인쇄하고, 파렛트 번호까지 입력하면 파렛트 쉬트도 함께 인쇄하세요.</p></section>
+        <section className="rounded-lg border bg-muted/20 p-4"><h3 className="font-semibold">4단계 · 최종 파렛트 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별로 어떤 박스와 상품이 실렸는지 확인합니다. 포장완료 후에는 수량과 파렛트 배정을 수정할 수 없습니다.</p><p className="mt-2 text-xs text-muted-foreground">박스분할을 저장한 박스부터 상단의 <span className="font-medium text-foreground">부착용 쉽먼트 엑셀</span> 버튼으로 바로 내려받을 수 있습니다. 현재 내용이 들어 있는 박스만 파일에 포함되고, 파렛트 시트에는 현재 배정된 박스만 합산됩니다. 로케이션은 품목에 등록된 한국창고기준 위치가 자동 입력되며, 비어 있으면 직접 입력하세요. 중국어 상품명도 입력한 뒤 인쇄하세요.</p></section>
         <WorkbookActions shipmentId={shipment.id} editable={editable} />
         {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
         {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}

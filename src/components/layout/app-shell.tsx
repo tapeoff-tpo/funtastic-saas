@@ -90,7 +90,7 @@ export function AppShell({ children }: AppShellProps) {
           <main
             ref={mainRef}
             onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 300)}
-            className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-gray-50 p-3 sm:p-4 md:p-6"
+            className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-gray-50 p-3 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-6 md:pb-24"
           >
             <PurchasingLanguageSwitcher />
             {children}

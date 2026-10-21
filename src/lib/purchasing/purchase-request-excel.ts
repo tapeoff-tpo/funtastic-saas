@@ -19,6 +19,11 @@ import {
   type PurchaseRequestStatus,
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import {
+  getPurchaseStockCoverageMonths,
+  getPurchaseUrgencyStatus,
+  PURCHASE_URGENCY_STATUS_LABELS,
+} from './purchase-urgency'
 
 const PURCHASE_BUYERS: Record<string, string> = {
   '1': '한상철',
@@ -31,6 +36,7 @@ const PURCHASE_BUYERS: Record<string, string> = {
 export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   'ID',
   '상태',
+  '구매 우선상태',
   '품목코드',
   '상품명',
   '옵션명',
@@ -39,6 +45,7 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '당월 출고수량',
   '3개월 평균 출고수량',
   '목표수량',
+  '재고 보유개월',
   '실제구매수량',
   '중국입고수량',
   '중국출고요청수량',
@@ -100,6 +107,10 @@ export async function exportPurchaseRequestsExcel(input: {
 
   for (const row of rows) {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
+    const purchaseUrgencyStatus = isPurchaseUrgencyActionNeeded(row.status)
+      ? getPurchaseUrgencyStatus(row.rawData)
+      : null
+    const stockCoverageMonths = getPurchaseStockCoverageMonths(row.rawData)
     const costs = calculatePurchaseCosts({
       requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
       specialPriceCny: row.specialPriceCny,
@@ -109,6 +120,9 @@ export async function exportPurchaseRequestsExcel(input: {
     sheet.addRow({
       ID: row.id,
       상태: PURCHASE_REQUEST_STATUS_LABELS[row.status],
+      '구매 우선상태': purchaseUrgencyStatus
+        ? PURCHASE_URGENCY_STATUS_LABELS[purchaseUrgencyStatus]
+        : '',
       품목코드: row.sku,
       상품명: row.productName,
       옵션명: row.optionName ?? '',
@@ -117,6 +131,7 @@ export async function exportPurchaseRequestsExcel(input: {
       '당월 출고수량': outgoingMetrics?.currentMonthOutgoing ?? 0,
       '3개월 평균 출고수량': outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
       목표수량: recommendationBasisExcelValue(row.rawData, 'targetStockQuantity'),
+      '재고 보유개월': stockCoverageMonths ?? '',
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
       중국출고요청수량: outboundRequestedQuantity(row.rawData),
@@ -143,6 +158,7 @@ export async function exportPurchaseRequestsExcel(input: {
   sheet.getColumn('당월 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('3개월 평균 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('목표수량').numFmt = '#,##0'
+  sheet.getColumn('재고 보유개월').numFmt = '#,##0.0'
   sheet.getColumn('개당 원가(₩)').numFmt = '#,##0'
   sheet.getColumn('총 원가(元)').numFmt = '#,##0.00'
   sheet.getColumn('총 원가(₩)').numFmt = '#,##0'
@@ -463,6 +479,10 @@ function recommendationBasisExcelValue(rawData: Record<string, unknown>, key: st
 function outboundRequestedQuantity(rawData: Record<string, unknown>) {
   const value = rawData.outboundRequestedQuantity
   return typeof value === 'number' || typeof value === 'string' ? String(value) : ''
+}
+
+function isPurchaseUrgencyActionNeeded(status: PurchaseRequestStatus) {
+  return status === 'requested' || status === 'purchased'
 }
 
 function mergeOutboundQuantity(rawData: Record<string, unknown>, quantity: number | null | undefined) {

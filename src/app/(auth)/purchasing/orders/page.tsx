@@ -20,6 +20,11 @@ import {
   PURCHASE_REQUEST_STATUS_LABELS,
   type PurchaseRequestStatus,
 } from '@/lib/purchasing/purchase-request-status'
+import {
+  getPurchaseStockCoverageMonths,
+  getPurchaseUrgencyStatus,
+  PURCHASE_URGENCY_STATUS_LABELS,
+} from '@/lib/purchasing/purchase-urgency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
@@ -554,6 +559,10 @@ export async function PurchasingOrdersView({
                       && requestDateElapsedDays >= 7
                     const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
                     const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
+                    const purchaseUrgencyStatus = isPurchaseUrgencyActionNeeded(item.status)
+                      ? getPurchaseUrgencyStatus(item.rawData)
+                      : null
+                    const stockCoverageMonths = getPurchaseStockCoverageMonths(item.rawData)
                     const stickyCellClassName = isOverdueRow ? 'bg-red-50' : 'bg-background'
                     const purchaseUrlHref = typeof item.purchaseUrl === 'string' && /^https?:\/\//.test(item.purchaseUrl)
                       ? item.purchaseUrl
@@ -575,6 +584,16 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
+                        {purchaseUrgencyStatus ? (
+                          <div className="mt-1">
+                            <Badge
+                              className="border-orange-300 bg-orange-100 px-1.5 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
+                              title={`재고 보유 ${formatNumber(stockCoverageMonths)}개월 · 1개월 이하`}
+                            >
+                              {PURCHASE_URGENCY_STATUS_LABELS[purchaseUrgencyStatus]}
+                            </Badge>
+                          </div>
+                        ) : null}
                         {item.rawData.saasChinaMode === true ? (
                           <div className="mt-1">
                             <Badge className="border-sky-200 bg-sky-100 px-1.5 text-[11px] text-sky-800 hover:bg-sky-100">
@@ -886,6 +905,10 @@ function getStageQuantityColumn(status: PurchaseRequestStatus) {
     return { label: '출고요청수량', field: 'outboundRequestedQuantity' as const }
   }
   return { label: '요청수량', field: 'requestedQuantity' as const }
+}
+
+function isPurchaseUrgencyActionNeeded(status: PurchaseRequestStatus) {
+  return status === 'requested' || status === 'purchased'
 }
 
 function getStageQuantity(

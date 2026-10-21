@@ -193,23 +193,23 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     const box = workbook.getWorksheet('박스 쉽먼트 01')!
     const pallet = workbook.getWorksheet('파렛트 쉽먼트 01')!
-    expect([1, 2, 3, 4, 5].map((column) => box.getRow(4).getCell(column).value))
+    expect([1, 2, 3, 4, 5].map((column) => box.getRow(2).getCell(column).value))
       .toEqual(['박스번호', '상품명(한국어)', '상품명(중국어)', '수량', '로케이션'])
-    expect(box.getCell('A5').value).toBe('박스 1')
-    expect(box.getCell('B5').value).toBe('상품 A')
-    expect(box.getCell('C5').value ?? '').toBe('')
-    expect([5, 6, 7].map((row) => box.getCell(`E${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
-    expect([5, 6, 7].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
-    expect(box.getCell('D5').value).toBe(2)
-    expect(pallet.getCell('E4').value).toBe('상품명(중국어)')
-    expect(pallet.getCell('E5').value ?? '').toBe('')
-    expect(pallet.getCell('G5').value).toBe(2)
+    expect(box.getCell('A3').value).toBe('박스 1')
+    expect(box.getCell('B3').value).toBe('상품 A')
+    expect(box.getCell('C3').value ?? '').toBe('')
+    expect([3, 4, 5].map((row) => box.getCell(`E${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
+    expect([3, 4, 5].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
+    expect(box.getCell('D3').value).toBe(2)
+    expect(pallet.getCell('E2').value).toBe('상품명(중국어)')
+    expect(pallet.getCell('E3').value ?? '').toBe('')
+    expect(pallet.getCell('G3').value).toBe(2)
 
-    box.getCell('C5').value = '中文商品名'
-    pallet.getCell('E5').value = '中文商品名'
+    box.getCell('C3').value = '中文商品名'
+    pallet.getCell('E3').value = '中文商品名'
     const edited = new ExcelJS.Workbook()
     await edited.xlsx.load(await workbook.xlsx.writeBuffer())
-    expect(edited.getWorksheet('박스 쉽먼트 01')!.getCell('C5').value).toBe('中文商品名')
-    expect(edited.getWorksheet('파렛트 쉽먼트 01')!.getCell('E5').value).toBe('中文商品名')
+    expect(edited.getWorksheet('박스 쉽먼트 01')!.getCell('C3').value).toBe('中文商品名')
+    expect(edited.getWorksheet('파렛트 쉽먼트 01')!.getCell('E3').value).toBe('中文商品名')
   })
 })

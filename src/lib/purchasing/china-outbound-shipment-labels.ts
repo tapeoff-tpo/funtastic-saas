@@ -188,8 +188,6 @@ function addBoxLabelSheets(
       sheet,
       lastColumn: 'E',
       title: `박스 쉽먼트 · ${box.boxNo}`,
-      subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
-      inputNotice: '중국어 상품명 직접 입력 · 로케이션 자동 입력 및 수정 가능',
       headers: ['박스번호', '상품명(한국어)', '상품명(중국어)', '수량', '로케이션'],
       rows,
       inputColumns: new Set([3, 5]),
@@ -234,8 +232,6 @@ function addPalletLabelSheets(
       sheet,
       lastColumn: 'G',
       title: `파렛트 쉽먼트 · ${pallet.palletNo}`,
-      subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
-      inputNotice: '중국어 상품명 직접 입력 · 품목 위치 자동 입력 및 수정 가능',
       headers: ['번호', '박스수량', '위치', '상품명(한국어)', '상품명(중국어)', '옵션', '수량'],
       rows,
       inputColumns: new Set([3, 5]),
@@ -338,8 +334,6 @@ function addLabelBlock(input: {
   sheet: ExcelJS.Worksheet
   lastColumn: string
   title: string
-  subtitle: string
-  inputNotice: string
   headers: string[]
   rows: LabelRow[]
   inputColumns: Set<number>
@@ -349,16 +343,6 @@ function addLabelBlock(input: {
   input.sheet.mergeCells(`A${titleRow.number}:${input.lastColumn}${titleRow.number}`)
   titleRow.height = 30
   styleMergedRow(titleRow, DARK_FILL, { bold: true, size: 16, color: { argb: 'FFFFFFFF' } })
-
-  const subtitleRow = input.sheet.addRow([input.subtitle])
-  input.sheet.mergeCells(`A${subtitleRow.number}:${input.lastColumn}${subtitleRow.number}`)
-  subtitleRow.height = 18
-  styleMergedRow(subtitleRow, undefined, { size: 9, color: { argb: 'FF4B5563' } })
-
-  const noticeRow = input.sheet.addRow([input.inputNotice])
-  input.sheet.mergeCells(`A${noticeRow.number}:${input.lastColumn}${noticeRow.number}`)
-  noticeRow.height = 20
-  styleMergedRow(noticeRow, INPUT_FILL, { italic: true, size: 9, color: { argb: 'FF6B4F00' } })
 
   const headerRow = input.sheet.addRow(input.headers)
   headerRow.height = 28

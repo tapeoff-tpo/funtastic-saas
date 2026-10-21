@@ -1233,6 +1233,7 @@ export const chinaOutboundPallets = pgTable(
     userId: uuid('user_id').notNull(),
     palletNo: varchar('pallet_no', { length: 100 }).notNull(),
     labelCode: varchar('label_code', { length: 200 }),
+    completionStatus: varchar('completion_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
@@ -1257,6 +1258,7 @@ export const chinaOutboundPallets = pgTable(
     index('china_outbound_pallets_shipment_sort').on(table.shipmentId, table.sortOrder),
     index('china_outbound_pallets_user_shipment').on(table.userId, table.shipmentId),
     check('china_outbound_pallets_sort_nonnegative', sql`${table.sortOrder} >= 0`),
+    check('china_outbound_pallets_completion_status', sql`${table.completionStatus} IS NULL OR ${table.completionStatus} IN ('in_progress', 'completed')`),
     check(
       'china_outbound_pallets_measurements_nonnegative',
       sql`(${table.grossWeightKg} IS NULL OR ${table.grossWeightKg} >= 0)
@@ -1277,6 +1279,7 @@ export const chinaOutboundBoxes = pgTable(
     boxNo: varchar('box_no', { length: 100 }).notNull(),
     labelCode: varchar('label_code', { length: 200 }),
     status: varchar('status', { length: 30 }).notNull().default('open'),
+    completionStatus: varchar('completion_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
@@ -1309,6 +1312,7 @@ export const chinaOutboundBoxes = pgTable(
     index('china_outbound_boxes_user_shipment').on(table.userId, table.shipmentId),
     index('china_outbound_boxes_pallet').on(table.palletId),
     check('china_outbound_boxes_status_check', sql`${table.status} IN ('open', 'sealed')`),
+    check('china_outbound_boxes_completion_status', sql`${table.completionStatus} IS NULL OR ${table.completionStatus} IN ('in_progress', 'completed')`),
     check('china_outbound_boxes_sort_nonnegative', sql`${table.sortOrder} >= 0`),
     check(
       'china_outbound_boxes_measurements_nonnegative',

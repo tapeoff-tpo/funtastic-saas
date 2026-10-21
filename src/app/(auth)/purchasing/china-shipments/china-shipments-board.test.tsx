@@ -2,11 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
   createShipment: vi.fn(),
   updateShipment: vi.fn(),
   saveBoxSplits: vi.fn(),
   savePalletAssignments: vi.fn(),
+  saveBoxStatuses: vi.fn(),
+  savePalletStatuses: vi.fn(),
   addShipmentItems: vi.fn(),
   toastError: vi.fn(),
   navigate: vi.fn(),
@@ -24,6 +26,8 @@ vi.mock('../saas-china-actions', () => ({
   dispatchChinaOutboundShipmentAction: vi.fn(),
   markChinaOutboundShipmentReadyAction: vi.fn(),
   saveChinaOutboundItemBoxSplitsAction: saveBoxSplits,
+  saveChinaOutboundBoxCompletionStatusesAction: saveBoxStatuses,
+  saveChinaOutboundPalletCompletionStatusesAction: savePalletStatuses,
   updateChinaOutboundShipmentAction: updateShipment,
 }))
 
@@ -137,6 +141,22 @@ function makeShipmentWithCompletionFilters(): ChinaShipmentDetailView {
   }
 }
 
+function makeShipmentWithBoxAndPalletStatuses(): ChinaShipmentDetailView {
+  const detail = makeShipmentWithCompletionFilters()
+  return {
+    ...detail,
+    pallets: [
+      { id: 'pallet-1', palletNo: 'P1', note: null, completionStatus: 'completed' },
+      { id: 'pallet-2', palletNo: 'P2', note: null, completionStatus: 'completed' },
+    ],
+    boxes: detail.boxes.map((box) => ({
+      ...box,
+      palletId: box.id === 'box-shared' ? 'pallet-2' : box.palletId,
+      completionStatus: box.id === 'box-empty' ? 'in_progress' as const : 'completed' as const,
+    })),
+  }
+}
+
 function makeShipmentWithSharedBoxDimensions(lengthCm = 10, widthCm = 20, heightCm = 30): ChinaShipmentDetailView {
   return {
     ...shipmentA,
@@ -181,12 +201,20 @@ function itemEditor(sku: string) {
   return within(article)
 }
 
+function palletAssignmentRow(boxNo: string) {
+  const row = screen.getByLabelText(`박스 ${boxNo} 파렛트 배정 선택`).closest('tr')
+  if (!row) throw new Error(`파렛트 배정 행을 찾을 수 없습니다: ${boxNo}`)
+  return within(row)
+}
+
 describe('ChinaShipmentsBoard', () => {
   beforeEach(() => {
     createShipment.mockReset()
     updateShipment.mockReset()
     saveBoxSplits.mockReset()
     savePalletAssignments.mockReset()
+    saveBoxStatuses.mockReset()
+    savePalletStatuses.mockReset()
     addShipmentItems.mockReset()
     toastError.mockReset()
     navigate.mockReset()
@@ -260,6 +288,203 @@ describe('ChinaShipmentsBoard', () => {
     if (!emptyBoxRow) throw new Error('빈 박스 행을 찾을 수 없습니다.')
     expect(within(emptyBoxRow).getByText('내용 없음')).toBeInTheDocument()
     expect(within(emptyBoxRow).queryByRole('link', { name: /부착용 쉽먼트 다운로드/ })).not.toBeInTheDocument()
+  })
+
+  it('saves only the checked box completion statuses', async () => {
+    saveBoxStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
+
+    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
+    expect(saveBoxStatuses).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      updates: [{ boxId: 'box-saved', status: 'in_progress' }],
+    })
+    expect(screen.getByLabelText('박스 BOX-02 상태')).toHaveValue('in_progress')
+  })
+
+  it('keeps an unselected box status draft after saving another box', async () => {
+    saveBoxStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
+    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
+
+    selectOtherShipment()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    expect(saveBoxStatuses).toHaveBeenCalledTimes(2)
+    expect(saveBoxStatuses).toHaveBeenNthCalledWith(2, { shipmentId: 'a', updates: [{ boxId: 'box-shared', status: 'in_progress' }] })
+  })
+
+  it('saves all changed box completion statuses at once', async () => {
+    saveBoxStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByRole('button', { name: '박스 전체 저장' }))
+
+    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
+    expect(saveBoxStatuses).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      updates: [
+        { boxId: 'box-saved', status: 'in_progress' },
+        { boxId: 'box-shared', status: 'in_progress' },
+      ],
+    })
+  })
+
+  it('selects every displayed box for the selected save', async () => {
+    saveBoxStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
+
+    fireEvent.click(screen.getByLabelText('표시된 박스 전체 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
+
+    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
+    expect(saveBoxStatuses).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      updates: [
+        { boxId: 'box-saved', status: 'in_progress' },
+        { boxId: 'box-shared', status: 'in_progress' },
+      ],
+    })
+  })
+
+  it('saves only checked pallet statuses and keeps other changes available', async () => {
+    savePalletStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+
+    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('파렛트 P2 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByLabelText('파렛트 P1 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 선택 저장' }))
+
+    await waitFor(() => expect(savePalletStatuses).toHaveBeenCalledTimes(1))
+    expect(savePalletStatuses).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      updates: [{ palletId: 'pallet-1', status: 'in_progress' }],
+    })
+    expect(screen.getByLabelText('파렛트 P2 상태')).toHaveValue('in_progress')
+  })
+
+  it('saves all changed pallet completion statuses at once', async () => {
+    savePalletStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+
+    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
+    fireEvent.change(screen.getByLabelText('파렛트 P2 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 전체 저장' }))
+
+    await waitFor(() => expect(savePalletStatuses).toHaveBeenCalledTimes(1))
+    expect(savePalletStatuses).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      updates: [
+        { palletId: 'pallet-1', status: 'in_progress' },
+        { palletId: 'pallet-2', status: 'in_progress' },
+      ],
+    })
+  })
+
+  it('protects a changed box status when switching shipments', () => {
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
+
+    selectOtherShipment()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+
+    expect(screen.getByLabelText('박스 BOX-01 상태')).toHaveValue('in_progress')
+    expect(saveBoxStatuses).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('saves a changed pallet status before switching shipments', async () => {
+    savePalletStatuses.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
+
+    selectOtherShipment()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    expect(savePalletStatuses).toHaveBeenCalledWith({ shipmentId: 'a', updates: [{ palletId: 'pallet-1', status: 'in_progress' }] })
+  })
+
+  it('keeps a failed pallet status save available for retry', async () => {
+    savePalletStatuses.mockResolvedValue({ ok: false, error: '파렛트 상태 저장 실패' })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
+    fireEvent.click(screen.getByLabelText('파렛트 P1 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 선택 저장' }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('in_progress')
+    expect(screen.getByLabelText('파렛트 P1 선택')).toBeChecked()
+  })
+
+  it('does not allow an empty box to be marked complete', () => {
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+    fireEvent.click(screen.getByRole('button', { name: /전체 박스/ }))
+
+    fireEvent.change(screen.getByLabelText('박스 BOX-03 상태'), { target: { value: 'completed' } })
+
+    expect(screen.getByLabelText('박스 BOX-03 상태')).toHaveValue('in_progress')
+    expect(toastError).toHaveBeenCalledWith('내용이 있는 박스만 완료할 수 있습니다.')
+    expect(saveBoxStatuses).not.toHaveBeenCalled()
+  })
+
+  it('does not allow a pallet to be completed while one of its boxes is in progress', () => {
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    detail.pallets = detail.pallets.map((pallet) => pallet.id === 'pallet-1' ? { ...pallet, completionStatus: 'in_progress' } : pallet)
+    detail.boxes = detail.boxes.map((box) => box.id === 'box-saved' ? { ...box, completionStatus: 'in_progress' } : box)
+    renderShipment(detail, 'pallets')
+
+    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'completed' } })
+
+    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('in_progress')
+    expect(toastError).toHaveBeenCalledWith('파렛트의 모든 박스를 완료한 뒤 파렛트를 완료할 수 있습니다.')
+    expect(savePalletStatuses).not.toHaveBeenCalled()
+  })
+
+  it('treats existing filled boxes and used pallets without a status as complete', () => {
+    const detail = makeFullyPackedInProgressShipment()
+    detail.items = detail.items.map((item) => ({ ...item, boxSplitStatus: 'completed' }))
+    renderShipment(detail, 'summary')
+
+    expect(screen.getByRole('button', { name: '포장완료' })).toBeEnabled()
+  })
+
+  it('requires used boxes and pallets to be completed before marking the shipment ready', () => {
+    const base = makeFullyPackedInProgressShipment()
+    const detail = {
+      ...base,
+      items: base.items.map((item) => ({ ...item, boxSplitStatus: 'completed' as const })),
+      boxes: base.boxes.map((box) => ({ ...box, completionStatus: 'in_progress' as const })),
+      pallets: base.pallets.map((pallet) => ({ ...pallet, completionStatus: 'completed' as const })),
+    }
+    const { rerender } = renderShipment(detail, 'summary')
+    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
+
+    const palletInProgress = {
+      ...detail,
+      boxes: detail.boxes.map((box) => ({ ...box, completionStatus: 'completed' as const })),
+      pallets: detail.pallets.map((pallet) => ({ ...pallet, completionStatus: 'in_progress' as const })),
+    }
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={palletInProgress} selectedStep="summary" showCreate={false} />)
+    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
+
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...palletInProgress, pallets: detail.pallets }} selectedStep="summary" showCreate={false} />)
+    expect(screen.getByRole('button', { name: '포장완료' })).toBeEnabled()
   })
 
   it('opens a completed saved box in its editable product editor', () => {
@@ -559,6 +784,67 @@ describe('ChinaShipmentsBoard', () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
     expect(savePalletAssignments).toHaveBeenCalledWith({ shipmentId: 'a', assignments: [{ boxNo: 'A-01', palletNo: null }] })
+  })
+
+  it('retains an unselected pallet assignment after saving a selected box', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
+    fireEvent.change(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1'), { target: { value: 'P4' } })
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
+
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledTimes(1))
+    expect(savePalletAssignments).toHaveBeenNthCalledWith(1, { shipmentId: 'a', assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }] })
+    expect(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1')).toHaveValue('P4')
+
+    selectOtherShipment()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    expect(savePalletAssignments).toHaveBeenCalledTimes(2)
+    expect(savePalletAssignments).toHaveBeenNthCalledWith(2, { shipmentId: 'a', assignments: [{ boxNo: 'BOX-02', palletNo: 'P4' }] })
+  })
+
+  it('keeps a failed selected pallet assignment and selection for retry', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: false, error: '파렛트 배정 저장 실패' })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
+
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1')).toHaveValue('P3')
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeChecked()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('saves all changed pallet assignments together', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
+    fireEvent.change(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1'), { target: { value: 'P4' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 전체 저장' }))
+
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P4' }],
+    }))
+  })
+
+  it('selects all displayed pallet assignments together', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
+    fireEvent.change(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1'), { target: { value: 'P4' } })
+
+    fireEvent.click(screen.getByLabelText('표시된 파렛트 배정 전체 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledWith({
+      shipmentId: 'a',
+      assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P4' }],
+    }))
   })
 
   it('guards changing the work stage while a box draft is unsaved', () => {

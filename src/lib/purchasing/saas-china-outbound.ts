@@ -33,6 +33,7 @@ export type ChinaOutboundShipmentStatus = (typeof CHINA_OUTBOUND_SHIPMENT_STATUS
 export const CHINA_OUTBOUND_BOX_SPLIT_STATUSES = ['in_progress', 'completed'] as const
 
 export type ChinaOutboundBoxSplitStatus = (typeof CHINA_OUTBOUND_BOX_SPLIT_STATUSES)[number]
+export type ChinaOutboundCompletionStatus = ChinaOutboundBoxSplitStatus
 
 export const CHINA_OUTBOUND_BOX_SPLIT_STATUS_LABELS: Record<ChinaOutboundBoxSplitStatus, string> = {
   in_progress: '진행 중',
@@ -438,6 +439,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     user_id uuid NOT NULL,
     pallet_no varchar(100) NOT NULL,
     label_code varchar(200),
+    completion_status varchar(20),
     sort_order integer NOT NULL DEFAULT 0,
     gross_weight_kg numeric(12, 3),
     length_cm numeric(12, 2),
@@ -453,6 +455,9 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
       REFERENCES china_outbound_shipments(id, user_id)
       ON DELETE CASCADE,
     CONSTRAINT china_outbound_pallets_sort_nonnegative CHECK (sort_order >= 0),
+    CONSTRAINT china_outbound_pallets_completion_status CHECK (
+      completion_status IS NULL OR completion_status IN ('in_progress', 'completed')
+    ),
     CONSTRAINT china_outbound_pallets_measurements_nonnegative CHECK (
       (gross_weight_kg IS NULL OR gross_weight_kg >= 0)
       AND (length_cm IS NULL OR length_cm >= 0)
@@ -460,6 +465,20 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
       AND (height_cm IS NULL OR height_cm >= 0)
     )
   );
+
+  ALTER TABLE china_outbound_pallets
+    ADD COLUMN IF NOT EXISTS completion_status varchar(20);
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'china_outbound_pallets_completion_status'
+        AND conrelid = 'china_outbound_pallets'::regclass
+    ) THEN
+      ALTER TABLE china_outbound_pallets ADD CONSTRAINT china_outbound_pallets_completion_status
+        CHECK (completion_status IS NULL OR completion_status IN ('in_progress', 'completed'));
+    END IF;
+  END $$;
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_pallets_shipment_pallet_no
     ON china_outbound_pallets(shipment_id, pallet_no);
@@ -476,6 +495,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     box_no varchar(100) NOT NULL,
     label_code varchar(200),
     status varchar(30) NOT NULL DEFAULT 'open',
+    completion_status varchar(20),
     sort_order integer NOT NULL DEFAULT 0,
     gross_weight_kg numeric(12, 3),
     length_cm numeric(12, 2),
@@ -496,6 +516,9 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
       REFERENCES china_outbound_pallets(id, shipment_id, user_id)
       ON DELETE RESTRICT,
     CONSTRAINT china_outbound_boxes_status_check CHECK (status IN ('open', 'sealed')),
+    CONSTRAINT china_outbound_boxes_completion_status CHECK (
+      completion_status IS NULL OR completion_status IN ('in_progress', 'completed')
+    ),
     CONSTRAINT china_outbound_boxes_sort_nonnegative CHECK (sort_order >= 0),
     CONSTRAINT china_outbound_boxes_measurements_nonnegative CHECK (
       (gross_weight_kg IS NULL OR gross_weight_kg >= 0)
@@ -511,7 +534,20 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE china_outbound_boxes
     ADD COLUMN IF NOT EXISTS length_cm numeric(12, 2),
     ADD COLUMN IF NOT EXISTS width_cm numeric(12, 2),
-    ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2);
+    ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2),
+    ADD COLUMN IF NOT EXISTS completion_status varchar(20);
+
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'china_outbound_boxes_completion_status'
+        AND conrelid = 'china_outbound_boxes'::regclass
+    ) THEN
+      ALTER TABLE china_outbound_boxes ADD CONSTRAINT china_outbound_boxes_completion_status
+        CHECK (completion_status IS NULL OR completion_status IN ('in_progress', 'completed'));
+    END IF;
+  END $$;
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_boxes_shipment_box_no
     ON china_outbound_boxes(shipment_id, box_no);
@@ -1576,8 +1612,130 @@ export async function saveChinaOutboundBoxDimensions(input: {
       .where(eq(chinaOutboundBoxes.id, box.id))
       .returning()
     if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
+    const current = [box.lengthCm, box.widthCm, box.heightCm].map((value) => value == null ? null : Number(value))
+    if (current[0] !== dimensions.lengthCm || current[1] !== dimensions.widthCm || current[2] !== dimensions.heightCm) {
+      await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, [box.id])
+    }
     return updated
   })
+}
+
+/** Save a batch atomically, without treating the separate seal state as progress. */
+export async function saveChinaOutboundBoxCompletionStatuses(input: {
+  userId: string
+  shipmentId: string
+  updates: Array<{ boxId: string; status: ChinaOutboundCompletionStatus }>
+}) {
+  validateCompletionUpdates(input.updates.map(({ boxId, status }) => ({ id: boxId, status })))
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const ids = input.updates.map((update) => update.boxId)
+    const [boxes, items] = await Promise.all([
+      tx.select().from(chinaOutboundBoxes).where(and(
+        eq(chinaOutboundBoxes.userId, input.userId),
+        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        inArray(chinaOutboundBoxes.id, ids),
+      )),
+      tx.select({ boxId: chinaOutboundBoxItems.boxId }).from(chinaOutboundBoxItems).where(and(
+        eq(chinaOutboundBoxItems.userId, input.userId),
+        eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+        inArray(chinaOutboundBoxItems.boxId, ids),
+      )),
+    ])
+    const boxesById = new Map(boxes.map((box) => [box.id, box]))
+    const filledBoxIds = new Set(items.map((item) => item.boxId))
+    for (const update of input.updates) {
+      const box = boxesById.get(update.boxId)
+      if (!box) throw new Error('해당 출고작업의 박스를 찾을 수 없습니다.')
+      if (update.status === 'completed' && !filledBoxIds.has(box.id)) {
+        throw new Error(`${box.boxNo}에 상품이 없어 완료로 표시할 수 없습니다.`)
+      }
+    }
+    for (const status of CHINA_OUTBOUND_BOX_SPLIT_STATUSES) {
+      const idsForStatus = input.updates.filter((update) => update.status === status).map((update) => update.boxId)
+      if (idsForStatus.length === 0) continue
+      await tx.update(chinaOutboundBoxes).set({ completionStatus: status, updatedAt: new Date() }).where(and(
+        eq(chinaOutboundBoxes.userId, input.userId),
+        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        inArray(chinaOutboundBoxes.id, idsForStatus),
+      ))
+    }
+    const inProgressBoxIds = new Set(input.updates.filter((update) => update.status === 'in_progress').map((update) => update.boxId))
+    const palletIds = boxes
+      .filter((box) => inProgressBoxIds.has(box.id))
+      .flatMap((box) => box.palletId ? [box.palletId] : [])
+    await markChinaOutboundPalletsChanged(tx, input.userId, shipment.id, palletIds)
+  })
+}
+
+export async function saveChinaOutboundPalletCompletionStatuses(input: {
+  userId: string
+  shipmentId: string
+  updates: Array<{ palletId: string; status: ChinaOutboundCompletionStatus }>
+}) {
+  validateCompletionUpdates(input.updates.map(({ palletId, status }) => ({ id: palletId, status })))
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const ids = input.updates.map((update) => update.palletId)
+    const [pallets, boxes, items] = await Promise.all([
+      tx.select().from(chinaOutboundPallets).where(and(
+        eq(chinaOutboundPallets.userId, input.userId),
+        eq(chinaOutboundPallets.shipmentId, shipment.id),
+        inArray(chinaOutboundPallets.id, ids),
+      )),
+      tx.select().from(chinaOutboundBoxes).where(and(
+        eq(chinaOutboundBoxes.userId, input.userId),
+        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        inArray(chinaOutboundBoxes.palletId, ids),
+      )),
+      tx.select({ boxId: chinaOutboundBoxItems.boxId }).from(chinaOutboundBoxItems).where(and(
+        eq(chinaOutboundBoxItems.userId, input.userId),
+        eq(chinaOutboundBoxItems.shipmentId, shipment.id),
+      )),
+    ])
+    const palletsById = new Map(pallets.map((pallet) => [pallet.id, pallet]))
+    const filledBoxIds = new Set(items.map((item) => item.boxId))
+    const filledBoxesByPallet = new Map<string, ChinaOutboundBoxRow[]>()
+    for (const box of boxes) {
+      if (!box.palletId || !filledBoxIds.has(box.id)) continue
+      const group = filledBoxesByPallet.get(box.palletId) ?? []
+      group.push(box)
+      filledBoxesByPallet.set(box.palletId, group)
+    }
+    for (const update of input.updates) {
+      const pallet = palletsById.get(update.palletId)
+      if (!pallet) throw new Error('해당 출고작업의 파렛트를 찾을 수 없습니다.')
+      if (update.status !== 'completed') continue
+      const filledBoxes = filledBoxesByPallet.get(pallet.id) ?? []
+      if (filledBoxes.length === 0) throw new Error(`${pallet.palletNo}에 적재된 박스가 없어 완료로 표시할 수 없습니다.`)
+      if (filledBoxes.some((box) => box.completionStatus === 'in_progress')) {
+        throw new Error(`${pallet.palletNo}에 진행 중인 박스가 있습니다. 박스를 먼저 완료로 저장해주세요.`)
+      }
+    }
+    for (const status of CHINA_OUTBOUND_BOX_SPLIT_STATUSES) {
+      const idsForStatus = input.updates.filter((update) => update.status === status).map((update) => update.palletId)
+      if (idsForStatus.length === 0) continue
+      await tx.update(chinaOutboundPallets).set({ completionStatus: status, updatedAt: new Date() }).where(and(
+        eq(chinaOutboundPallets.userId, input.userId),
+        eq(chinaOutboundPallets.shipmentId, shipment.id),
+        inArray(chinaOutboundPallets.id, idsForStatus),
+      ))
+    }
+  })
+}
+
+function validateCompletionUpdates(updates: Array<{ id: string; status: ChinaOutboundCompletionStatus }>) {
+  if (updates.length === 0 || updates.length > 5_000) throw new Error('저장할 상태를 선택해주세요.')
+  const ids = new Set<string>()
+  for (const update of updates) {
+    if (!update.id || ids.has(update.id)) throw new Error('중복되거나 잘못된 항목이 있습니다.')
+    if (update.status !== 'in_progress' && update.status !== 'completed') throw new Error('상태를 확인해주세요.')
+    ids.add(update.id)
+  }
 }
 
 /**
@@ -1803,6 +1961,7 @@ export async function addChinaOutboundBoxItem(input: {
         quantity,
       })
     }
+    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, [box.id])
 
     const nextPackedQuantity = shipmentItem.packedQuantity + quantity
     await tx
@@ -1860,7 +2019,7 @@ export async function saveChinaOutboundItemPacking(input: {
         .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id)))
         .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
       tx
-        .select({ id: chinaOutboundBoxItems.id, boxId: chinaOutboundBoxItems.boxId, shipmentItemId: chinaOutboundBoxItems.shipmentItemId })
+        .select({ id: chinaOutboundBoxItems.id, boxId: chinaOutboundBoxItems.boxId, shipmentItemId: chinaOutboundBoxItems.shipmentItemId, quantity: chinaOutboundBoxItems.quantity })
         .from(chinaOutboundBoxItems)
         .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, shipment.id))),
     ])
@@ -1883,6 +2042,21 @@ export async function saveChinaOutboundItemPacking(input: {
     }
 
     const previousBoxIds = new Set(existingBoxItems.filter((item) => item.shipmentItemId === shipmentItem.id).map((item) => item.boxId))
+    const previousByBox = new Map(existingBoxItems.filter((item) => item.shipmentItemId === shipmentItem.id).map((item) => [item.boxId, item.quantity]))
+    const nextByBox = new Map(resolvedAllocations.map((allocation) => [allocation.box.id, allocation.quantity]))
+    const affectedBoxIds = new Set<string>()
+    const affectedPalletIds = new Set<string>()
+    for (const box of boxes) {
+      if (previousByBox.get(box.id) !== nextByBox.get(box.id)) affectedBoxIds.add(box.id)
+      if (affectedBoxIds.has(box.id) && box.palletId) affectedPalletIds.add(box.palletId)
+    }
+    for (const allocation of resolvedAllocations) {
+      if (allocation.box.palletId !== allocation.pallet.id) {
+        if (allocation.box.palletId) affectedPalletIds.add(allocation.box.palletId)
+        affectedPalletIds.add(allocation.pallet.id)
+      }
+      if (affectedBoxIds.has(allocation.box.id)) affectedPalletIds.add(allocation.pallet.id)
+    }
     if (previousBoxIds.size > 0) {
       await tx
         .delete(chinaOutboundBoxItems)
@@ -1915,6 +2089,8 @@ export async function saveChinaOutboundItemPacking(input: {
         quantity: allocation.quantity,
       })
     }
+    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, [...affectedBoxIds])
+    await markChinaOutboundPalletsChanged(tx, input.userId, shipment.id, [...affectedPalletIds])
 
     await tx
       .update(chinaOutboundShipmentItems)
@@ -1963,6 +2139,7 @@ export async function removeChinaOutboundBoxItem(input: {
     const shipmentItem = await getChinaOutboundShipmentItem(tx, input.userId, shipment.id, boxItem.shipmentItemId)
 
     await tx.delete(chinaOutboundBoxItems).where(eq(chinaOutboundBoxItems.id, boxItem.id))
+    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, [boxItem.boxId])
     await tx
       .update(chinaOutboundShipmentItems)
       .set({
@@ -2456,19 +2633,49 @@ async function assertShipmentFullyPacked(
   if (statusUnfinished) {
     throw new Error(`${statusUnfinished.sku}의 박스분할 상태가 진행 중입니다. 박스분할을 확인한 뒤 완료로 저장해주세요.`)
   }
-  const [boxes, packedBoxItems] = await Promise.all([
+  const [boxes, packedBoxItems, pallets] = await Promise.all([
     tx
-      .select({ id: chinaOutboundBoxes.id, palletId: chinaOutboundBoxes.palletId })
+      .select({ id: chinaOutboundBoxes.id, boxNo: chinaOutboundBoxes.boxNo, palletId: chinaOutboundBoxes.palletId, completionStatus: chinaOutboundBoxes.completionStatus })
       .from(chinaOutboundBoxes)
       .where(and(eq(chinaOutboundBoxes.userId, userId), eq(chinaOutboundBoxes.shipmentId, shipmentId))),
     tx
       .select({ boxId: chinaOutboundBoxItems.boxId })
       .from(chinaOutboundBoxItems)
       .where(and(eq(chinaOutboundBoxItems.userId, userId), eq(chinaOutboundBoxItems.shipmentId, shipmentId))),
+    tx
+      .select({ id: chinaOutboundPallets.id, palletNo: chinaOutboundPallets.palletNo, completionStatus: chinaOutboundPallets.completionStatus })
+      .from(chinaOutboundPallets)
+      .where(and(eq(chinaOutboundPallets.userId, userId), eq(chinaOutboundPallets.shipmentId, shipmentId))),
   ])
   if (boxes.length === 0) throw new Error('박스를 하나 이상 등록해주세요.')
   const packedBoxIds = new Set(packedBoxItems.map((boxItem) => boxItem.boxId))
   if (boxes.some((box) => packedBoxIds.has(box.id) && !box.palletId)) throw new Error('상품이 담긴 박스는 파렛트 번호를 지정해주세요.')
+  const unfinishedBox = boxes.find((box) => packedBoxIds.has(box.id) && box.completionStatus === 'in_progress')
+  if (unfinishedBox) throw new Error(`${unfinishedBox.boxNo} 박스 상태가 진행 중입니다. 완료로 저장해주세요.`)
+  const usedPalletIds = new Set(boxes.flatMap((box) => packedBoxIds.has(box.id) && box.palletId ? [box.palletId] : []))
+  const unfinishedPallet = pallets.find((pallet) => usedPalletIds.has(pallet.id) && pallet.completionStatus === 'in_progress')
+  if (unfinishedPallet) throw new Error(`${unfinishedPallet.palletNo} 파렛트 상태가 진행 중입니다. 완료로 저장해주세요.`)
+}
+
+async function markChinaOutboundPalletsChanged(tx: DbTransaction, userId: string, shipmentId: string, palletIds: string[]) {
+  const ids = [...new Set(palletIds)]
+  if (ids.length === 0) return
+  await tx.update(chinaOutboundPallets).set({ completionStatus: 'in_progress', updatedAt: new Date() }).where(and(
+    eq(chinaOutboundPallets.userId, userId),
+    eq(chinaOutboundPallets.shipmentId, shipmentId),
+    inArray(chinaOutboundPallets.id, ids),
+  ))
+}
+
+async function markChinaOutboundBoxesChanged(tx: DbTransaction, userId: string, shipmentId: string, boxIds: string[]) {
+  const ids = [...new Set(boxIds)]
+  if (ids.length === 0) return
+  const updated = await tx.update(chinaOutboundBoxes).set({ completionStatus: 'in_progress', updatedAt: new Date() }).where(and(
+    eq(chinaOutboundBoxes.userId, userId),
+    eq(chinaOutboundBoxes.shipmentId, shipmentId),
+    inArray(chinaOutboundBoxes.id, ids),
+  )).returning({ palletId: chinaOutboundBoxes.palletId })
+  await markChinaOutboundPalletsChanged(tx, userId, shipmentId, updated.flatMap((box) => box.palletId ? [box.palletId] : []))
 }
 
 async function getSaasChinaInventoryForUpdate(tx: DbTransaction, userId: string, inventoryId: string) {
@@ -2737,6 +2944,14 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   }
 
   const previousBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId === input.shipmentItem.id)
+  const previousQuantitiesByBox = new Map(previousBoxItems.map((boxItem) => [boxItem.boxId, boxItem.quantity]))
+  const allocationsByBoxNo = new Map(input.allocations.map((allocation) => [allocation.boxNo, allocation]))
+  const boxesById = new Map(input.boxes.map((box) => [box.id, box]))
+  const changedBoxIds = new Set<string>()
+  for (const previous of previousBoxItems) {
+    const box = boxesById.get(previous.boxId)
+    if (!box || allocationsByBoxNo.get(box.boxNo)?.quantity !== previous.quantity) changedBoxIds.add(previous.boxId)
+  }
   if (previousBoxItems.length > 0) {
     await input.tx
       .delete(chinaOutboundBoxItems)
@@ -2769,7 +2984,11 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
       box = created
       input.boxes.push(created)
       boxesByNo.set(created.boxNo, created)
+      changedBoxIds.add(created.id)
     } else if (dimensions) {
+      if (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm) {
+        changedBoxIds.add(box.id)
+      }
       const [updated] = await input.tx
         .update(chinaOutboundBoxes)
         .set({
@@ -2787,6 +3006,8 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
       boxesByNo.set(updated.boxNo, updated)
     }
 
+    if (previousQuantitiesByBox.get(box.id) !== allocation.quantity) changedBoxIds.add(box.id)
+
     const [boxItem] = await input.tx
       .insert(chinaOutboundBoxItems)
       .values({
@@ -2800,6 +3021,8 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     if (!boxItem) throw new Error('박스 분할 수량을 저장하지 못했습니다.')
     nextBoxItems = [...nextBoxItems, boxItem]
   }
+
+  await markChinaOutboundBoxesChanged(input.tx, input.userId, input.shipment.id, [...changedBoxIds])
 
   await input.tx
     .update(chinaOutboundShipmentItems)
@@ -2826,6 +3049,7 @@ async function assignChinaOutboundBoxesToPalletsInTransaction(input: {
 }) {
   const boxesByNo = new Map(input.boxes.map((box) => [box.boxNo, box]))
   const palletsByNo = new Map(input.pallets.map((pallet) => [pallet.palletNo, pallet]))
+  const changedPalletIds = new Set<string>()
 
   for (const assignment of input.assignments) {
     const box = boxesByNo.get(assignment.boxNo)
@@ -2852,6 +3076,10 @@ async function assignChinaOutboundBoxesToPalletsInTransaction(input: {
       }
     }
 
+    if (box.palletId !== (pallet?.id ?? null)) {
+      if (box.palletId) changedPalletIds.add(box.palletId)
+      if (pallet) changedPalletIds.add(pallet.id)
+    }
     const [updated] = await input.tx
       .update(chinaOutboundBoxes)
       .set({ palletId: pallet?.id ?? null, updatedAt: new Date() })
@@ -2862,6 +3090,7 @@ async function assignChinaOutboundBoxesToPalletsInTransaction(input: {
     if (index >= 0) input.boxes[index] = updated
     boxesByNo.set(updated.boxNo, updated)
   }
+  await markChinaOutboundPalletsChanged(input.tx, input.userId, input.shipment.id, [...changedPalletIds])
 }
 
 function normalizeChinaOutboundBoxDimensions(input: ChinaOutboundBoxDimensionsInput) {

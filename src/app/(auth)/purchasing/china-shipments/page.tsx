@@ -108,7 +108,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
         ? item.boxSplitStatus
         : item.packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress',
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note })),
+    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,
@@ -116,6 +116,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       palletId: box.palletId,
       boxNo: box.boxNo,
       status: box.status,
+      completionStatus: box.completionStatus === 'completed' || box.completionStatus === 'in_progress' ? box.completionStatus : null,
       note: box.note,
       lengthCm: dimensionNumber(box.lengthCm),
       widthCm: dimensionNumber(box.widthCm),

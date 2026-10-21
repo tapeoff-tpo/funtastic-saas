@@ -10,6 +10,8 @@ type Draft = {
   kind: DraftKind
   label: string
   snapshot: unknown
+  // Completion statuses are saved after the content they describe.
+  savePriority?: number
   boxDimensions?: Array<{ boxNo: string; dimensions: string }>
   save: () => Promise<boolean>
   saveQuietly?: () => Promise<boolean>
@@ -129,7 +131,9 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
 
   async function saveAndNavigate() {
     if (!pendingNavigation || busyRef.current) return
-    const currentDrafts = [...drafts.current.entries()].filter(([, draft]) => !pendingNavigation.kinds || pendingNavigation.kinds.includes(draft.kind))
+    const currentDrafts = [...drafts.current.entries()]
+      .filter(([, draft]) => !pendingNavigation.kinds || pendingNavigation.kinds.includes(draft.kind))
+      .sort(([, left], [, right]) => (left.savePriority ?? 0) - (right.savePriority ?? 0))
     const hasWorkbook = currentDrafts.some(([, draft]) => draft.kind === 'workbook')
     const hasDirectPacking = currentDrafts.some(([, draft]) => draft.kind === 'box' || draft.kind === 'pallet')
     if (hasWorkbook && hasDirectPacking) {

@@ -21,8 +21,10 @@ import {
   receiveSaasChinaInventory,
   removeChinaOutboundBoxItem,
   saveChinaOutboundBoxDimensions,
+  saveChinaOutboundBoxCompletionStatuses,
   saveChinaOutboundItemBoxSplits,
   saveChinaOutboundItemPacking,
+  saveChinaOutboundPalletCompletionStatuses,
   updateChinaOutboundShipment,
 } from '@/lib/purchasing/saas-china-outbound'
 
@@ -139,6 +141,22 @@ const assignPalletsSchema = z.object({
     boxNo: text('박스 번호', 100),
     palletNo: z.string().trim().max(100, '파렛트 번호는 100자 이하로 입력해주세요.').nullable(),
   })).max(5_000, '파렛트 배정은 5,000개 이하로 입력해주세요.'),
+})
+
+const completionStatus = z.enum(['in_progress', 'completed'])
+const saveBoxCompletionStatusesSchema = z.object({
+  shipmentId,
+  updates: z.array(z.object({
+    boxId: z.string().uuid('박스를 확인해주세요.'),
+    status: completionStatus,
+  })).min(1, '저장할 박스를 선택해주세요.').max(5_000),
+})
+const savePalletCompletionStatusesSchema = z.object({
+  shipmentId,
+  updates: z.array(z.object({
+    palletId: z.string().uuid('파렛트를 확인해주세요.'),
+    status: completionStatus,
+  })).min(1, '저장할 파렛트를 선택해주세요.').max(5_000),
 })
 
 const configurePackagingSchema = z.object({
@@ -263,6 +281,24 @@ export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Prom
     const value = saveItemBoxSplitsSchema.parse(input)
     const actor = await getActor()
     await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundBoxCompletionStatusesAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = saveBoxCompletionStatusesSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundBoxCompletionStatuses({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundPalletCompletionStatusesAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = savePalletCompletionStatusesSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundPalletCompletionStatuses({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

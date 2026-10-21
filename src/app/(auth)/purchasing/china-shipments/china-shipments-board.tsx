@@ -491,6 +491,19 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
     setBoxPage(1)
   }
 
+  function editSavedBoxItem(itemId: string) {
+    const itemIndex = sortedBoxSplitItems.findIndex((item) => item.id === itemId)
+    if (itemIndex < 0) return
+
+    guard.requestNavigation(() => {
+      setBoxSplitItemFilter('all')
+      setBoxPage(Math.floor(itemIndex / pageSize) + 1)
+      window.setTimeout(() => {
+        document.getElementById(`shipment-box-item-${itemId}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      }, 0)
+    }, ['box'])
+  }
+
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
       await guard.runTask(async () => {
@@ -539,7 +552,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       {stage === 'items' ? <section className="space-y-3"><ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} editable={editable} isPending={isPending} /><OutboundItemsPanel items={items} boxItemsByItem={boxItemsByItem} /></section> : null}
 
       {stage === 'boxes' ? <section className="space-y-4">
-        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} onFilterChange={(filter) => setSavedBoxFilter(filter)} />
+        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} onFilterChange={(filter) => setSavedBoxFilter(filter)} onEditItem={editSavedBoxItem} />
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <div role="group" aria-label="박스분할 품목 상태 필터" className="flex flex-wrap gap-2">
               <button type="button" aria-pressed={boxSplitItemFilter === 'all'} onClick={() => changeBoxSplitItemFilter('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 품목 {sortedBoxSplitItems.length.toLocaleString('ko-KR')}</button>
@@ -665,7 +678,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
   const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
   const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
     ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
-    : [createBoxSplitDraft(item.sku)])))
+    : [createBoxSplitDraft()])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)
   const isComplete = item.packedQuantity === item.reservedQuantity
@@ -716,7 +729,140 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
 
   function save() { void guard.runTask(saveDraft) }
 
-  return <article className="overflow-hidden rounded-lg border bg-background"><div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 md:flex-row md:items-center md:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{item.sku}</p><ProgressBadge completed={isComplete} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} /></div><p className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개</p></div><div className="overflow-x-auto"><table className="min-w-[880px] w-full text-sm"><thead className="bg-muted/10 text-xs text-muted-foreground"><tr><th className="w-[22%] px-3 py-2 text-left font-medium">박스번호</th><th className="w-[14%] px-3 py-2 text-right font-medium">적재수량</th><th className="w-[13%] px-3 py-2 text-right font-medium">가로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">세로(cm)</th><th className="w-[13%] px-3 py-2 text-right font-medium">높이(cm)</th><th className="w-[15%] px-3 py-2 text-right font-medium">CBM</th><th className="w-[10%] px-3 py-2 text-center font-medium">관리</th></tr></thead><tbody>{drafts.map((draft) => { const cbm = calculateChinaOutboundBoxCbm({ lengthCm: optionalNumber(draft.lengthCm), widthCm: optionalNumber(draft.widthCm), heightCm: optionalNumber(draft.heightCm) }); return <tr key={draft.key} className="border-t"><td className="px-3 py-2"><input value={draft.boxNo} onChange={(event) => patchDraft(draft.key, { boxNo: event.target.value })} disabled={!editable || isPending} className={compactInputClass} placeholder="예: A-01" /></td><td className="px-3 py-2"><input type="number" min="1" step="1" value={draft.quantity} onChange={(event) => patchDraft(draft.key, { quantity: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="0" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.lengthCm} onChange={(event) => patchDraft(draft.key, { lengthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.widthCm} onChange={(event) => patchDraft(draft.key, { widthCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2"><input type="number" min="0" step="0.01" value={draft.heightCm} onChange={(event) => patchDraft(draft.key, { heightCm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder="선택" /></td><td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><button type="button" disabled={!editable || isPending || drafts.length === 1} onClick={() => setDrafts((current) => current.filter((candidate) => candidate.key !== draft.key))} className="h-8 rounded-md border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40">삭제</button></td></tr> })}</tbody></table></div><div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</p><div className="flex gap-2"><button type="button" disabled={!editable || isPending} onClick={() => setDrafts((current) => [...current, createBoxSplitDraft(item.sku, current.length + 1)])} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> 박스 추가</button><button type="button" disabled={!editable || isPending} onClick={save} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 박스분할 저장</button></div></div></article>
+  return (
+    <article id={`shipment-box-item-${item.id}`} className="overflow-hidden rounded-lg border bg-background">
+      <div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">{item.sku}</p>
+            <ProgressBadge completed={isComplete} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
+          </div>
+          <p className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+        </div>
+        <p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>
+          입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[880px] w-full text-sm">
+          <thead className="bg-muted/10 text-xs text-muted-foreground">
+            <tr>
+              <th className="w-[22%] px-3 py-2 text-left font-medium">박스번호</th>
+              <th className="w-[14%] px-3 py-2 text-right font-medium">적재수량</th>
+              <th className="w-[13%] px-3 py-2 text-right font-medium">가로(cm)</th>
+              <th className="w-[13%] px-3 py-2 text-right font-medium">세로(cm)</th>
+              <th className="w-[13%] px-3 py-2 text-right font-medium">높이(cm)</th>
+              <th className="w-[15%] px-3 py-2 text-right font-medium">CBM</th>
+              <th className="w-[10%] px-3 py-2 text-center font-medium">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {drafts.map((draft) => {
+              const cbm = calculateChinaOutboundBoxCbm({
+                lengthCm: optionalNumber(draft.lengthCm),
+                widthCm: optionalNumber(draft.widthCm),
+                heightCm: optionalNumber(draft.heightCm),
+              })
+              return (
+                <tr key={draft.key} className="border-t">
+                  <td className="px-3 py-2">
+                    <input
+                      value={draft.boxNo}
+                      onChange={(event) => patchDraft(draft.key, { boxNo: event.target.value })}
+                      disabled={!editable || isPending}
+                      inputMode="numeric"
+                      className={compactInputClass}
+                      placeholder="1"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={draft.quantity}
+                      onChange={(event) => patchDraft(draft.key, { quantity: event.target.value })}
+                      disabled={!editable || isPending}
+                      className={`${compactInputClass} text-right tabular-nums`}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.lengthCm}
+                      onChange={(event) => patchDraft(draft.key, { lengthCm: event.target.value })}
+                      disabled={!editable || isPending}
+                      className={`${compactInputClass} text-right tabular-nums`}
+                      placeholder="선택"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.widthCm}
+                      onChange={(event) => patchDraft(draft.key, { widthCm: event.target.value })}
+                      disabled={!editable || isPending}
+                      className={`${compactInputClass} text-right tabular-nums`}
+                      placeholder="선택"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={draft.heightCm}
+                      onChange={(event) => patchDraft(draft.key, { heightCm: event.target.value })}
+                      disabled={!editable || isPending}
+                      className={`${compactInputClass} text-right tabular-nums`}
+                      placeholder="선택"
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      disabled={!editable || isPending || drafts.length === 1}
+                      onClick={() => setDrafts((current) => current.filter((candidate) => candidate.key !== draft.key))}
+                      className="h-8 rounded-md border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+                    >
+                      삭제
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3">
+        <p className="text-xs text-muted-foreground">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={!editable || isPending}
+            onClick={() => setDrafts((current) => [...current, createBoxSplitDraft()])}
+            className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"
+          >
+            <Plus className="size-3.5" /> 박스 추가
+          </button>
+          <button
+            type="button"
+            disabled={!editable || isPending}
+            onClick={save}
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          >
+            {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 박스분할 저장
+          </button>
+        </div>
+      </div>
+    </article>
+  )
 }
 
 function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, palletById, editable, isPending }: {
@@ -892,11 +1038,13 @@ function buildSavedBoxSummaries({ boxes, boxItemsByBox, itemById, palletById }: 
   })
 }
 
-function SavedBoxContentsPanel({ shipmentId, summaries, filter, onFilterChange }: {
+function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, onFilterChange, onEditItem }: {
   shipmentId: string
   summaries: SavedBoxSummary[]
   filter: SavedBoxFilter
+  editable: boolean
   onFilterChange: (filter: SavedBoxFilter) => void
+  onEditItem: (itemId: string) => void
 }) {
   const savedBoxes = summaries.filter((summary) => summary.quantity > 0)
   const visibleBoxes = filter === 'saved' ? savedBoxes : summaries
@@ -909,7 +1057,74 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, onFilterChange }
         <button type="button" aria-pressed={filter === 'all'} onClick={() => onFilterChange('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 박스 {summaries.length.toLocaleString('ko-KR')}</button>
       </div>
     </div>
-    {visibleBoxes.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : <div className="overflow-x-auto"><table className="min-w-[900px] w-full text-sm"><caption className="sr-only">박스별 저장 상태, 적재 상품, 수량, 파렛트 위치, 부착용 쉽먼트 다운로드</caption><thead className="bg-muted/10 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">저장 상태</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">총수량</th><th className="px-3 py-2 text-left font-medium">파렛트 위치</th><th className="px-3 py-2 text-center font-medium">부착용 쉽먼트</th></tr></thead><tbody>{visibleBoxes.map((summary) => { const hasContents = summary.quantity > 0; const boxLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`; return <tr key={summary.box.id} className="border-t align-top"><td className="px-3 py-3 font-medium">{summary.box.boxNo}</td><td className="px-3 py-3"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${hasContents ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>{hasContents ? '저장됨 · 내용 있음' : '내용 없음'}</span></td><td className="px-3 py-3 text-xs leading-5">{summary.items.length > 0 ? <ul className="space-y-1">{summary.items.map(({ item, quantity }) => <li key={item.id}>{item.sku} · {item.productName}{item.optionName ? ` · ${item.optionName}` : ''} <span className="tabular-nums text-muted-foreground">{quantity.toLocaleString('ko-KR')}개</span></li>)}</ul> : hasContents ? <span className="text-muted-foreground">품목 정보를 찾지 못했습니다.</span> : <span className="text-muted-foreground">-</span>}</td><td className="px-3 py-3 text-right tabular-nums">{summary.quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-xs">{summary.palletNo ? `파렛트 ${summary.palletNo}` : <span className="text-muted-foreground">미배정</span>}</td><td className="px-3 py-3 text-center">{hasContents ? <a href={boxLabelsHref} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-muted"><Download className="size-3.5" /> 박스별 다운로드</a> : <span className="text-xs text-muted-foreground">-</span>}</td></tr> })}</tbody></table></div>}
+    {visibleBoxes.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : (
+      <div className="overflow-x-auto">
+        <table className="min-w-[980px] w-full text-sm">
+          <caption className="sr-only">박스별 저장 상태, 적재 상품, 수량, 파렛트 위치, 부착용 쉽먼트 다운로드 및 수정</caption>
+          <thead className="bg-muted/10 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">박스번호</th>
+              <th className="px-3 py-2 text-left font-medium">저장 상태</th>
+              <th className="px-3 py-2 text-left font-medium">적재 상품</th>
+              <th className="px-3 py-2 text-right font-medium">총수량</th>
+              <th className="px-3 py-2 text-left font-medium">파렛트 위치</th>
+              <th className="px-3 py-2 text-center font-medium">부착용 쉽먼트</th>
+              <th className="px-3 py-2 text-center font-medium">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleBoxes.map((summary) => {
+              const hasContents = summary.quantity > 0
+              const boxLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`
+              const firstItem = summary.items[0]?.item
+              return (
+                <tr key={summary.box.id} className="border-t align-top">
+                  <td className="px-3 py-3 font-medium">{summary.box.boxNo}</td>
+                  <td className="px-3 py-3">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${hasContents ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>
+                      {hasContents ? '저장됨 · 내용 있음' : '내용 없음'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-xs leading-5">
+                    {summary.items.length > 0 ? (
+                      <ul className="space-y-1">
+                        {summary.items.map(({ item, quantity }) => (
+                          <li key={item.id}>
+                            {item.sku} · {item.productName}{item.optionName ? ` · ${item.optionName}` : ''}{' '}
+                            <span className="tabular-nums text-muted-foreground">{quantity.toLocaleString('ko-KR')}개</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : hasContents ? <span className="text-muted-foreground">품목 정보를 찾지 못했습니다.</span> : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">{summary.quantity.toLocaleString('ko-KR')}개</td>
+                  <td className="px-3 py-3 text-xs">{summary.palletNo ? `파렛트 ${summary.palletNo}` : <span className="text-muted-foreground">미배정</span>}</td>
+                  <td className="px-3 py-3 text-center">
+                    {hasContents ? (
+                      <a href={boxLabelsHref} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-muted">
+                        <Download className="size-3.5" /> 박스별 다운로드
+                      </a>
+                    ) : <span className="text-xs text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {hasContents && editable && firstItem ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditItem(firstItem.id)}
+                        aria-label={`${summary.box.boxNo} 박스 내용 수정`}
+                        className="h-8 rounded-md border bg-background px-2.5 text-xs font-medium hover:bg-muted"
+                      >
+                        수정
+                      </button>
+                    ) : <span className="text-xs text-muted-foreground">-</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
   </section>
 }
 
@@ -1004,8 +1219,8 @@ function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
 
-function createBoxSplitDraft(sku: string, order = 1): BoxSplitDraft {
-  return { key: `${sku}-${Date.now()}-${Math.random()}`, boxNo: `${sku}-${order}`, quantity: '', lengthCm: '', widthCm: '', heightCm: '' }
+function createBoxSplitDraft(): BoxSplitDraft {
+  return { key: `box-${Date.now()}-${Math.random()}`, boxNo: '', quantity: '', lengthCm: '', widthCm: '', heightCm: '' }
 }
 
 function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {

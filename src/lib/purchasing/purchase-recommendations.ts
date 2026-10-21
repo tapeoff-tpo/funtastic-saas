@@ -4,6 +4,7 @@ import {
   chinaWarehouseInventory,
   inventory,
   products,
+  purchaseBudgetComparisons,
   purchaseRequestBatches,
   purchaseRequestItems,
 } from '@/lib/db/schema'
@@ -16,6 +17,8 @@ import {
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 import { cleanupExpiredEcountPurchaseOrderRows } from './purchase-order-retention'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { buildPurchaseBudgetComparison } from './purchase-budget-comparison'
+import { ensurePurchaseBudgetComparisonSchema } from './purchase-budget-comparison-store'
 
 type ProductGroupMoqRule = {
   productName: string
@@ -663,6 +666,8 @@ export async function generatePurchaseRecommendations(input: {
     : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
 
+  if (budgetKrw !== null) await ensurePurchaseBudgetComparisonSchema()
+
   // Expired order rows must not inflate the in-progress pipeline quantity.
   const [exchangeRateReference] = await Promise.all([
     getLatestCnyKrwReferenceRate(),
@@ -844,11 +849,14 @@ export async function generatePurchaseRecommendations(input: {
       .select({
         id: purchaseRequestItems.id,
         sku: purchaseRequestItems.sku,
+        productName: purchaseRequestItems.productName,
+        optionName: purchaseRequestItems.optionName,
         status: purchaseRequestItems.status,
         batchId: purchaseRequestItems.batchId,
         requestedQuantity: purchaseRequestItems.requestedQuantity,
         actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
         chinaReceivedQuantity: purchaseRequestItems.chinaReceivedQuantity,
+        costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
         rawData: purchaseRequestItems.rawData,
       })
       .from(purchaseRequestItems)
@@ -1013,43 +1021,88 @@ export async function generatePurchaseRecommendations(input: {
       moqBudgetExcludedGroupCount: allocation.moqBudgetExcludedGroupCount,
       salesAnomalyCount,
     }
-    if (newReviewRows.length === 0) return { ...resultBase, created: 0 }
+    let batchId: string | undefined
+    if (newReviewRows.length > 0) {
+      const [batch] = await tx
+        .insert(purchaseRequestBatches)
+        .values({
+          userId: input.userId,
+          sourceFileName: `auto_purchase_recommendation ${formatSeoulDate(now)}`,
+          sourceSheetName: 'auto_recommendation',
+          totalRows: inventoryRows.length,
+          importedRows: newReviewRows.length,
+          skippedRows: inventoryRows.length - newReviewRows.length,
+          uploadedByUserId: input.requestedByUserId,
+        })
+        .returning({ id: purchaseRequestBatches.id })
+      batchId = batch.id
 
-    const [batch] = await tx
-      .insert(purchaseRequestBatches)
-      .values({
-        userId: input.userId,
-        sourceFileName: `auto_purchase_recommendation ${formatSeoulDate(now)}`,
-        sourceSheetName: 'auto_recommendation',
-        totalRows: inventoryRows.length,
-        importedRows: newReviewRows.length,
-        skippedRows: inventoryRows.length - newReviewRows.length,
-        uploadedByUserId: input.requestedByUserId,
+      let rowNumber = 1
+      for (const chunk of chunks(newReviewRows, 250)) {
+        await tx.insert(purchaseRequestItems).values(chunk.map((item, index) => ({
+          userId: input.userId,
+          batchId: batch.id,
+          rowNumber: rowNumber + index,
+          requestDate: formatSeoulDate(now),
+          sku: item.row.sku,
+          productName: item.row.productName,
+          optionName: item.row.optionName,
+          requestedQuantity: item.allocatedQuantity,
+          recommendationBasis: 'manual_stock_months',
+          salesAverageWindowDays: 90,
+          isNewProduct: item.isNewProduct,
+          rawData: buildAutoRecommendationRawData({ item, targetStockMonths, budgetKrw, now }),
+        })))
+        rowNumber += chunk.length
+      }
+    }
+
+    if (budgetKrw !== null) {
+      const afterRows = await tx.select({
+        sku: purchaseRequestItems.sku,
+        productName: purchaseRequestItems.productName,
+        optionName: purchaseRequestItems.optionName,
+        requestedQuantity: purchaseRequestItems.requestedQuantity,
+        costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
+        rawData: purchaseRequestItems.rawData,
+      }).from(purchaseRequestItems).where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        eq(purchaseRequestItems.status, 'requested'),
+      ))
+      const snapshot = buildPurchaseBudgetComparison({
+        calculatedAt: now,
+        targetStockMonths,
+        budgetKrw,
+        spentBudgetKrw: allocation.spentBudgetKrw,
+        exchangeRateKrw: exchangeRateReference.rate,
+        beforeRows: activeRequestRows.filter((row) => row.status === 'requested'),
+        afterRows,
+        productCosts: canonicalProductRows,
+        candidates: recommendationCandidates.map((item) => ({
+          sku: item.row.sku,
+          productName: item.row.productName,
+          optionName: item.row.optionName,
+          recommendedQuantity: item.recommendedQuantity,
+          allocatedQuantity: allocatedQuantityBySku.get(item.row.sku) ?? 0,
+          availableStock: item.row.availableStock,
+          pipelineQuantity: item.pipelineQuantity,
+          targetStockQuantity: item.calculation.targetStockQuantity,
+          unitCostYuan: item.unitCostYuan,
+          unitCostKrw: item.unitCostKrw,
+          moqProductGroupName: item.moqProductGroupName,
+          siblingOptionBundleGroupName: item.siblingOptionBundleGroupName,
+        })),
       })
-      .returning({ id: purchaseRequestBatches.id })
-
-    let rowNumber = 1
-    for (const chunk of chunks(newReviewRows, 250)) {
-      await tx.insert(purchaseRequestItems).values(chunk.map((item, index) => ({
+      await tx.insert(purchaseBudgetComparisons).values({
         userId: input.userId,
-        batchId: batch.id,
-        rowNumber: rowNumber + index,
-        requestDate: formatSeoulDate(now),
-        sku: item.row.sku,
-        productName: item.row.productName,
-        optionName: item.row.optionName,
-        requestedQuantity: item.allocatedQuantity,
-        recommendationBasis: 'manual_stock_months',
-        salesAverageWindowDays: 90,
-        isNewProduct: item.isNewProduct,
-        rawData: buildAutoRecommendationRawData({ item, targetStockMonths, budgetKrw, now }),
-      })))
-      rowNumber += chunk.length
+        snapshot,
+        createdAt: now,
+      })
     }
 
     return {
       ...resultBase,
-      batchId: batch.id,
+      ...(batchId ? { batchId } : {}),
       created: newReviewRows.length,
     }
   })

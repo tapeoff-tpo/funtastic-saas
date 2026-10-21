@@ -686,6 +686,19 @@ export const purchaseRequestBatches = pgTable(
   ],
 )
 
+export const purchaseBudgetComparisons = pgTable(
+  'purchase_budget_comparisons',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('purchase_budget_comparisons_user_created').on(table.userId, table.createdAt),
+  ],
+)
+
 export const purchaseRequestItems = pgTable(
   'purchase_request_items',
   {

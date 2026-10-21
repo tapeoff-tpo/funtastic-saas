@@ -1085,6 +1085,7 @@ export function PurchaseRecommendationGenerator({
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [isDownloadingComparison, setIsDownloadingComparison] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -1204,6 +1205,32 @@ export function PurchaseRecommendationGenerator({
     })
   }
 
+  async function downloadBudgetComparison() {
+    setError(null)
+    setIsDownloadingComparison(true)
+    try {
+      const response = await fetch('/api/purchasing/purchase-requests/budget-comparison', { cache: 'no-store' })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? '예산 비교 엑셀을 다운로드하지 못했습니다.')
+      }
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const encodedName = response.headers.get('content-disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = encodedName ? decodeURIComponent(encodedName) : '발주_예산비교.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : '예산 비교 엑셀을 다운로드하지 못했습니다.')
+    } finally {
+      setIsDownloadingComparison(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
@@ -1253,6 +1280,10 @@ export function PurchaseRecommendationGenerator({
         <Button type="button" onClick={generate} disabled={isPending || activeJobId !== null}>
           {isPending || activeJobId !== null ? <Loader2 className="animate-spin" /> : <Sparkles />}
           {activeJobId ? '계산 중' : '추천 계산'}
+        </Button>
+        <Button type="button" variant="outline" title="가장 최근에 예산을 적용한 계산의 비교 결과" onClick={downloadBudgetComparison} disabled={isDownloadingComparison || isPending || activeJobId !== null}>
+          {isDownloadingComparison ? <Loader2 className="animate-spin" /> : <Download />}
+          예산 비교 엑셀
         </Button>
       </div>
     </div>

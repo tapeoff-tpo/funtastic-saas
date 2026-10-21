@@ -12,6 +12,7 @@ type Draft = {
   snapshot: unknown
   boxDimensions?: Array<{ boxNo: string; dimensions: string }>
   save: () => Promise<boolean>
+  saveQuietly?: () => Promise<boolean>
   discard: () => void
 }
 

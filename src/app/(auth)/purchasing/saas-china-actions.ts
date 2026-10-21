@@ -117,6 +117,7 @@ const splitDimension = z.coerce.number()
 const saveItemBoxSplitsSchema = z.object({
   shipmentId,
   shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
+  boxSplitStatus: z.enum(['in_progress', 'completed']).optional(),
   allocations: z.array(z.object({
     boxNo: text('박스 번호', 100),
     quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),

@@ -53,6 +53,7 @@ function makeShipment(id: string, name: string, sku: string): ChinaShipmentDetai
       reservedQuantity: 10,
       packedQuantity: 0,
       dispatchedQuantity: 0,
+      boxSplitStatus: 'in_progress',
     }],
     pallets: [],
     boxes: [],
@@ -104,11 +105,21 @@ function makeShipmentWithBox(): ChinaShipmentDetailView {
   }
 }
 
+function makeFullyPackedInProgressShipment(): ChinaShipmentDetailView {
+  return {
+    ...shipmentA,
+    items: [{ ...shipmentA.items[0], packedQuantity: 10, boxSplitStatus: 'in_progress' }],
+    pallets: [{ id: 'pallet-1', palletNo: 'P1', note: null }],
+    boxes: [{ id: 'box-1', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: '1', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
+    boxItems: [{ id: 'allocation-1', boxId: 'box-1', shipmentItemId: 'shared-item-id', quantity: 10 }],
+  }
+}
+
 function makeShipmentWithCompletionFilters(): ChinaShipmentDetailView {
   return {
     ...shipmentA,
     items: [
-      { ...shipmentA.items[0], id: 'complete-item', sku: 'DONE-01', productName: '완료 상품', optionName: '대형', reservedQuantity: 5, packedQuantity: 5 },
+      { ...shipmentA.items[0], id: 'complete-item', sku: 'DONE-01', productName: '완료 상품', optionName: '대형', reservedQuantity: 5, packedQuantity: 5, boxSplitStatus: 'completed' },
       { ...shipmentA.items[0], id: 'progress-item', sku: 'WORK-01', productName: '진행 상품', optionName: '소형', reservedQuantity: 5, packedQuantity: 2 },
       { ...shipmentA.items[0], id: 'waiting-item', sku: 'WAIT-01', productName: '미작업 상품', optionName: null, reservedQuantity: 5, packedQuantity: 0 },
     ],
@@ -158,7 +169,7 @@ function makeShipmentWithCompletedBoxOnLaterPage(): ChinaShipmentDetailView {
   if (!completedItem) throw new Error('완료 품목을 만들지 못했습니다.')
   return {
     ...detail,
-    items: detail.items.map((item) => item.id === completedItem.id ? { ...item, packedQuantity: item.reservedQuantity } : item),
+    items: detail.items.map((item) => item.id === completedItem.id ? { ...item, packedQuantity: item.reservedQuantity, boxSplitStatus: 'completed' } : item),
     boxes: [{ id: 'completed-box', shipmentId: 'a', editable: true, palletId: null, boxNo: '11', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
     boxItems: [{ id: 'completed-allocation', boxId: 'completed-box', shipmentItemId: completedItem.id, quantity: completedItem.reservedQuantity }],
   }
@@ -279,6 +290,111 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByText('WORK-01')).toBeInTheDocument()
     expect(screen.getByText('WAIT-01')).toBeInTheDocument()
     expect(itemEditor('WORK-01').getByPlaceholderText('0')).toHaveValue(3)
+  })
+
+  it('allows a fully packed product to be marked complete with the box split save', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    renderShipment()
+    editBox('10')
+
+    fireEvent.change(screen.getByLabelText('SKU-A 박스분할 상태'), { target: { value: 'completed' } })
+    fireEvent.click(itemEditor('SKU-A').getByRole('button', { name: '박스분할 저장' }))
+
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'a',
+      shipmentItemId: 'shared-item-id',
+      boxSplitStatus: 'completed',
+    })))
+  })
+
+  it('keeps a partially packed product in progress when complete is selected', () => {
+    renderShipment()
+    editBox('3')
+
+    fireEvent.change(screen.getByLabelText('SKU-A 박스분할 상태'), { target: { value: 'completed' } })
+
+    expect(screen.getByLabelText('SKU-A 박스분할 상태')).toHaveValue('in_progress')
+    expect(toastError).toHaveBeenCalledWith('완료는 포장수량이 출고수량과 같을 때 선택할 수 있습니다.')
+  })
+
+  it('requires an explicitly completed box split status before marking the shipment ready', () => {
+    renderShipment(makeFullyPackedInProgressShipment(), 'summary')
+
+    expect(screen.getByText(/박스분할 상태가 진행 중인 품목/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
+  })
+
+  it('saves only the checked box split drafts', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithManyItems(2))
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('1'), { target: { value: '1' } })
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('0'), { target: { value: '3' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('1'), { target: { value: '2' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('0'), { target: { value: '4' } })
+    fireEvent.click(screen.getByLabelText('SKU-01 저장 선택'))
+
+    fireEvent.click(screen.getByRole('button', { name: '선택 저장' }))
+
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledTimes(1))
+    expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({
+      shipmentId: 'a',
+      shipmentItemId: 'item-1',
+      allocations: [{ boxNo: '1', quantity: 3, lengthCm: null, widthCm: null, heightCm: null }],
+    }))
+    expect(saveBoxSplits.mock.calls.some(([input]) => input.shipmentItemId === 'item-2')).toBe(false)
+  })
+
+  it('saves every changed box split with the overall save button', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithManyItems(2))
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('1'), { target: { value: '1' } })
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('0'), { target: { value: '3' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('1'), { target: { value: '2' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('0'), { target: { value: '4' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '전체 저장' }))
+
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledTimes(2))
+    expect(saveBoxSplits.mock.calls.map(([input]) => input.shipmentItemId).sort()).toEqual(['item-1', 'item-2'])
+  })
+
+  it('does not bulk-save conflicting dimensions for the same shared box', () => {
+    renderShipment(makeShipmentWithSharedBoxDimensions())
+    fireEvent.change(itemEditor('SHARED-01').getByDisplayValue('10'), { target: { value: '11' } })
+    fireEvent.change(itemEditor('SHARED-02').getByDisplayValue('10'), { target: { value: '12' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '전체 저장' }))
+
+    expect(saveBoxSplits).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledWith('COMMON-1 박스에 서로 다른 규격이 입력돼 있습니다. 규격을 일치시킨 뒤 저장해주세요.')
+  })
+
+  it('keeps only failed selected drafts checked after a partial batch save', async () => {
+    let secondAttempts = 0
+    saveBoxSplits.mockImplementation(async ({ shipmentItemId }: { shipmentItemId: string }) => {
+      if (shipmentItemId === 'item-1') return { ok: true }
+      secondAttempts += 1
+      return secondAttempts === 1 ? { ok: false, error: '두 번째 품목 저장 실패' } : { ok: true }
+    })
+    renderShipment(makeShipmentWithManyItems(2))
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('1'), { target: { value: '1' } })
+    fireEvent.change(itemEditor('SKU-01').getByPlaceholderText('0'), { target: { value: '3' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('1'), { target: { value: '2' } })
+    fireEvent.change(itemEditor('SKU-02').getByPlaceholderText('0'), { target: { value: '4' } })
+    fireEvent.click(screen.getByLabelText('SKU-01 저장 선택'))
+    fireEvent.click(screen.getByLabelText('SKU-02 저장 선택'))
+
+    fireEvent.click(screen.getByRole('button', { name: '선택 저장' }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(screen.getByText('선택 1개')).toBeInTheDocument()
+    expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-1')).toHaveLength(1)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '선택 저장' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '선택 저장' }))
+
+    await waitFor(() => expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-2')).toHaveLength(2))
+    expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-1')).toHaveLength(1)
   })
 
   it('switches immediately with a clean blank box number', () => {
@@ -496,7 +612,7 @@ describe('ChinaShipmentsBoard', () => {
 
     const refreshed: ChinaShipmentDetailView = {
       ...detail,
-      items: detail.items.map((item) => item.id === 'item-1' ? { ...item, packedQuantity: 10 } : item),
+      items: detail.items.map((item) => item.id === 'item-1' ? { ...item, packedQuantity: 10, boxSplitStatus: 'completed' } : item),
       boxes: [{ id: 'saved-box', shipmentId: 'a', editable: true, palletId: null, boxNo: 'SKU-01-1', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
       boxItems: [{ id: 'saved-allocation', boxId: 'saved-box', shipmentItemId: 'item-1', quantity: 10 }],
     }

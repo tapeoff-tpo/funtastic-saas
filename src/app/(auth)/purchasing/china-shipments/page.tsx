@@ -104,6 +104,9 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       reservedQuantity: item.reservedQuantity,
       packedQuantity: item.packedQuantity,
       dispatchedQuantity: item.dispatchedQuantity,
+      boxSplitStatus: item.boxSplitStatus === 'completed' || item.boxSplitStatus === 'in_progress'
+        ? item.boxSplitStatus
+        : item.packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress',
     })),
     pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note })),
     boxes: detail.boxes.map((box) => ({

@@ -1074,6 +1074,7 @@ export const chinaOutboundShipmentItems = pgTable(
     reservedQuantity: integer('reserved_quantity').notNull(),
     packedQuantity: integer('packed_quantity').notNull().default(0),
     dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),
+    boxSplitStatus: varchar('box_split_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     note: text('note'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1110,6 +1111,10 @@ export const chinaOutboundShipmentItems = pgTable(
     check(
       'china_outbound_shipment_items_dispatched_within_packed',
       sql`${table.dispatchedQuantity} >= 0 AND ${table.dispatchedQuantity} <= ${table.packedQuantity}`,
+    ),
+    check(
+      'china_outbound_shipment_items_box_split_status',
+      sql`${table.boxSplitStatus} IS NULL OR ${table.boxSplitStatus} IN ('in_progress', 'completed')`,
     ),
     check('china_outbound_shipment_items_sort_nonnegative', sql`${table.sortOrder} >= 0`),
   ],

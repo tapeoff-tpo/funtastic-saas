@@ -30,6 +30,15 @@ export const CHINA_OUTBOUND_SHIPMENT_STATUSES = [
 
 export type ChinaOutboundShipmentStatus = (typeof CHINA_OUTBOUND_SHIPMENT_STATUSES)[number]
 
+export const CHINA_OUTBOUND_BOX_SPLIT_STATUSES = ['in_progress', 'completed'] as const
+
+export type ChinaOutboundBoxSplitStatus = (typeof CHINA_OUTBOUND_BOX_SPLIT_STATUSES)[number]
+
+export const CHINA_OUTBOUND_BOX_SPLIT_STATUS_LABELS: Record<ChinaOutboundBoxSplitStatus, string> = {
+  in_progress: '진행 중',
+  completed: '완료',
+}
+
 export const CHINA_OUTBOUND_ACTIVE_SHIPMENT_STATUSES = ['draft', 'packing', 'ready'] as const satisfies readonly ChinaOutboundShipmentStatus[]
 
 export const CHINA_OUTBOUND_SHIPMENT_STATUS_LABELS: Record<ChinaOutboundShipmentStatus, string> = {
@@ -370,6 +379,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     reserved_quantity integer NOT NULL,
     packed_quantity integer NOT NULL DEFAULT 0,
     dispatched_quantity integer NOT NULL DEFAULT 0,
+    box_split_status varchar(20),
     sort_order integer NOT NULL DEFAULT 0,
     note text,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -391,8 +401,27 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     CONSTRAINT china_outbound_shipment_items_dispatched_within_packed CHECK (
       dispatched_quantity >= 0 AND dispatched_quantity <= packed_quantity
     ),
+    CONSTRAINT china_outbound_shipment_items_box_split_status CHECK (
+      box_split_status IS NULL OR box_split_status IN ('in_progress', 'completed')
+    ),
     CONSTRAINT china_outbound_shipment_items_sort_nonnegative CHECK (sort_order >= 0)
   );
+
+  ALTER TABLE china_outbound_shipment_items
+    ADD COLUMN IF NOT EXISTS box_split_status varchar(20);
+
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conname = 'china_outbound_shipment_items_box_split_status'
+    ) THEN
+      ALTER TABLE china_outbound_shipment_items
+        ADD CONSTRAINT china_outbound_shipment_items_box_split_status
+        CHECK (box_split_status IS NULL OR box_split_status IN ('in_progress', 'completed'));
+    END IF;
+  END $$;
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_shipment_items_shipment_inventory
     ON china_outbound_shipment_items(shipment_id, inventory_id);
@@ -1257,6 +1286,9 @@ export async function addChinaOutboundShipmentItems(input: {
           .update(chinaOutboundShipmentItems)
           .set({
             reservedQuantity: existingItem.reservedQuantity + line.quantity,
+            // The newly reserved quantity has not been placed into a box yet.
+            // Do not leave a formerly completed split marked as completed.
+            boxSplitStatus: 'in_progress',
             updatedAt: new Date(),
           })
           .where(and(
@@ -1557,6 +1589,7 @@ export async function saveChinaOutboundItemBoxSplits(input: {
   shipmentId: string
   shipmentItemId: string
   allocations: ChinaOutboundBoxSplitInput[]
+  boxSplitStatus?: ChinaOutboundBoxSplitStatus
 }) {
   await ensureSaasChinaOutboundSchema()
   const allocations = normalizeChinaOutboundBoxSplitAllocations(input.allocations)
@@ -1589,6 +1622,7 @@ export async function saveChinaOutboundItemBoxSplits(input: {
       shipment,
       shipmentItem,
       allocations,
+      boxSplitStatus: input.boxSplitStatus,
       boxes,
       boxItems,
     })
@@ -1770,9 +1804,16 @@ export async function addChinaOutboundBoxItem(input: {
       })
     }
 
+    const nextPackedQuantity = shipmentItem.packedQuantity + quantity
     await tx
       .update(chinaOutboundShipmentItems)
-      .set({ packedQuantity: shipmentItem.packedQuantity + quantity, updatedAt: new Date() })
+      .set({
+        packedQuantity: nextPackedQuantity,
+        boxSplitStatus: nextPackedQuantity === shipmentItem.reservedQuantity
+          ? normalizeChinaOutboundBoxSplitStatus(shipmentItem.boxSplitStatus)
+          : 'in_progress',
+        updatedAt: new Date(),
+      })
       .where(eq(chinaOutboundShipmentItems.id, shipmentItem.id))
     if (shipment.status === 'draft') {
       await tx
@@ -1877,7 +1918,13 @@ export async function saveChinaOutboundItemPacking(input: {
 
     await tx
       .update(chinaOutboundShipmentItems)
-      .set({ packedQuantity: totalQuantity, updatedAt: new Date() })
+      .set({
+        packedQuantity: totalQuantity,
+        boxSplitStatus: totalQuantity === shipmentItem.reservedQuantity
+          ? normalizeChinaOutboundBoxSplitStatus(shipmentItem.boxSplitStatus)
+          : 'in_progress',
+        updatedAt: new Date(),
+      })
       .where(eq(chinaOutboundShipmentItems.id, shipmentItem.id))
     if (shipment.status === 'draft' && totalQuantity > 0) {
       await tx
@@ -1918,7 +1965,11 @@ export async function removeChinaOutboundBoxItem(input: {
     await tx.delete(chinaOutboundBoxItems).where(eq(chinaOutboundBoxItems.id, boxItem.id))
     await tx
       .update(chinaOutboundShipmentItems)
-      .set({ packedQuantity: shipmentItem.packedQuantity - boxItem.quantity, updatedAt: new Date() })
+      .set({
+        packedQuantity: shipmentItem.packedQuantity - boxItem.quantity,
+        boxSplitStatus: 'in_progress',
+        updatedAt: new Date(),
+      })
       .where(eq(chinaOutboundShipmentItems.id, shipmentItem.id))
   })
 }
@@ -2401,6 +2452,10 @@ async function assertShipmentFullyPacked(
   if (unfinished) {
     throw new Error(`${unfinished.sku}의 포장수량(${unfinished.packedQuantity.toLocaleString('ko-KR')})이 출고수량(${unfinished.reservedQuantity.toLocaleString('ko-KR')})과 다릅니다.`)
   }
+  const statusUnfinished = items.find((item) => item.boxSplitStatus === 'in_progress')
+  if (statusUnfinished) {
+    throw new Error(`${statusUnfinished.sku}의 박스분할 상태가 진행 중입니다. 박스분할을 확인한 뒤 완료로 저장해주세요.`)
+  }
   const [boxes, packedBoxItems] = await Promise.all([
     tx
       .select({ id: chinaOutboundBoxes.id, palletId: chinaOutboundBoxes.palletId })
@@ -2627,6 +2682,10 @@ function normalizeChinaOutboundPalletAssignments(assignments: ChinaOutboundPalle
   return [...palletByBoxNo.entries()].map(([boxNo, palletNo]) => ({ boxNo, palletNo }))
 }
 
+function normalizeChinaOutboundBoxSplitStatus(value: string | null | undefined): ChinaOutboundBoxSplitStatus | null {
+  return value === 'in_progress' || value === 'completed' ? value : null
+}
+
 function normalizeOptionalChinaOutboundBoxDimensions(input: {
   lengthCm?: number | null
   widthCm?: number | null
@@ -2656,6 +2715,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   shipment: ChinaOutboundShipmentRow
   shipmentItem: ChinaOutboundShipmentItemRow
   allocations: ChinaOutboundBoxSplitInput[]
+  boxSplitStatus?: ChinaOutboundBoxSplitStatus
   boxes: ChinaOutboundBoxRow[]
   boxItems: ChinaOutboundBoxItemRow[]
 }) {
@@ -2663,6 +2723,12 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   if (totalQuantity > input.shipmentItem.reservedQuantity) {
     throw new Error(`${input.shipmentItem.sku}의 분할 수량은 출고수량 ${input.shipmentItem.reservedQuantity.toLocaleString('ko-KR')}개를 넘을 수 없습니다.`)
   }
+  if (input.boxSplitStatus === 'completed' && totalQuantity !== input.shipmentItem.reservedQuantity) {
+    throw new Error(`${input.shipmentItem.sku}은(는) 포장수량이 출고수량과 같아야 완료로 표시할 수 있습니다.`)
+  }
+  const nextBoxSplitStatus = totalQuantity !== input.shipmentItem.reservedQuantity
+    ? 'in_progress'
+    : input.boxSplitStatus ?? normalizeChinaOutboundBoxSplitStatus(input.shipmentItem.boxSplitStatus)
 
   const boxesByNo = new Map(input.boxes.map((box) => [box.boxNo, box]))
   for (const allocation of input.allocations) {
@@ -2737,7 +2803,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
 
   await input.tx
     .update(chinaOutboundShipmentItems)
-    .set({ packedQuantity: totalQuantity, updatedAt: new Date() })
+    .set({ packedQuantity: totalQuantity, boxSplitStatus: nextBoxSplitStatus, updatedAt: new Date() })
     .where(eq(chinaOutboundShipmentItems.id, input.shipmentItem.id))
 
   if (input.shipment.status === 'draft' && totalQuantity > 0) {

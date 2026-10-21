@@ -72,6 +72,7 @@ export type ChinaShipmentDetailView = {
     reservedQuantity: number
     packedQuantity: number
     dispatchedQuantity: number
+    boxSplitStatus: 'in_progress' | 'completed'
   }>
   pallets: Array<{ id: string; palletNo: string; note: string | null }>
   boxes: Array<{
@@ -90,7 +91,13 @@ export type ChinaShipmentDetailView = {
 }
 
 type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string }
-type BoxSplitDraftSnapshot = { drafts: BoxSplitDraft[]; baseline: BoxSplitDraft[] }
+type BoxSplitStatus = 'in_progress' | 'completed'
+type BoxSplitDraftSnapshot = {
+  drafts: BoxSplitDraft[]
+  baseline: BoxSplitDraft[]
+  status?: BoxSplitStatus
+  baselineStatus?: BoxSplitStatus
+}
 type BoxSplitItemFilter = 'all' | 'incomplete' | 'complete'
 type SavedBoxFilter = 'all' | 'saved'
 type WorkbookPreview = {
@@ -447,6 +454,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const [boxPage, setBoxPage] = useState(1)
   const [boxSplitItemFilter, setBoxSplitItemFilter] = useState<BoxSplitItemFilter>('all')
   const [savedBoxFilter, setSavedBoxFilter] = useState<SavedBoxFilter>('saved')
+  const [selectedBoxItemIds, setSelectedBoxItemIds] = useState<string[]>([])
 
   if (!detail) return null
 
@@ -462,18 +470,18 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const totalPackedQuantity = items.reduce((total, item) => total + item.packedQuantity, 0)
   const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
-  const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
+  const hasIncompleteBoxSplit = items.some((item) => item.boxSplitStatus !== 'completed')
   const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
   const canDownloadShipmentLabels = boxesWithItems.length > 0
   const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
-    const leftComplete = left.packedQuantity === left.reservedQuantity
-    const rightComplete = right.packedQuantity === right.reservedQuantity
+    const leftComplete = left.boxSplitStatus === 'completed'
+    const rightComplete = right.boxSplitStatus === 'completed'
     if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
     return compareShipmentItems(left, right)
   })
-  const incompleteBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity !== item.reservedQuantity)
-  const completeBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity === item.reservedQuantity)
+  const incompleteBoxSplitItems = sortedBoxSplitItems.filter((item) => item.boxSplitStatus !== 'completed')
+  const completeBoxSplitItems = sortedBoxSplitItems.filter((item) => item.boxSplitStatus === 'completed')
   const filteredBoxSplitItems = boxSplitItemFilter === 'incomplete'
     ? incompleteBoxSplitItems
     : boxSplitItemFilter === 'complete'
@@ -483,6 +491,9 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const pageCount = Math.max(1, Math.ceil(filteredBoxSplitItems.length / pageSize))
   const resolvedBoxPage = Math.min(boxPage, pageCount)
   const pagedBoxSplitItems = filteredBoxSplitItems.slice((resolvedBoxPage - 1) * pageSize, resolvedBoxPage * pageSize)
+  const selectedBoxItemIdSet = new Set(selectedBoxItemIds.filter((itemId) => itemById.has(itemId)))
+  const selectedBoxItemCount = selectedBoxItemIdSet.size
+  const allFilteredBoxItemsSelected = filteredBoxSplitItems.length > 0 && filteredBoxSplitItems.every((item) => selectedBoxItemIdSet.has(item.id))
 
   function changeBoxSplitItemFilter(filter: BoxSplitItemFilter) {
     if (filter === boxSplitItemFilter) return
@@ -502,6 +513,65 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         document.getElementById(`shipment-box-item-${itemId}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
       }, 0)
     }, ['box'])
+  }
+
+  function setBoxItemSelected(itemId: string, selected: boolean) {
+    setSelectedBoxItemIds((current) => selected
+      ? current.includes(itemId) ? current : [...current, itemId]
+      : current.filter((id) => id !== itemId))
+  }
+
+  function setFilteredBoxItemsSelected(selected: boolean) {
+    const filteredIds = new Set(filteredBoxSplitItems.map((item) => item.id))
+    setSelectedBoxItemIds((current) => selected
+      ? [...new Set([...current, ...filteredIds])]
+      : current.filter((itemId) => !filteredIds.has(itemId)))
+  }
+
+  function saveBoxSplitItems(itemIds: string[], scope: 'selected' | 'all') {
+    const draftsToSave = itemIds.flatMap((itemId) => {
+      const draft = guard.getDraft(`box:${itemId}`)
+      return draft ? [{ itemId, draft }] : []
+    })
+    if (draftsToSave.length === 0) {
+      toast.error(scope === 'selected' ? '선택한 품목 중 저장할 변경사항이 없습니다.' : '저장할 박스분할 변경사항이 없습니다.')
+      return
+    }
+    const dimensionsByBox = new Map<string, string>()
+    for (const { draft } of draftsToSave) {
+      for (const box of draft.boxDimensions ?? []) {
+        const previous = dimensionsByBox.get(box.boxNo)
+        if (previous && previous !== box.dimensions) {
+          toast.error(`${box.boxNo} 박스에 서로 다른 규격이 입력돼 있습니다. 규격을 일치시킨 뒤 저장해주세요.`)
+          return
+        }
+        dimensionsByBox.set(box.boxNo, box.dimensions)
+      }
+    }
+
+    startTransition(async () => {
+      const savedItemIds: string[] = []
+      const saved = await guard.runTask(async () => {
+        for (const { itemId, draft } of draftsToSave) {
+          if (!await (draft.saveQuietly ?? draft.save)()) return false
+          savedItemIds.push(itemId)
+        }
+        return true
+      })
+      if (savedItemIds.length > 0) {
+        const savedIds = new Set(savedItemIds)
+        const idsToClear = saved && scope === 'selected' ? new Set(itemIds) : savedIds
+        setSelectedBoxItemIds((current) => current.filter((itemId) => !idsToClear.has(itemId)))
+        // A later product can fail after an earlier one has committed. Refresh
+        // committed rows so the remaining draft never works from stale totals.
+        router.refresh()
+      }
+      if (!saved) {
+        if (savedItemIds.length > 0) toast.error(`${savedItemIds.length.toLocaleString('ko-KR')}개 품목은 저장됐습니다. 나머지 변경사항을 확인한 뒤 다시 저장해주세요.`)
+        return
+      }
+      toast.success(`${draftsToSave.length.toLocaleString('ko-KR')}개 품목의 박스분할을 저장했습니다.`)
+    })
   }
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
@@ -536,7 +606,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</a> : <button type="button" disabled title="박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</button>}
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
-          {editable && stage === 'summary' ? <button type="button" disabled={isPending} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
+          {editable && stage === 'summary' ? <button type="button" disabled={isPending || hasIncompleteBoxSplit} title={hasIncompleteBoxSplit ? '모든 품목의 박스분할 상태를 완료로 저장한 뒤 포장완료할 수 있습니다.' : undefined} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('포장된 수량을 SaaS 중국재고에서 차감하고 출고완료 처리할까요?')) run(() => dispatchChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고완료 처리했습니다. SaaS 재고가 차감되었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
           {shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={() => { if (window.confirm('이 출고작업을 취소하고 예약 수량을 풀까요?')) run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.') }} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}
         </div>
@@ -559,7 +629,16 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
               <button type="button" aria-pressed={boxSplitItemFilter === 'incomplete'} onClick={() => changeBoxSplitItemFilter('incomplete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'incomplete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>진행 중 {incompleteBoxSplitItems.length.toLocaleString('ko-KR')}</button>
               <button type="button" aria-pressed={boxSplitItemFilter === 'complete'} onClick={() => changeBoxSplitItemFilter('complete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'complete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>박스분할 완료 {completeBoxSplitItems.length.toLocaleString('ko-KR')}</button>
           </div>
-          <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium hover:bg-muted">
+              <input type="checkbox" aria-label="현재 필터 품목 전체 선택" checked={allFilteredBoxItemsSelected} onChange={(event) => setFilteredBoxItemsSelected(event.target.checked)} disabled={!editable || isPending} className="size-3.5 accent-primary" />
+              현재 필터 전체 선택
+            </label>
+            <span className="text-xs text-muted-foreground">선택 {selectedBoxItemCount.toLocaleString('ko-KR')}개</span>
+            <button type="button" disabled={!editable || isPending || selectedBoxItemCount === 0} onClick={() => saveBoxSplitItems([...selectedBoxItemIdSet], 'selected')} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Check className="size-3.5" /> 선택 저장</button>
+            <button type="button" disabled={!editable || isPending} onClick={() => saveBoxSplitItems(sortedBoxSplitItems.map((item) => item.id), 'all')} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Check className="size-3.5" /> 전체 저장</button>
+            <Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} />
+          </div>
         </div>
         <div className="space-y-3">
           {pagedBoxSplitItems.length === 0 ? <p className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">선택한 상태의 품목이 없습니다.</p> : null}
@@ -568,7 +647,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
               const box = boxById.get(allocation.boxId)
               return box ? [{ allocation, box }] : []
             })
-            return <ProductBoxSplitEditor key={item.id} shipmentId={shipment.id} item={item} allocations={allocations} editable={editable} isPending={isPending} />
+            return <ProductBoxSplitEditor key={item.id} shipmentId={shipment.id} item={item} allocations={allocations} editable={editable} isPending={isPending} selected={selectedBoxItemIdSet.has(item.id)} onSelectedChange={(selected) => setBoxItemSelected(item.id, selected)} />
           })}
         </div>
         <div className="flex justify-end"><Pagination page={resolvedBoxPage} pageCount={pageCount} onPrevious={() => guard.requestNavigation(() => setBoxPage((current) => Math.max(1, current - 1)), ['box'])} onNext={() => guard.requestNavigation(() => setBoxPage((current) => Math.min(pageCount, current + 1)), ['box'])} /></div>
@@ -580,7 +659,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할이 끝나지 않은 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같아야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
+        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할 상태가 진행 중인 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같고 상태를 완료로 저장해야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
         {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
       </section> : null}
@@ -593,7 +672,7 @@ function OutboundItemsPanel({ items, boxItemsByItem }: {
   boxItemsByItem: Map<string, ChinaShipmentDetailView['boxItems']>
 }) {
   const sortedItems = [...items].sort(compareShipmentItems)
-  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.packedQuantity === item.reservedQuantity} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
+  return <section className="overflow-hidden rounded-lg border"><div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3></div><div className="overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">품목코드</th><th className="px-3 py-2 text-left font-medium">상품명</th><th className="px-3 py-2 text-left font-medium">옵션</th><th className="px-3 py-2 text-right font-medium">출고수량</th><th className="px-3 py-2 text-right font-medium">박스분할</th><th className="px-3 py-2 text-center font-medium">상태</th></tr></thead><tbody>{sortedItems.map((item) => <tr key={item.id} className="border-t"><td className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.productName}</td><td className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td><td className="px-3 py-3 text-right tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-center"><ProgressBadge completed={item.boxSplitStatus === 'completed'} detail={`${(boxItemsByItem.get(item.id)?.length ?? 0).toLocaleString('ko-KR')}박스`} /></td></tr>)}</tbody></table></div></section>
 }
 
 function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPending }: {
@@ -665,12 +744,14 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPen
   return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가</h3><p className="mt-1 text-xs text-muted-foreground">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</p></div><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : setIsOpen(true)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p className="mt-1 truncate font-medium">{item.productName}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
 }
 
-function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPending }: {
+function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPending, selected, onSelectedChange }: {
   shipmentId: string
   item: ChinaShipmentDetailView['items'][number]
   allocations: Array<{ allocation: ChinaShipmentDetailView['boxItems'][number]; box: ChinaShipmentDetailView['boxes'][number] }>
   editable: boolean
   isPending: boolean
+  selected: boolean
+  onSelectedChange: (selected: boolean) => void
 }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
@@ -680,14 +761,28 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
     ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
     : [createBoxSplitDraft()])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
+  const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
+  const [boxSplitStatus, setBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.status ?? initialBoxSplitStatus)
   const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)
-  const isComplete = item.packedQuantity === item.reservedQuantity
+  // A completed status is only valid while every reserved unit has a box.
+  // The server validates this too; this keeps the selector immediately clear.
+  const currentBoxSplitStatus: BoxSplitStatus = boxSplitStatus === 'completed' && splitQuantity !== item.reservedQuantity
+    ? 'in_progress'
+    : boxSplitStatus
 
   function patchDraft(key: string, patch: Partial<BoxSplitDraft>) {
     setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch } : draft))
   }
 
-  async function saveDraft() {
+  function changeBoxSplitStatus(nextStatus: BoxSplitStatus) {
+    if (nextStatus === 'completed' && splitQuantity !== item.reservedQuantity) {
+      toast.error('완료는 포장수량이 출고수량과 같을 때 선택할 수 있습니다.')
+      return
+    }
+    setBoxSplitStatus(nextStatus)
+  }
+
+  async function saveDraft(options: { quiet?: boolean; refresh?: boolean } = {}) {
     const nextAllocations = drafts
       .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm].some((value) => value.trim()))
       .map((draft) => {
@@ -702,21 +797,34 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
           heightCm: dimensionsChanged ? optionalNumber(draft.heightCm) : null,
         }
       })
-    const result = await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId: item.id, allocations: nextAllocations })
+    const hasBoxSplitStatusChange = currentBoxSplitStatus !== initialBoxSplitStatus
+    const result = await saveChinaOutboundItemBoxSplitsAction({
+      shipmentId,
+      shipmentItemId: item.id,
+      allocations: nextAllocations,
+      ...(hasBoxSplitStatusChange ? { boxSplitStatus: currentBoxSplitStatus } : {}),
+    })
     if (!result.ok) {
       toast.error(result.error ?? '박스분할을 저장하지 못했습니다.')
       return false
     }
     setInitialDrafts(cloneBoxSplitDrafts(drafts))
+    setInitialBoxSplitStatus(currentBoxSplitStatus)
+    setBoxSplitStatus(currentBoxSplitStatus)
     guard.setDraft(draftId, null)
-    toast.success(`${item.productName}의 박스분할을 저장했습니다.`)
-    router.refresh()
+    if (!options.quiet) toast.success(`${item.productName}의 박스분할을 저장했습니다.`)
+    if (options.refresh !== false) router.refresh()
     return true
   }
 
-  const dirty = boxDraftValues(drafts) !== boxDraftValues(initialDrafts)
+  const dirty = boxDraftValues(drafts) !== boxDraftValues(initialDrafts) || currentBoxSplitStatus !== initialBoxSplitStatus
   useChinaWorkDraft(draftId, dirty ? {
-    kind: 'box', label: `${item.productName} 박스분할`, snapshot: { drafts: cloneBoxSplitDrafts(drafts), baseline: cloneBoxSplitDrafts(initialDrafts) }, save: saveDraft,
+    kind: 'box', label: `${item.productName} 박스분할`, snapshot: {
+      drafts: cloneBoxSplitDrafts(drafts),
+      baseline: cloneBoxSplitDrafts(initialDrafts),
+      status: currentBoxSplitStatus,
+      baselineStatus: initialBoxSplitStatus,
+    }, save: saveDraft, saveQuietly: () => saveDraft({ quiet: true, refresh: false }),
     boxDimensions: drafts.flatMap((draft) => {
       const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
       const dimensions = [draft.lengthCm, draft.widthCm, draft.heightCm]
@@ -724,7 +832,10 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
       return changed && draft.boxNo.trim() && dimensions.every((value) => value.trim() && Number.isFinite(Number(value)))
         ? [{ boxNo: draft.boxNo.trim(), dimensions: dimensions.map((value) => String(Number(value))).join(':') }] : []
     }),
-    discard: () => setDrafts(cloneBoxSplitDrafts(initialDrafts)),
+    discard: () => {
+      setDrafts(cloneBoxSplitDrafts(initialDrafts))
+      setBoxSplitStatus(initialBoxSplitStatus)
+    },
   } : null)
 
   function save() { void guard.runTask(saveDraft) }
@@ -735,13 +846,26 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, editable, isPend
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold">{item.sku}</p>
-            <ProgressBadge completed={isComplete} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
+            <ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
           </div>
           <p className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p>
         </div>
-        <p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>
-          입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium">
+            <input type="checkbox" aria-label={`${item.sku} 저장 선택`} checked={selected} onChange={(event) => onSelectedChange(event.target.checked)} disabled={!editable || isPending} className="size-3.5 accent-primary" />
+            저장 선택
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-xs font-medium">
+            <span>상태</span>
+            <select aria-label={`${item.sku} 박스분할 상태`} value={currentBoxSplitStatus} onChange={(event) => changeBoxSplitStatus(event.target.value as BoxSplitStatus)} disabled={!editable || isPending} className={`${compactInputClass} w-24`}>
+              <option value="in_progress">진행 중</option>
+              <option value="completed">완료</option>
+            </select>
+          </label>
+          <p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>
+            입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개
+          </p>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-[880px] w-full text-sm">
@@ -1226,7 +1350,13 @@ function createBoxSplitDraft(): BoxSplitDraft {
 function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
   if (!value || typeof value !== 'object') return null
   const snapshot = value as Partial<BoxSplitDraftSnapshot>
-  return Array.isArray(snapshot.drafts) && Array.isArray(snapshot.baseline) ? snapshot as BoxSplitDraftSnapshot : null
+  if (!Array.isArray(snapshot.drafts) || !Array.isArray(snapshot.baseline)) return null
+  return {
+    drafts: snapshot.drafts as BoxSplitDraft[],
+    baseline: snapshot.baseline as BoxSplitDraft[],
+    status: snapshot.status === 'completed' || snapshot.status === 'in_progress' ? snapshot.status : undefined,
+    baselineStatus: snapshot.baselineStatus === 'completed' || snapshot.baselineStatus === 'in_progress' ? snapshot.baselineStatus : undefined,
+  }
 }
 
 function cloneBoxSplitDrafts(drafts: BoxSplitDraft[]) {

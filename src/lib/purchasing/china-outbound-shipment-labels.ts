@@ -173,7 +173,7 @@ function addBoxLabelSheets(
 
   if (boxes.length === 0) {
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes)
-    sheet.columns = [{ width: 28 }, { width: 11 }, { width: 36 }, { width: 17 }, { width: 20 }]
+    sheet.columns = [{ width: 17 }, { width: 36 }, { width: 28 }, { width: 11 }, { width: 20 }]
     configureLabelSheet(sheet, 'E')
     addEmptyLabelMessage(sheet, '포장된 박스가 없어 박스 쉽먼트를 만들 수 없습니다.', 'E')
     return
@@ -181,7 +181,7 @@ function addBoxLabelSheets(
 
   for (const [index, box] of boxes.entries()) {
     const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes, index))
-    sheet.columns = [{ width: 28 }, { width: 11 }, { width: 36 }, { width: 17 }, { width: 20 }]
+    sheet.columns = [{ width: 17 }, { width: 36 }, { width: 28 }, { width: 11 }, { width: 20 }]
     configureLabelSheet(sheet, 'E')
     const rows = aggregateBoxLabelRows(boxItemsByBoxId.get(box.id) ?? [], itemById, box.boxNo)
     addLabelBlock({
@@ -190,10 +190,10 @@ function addBoxLabelSheets(
       title: `박스 쉽먼트 · ${box.boxNo}`,
       subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
       inputNotice: '중국어 상품명 직접 입력 · 로케이션 자동 입력 및 수정 가능',
-      headers: ['중국어 상품명', '수량', '한국어 상품명', '박스번호', '로케이션'],
+      headers: ['박스번호', '상품명(한국어)', '상품명(중국어)', '수량', '로케이션'],
       rows,
-      inputColumns: new Set([1, 5]),
-      quantityColumns: new Set([2]),
+      inputColumns: new Set([3, 5]),
+      quantityColumns: new Set([4]),
     })
   }
 }
@@ -218,28 +218,28 @@ function addPalletLabelSheets(
 
   if (pallets.length === 0) {
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets)
-    sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 24 }, { width: 12 }]
-    configureLabelSheet(sheet, 'F')
-    addEmptyLabelMessage(sheet, '파렛트에 배정된 박스가 없어 파렛트 쉽먼트를 만들 수 없습니다.', 'F')
+    sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 28 }, { width: 24 }, { width: 12 }]
+    configureLabelSheet(sheet, 'G')
+    addEmptyLabelMessage(sheet, '파렛트에 배정된 박스가 없어 파렛트 쉽먼트를 만들 수 없습니다.', 'G')
     return
   }
 
   for (const [index, pallet] of pallets.entries()) {
     const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets, index))
-    sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 24 }, { width: 12 }]
-    configureLabelSheet(sheet, 'F')
+    sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 28 }, { width: 24 }, { width: 12 }]
+    configureLabelSheet(sheet, 'G')
     const boxes = boxesByPalletId.get(pallet.id) ?? []
     const rows = aggregatePalletLabelRows(boxes, boxItemsByBoxId, itemById, pallet.palletNo)
     addLabelBlock({
       sheet,
-      lastColumn: 'F',
+      lastColumn: 'G',
       title: `파렛트 쉽먼트 · ${pallet.palletNo}`,
       subtitle: `출고번호: ${detail.shipment.shipmentNo}`,
-      inputNotice: '품목 위치 자동 입력 · 빈칸 입력 및 수정 가능',
-      headers: ['번호', '박스수량', '위치', '품명', '옵션', '수량'],
+      inputNotice: '중국어 상품명 직접 입력 · 품목 위치 자동 입력 및 수정 가능',
+      headers: ['번호', '박스수량', '위치', '상품명(한국어)', '상품명(중국어)', '옵션', '수량'],
       rows,
-      inputColumns: new Set([3]),
-      quantityColumns: new Set([2, 6]),
+      inputColumns: new Set([3, 5]),
+      quantityColumns: new Set([2, 7]),
     })
   }
 }
@@ -258,7 +258,7 @@ function aggregateBoxLabelRows(
   boxNo: string,
 ): LabelRow[] {
   return aggregateLabelProducts(allocations, itemById)
-    .map((row) => ['', row.quantity, koreanProductName(row.productName, row.optionName), boxNo, row.location])
+    .map((row) => [boxNo, koreanProductName(row.productName, row.optionName), '', row.quantity, row.location])
 }
 
 function aggregatePalletLabelRows(
@@ -269,8 +269,8 @@ function aggregatePalletLabelRows(
 ): LabelRow[] {
   const allocations = boxes.flatMap((box) => boxItemsByBoxId.get(box.id) ?? [])
   const productRows = aggregateLabelProducts(allocations, itemById)
-  if (productRows.length === 0) return [[palletNo, boxes.length, '', '', '', '']]
-  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, row.optionName ?? '', row.quantity])
+  if (productRows.length === 0) return [[palletNo, boxes.length, '', '', '', '', '']]
+  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, '', row.optionName ?? '', row.quantity])
 }
 
 function aggregateLabelProducts(

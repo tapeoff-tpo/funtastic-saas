@@ -6,8 +6,8 @@ import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from './purchase-costs'
-import { getSkuOutgoingMetrics } from './items'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
+import { getPurchaseReviewOperationalMetricsBySku } from './purchase-requests'
 import {
   PURCHASE_DELAY_REASON_LABELS,
   PURCHASE_DELAY_TRACKING_START_DATE,
@@ -41,6 +41,9 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '상품명',
   '옵션명',
   '요청수량',
+  '최근 발주수량',
+  '진행 구매수량',
+  '중국출고 예정수량',
   '총 현재고',
   '당월 출고수량',
   '3개월 평균 출고수량',
@@ -85,7 +88,10 @@ export async function exportPurchaseRequestsExcel(input: {
   await ensurePurchasePaymentTrackingSchema()
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
   const rows = await getPurchaseRequestRowsForExcel(input)
-  const outgoingMetricsBySku = await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.sku))
+  const purchaseReviewMetricsBySku = await getPurchaseReviewOperationalMetricsBySku({
+    userId: input.userId,
+    skus: rows.map((row) => row.sku),
+  })
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('발주')
 
@@ -106,7 +112,8 @@ export async function exportPurchaseRequestsExcel(input: {
   })
 
   for (const row of rows) {
-    const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
+    const reviewMetrics = purchaseReviewMetricsBySku.get(row.sku)
+    const recordedTargetStockQuantity = recommendationBasisExcelValue(row.rawData, 'targetStockQuantity')
     const purchaseUrgencyStatus = isPurchaseUrgencyActionNeeded(row.status)
       ? getPurchaseUrgencyStatus(row.rawData)
       : null
@@ -127,10 +134,15 @@ export async function exportPurchaseRequestsExcel(input: {
       상품명: row.productName,
       옵션명: row.optionName ?? '',
       요청수량: row.requestedQuantity,
-      '총 현재고': recommendationBasisExcelValue(row.rawData, 'availableStock'),
-      '당월 출고수량': outgoingMetrics?.currentMonthOutgoing ?? 0,
-      '3개월 평균 출고수량': outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
-      목표수량: recommendationBasisExcelValue(row.rawData, 'targetStockQuantity'),
+      '최근 발주수량': reviewMetrics?.lastPurchaseQuantity ?? '',
+      '진행 구매수량': reviewMetrics?.purchaseInProgressQuantity ?? 0,
+      '중국출고 예정수량': reviewMetrics?.chinaOutboundScheduledQuantity ?? 0,
+      '총 현재고': reviewMetrics?.currentStock ?? recommendationBasisExcelValue(row.rawData, 'availableStock'),
+      '당월 출고수량': reviewMetrics?.currentMonthOutgoing ?? 0,
+      '3개월 평균 출고수량': reviewMetrics?.threeMonthAverageOutgoing ?? 0,
+      목표수량: recordedTargetStockQuantity === ''
+        ? reviewMetrics?.targetStockQuantity ?? ''
+        : recordedTargetStockQuantity,
       '재고 보유개월': stockCoverageMonths ?? '',
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
@@ -154,6 +166,9 @@ export async function exportPurchaseRequestsExcel(input: {
   }
 
   sheet.getColumn('개당 원가(元)').numFmt = '#,##0.00'
+  sheet.getColumn('최근 발주수량').numFmt = '#,##0'
+  sheet.getColumn('진행 구매수량').numFmt = '#,##0'
+  sheet.getColumn('중국출고 예정수량').numFmt = '#,##0'
   sheet.getColumn('총 현재고').numFmt = '#,##0'
   sheet.getColumn('당월 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('3개월 평균 출고수량').numFmt = '#,##0.0'

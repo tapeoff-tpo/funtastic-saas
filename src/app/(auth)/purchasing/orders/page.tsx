@@ -12,6 +12,7 @@ import {
   getOutboundRequestedQuantity,
   getPurchaseRequests,
   type PurchaseReviewHistory,
+  type PurchaseReviewOperationalMetrics,
 } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
@@ -452,7 +453,7 @@ export async function PurchasingOrdersView({
                   selectedDates={outboundDates}
                 />
               ) : null}
-              {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
+              {isRequestedStatus ? <PurchaseRequestCreateDialog targetStockMonths={latestTargetStockMonths} /> : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link
@@ -520,7 +521,7 @@ export async function PurchasingOrdersView({
                       )}
                     </>
                   ) : null}
-                  {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
+                  {showRecommendationBasis ? <th className="min-w-[520px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
@@ -695,7 +696,10 @@ export async function PurchasingOrdersView({
                       ) : null}
                       {showRecommendationBasis ? (
                         <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
-                          <RecommendationBasisGrid rawData={item.rawData} />
+                          <RecommendationBasisGrid
+                            rawData={item.rawData}
+                            metrics={item.purchaseReviewMetrics}
+                          />
                         </td>
                       ) : null}
                       {isRequestedStatus ? null : (
@@ -945,8 +949,15 @@ function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHist
   )
 }
 
-function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
-  if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
+function RecommendationBasisGrid({
+  rawData,
+  metrics,
+}: {
+  rawData: Record<string, unknown>
+  metrics: PurchaseReviewOperationalMetrics | null
+}) {
+  const isAutomaticRecommendation = rawData.source === 'auto_purchase_recommendation'
+  if (!isAutomaticRecommendation && !metrics) return <span>-</span>
   const oneOffCurrentMonthSpikeDetected = rawData.oneOffCurrentMonthSpikeDetected === true
   const currentMonthOrderCount = Number(rawData.currentMonthOrderCount)
   const currentMonthLargestOrderQuantity = Number(rawData.currentMonthLargestOrderQuantity)
@@ -966,13 +977,15 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `예산 조정 ${formatNumber(moqAdjustedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
     : null
   const pipelineQuantity = Number(rawData.pipelineQuantity)
-  const pipelineNote = Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
+  const pipelineNote = !metrics && Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
     ? `진행 중 발주 ${formatNumber(pipelineQuantity)}`
     : null
   const chinaAvailableStock = Number(rawData.chinaAvailableStock)
-  const stockNote = Number.isFinite(chinaAvailableStock)
-    ? `국내 ${formatNumber(rawData.domesticAvailableStock)} · 중국 ${formatNumber(chinaAvailableStock)}`
-    : null
+  const stockNote = metrics
+    ? `국내 ${formatNumber(metrics.domesticCurrentStock)} · 중국 ${formatNumber(metrics.chinaCurrentStock)}`
+    : Number.isFinite(chinaAvailableStock)
+      ? `국내 ${formatNumber(rawData.domesticAvailableStock)} · 중국 ${formatNumber(chinaAvailableStock)}`
+      : null
   const moqNote = typeof rawData.moqProductGroupName === 'string'
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
@@ -995,13 +1008,20 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     : rawData.recommendationState === 'monitoring'
       ? '현재 발주 보류 · 계속 관찰'
       : null
+  const currentStock = metrics?.currentStock ?? numericRawDataValue(rawData, 'availableStock')
+  const currentMonthOutgoing = metrics?.currentMonthOutgoing ?? numericRawDataValue(rawData, 'currentMonthOutgoing')
+  const threeMonthAverageOutgoing = metrics?.threeMonthAverageOutgoing ?? numericRawDataValue(rawData, 'averageMonthlyOutgoing')
+  const targetStockQuantity = numericRawDataValue(rawData, 'targetStockQuantity') ?? metrics?.targetStockQuantity
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
-      <Metric label="총 현재고" value={formatNumber(rawData.availableStock)} />
-      <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
-      <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
-      <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
+      <Metric label="최근 발주수량" value={formatNumber(metrics?.lastPurchaseQuantity)} />
+      <Metric label="진행 구매수량" value={formatNumber(metrics?.purchaseInProgressQuantity)} />
+      <Metric label="중국출고 예정수량" value={formatNumber(metrics?.chinaOutboundScheduledQuantity)} />
+      <Metric label="총 현재고" value={formatNumber(currentStock)} />
+      <Metric label="당월 출고" value={formatNumber(currentMonthOutgoing)} />
+      <Metric label="3개월평균" value={formatNumber(threeMonthAverageOutgoing)} />
+      <Metric label="목표수량" value={formatNumber(targetStockQuantity)} />
       {stockNote || pipelineNote || moqNote || siblingOptionBundleNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}

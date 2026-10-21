@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import {
   chinaWarehouseInventory,
   chinaWarehouseInventoryMovements,
+  inventory,
   products,
   purchaseRequestItems,
   saasChinaPurchaseLinks,
@@ -19,7 +20,8 @@ import {
   purchaseDelayReasonToItemStatus,
   type PurchaseDelayReason,
 } from './purchase-delay'
-import { PURCHASE_URL_HEADER } from './items'
+import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
+import { purchasePipelineQuantity } from './purchase-recommendations'
 import {
   type PurchasePaymentStatus,
   type PurchaseRequestStatus,
@@ -84,6 +86,34 @@ export type PurchaseReviewHistoryCandidate = {
   outboundExpectedDate: string | null
   rawData: Record<string, unknown>
   createdAt: Date
+}
+
+export type PurchaseReviewOperationalMetrics = {
+  lastPurchaseDate: string | null
+  lastPurchaseQuantity: number | null
+  lastPurchaseThreeMonthAverageOutgoing: number | null
+  purchaseInProgressQuantity: number
+  chinaOutboundScheduledQuantity: number
+  domesticCurrentStock: number
+  chinaCurrentStock: number
+  currentStock: number
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+  targetStockQuantity: number
+}
+
+export type PurchaseReviewPipelineQuantities = Pick<
+  PurchaseReviewOperationalMetrics,
+  'purchaseInProgressQuantity' | 'chinaOutboundScheduledQuantity'
+>
+
+export type PurchaseReviewPipelineRow = {
+  sku: string
+  status: PurchaseRequestStatus | string
+  requestedQuantity: number
+  actualPurchaseQuantity: number | null
+  chinaReceivedQuantity: number | null
+  rawData: Record<string, unknown>
 }
 
 export type PurchasePaymentFlowSummary = {
@@ -1059,9 +1089,12 @@ export async function getPurchaseRequests(input: {
       exchangeRateKrw: item.costExchangeRateKrw ?? input.exchangeRateKrw,
     }),
   }))
-  const purchaseReviewHistoryBySku = input.status === 'requested'
-    ? await getPurchaseReviewHistoryBySku(input.userId, pricedItems.map((item) => item.sku))
-    : new Map<string, PurchaseReviewHistory>()
+  const purchaseReviewMetricsBySku = input.status === 'requested'
+    ? await getPurchaseReviewOperationalMetricsBySku({
+      userId: input.userId,
+      skus: pricedItems.map((item) => item.sku),
+    })
+    : new Map<string, PurchaseReviewOperationalMetrics>()
   const missingCostItems = costRows
     .map((row) => ({ row, costs: calculatePurchaseCost(row, input.exchangeRateKrw) }))
     .filter(({ costs }) => costs.unitCostYuan === null || costs.unitCostKrw === null)
@@ -1075,7 +1108,8 @@ export async function getPurchaseRequests(input: {
   return {
     items: pricedItems.map((item) => ({
       ...item,
-      purchaseReviewHistory: purchaseReviewHistoryBySku.get(item.sku) ?? null,
+      purchaseReviewMetrics: purchaseReviewMetricsBySku.get(item.sku) ?? null,
+      purchaseReviewHistory: purchaseReviewHistoryFromMetrics(purchaseReviewMetricsBySku.get(item.sku)),
     })),
     total,
     costTotals: summarizePurchaseCosts(costRows, input.exchangeRateKrw),
@@ -1168,6 +1202,220 @@ export async function getPurchaseReviewHistoryBySku(
         ?? 0,
     },
   ]))
+}
+
+/**
+ * Returns the live quantities needed to judge a SKU before adding it to a
+ * purchase review. Purchase-stage rows and China-outbound rows stay separate
+ * so the same units are not counted twice in the UI or export.
+ */
+export async function getPurchaseReviewOperationalMetricsBySku(input: {
+  userId: string
+  skus: readonly string[]
+  targetStockMonths?: number
+}): Promise<Map<string, PurchaseReviewOperationalMetrics>> {
+  const uniqueSkus = Array.from(new Set(input.skus.map((sku) => sku.trim()).filter(Boolean)))
+  if (uniqueSkus.length === 0) return new Map()
+
+  const targetStockMonths = normalizeTargetStockMonths(input.targetStockMonths)
+  const [
+    domesticInventoryRows,
+    chinaInventoryRows,
+    activePurchaseRows,
+    outgoingMetricsBySku,
+    purchaseHistoryBySku,
+  ] = await Promise.all([
+    db
+      .select({
+        sku: inventory.sku,
+        availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+      })
+      .from(inventory)
+      .where(and(
+        eq(inventory.userId, input.userId),
+        inArray(inventory.sku, uniqueSkus),
+      ))
+      .groupBy(inventory.sku),
+    db
+      .select({
+        sku: chinaWarehouseInventory.sku,
+        availableStock: sql<number>`COALESCE(SUM(${chinaWarehouseInventory.availableQuantity}), 0)::int`,
+      })
+      .from(chinaWarehouseInventory)
+      .where(and(
+        eq(chinaWarehouseInventory.userId, input.userId),
+        inArray(chinaWarehouseInventory.sku, uniqueSkus),
+      ))
+      .groupBy(chinaWarehouseInventory.sku),
+    db
+      .select({
+        sku: purchaseRequestItems.sku,
+        status: purchaseRequestItems.status,
+        requestedQuantity: purchaseRequestItems.requestedQuantity,
+        actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+        chinaReceivedQuantity: purchaseRequestItems.chinaReceivedQuantity,
+        rawData: purchaseRequestItems.rawData,
+      })
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        inArray(purchaseRequestItems.sku, uniqueSkus),
+        inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+      )),
+    getSkuOutgoingMetrics(input.userId, uniqueSkus),
+    getPurchaseReviewHistoryBySku(input.userId, uniqueSkus),
+  ])
+
+  const domesticStockBySku = quantityBySku(domesticInventoryRows)
+  const chinaStockBySku = quantityBySku(chinaInventoryRows)
+  const pipelineBySku = summarizePurchaseReviewPipelineQuantities(activePurchaseRows)
+
+  return new Map(uniqueSkus.map((sku) => {
+    const outgoing = outgoingMetricsBySku.get(sku)
+    const history = purchaseHistoryBySku.get(sku)
+    const domesticCurrentStock = domesticStockBySku.get(sku) ?? 0
+    const chinaCurrentStock = chinaStockBySku.get(sku) ?? 0
+    const threeMonthAverageOutgoing = outgoing?.threeMonthAverageOutgoing ?? 0
+    const pipeline = pipelineBySku.get(sku) ?? emptyPurchaseReviewPipelineQuantities()
+
+    return [sku, {
+      lastPurchaseDate: history?.lastPurchaseDate ?? null,
+      lastPurchaseQuantity: history?.lastPurchaseQuantity ?? null,
+      lastPurchaseThreeMonthAverageOutgoing: history?.threeMonthAverageOutgoingAtLastPurchase ?? null,
+      purchaseInProgressQuantity: pipeline.purchaseInProgressQuantity,
+      chinaOutboundScheduledQuantity: pipeline.chinaOutboundScheduledQuantity,
+      domesticCurrentStock,
+      chinaCurrentStock,
+      currentStock: domesticCurrentStock + chinaCurrentStock,
+      currentMonthOutgoing: outgoing?.currentMonthOutgoing ?? 0,
+      threeMonthAverageOutgoing,
+      targetStockQuantity: calculatePurchaseReviewTargetQuantity(threeMonthAverageOutgoing, targetStockMonths),
+    }]
+  }))
+}
+
+export function summarizePurchaseReviewPipelineQuantities(
+  rows: readonly PurchaseReviewPipelineRow[],
+): Map<string, PurchaseReviewPipelineQuantities> {
+  const quantitiesBySku = new Map<string, PurchaseReviewPipelineQuantities>()
+
+  for (const row of rows) {
+    const current = quantitiesBySku.get(row.sku) ?? emptyPurchaseReviewPipelineQuantities()
+    if (row.status === 'outbound_requested') {
+      current.chinaOutboundScheduledQuantity += getOutboundRequestedQuantity(row)
+    } else if (
+      row.status === 'purchased'
+      || row.status === 'purchase_completed'
+      || row.status === 'china_arrived'
+    ) {
+      current.purchaseInProgressQuantity += purchasePipelineQuantity(row)
+    }
+    quantitiesBySku.set(row.sku, current)
+  }
+
+  return quantitiesBySku
+}
+
+export function calculatePurchaseReviewTargetQuantity(
+  threeMonthAverageOutgoing: number,
+  targetStockMonths = 1.2,
+) {
+  const average = Number.isFinite(threeMonthAverageOutgoing)
+    ? Math.max(0, threeMonthAverageOutgoing)
+    : 0
+  if (average <= 0) return 0
+  return Math.ceil(average * normalizeTargetStockMonths(targetStockMonths))
+}
+
+export async function searchManualPurchaseCandidates(input: {
+  userId: string
+  query: string
+  targetStockMonths?: number
+  limit?: number
+}) {
+  const query = input.query.trim()
+  if (!query) return []
+
+  const limit = Math.min(50, Math.max(1, Math.trunc(input.limit ?? 20)))
+  const pattern = `%${query}%`
+  const optionName = sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>'규격정보', '')), '')`
+  const productRows = await db
+    .select({
+      sku: products.internalSku,
+      productName: products.name,
+      optionName,
+    })
+    .from(products)
+    .where(and(
+      eq(products.userId, input.userId),
+      or(
+        ilike(products.internalSku, pattern),
+        ilike(products.name, pattern),
+        sql`COALESCE(${products.metadata}->'esa009m'->>'규격정보', '') ILIKE ${pattern}`,
+      )!,
+    ))
+    .orderBy(asc(products.internalSku))
+    .limit(limit)
+
+  const metricsBySku = await getPurchaseReviewOperationalMetricsBySku({
+    userId: input.userId,
+    skus: productRows.map((row) => row.sku),
+    targetStockMonths: input.targetStockMonths,
+  })
+
+  return productRows.map((row) => ({
+    sku: row.sku,
+    productName: row.productName,
+    optionName: row.optionName,
+    ...(metricsBySku.get(row.sku) ?? emptyPurchaseReviewOperationalMetrics()),
+  }))
+}
+
+function emptyPurchaseReviewPipelineQuantities(): PurchaseReviewPipelineQuantities {
+  return {
+    purchaseInProgressQuantity: 0,
+    chinaOutboundScheduledQuantity: 0,
+  }
+}
+
+function emptyPurchaseReviewOperationalMetrics(): PurchaseReviewOperationalMetrics {
+  return {
+    lastPurchaseDate: null,
+    lastPurchaseQuantity: null,
+    lastPurchaseThreeMonthAverageOutgoing: null,
+    ...emptyPurchaseReviewPipelineQuantities(),
+    domesticCurrentStock: 0,
+    chinaCurrentStock: 0,
+    currentStock: 0,
+    currentMonthOutgoing: 0,
+    threeMonthAverageOutgoing: 0,
+    targetStockQuantity: 0,
+  }
+}
+
+function purchaseReviewHistoryFromMetrics(
+  metrics: PurchaseReviewOperationalMetrics | undefined,
+): PurchaseReviewHistory | null {
+  if (!metrics?.lastPurchaseDate || metrics.lastPurchaseQuantity === null) return null
+  return {
+    lastPurchaseDate: metrics.lastPurchaseDate,
+    lastPurchaseQuantity: metrics.lastPurchaseQuantity,
+    threeMonthAverageOutgoingAtLastPurchase: metrics.lastPurchaseThreeMonthAverageOutgoing ?? 0,
+  }
+}
+
+function quantityBySku(rows: ReadonlyArray<{ sku: string; availableStock: number | string | null }>) {
+  return new Map(rows.map((row) => [row.sku, metricQuantity(row.availableStock)]))
+}
+
+function metricQuantity(value: number | string | null | undefined) {
+  const quantity = Number(value)
+  return Number.isFinite(quantity) ? Math.trunc(quantity) : 0
+}
+
+function normalizeTargetStockMonths(value: number | undefined) {
+  if (!Number.isFinite(value)) return 1.2
+  return Math.min(12, Math.max(0.1, value!))
 }
 
 export function getStoredPurchaseReviewAverage(rawData: Record<string, unknown>): number | null {

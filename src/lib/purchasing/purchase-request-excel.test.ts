@@ -5,6 +5,7 @@ import { canonicalPurchaseRequestExcelHeader, exportPurchaseRequestsExcel } from
 
 const mocks = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
+  metrics: new Map<string, Record<string, number | string | null>>(),
 }))
 
 vi.mock('@/lib/db', () => ({
@@ -21,7 +22,9 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/new-products/cny-cost', () => ({
   getLatestCnyKrwReferenceRate: async () => ({ rate: 200 }),
 }))
-vi.mock('./items', () => ({ getSkuOutgoingMetrics: async () => new Map() }))
+vi.mock('./purchase-requests', () => ({
+  getPurchaseReviewOperationalMetricsBySku: async () => mocks.metrics,
+}))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
 
 describe('canonicalPurchaseRequestExcelHeader', () => {
@@ -54,7 +57,7 @@ describe('canonicalPurchaseRequestExcelHeader', () => {
 })
 
 describe('exportPurchaseRequestsExcel', () => {
-  it('추천 시점의 현재고, 목표수량, 긴급구매 상태를 숫자와 함께 내보낸다', async () => {
+  it('현재 재고·진행 구매·중국출고 예정과 목표수량을 함께 내보낸다', async () => {
     mocks.rows = [
       {
         id: 'automatic', status: 'requested', sku: '100001-0001', productName: '자동 추천',
@@ -81,6 +84,35 @@ describe('exportPurchaseRequestsExcel', () => {
         rawData: { source: 'auto_purchase_recommendation', availableStock: null, targetStockQuantity: '잘못된 값' },
       },
     ]
+    mocks.metrics = new Map([
+      ['100001-0001', {
+        lastPurchaseQuantity: 40,
+        purchaseInProgressQuantity: 30,
+        chinaOutboundScheduledQuantity: 15,
+        currentStock: 91,
+        currentMonthOutgoing: 45,
+        threeMonthAverageOutgoing: 85.3,
+        targetStockQuantity: 103,
+      }],
+      ['100001-0002', {
+        lastPurchaseQuantity: null,
+        purchaseInProgressQuantity: 0,
+        chinaOutboundScheduledQuantity: 0,
+        currentStock: -3,
+        currentMonthOutgoing: 2,
+        threeMonthAverageOutgoing: 10,
+        targetStockQuantity: 12,
+      }],
+      ['100001-0003', {
+        lastPurchaseQuantity: 20,
+        purchaseInProgressQuantity: 5,
+        chinaOutboundScheduledQuantity: 4,
+        currentStock: 51,
+        currentMonthOutgoing: 12,
+        threeMonthAverageOutgoing: 22,
+        targetStockQuantity: 27,
+      }],
+    ])
 
     const bytes = await exportPurchaseRequestsExcel({ userId: 'workspace', status: 'requested' })
     const workbook = new ExcelJS.Workbook()
@@ -88,27 +120,45 @@ describe('exportPurchaseRequestsExcel', () => {
     const sheet = workbook.getWorksheet('발주')!
     const headers = (sheet.getRow(1).values as ExcelJS.CellValue[]).map(String)
     const stockColumn = headers.indexOf('총 현재고')
+    const latestPurchaseColumn = headers.indexOf('최근 발주수량')
+    const inProgressColumn = headers.indexOf('진행 구매수량')
+    const outboundScheduledColumn = headers.indexOf('중국출고 예정수량')
     const targetColumn = headers.indexOf('목표수량')
     const urgencyColumn = headers.indexOf('구매 우선상태')
     const coverageColumn = headers.indexOf('재고 보유개월')
 
     expect(stockColumn).toBeGreaterThan(0)
+    expect(latestPurchaseColumn).toBeGreaterThan(0)
+    expect(inProgressColumn).toBeGreaterThan(latestPurchaseColumn)
+    expect(outboundScheduledColumn).toBeGreaterThan(inProgressColumn)
     expect(targetColumn).toBeGreaterThan(stockColumn)
     expect(urgencyColumn).toBeGreaterThan(0)
     expect(coverageColumn).toBeGreaterThan(targetColumn)
-    expect(sheet.getRow(2).getCell(stockColumn).value).toBe(85)
+    expect(sheet.getRow(2).getCell(stockColumn).value).toBe(91)
+    expect(sheet.getRow(2).getCell(latestPurchaseColumn).value).toBe(40)
+    expect(sheet.getRow(2).getCell(inProgressColumn).value).toBe(30)
+    expect(sheet.getRow(2).getCell(outboundScheduledColumn).value).toBe(15)
     expect(sheet.getRow(2).getCell(targetColumn).value).toBe(128)
     expect(sheet.getRow(2).getCell(urgencyColumn).value).toBe('긴급구매')
     expect(sheet.getRow(2).getCell(coverageColumn).value).toBe(0.8)
     expect(sheet.getRow(3).getCell(stockColumn).value).toBe(-3)
+    expect(sheet.getRow(3).getCell(latestPurchaseColumn).value).toBe('')
+    expect(sheet.getRow(3).getCell(inProgressColumn).value).toBe(0)
+    expect(sheet.getRow(3).getCell(outboundScheduledColumn).value).toBe(0)
     expect(sheet.getRow(3).getCell(targetColumn).value).toBe(0)
     expect(sheet.getRow(3).getCell(urgencyColumn).value).toBe('긴급구매')
     expect(sheet.getRow(3).getCell(coverageColumn).value).toBe(-0.3)
-    expect(sheet.getRow(4).getCell(stockColumn).value).toBe('')
-    expect(sheet.getRow(4).getCell(targetColumn).value).toBe('')
+    expect(sheet.getRow(4).getCell(stockColumn).value).toBe(51)
+    expect(sheet.getRow(4).getCell(latestPurchaseColumn).value).toBe(20)
+    expect(sheet.getRow(4).getCell(inProgressColumn).value).toBe(5)
+    expect(sheet.getRow(4).getCell(outboundScheduledColumn).value).toBe(4)
+    expect(sheet.getRow(4).getCell(targetColumn).value).toBe(27)
     expect(sheet.getRow(4).getCell(urgencyColumn).value).toBe('')
     expect(sheet.getRow(4).getCell(coverageColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(stockColumn).value).toBe('')
+    expect(sheet.getRow(5).getCell(latestPurchaseColumn).value).toBe('')
+    expect(sheet.getRow(5).getCell(inProgressColumn).value).toBe(0)
+    expect(sheet.getRow(5).getCell(outboundScheduledColumn).value).toBe(0)
     expect(sheet.getRow(5).getCell(targetColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(urgencyColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(coverageColumn).value).toBe('')

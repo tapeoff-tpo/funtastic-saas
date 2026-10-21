@@ -14,7 +14,7 @@ import {
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronDown, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { Check, ChevronDown, Download, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -536,7 +536,31 @@ export function PurchaseBulkPaymentDialog() {
   )
 }
 
-export function PurchaseRequestCreateDialog() {
+type ManualPurchaseCandidate = {
+  sku: string
+  productName: string
+  optionName: string | null
+  lastPurchaseDate: string | null
+  lastPurchaseQuantity: number | null
+  lastPurchaseThreeMonthAverageOutgoing: number | null
+  purchaseInProgressQuantity: number
+  chinaOutboundScheduledQuantity: number
+  domesticCurrentStock: number
+  chinaCurrentStock: number
+  currentStock: number
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+  targetStockQuantity: number
+}
+
+type ManualPurchaseDraft = {
+  sku: string
+  productName: string
+  optionName: string
+  requestedQuantity: string
+}
+
+export function PurchaseRequestCreateDialog({ targetStockMonths }: { targetStockMonths: number }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [open, setOpen] = useState(false)
@@ -548,12 +572,83 @@ export function PurchaseRequestCreateDialog() {
   const initialDialogKey = initialSku && initialName ? `${initialSku}\u0000${initialName}\u0000${initialOption}` : ''
   const [dismissedInitialDialogKey, setDismissedInitialDialogKey] = useState('')
   const shouldOpenFromSearch = Boolean(initialDialogKey && dismissedInitialDialogKey !== initialDialogKey)
+  const [draft, setDraft] = useState<ManualPurchaseDraft>(() => ({
+    sku: initialSku,
+    productName: initialName,
+    optionName: initialOption,
+    requestedQuantity: '1',
+  }))
+  const [candidateQuery, setCandidateQuery] = useState(initialSku || initialName)
+  const [candidates, setCandidates] = useState<ManualPurchaseCandidate[]>([])
+  const [selectedCandidate, setSelectedCandidate] = useState<ManualPurchaseCandidate | null>(null)
+  const [candidateError, setCandidateError] = useState<string | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
+  const candidateRequestRef = useRef(0)
+
+  function updateDraft(field: keyof ManualPurchaseDraft, value: string) {
+    setDraft((current) => ({ ...current, [field]: value }))
+  }
+
+  async function searchCandidates() {
+    const query = candidateQuery.trim()
+    if (!query) {
+      setCandidateError('품목코드 또는 상품명을 입력해주세요.')
+      setCandidates([])
+      setHasSearched(false)
+      return
+    }
+
+    const requestId = candidateRequestRef.current + 1
+    candidateRequestRef.current = requestId
+    setCandidateError(null)
+    setIsSearching(true)
+    setHasSearched(true)
+    try {
+      const params = new URLSearchParams({
+        query,
+        targetStockMonths: String(targetStockMonths),
+      })
+      const response = await fetch(`/api/purchasing/purchase-requests/manual-candidates?${params.toString()}`)
+      const body = await response.json().catch(() => ({})) as {
+        error?: string
+        items?: ManualPurchaseCandidate[]
+      }
+      if (candidateRequestRef.current !== requestId) return
+      if (!response.ok) {
+        setCandidateError(body.error ?? '품목을 검색하지 못했습니다.')
+        setCandidates([])
+        return
+      }
+      setCandidates(Array.isArray(body.items) ? body.items : [])
+    } catch {
+      if (candidateRequestRef.current === requestId) {
+        setCandidateError('품목을 검색하지 못했습니다.')
+        setCandidates([])
+      }
+    } finally {
+      if (candidateRequestRef.current === requestId) setIsSearching(false)
+    }
+  }
+
+  function selectCandidate(candidate: ManualPurchaseCandidate) {
+    setSelectedCandidate(candidate)
+    setDraft((current) => ({
+      ...current,
+      sku: candidate.sku,
+      productName: candidate.productName,
+      optionName: candidate.optionName ?? '',
+    }))
+    setError(null)
+  }
 
   function addPurchaseRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const formElement = event.currentTarget
-    const form = new FormData(formElement)
-    const requestedQuantity = Number(form.get('requestedQuantity'))
+    const requestedQuantity = Number(draft.requestedQuantity)
+    if (!Number.isInteger(requestedQuantity) || requestedQuantity < 1 || requestedQuantity > 1_000_000) {
+      setError('수량은 1 이상 1,000,000 이하의 정수로 입력해주세요.')
+      return
+    }
 
     setError(null)
     startTransition(async () => {
@@ -561,9 +656,9 @@ export function PurchaseRequestCreateDialog() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sku: String(form.get('sku') ?? '').trim(),
-          productName: String(form.get('productName') ?? '').trim(),
-          optionName: String(form.get('optionName') ?? '').trim() || null,
+          sku: draft.sku.trim(),
+          productName: draft.productName.trim(),
+          optionName: draft.optionName.trim() || null,
           requestedQuantity,
         }),
       })
@@ -573,7 +668,8 @@ export function PurchaseRequestCreateDialog() {
         return
       }
 
-      formElement.reset()
+      setDraft({ sku: '', productName: '', optionName: '', requestedQuantity: '1' })
+      setSelectedCandidate(null)
       setOpen(false)
       toast.success('발주검토에 항목을 추가했습니다.')
       router.refresh()
@@ -599,11 +695,74 @@ export function PurchaseRequestCreateDialog() {
       />
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(900px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
           <Dialog.Title className="text-base font-semibold">발주 항목 수동 추가</Dialog.Title>
           <Dialog.Description className="sr-only">
-            상품코드, 상품명, 옵션, 수량을 입력해 발주검토에 추가합니다.
+            품목을 검색한 뒤 상품코드, 상품명, 옵션, 수량을 확인해 발주검토에 추가합니다.
           </Dialog.Description>
+          <div className="mt-4 rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Label htmlFor="manual-purchase-candidate-search">품목 검색</Label>
+                <Input
+                  id="manual-purchase-candidate-search"
+                  value={candidateQuery}
+                  onChange={(event) => setCandidateQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return
+                    event.preventDefault()
+                    void searchCandidates()
+                  }}
+                  placeholder="상품코드, 상품명, 옵션 검색"
+                  autoFocus
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={() => void searchCandidates()} disabled={isSearching}>
+                {isSearching ? <Loader2 className="animate-spin" /> : <Search />}
+                검색
+              </Button>
+            </div>
+            {candidateError ? <p className="mt-2 text-sm text-destructive">{candidateError}</p> : null}
+            {hasSearched && !candidateError && candidates.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">일치하는 품목이 없습니다. 아래 입력칸에 직접 추가할 수 있습니다.</p>
+            ) : null}
+            {candidates.length > 0 ? (
+              <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                {candidates.map((candidate) => {
+                  const selected = selectedCandidate?.sku === candidate.sku
+                  return (
+                    <button
+                      key={candidate.sku}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => selectCandidate(candidate)}
+                      className={`w-full rounded-md border p-3 text-left transition-colors ${
+                        selected ? 'border-primary bg-primary/5' : 'bg-background hover:bg-muted/60'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                        <div className="min-w-0">
+                          <span className="font-medium text-foreground">{candidate.productName}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{candidate.sku}</span>
+                          {candidate.optionName ? <span className="ml-2 text-xs text-muted-foreground">· {candidate.optionName}</span> : null}
+                        </div>
+                        <span className="text-xs font-medium text-primary">{selected ? '선택됨' : '선택'}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums sm:grid-cols-4 xl:grid-cols-7">
+                        <ManualPurchaseMetric label="최근 발주수량" value={formatManualPurchaseNumber(candidate.lastPurchaseQuantity)} />
+                        <ManualPurchaseMetric label="진행 구매수량" value={formatManualPurchaseNumber(candidate.purchaseInProgressQuantity)} />
+                        <ManualPurchaseMetric label="중국출고 예정수량" value={formatManualPurchaseNumber(candidate.chinaOutboundScheduledQuantity)} />
+                        <ManualPurchaseMetric label="현재고" value={formatManualPurchaseNumber(candidate.currentStock)} />
+                        <ManualPurchaseMetric label="당월출고" value={formatManualPurchaseNumber(candidate.currentMonthOutgoing)} />
+                        <ManualPurchaseMetric label="3개월평균" value={formatManualPurchaseNumber(candidate.threeMonthAverageOutgoing)} />
+                        <ManualPurchaseMetric label="목표수량" value={formatManualPurchaseNumber(candidate.targetStockQuantity)} />
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
           <form onSubmit={addPurchaseRequest} className="mt-4">
             <div className="grid gap-3 md:grid-cols-[1.1fr_1.8fr_1.2fr_100px]">
               <div className="space-y-1.5">
@@ -613,8 +772,8 @@ export function PurchaseRequestCreateDialog() {
                   name="sku"
                   maxLength={100}
                   required
-                  autoFocus
-                  defaultValue={initialSku}
+                  value={draft.sku}
+                  onChange={(event) => updateDraft('sku', event.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
@@ -624,7 +783,8 @@ export function PurchaseRequestCreateDialog() {
                   name="productName"
                   maxLength={500}
                   required
-                  defaultValue={initialName}
+                  value={draft.productName}
+                  onChange={(event) => updateDraft('productName', event.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
@@ -633,7 +793,8 @@ export function PurchaseRequestCreateDialog() {
                   id="manual-purchase-option-name"
                   name="optionName"
                   maxLength={200}
-                  defaultValue={initialOption}
+                  value={draft.optionName}
+                  onChange={(event) => updateDraft('optionName', event.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
@@ -646,7 +807,8 @@ export function PurchaseRequestCreateDialog() {
                   min={1}
                   max={1_000_000}
                   step={1}
-                  defaultValue={1}
+                  value={draft.requestedQuantity}
+                  onChange={(event) => updateDraft('requestedQuantity', event.target.value)}
                   required
                 />
               </div>
@@ -668,6 +830,20 @@ export function PurchaseRequestCreateDialog() {
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+function ManualPurchaseMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="ml-1 font-medium text-foreground">{value}</span>
+    </div>
+  )
+}
+
+function formatManualPurchaseNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
+  return value.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
 }
 
 export function PurchaseRequestExcelActions({

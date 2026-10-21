@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateBulkPaymentBalance,
+  calculatePurchaseReviewTargetQuantity,
   getStoredPurchaseReviewAverage,
   getPurchasePaymentFlowViewSummary,
   getLatestPurchaseReviewHistoryCandidates,
@@ -11,6 +12,7 @@ import {
   PURCHASE_PAYMENT_FLOW_VIEWS,
   purchaseRequestOrderBy,
   sortPurchasePaymentFlowItems,
+  summarizePurchaseReviewPipelineQuantities,
 } from './purchase-requests'
 import { PURCHASE_REQUEST_STATUS_LABELS } from './purchase-request-status'
 import { completedOutboundCleanupCutoffDate } from './reflected-outbound-items'
@@ -71,6 +73,45 @@ describe('purchase request stage quantities', () => {
       actualPurchaseQuantity: 3,
       requestedQuantity: 1,
     })).toBe(3)
+  })
+})
+
+describe('purchase review live quantities', () => {
+  it('keeps in-progress purchases separate from China outbound reservations', () => {
+    const quantities = summarizePurchaseReviewPipelineQuantities([
+      {
+        sku: '100560-0001', status: 'purchased', requestedQuantity: 10,
+        actualPurchaseQuantity: 8, chinaReceivedQuantity: null, rawData: {},
+      },
+      {
+        sku: '100560-0001', status: 'purchase_completed', requestedQuantity: 15,
+        actualPurchaseQuantity: null, chinaReceivedQuantity: null, rawData: {},
+      },
+      {
+        sku: '100560-0001', status: 'china_arrived', requestedQuantity: 40,
+        actualPurchaseQuantity: 40, chinaReceivedQuantity: 40,
+        rawData: { pendingChinaInventorySnapshot: true, pendingChinaInventoryQuantity: 12 },
+      },
+      {
+        sku: '100560-0001', status: 'china_arrived', requestedQuantity: 20,
+        actualPurchaseQuantity: 20, chinaReceivedQuantity: 20, rawData: {},
+      },
+      {
+        sku: '100560-0001', status: 'outbound_requested', requestedQuantity: 50,
+        actualPurchaseQuantity: 50, chinaReceivedQuantity: 50,
+        rawData: { outboundRequestedQuantity: 17 },
+      },
+    ])
+
+    expect(quantities.get('100560-0001')).toEqual({
+      purchaseInProgressQuantity: 35,
+      chinaOutboundScheduledQuantity: 17,
+    })
+  })
+
+  it('calculates manual-search target stock from the selected target months', () => {
+    expect(calculatePurchaseReviewTargetQuantity(67, 1.5)).toBe(101)
+    expect(calculatePurchaseReviewTargetQuantity(0, 1.5)).toBe(0)
   })
 })
 

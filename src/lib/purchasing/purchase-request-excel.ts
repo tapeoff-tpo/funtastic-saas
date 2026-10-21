@@ -35,8 +35,10 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '상품명',
   '옵션명',
   '요청수량',
+  '총 현재고',
   '당월 출고수량',
   '3개월 평균 출고수량',
+  '목표수량',
   '실제구매수량',
   '중국입고수량',
   '중국출고요청수량',
@@ -111,8 +113,10 @@ export async function exportPurchaseRequestsExcel(input: {
       상품명: row.productName,
       옵션명: row.optionName ?? '',
       요청수량: row.requestedQuantity,
+      '총 현재고': recommendationBasisExcelValue(row.rawData, 'availableStock'),
       '당월 출고수량': outgoingMetrics?.currentMonthOutgoing ?? 0,
       '3개월 평균 출고수량': outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
+      목표수량: recommendationBasisExcelValue(row.rawData, 'targetStockQuantity'),
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
       중국출고요청수량: outboundRequestedQuantity(row.rawData),
@@ -135,8 +139,10 @@ export async function exportPurchaseRequestsExcel(input: {
   }
 
   sheet.getColumn('개당 원가(元)').numFmt = '#,##0.00'
+  sheet.getColumn('총 현재고').numFmt = '#,##0'
   sheet.getColumn('당월 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('3개월 평균 출고수량').numFmt = '#,##0.0'
+  sheet.getColumn('목표수량').numFmt = '#,##0'
   sheet.getColumn('개당 원가(₩)').numFmt = '#,##0'
   sheet.getColumn('총 원가(元)').numFmt = '#,##0.00'
   sheet.getColumn('총 원가(₩)').numFmt = '#,##0'
@@ -444,6 +450,14 @@ function emptyToNull(value: string) {
 function normalizeBuyerCode(value: string) {
   const trimmed = value.trim()
   return trimmed && PURCHASE_BUYERS[trimmed] ? trimmed : null
+}
+
+function recommendationBasisExcelValue(rawData: Record<string, unknown>, key: string) {
+  if (rawData.source !== 'auto_purchase_recommendation') return ''
+  const value = rawData[key]
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return ''
+  const number = Number(value)
+  return Number.isFinite(number) ? number : ''
 }
 
 function outboundRequestedQuantity(rawData: Record<string, unknown>) {

@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Check, ChevronDown, Download, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,12 @@ import {
   PURCHASING_ITEM_STATUS_LABELS,
   type PurchaseDelayReason,
 } from '@/lib/purchasing/purchase-delay'
+import type { PurchaseReviewListStatus } from '@/lib/purchasing/purchase-requests'
+
+const PURCHASE_REVIEW_STATUS_OPTIONS: Array<{ value: PurchaseReviewListStatus; label: string }> = [
+  { value: 'review', label: '발주검토' },
+  { value: 'not_required', label: '발주불필요' },
+]
 
 type BulkSelectionContextValue = {
   ids: string[]
@@ -922,6 +928,60 @@ export function PurchaseRequestExcelActions({
   )
 }
 
+export function PurchaseReviewStatusFilter({
+  selectedStatuses,
+  statusCounts,
+}: {
+  selectedStatuses: readonly PurchaseReviewListStatus[]
+  statusCounts: Record<PurchaseReviewListStatus, number>
+}) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const selected = new Set(selectedStatuses)
+
+  function toggle(status: PurchaseReviewListStatus) {
+    const next = new Set(selected)
+    if (next.has(status)) {
+      if (next.size === 1) return
+      next.delete(status)
+    } else {
+      next.add(status)
+    }
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('reviewStatus')
+    PURCHASE_REVIEW_STATUS_OPTIONS.forEach((option) => {
+      if (next.has(option.value)) params.append('reviewStatus', option.value)
+    })
+    params.delete('page')
+    const query = params.toString()
+    router.push(query ? `${pathname}?${query}` : pathname)
+  }
+
+  return (
+    <fieldset className="flex h-7 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs">
+      <legend className="sr-only">발주상태 필터</legend>
+      <span className="whitespace-nowrap text-muted-foreground">발주상태</span>
+      {PURCHASE_REVIEW_STATUS_OPTIONS.map((option) => {
+        const checked = selected.has(option.value)
+        return (
+          <label key={option.value} className="flex cursor-pointer items-center gap-1 whitespace-nowrap text-foreground">
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={checked && selected.size === 1}
+              onChange={() => toggle(option.value)}
+              className="h-3.5 w-3.5"
+            />
+            {option.label} {statusCounts[option.value].toLocaleString('ko-KR')}
+          </label>
+        )
+      })}
+    </fieldset>
+  )
+}
+
 export function PurchasePaginationControls({
   basePath,
   status,
@@ -934,6 +994,7 @@ export function PurchasePaginationControls({
   page,
   pageSize,
   totalPages,
+  reviewStatuses,
 }: {
   basePath: string
   status: PurchaseRequestStatus | undefined
@@ -946,6 +1007,7 @@ export function PurchasePaginationControls({
   page: number
   pageSize: number
   totalPages: number
+  reviewStatuses?: readonly PurchaseReviewListStatus[]
 }) {
   const router = useRouter()
   const [pageInput, setPageInput] = useState(String(page))
@@ -959,6 +1021,7 @@ export function PurchasePaginationControls({
     params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
     if (sort) params.set('sort', sort)
     if (order) params.set('order', order)
+    reviewStatuses?.forEach((status) => params.append('reviewStatus', status))
     if (nextPage > 1) params.set('page', String(nextPage))
     if (nextPageSize !== 50) params.set('pageSize', String(nextPageSize))
     const query = params.toString()

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import { exportPurchaseRequestsExcel } from '@/lib/purchasing/purchase-request-excel'
+import {
+  PURCHASE_REVIEW_LIST_STATUSES,
+  type PurchaseReviewListStatus,
+} from '@/lib/purchasing/purchase-requests'
 import { PURCHASE_REQUEST_STATUSES, type PurchaseRequestStatus } from '@/lib/purchasing/purchase-request-status'
 
 export async function GET(request: NextRequest) {
@@ -13,11 +17,13 @@ export async function GET(request: NextRequest) {
   const status = parseStatus(params.get('status'))
   const overdueOnly = params.get('overdueOnly') === '1'
   const search = params.get('search')?.trim() || undefined
+  const reviewStatuses = parseReviewStatuses(params.getAll('reviewStatus'))
   const buffer = await exportPurchaseRequestsExcel({
     userId: await getWorkspaceUserId(user.id),
     status,
     overdueOnly,
     search,
+    reviewStatuses,
   })
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
   const name = overdueOnly ? '구매입고지연' : status ? `발주_${status}` : '발주전체'
@@ -35,4 +41,12 @@ function parseStatus(value: string | null): PurchaseRequestStatus | undefined {
   return (PURCHASE_REQUEST_STATUSES as readonly string[]).includes(value)
     ? value as PurchaseRequestStatus
     : undefined
+}
+
+function parseReviewStatuses(values: readonly string[]): PurchaseReviewListStatus[] | undefined {
+  const statuses = Array.from(new Set(values))
+    .filter((value): value is PurchaseReviewListStatus => (
+      PURCHASE_REVIEW_LIST_STATUSES.includes(value as PurchaseReviewListStatus)
+    ))
+  return statuses.length > 0 ? statuses : undefined
 }

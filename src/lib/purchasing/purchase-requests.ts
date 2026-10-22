@@ -16,12 +16,18 @@ import {
 } from './purchase-costs'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
+  PURCHASE_DELAY_REASONS,
   PURCHASE_DELAY_TRACKING_START_DATE,
   purchaseDelayReasonToItemStatus,
   type PurchaseDelayReason,
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
 import { purchasePipelineQuantity } from './purchase-recommendations'
+import {
+  getProductGroupPurchaseUrgencyStatus,
+  getUrgentPurchaseProductNames,
+  type PurchaseUrgencyStatus,
+} from './purchase-urgency'
 import {
   type PurchasePaymentStatus,
   type PurchaseRequestStatus,
@@ -106,6 +112,64 @@ export type PurchaseReviewPipelineQuantities = Pick<
   PurchaseReviewOperationalMetrics,
   'purchaseInProgressQuantity' | 'chinaOutboundScheduledQuantity'
 >
+
+export const PURCHASE_REVIEW_LIST_STATUSES = ['review', 'not_required'] as const
+
+export type PurchaseReviewListStatus = (typeof PURCHASE_REVIEW_LIST_STATUSES)[number]
+
+export const PURCHASE_REVIEW_LIST_STATUS_LABELS: Record<PurchaseReviewListStatus, string> = {
+  review: '발주검토',
+  not_required: '발주불필요',
+}
+
+export type PurchaseReviewListItem = {
+  id: string | null
+  reviewStatus: PurchaseReviewListStatus
+  status: 'requested'
+  sku: string
+  productName: string
+  optionName: string | null
+  requestedQuantity: number
+  actualPurchaseQuantity: number | null
+  chinaReceivedQuantity: number | null
+  rawData: Record<string, unknown>
+  requestDate: string | null
+  outboundExpectedDate: string | null
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+  purchaseMethod: string | null
+  paymentStatus: PurchasePaymentStatus
+  paymentPaidAt: Date | null
+  bulkPaymentPending: boolean
+  bulkPaymentDueDate: string | null
+  delayReason: PurchaseDelayReason | null
+  delayNote: string | null
+  memo: string | null
+  buyerCode: string | null
+  buyerName: string | null
+  managerCode: string | null
+  purchaseUrl: string | null
+  purchasingStatus: string | null
+  purchasingStatusNote: string | null
+  chinaCurrentStock: number
+  costExchangeRateKrw: string | null
+  specialPriceCny: string | null
+  newCostCny: string | null
+  unitCostYuan: number | null
+  unitCostKrw: number | null
+  totalCostYuan: number | null
+  totalCostKrw: number | null
+  purchaseReviewMetrics: PurchaseReviewOperationalMetrics | null
+  purchaseReviewHistory: PurchaseReviewHistory | null
+  purchaseUrgencyStatus: PurchaseUrgencyStatus | null
+}
+
+type PurchaseReviewListBaseItem = Omit<
+  PurchaseReviewListItem,
+  'purchaseReviewMetrics' | 'purchaseReviewHistory' | 'purchaseUrgencyStatus'
+> & {
+  metadata: Record<string, unknown> | null
+}
 
 export type PurchaseReviewPipelineRow = {
   sku: string
@@ -920,6 +984,12 @@ function normalizePaymentStatus(value: string | null | undefined): PurchasePayme
   return 'pending'
 }
 
+function normalizePurchaseDelayReason(value: string | null | undefined): PurchaseDelayReason | null {
+  return PURCHASE_DELAY_REASONS.includes(value as PurchaseDelayReason)
+    ? value as PurchaseDelayReason
+    : null
+}
+
 export async function getPurchaseRequests(input: {
   userId: string
   status?: PurchaseRequestStatus
@@ -1095,6 +1165,7 @@ export async function getPurchaseRequests(input: {
       skus: pricedItems.map((item) => item.sku),
     })
     : new Map<string, PurchaseReviewOperationalMetrics>()
+  const urgentProductNames = getUrgentPurchaseProductNames(pricedItems)
   const missingCostItems = costRows
     .map((row) => ({ row, costs: calculatePurchaseCost(row, input.exchangeRateKrw) }))
     .filter(({ costs }) => costs.unitCostYuan === null || costs.unitCostKrw === null)
@@ -1108,8 +1179,18 @@ export async function getPurchaseRequests(input: {
   return {
     items: pricedItems.map((item) => ({
       ...item,
+      reviewStatus: item.status === 'requested'
+        ? item.requestedQuantity > 0 ? 'review' as const : 'not_required' as const
+        : null,
       purchaseReviewMetrics: purchaseReviewMetricsBySku.get(item.sku) ?? null,
       purchaseReviewHistory: purchaseReviewHistoryFromMetrics(purchaseReviewMetricsBySku.get(item.sku)),
+      purchaseUrgencyStatus: item.status === 'requested' || item.status === 'purchased'
+        ? getProductGroupPurchaseUrgencyStatus({
+          sku: item.sku,
+          productName: item.productName,
+          urgentProductNames,
+        })
+        : null,
     })),
     total,
     costTotals: summarizePurchaseCosts(costRows, input.exchangeRateKrw),
@@ -1119,7 +1200,307 @@ export async function getPurchaseRequests(input: {
     overduePurchaseCompletedCount,
     overdueTotalCount: overduePurchaseRequestCount + overduePurchaseCompletedCount,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.total])) as Partial<Record<PurchaseRequestStatus, number>>,
+    reviewStatusCounts: {
+      review: statusCounts.find((row) => row.status === 'requested')?.total ?? 0,
+      not_required: 0,
+    } satisfies Record<PurchaseReviewListStatus, number>,
   }
+}
+
+/**
+ * Builds the purchase-review list from the item master instead of creating
+ * zero-quantity purchase rows. This keeps the operational purchase workflow
+ * unchanged while making every managed SKU visible for review and export.
+ */
+export async function getPurchaseReviewList(input: {
+  userId: string
+  search?: string
+  statuses?: readonly PurchaseReviewListStatus[]
+  page?: number
+  pageSize?: number
+  sort?: string
+  order?: string
+  exchangeRateKrw?: number
+  targetStockMonths?: number
+}) {
+  await ensurePurchasePaymentTrackingSchema()
+  const page = input.page ?? 1
+  const pageSize = input.pageSize ?? 50
+  const optionName = sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>'규격정보', '')), '')`
+  const [productRows, requestedRows] = await Promise.all([
+    db.select({
+      sku: products.internalSku,
+      productName: products.name,
+      optionName,
+      metadata: products.metadata,
+      specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+      newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
+      purchasingStatus: products.purchasingStatus,
+      purchasingStatusNote: products.purchasingStatusNote,
+    }).from(products).where(and(
+      eq(products.userId, input.userId),
+      sql`${products.metadata}->'esa009m' IS NOT NULL`,
+    )).orderBy(asc(products.internalSku)),
+    db.select({
+      ...getTableColumns(purchaseRequestItems),
+    }).from(purchaseRequestItems).where(and(
+      eq(purchaseRequestItems.userId, input.userId),
+      eq(purchaseRequestItems.status, 'requested'),
+    )),
+  ])
+
+  const reviewRowBySku = latestPurchaseReviewRowBySku(requestedRows)
+  const productSkus = new Set(productRows.map((product) => product.sku))
+  const allProductRows = [
+    ...productRows,
+    ...requestedRows
+      .filter((row) => !productSkus.has(row.sku))
+      .map((row) => ({
+        sku: row.sku,
+        productName: row.productName,
+        optionName: row.optionName,
+        metadata: null,
+        specialPriceCny: null,
+        newCostCny: null,
+        purchaseUrl: null,
+        purchasingStatus: null,
+        purchasingStatusNote: null,
+      })),
+  ]
+  const baseRows: PurchaseReviewListBaseItem[] = allProductRows.map((product): PurchaseReviewListBaseItem => {
+    const source = reviewRowBySku.get(product.sku)
+    const requestedQuantity = Math.max(0, source?.requestedQuantity ?? 0)
+    const costs = calculatePurchaseCosts({
+      requestedQuantity,
+      specialPriceCny: product.specialPriceCny,
+      newCostCny: product.newCostCny,
+      exchangeRateKrw: source?.costExchangeRateKrw ?? input.exchangeRateKrw,
+    })
+    return {
+      id: requestedQuantity > 0 ? source?.id ?? null : null,
+      reviewStatus: requestedQuantity > 0 ? 'review' as const : 'not_required' as const,
+      status: 'requested' as const,
+      sku: product.sku,
+      productName: product.productName,
+      optionName: product.optionName,
+      requestedQuantity,
+      actualPurchaseQuantity: source?.actualPurchaseQuantity ?? null,
+      chinaReceivedQuantity: source?.chinaReceivedQuantity ?? null,
+      rawData: source?.rawData ?? {},
+      requestDate: source?.requestDate ?? null,
+      outboundExpectedDate: source?.outboundExpectedDate ?? null,
+      purchaseManagementCode: source?.purchaseManagementCode ?? null,
+      supplierOrderNumber: source?.supplierOrderNumber ?? null,
+      purchaseMethod: source?.purchaseMethod ?? null,
+      paymentStatus: normalizePaymentStatus(source?.paymentStatus),
+      paymentPaidAt: source?.paymentPaidAt ?? null,
+      bulkPaymentPending: source?.bulkPaymentPending ?? false,
+      bulkPaymentDueDate: source?.bulkPaymentDueDate ?? null,
+      delayReason: normalizePurchaseDelayReason(source?.delayReason),
+      delayNote: source?.delayNote ?? null,
+      memo: source?.memo ?? null,
+      buyerCode: source?.buyerCode ?? null,
+      buyerName: source?.buyerName ?? null,
+      managerCode: source?.managerCode ?? null,
+      purchaseUrl: product.purchaseUrl,
+      purchasingStatus: product.purchasingStatus,
+      purchasingStatusNote: product.purchasingStatusNote,
+      chinaCurrentStock: 0,
+      costExchangeRateKrw: source?.costExchangeRateKrw ?? null,
+      specialPriceCny: product.specialPriceCny,
+      newCostCny: product.newCostCny,
+      ...costs,
+      metadata: product.metadata,
+    }
+  })
+  const requestedStatuses = normalizePurchaseReviewListStatuses(input.statuses)
+  const normalizedSearch = input.search?.trim().toLocaleLowerCase('ko-KR') ?? ''
+  const filteredRows = baseRows.filter((row) => (
+    requestedStatuses.includes(row.reviewStatus)
+    && matchesPurchaseReviewSearch(row, normalizedSearch)
+  ))
+  const sortedRows = sortPurchaseReviewListRows(filteredRows, input.sort, input.order)
+  const reviewRows = filteredRows.filter((row) => row.reviewStatus === 'review')
+  const costRows = reviewRows.map((row) => ({
+    status: row.status,
+    requestedQuantity: row.requestedQuantity,
+    actualPurchaseQuantity: row.actualPurchaseQuantity,
+    specialPriceCny: row.specialPriceCny,
+    newCostCny: row.newCostCny,
+    costExchangeRateKrw: row.costExchangeRateKrw,
+  }))
+  const missingCostItems = reviewRows
+    .map((row) => ({ row, costs: calculatePurchaseCosts({
+      requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
+      specialPriceCny: row.specialPriceCny,
+      newCostCny: row.newCostCny,
+      exchangeRateKrw: row.costExchangeRateKrw ?? input.exchangeRateKrw,
+    }) }))
+    .filter(({ costs }) => costs.unitCostYuan === null || costs.unitCostKrw === null)
+    .map(({ row, costs }) => ({
+      sku: row.sku,
+      productName: row.productName,
+      missingYuan: costs.unitCostYuan === null,
+      missingKrw: costs.unitCostKrw === null,
+    }))
+  const total = sortedRows.length
+  const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize)
+  const metricsBySku = await getPurchaseReviewOperationalMetricsBySku({
+    userId: input.userId,
+    skus: pageRows.map((row) => row.sku),
+    targetStockMonths: input.targetStockMonths,
+  })
+  const urgentProductNames = getUrgentPurchaseProductNames(baseRows)
+  const items: PurchaseReviewListItem[] = pageRows.map((row) => {
+    const metrics = metricsBySku.get(row.sku) ?? emptyPurchaseReviewOperationalMetrics()
+    return {
+      ...row,
+      chinaCurrentStock: metrics.chinaCurrentStock,
+      purchaseReviewMetrics: metrics,
+      purchaseReviewHistory: purchaseReviewHistoryFromMetrics(metrics),
+      purchaseUrgencyStatus: getProductGroupPurchaseUrgencyStatus({
+        sku: row.sku,
+        productName: row.productName,
+        urgentProductNames,
+      }),
+    }
+  })
+
+  return {
+    items,
+    total,
+    costTotals: summarizePurchaseCosts(costRows, input.exchangeRateKrw),
+    missingCostItems,
+    reviewStatusCounts: {
+      review: baseRows.filter((row) => row.reviewStatus === 'review').length,
+      not_required: baseRows.filter((row) => row.reviewStatus === 'not_required').length,
+    } satisfies Record<PurchaseReviewListStatus, number>,
+    statusCounts: {
+      requested: baseRows.filter((row) => row.reviewStatus === 'review').length,
+    } satisfies Partial<Record<PurchaseRequestStatus, number>>,
+    overduePurchasedCount: 0,
+    overduePurchaseRequestCount: 0,
+    overduePurchaseCompletedCount: 0,
+    overdueTotalCount: 0,
+  }
+}
+
+function latestPurchaseReviewRowBySku<T extends {
+  sku: string
+  requestedQuantity: number
+  updatedAt: Date
+  createdAt: Date
+}>(rows: readonly T[]) {
+  const latestBySku = new Map<string, T>()
+  for (const row of rows) {
+    const current = latestBySku.get(row.sku)
+    if (!current || shouldReplacePurchaseReviewRow(current, row)) latestBySku.set(row.sku, row)
+  }
+  return latestBySku
+}
+
+function shouldReplacePurchaseReviewRow<T extends {
+  requestedQuantity: number
+  updatedAt: Date
+  createdAt: Date
+}>(current: T, candidate: T) {
+  const currentHasQuantity = current.requestedQuantity > 0
+  const candidateHasQuantity = candidate.requestedQuantity > 0
+  if (currentHasQuantity !== candidateHasQuantity) return candidateHasQuantity
+  const currentUpdatedAt = current.updatedAt.getTime()
+  const candidateUpdatedAt = candidate.updatedAt.getTime()
+  if (currentUpdatedAt !== candidateUpdatedAt) return candidateUpdatedAt > currentUpdatedAt
+  return candidate.createdAt.getTime() > current.createdAt.getTime()
+}
+
+function normalizePurchaseReviewListStatuses(value: readonly PurchaseReviewListStatus[] | undefined) {
+  const selected = Array.from(new Set(value ?? []))
+    .filter((status): status is PurchaseReviewListStatus => PURCHASE_REVIEW_LIST_STATUSES.includes(status))
+  return selected.length > 0 ? selected : [...PURCHASE_REVIEW_LIST_STATUSES]
+}
+
+function matchesPurchaseReviewSearch(row: {
+  sku: string
+  productName: string
+  optionName: string | null
+  purchaseUrl: string | null
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+  memo: string | null
+  rawData: Record<string, unknown>
+  metadata: Record<string, unknown> | null
+}, normalizedSearch: string) {
+  if (!normalizedSearch) return true
+  const metadataText = JSON.stringify(row.metadata?.esa009m ?? {}).toLocaleLowerCase('ko-KR')
+  const rawDataText = JSON.stringify(row.rawData).toLocaleLowerCase('ko-KR')
+  return [
+    row.sku,
+    row.productName,
+    row.optionName ?? '',
+    row.purchaseUrl ?? '',
+    row.purchaseManagementCode ?? '',
+    row.supplierOrderNumber ?? '',
+    row.memo ?? '',
+    metadataText,
+    rawDataText,
+  ]
+    .some((value) => value.toLocaleLowerCase('ko-KR').includes(normalizedSearch))
+}
+
+function sortPurchaseReviewListRows<T extends {
+  reviewStatus: PurchaseReviewListStatus
+  sku: string
+  productName: string
+  optionName: string | null
+  requestedQuantity: number
+  unitCostYuan: number | null
+  unitCostKrw: number | null
+  totalCostYuan: number | null
+  totalCostKrw: number | null
+}>(rows: readonly T[], sort?: string, order?: string) {
+  const direction = order === 'desc' ? -1 : 1
+  const compareText = (left: string, right: string) => left.localeCompare(right, 'ko-KR')
+  const compareNumber = (left: number | null, right: number | null) => (left ?? -1) - (right ?? -1)
+  return [...rows].sort((left, right) => {
+    let compared = 0
+    switch (sort) {
+      case 'status':
+        compared = Number(left.reviewStatus === 'not_required') - Number(right.reviewStatus === 'not_required')
+        break
+      case 'productName':
+        compared = compareText(left.productName, right.productName)
+        break
+      case 'sku':
+        compared = compareText(left.sku, right.sku)
+        break
+      case 'requestedQuantity':
+        compared = compareNumber(left.requestedQuantity, right.requestedQuantity)
+        break
+      case 'unitCostYuan':
+        compared = compareNumber(left.unitCostYuan, right.unitCostYuan)
+        break
+      case 'unitCostKrw':
+        compared = compareNumber(left.unitCostKrw, right.unitCostKrw)
+        break
+      case 'totalCostYuan':
+        compared = compareNumber(left.totalCostYuan, right.totalCostYuan)
+        break
+      case 'totalCostKrw':
+        compared = compareNumber(left.totalCostKrw, right.totalCostKrw)
+        break
+      default:
+        compared = Number(left.reviewStatus === 'not_required') - Number(right.reviewStatus === 'not_required')
+        if (compared !== 0) return compared
+        compared = compareText(left.sku, right.sku)
+        if (compared !== 0) return compared
+        return compareText(left.optionName ?? '', right.optionName ?? '')
+    }
+    if (compared !== 0) return compared * direction
+    const skuComparison = compareText(left.sku, right.sku)
+    if (skuComparison !== 0) return skuComparison
+    return compareText(left.optionName ?? '', right.optionName ?? '')
+  })
 }
 
 const PURCHASE_REVIEW_HISTORY_STATUSES = [

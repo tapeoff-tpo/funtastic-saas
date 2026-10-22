@@ -24,6 +24,56 @@ vi.mock('@/lib/new-products/cny-cost', () => ({
 }))
 vi.mock('./purchase-requests', () => ({
   getPurchaseReviewOperationalMetricsBySku: async () => mocks.metrics,
+  getPurchaseReviewList: async () => ({
+    items: mocks.rows.map((row) => {
+      const rawData = row.rawData as Record<string, unknown>
+      const stockCoverageMonths = Number(rawData.stockCoverageMonths)
+      const urgent = rawData.source === 'auto_purchase_recommendation'
+        && Number.isFinite(stockCoverageMonths)
+        && stockCoverageMonths <= 1
+      return {
+        id: typeof row.id === 'string' ? row.id : null,
+        reviewStatus: Number(row.requestedQuantity ?? 0) > 0 ? 'review' : 'not_required',
+        status: 'requested',
+        sku: String(row.sku ?? ''),
+        productName: String(row.productName ?? ''),
+        optionName: null,
+        requestedQuantity: Number(row.requestedQuantity ?? 0),
+        actualPurchaseQuantity: null,
+        chinaReceivedQuantity: null,
+        rawData,
+        requestDate: null,
+        outboundExpectedDate: null,
+        purchaseManagementCode: null,
+        supplierOrderNumber: null,
+        purchaseMethod: null,
+        paymentStatus: 'pending',
+        paymentPaidAt: null,
+        bulkPaymentPending: false,
+        bulkPaymentDueDate: null,
+        delayReason: null,
+        delayNote: null,
+        memo: null,
+        buyerCode: null,
+        buyerName: null,
+        managerCode: null,
+        purchaseUrl: null,
+        purchasingStatus: null,
+        purchasingStatusNote: null,
+        chinaCurrentStock: 0,
+        costExchangeRateKrw: null,
+        specialPriceCny: null,
+        newCostCny: null,
+        unitCostYuan: null,
+        unitCostKrw: null,
+        totalCostYuan: null,
+        totalCostKrw: null,
+        purchaseReviewMetrics: mocks.metrics.get(String(row.sku ?? '')) ?? null,
+        purchaseReviewHistory: null,
+        purchaseUrgencyStatus: urgent ? 'urgent' : null,
+      }
+    }),
+  }),
 }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
 
@@ -162,5 +212,36 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getRow(5).getCell(targetColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(urgencyColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(coverageColumn).value).toBe('')
+  })
+
+  it('전상품 발주검토 엑셀에는 발주불필요 품목도 수량 0으로 포함한다', async () => {
+    mocks.rows = [
+      {
+        id: 'review', status: 'requested', sku: '100002-0001', productName: '발주 필요 품목',
+        requestedQuantity: 20,
+        rawData: { source: 'auto_purchase_recommendation', stockCoverageMonths: 1.2 },
+      },
+      {
+        sku: '100002-0002', productName: '발주 불필요 품목',
+        requestedQuantity: 0,
+        rawData: {},
+      },
+    ]
+    mocks.metrics = new Map()
+
+    const bytes = await exportPurchaseRequestsExcel({ userId: 'workspace', status: 'requested' })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    const sheet = workbook.getWorksheet('발주')!
+    const headers = (sheet.getRow(1).values as ExcelJS.CellValue[]).map(String)
+    const statusColumn = headers.indexOf('상태')
+    const quantityColumn = headers.indexOf('요청수량')
+
+    expect(statusColumn).toBeGreaterThan(0)
+    expect(quantityColumn).toBeGreaterThan(0)
+    expect(sheet.getRow(2).getCell(statusColumn).value).toBe('발주검토')
+    expect(sheet.getRow(2).getCell(quantityColumn).value).toBe(20)
+    expect(sheet.getRow(3).getCell(statusColumn).value).toBe('발주불필요')
+    expect(sheet.getRow(3).getCell(quantityColumn).value).toBe(0)
   })
 })

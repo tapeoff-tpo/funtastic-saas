@@ -10,8 +10,12 @@ import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected
 import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
+  getPurchaseReviewList,
   getPurchaseRequests,
+  PURCHASE_REVIEW_LIST_STATUS_LABELS,
+  PURCHASE_REVIEW_LIST_STATUSES,
   type PurchaseReviewHistory,
+  type PurchaseReviewListStatus,
   type PurchaseReviewOperationalMetrics,
 } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
@@ -49,6 +53,7 @@ import {
   PurchaseRecommendationGenerator,
   PurchaseRequestCreateDialog,
   PurchaseRequestExcelActions,
+  PurchaseReviewStatusFilter,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
   PurchaseStatusButton,
@@ -111,6 +116,10 @@ export async function PurchasingOrdersView({
   const order = parseOrder(stringParam(params.order)) ?? 'desc'
   const selectedOutboundDates = parseOutboundDates(params.outboundDate)
   const outboundDates = status === 'completed' ? selectedOutboundDates : []
+  const isPurchaseReviewList = !overdueOnly && basePath === '/purchasing/purchases' && status === 'requested'
+  const selectedReviewStatuses = isPurchaseReviewList
+    ? parsePurchaseReviewStatuses(params.reviewStatus)
+    : []
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -127,34 +136,35 @@ export async function PurchasingOrdersView({
       fallbackExchangeRateKrw: exchangeRateReference.rate,
     })
     : null
-  const initialPurchaseRequestResult = await getPurchaseRequests({
-    userId: workspaceUserId,
-    status: selectedStatus,
-    overdueOnly,
-    search: search ?? undefined,
-    page: requestedPage,
-    pageSize,
-    sort: sort ?? undefined,
-    order,
-    outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
-    exchangeRateKrw: exchangeRateReference.rate,
-  })
-  let purchaseRequestResult = initialPurchaseRequestResult
-  const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
-  const page = Math.min(requestedPage, totalPages)
-  if (page !== requestedPage) {
-    purchaseRequestResult = await getPurchaseRequests({
+  const getPurchaseListPage = (targetPage: number) => isPurchaseReviewList
+    ? getPurchaseReviewList({
+      userId: workspaceUserId,
+      search: search ?? undefined,
+      statuses: selectedReviewStatuses,
+      page: targetPage,
+      pageSize,
+      sort: sort ?? undefined,
+      order,
+      exchangeRateKrw: exchangeRateReference.rate,
+    })
+    : getPurchaseRequests({
       userId: workspaceUserId,
       status: selectedStatus,
       overdueOnly,
       search: search ?? undefined,
-      page,
+      page: targetPage,
       pageSize,
       sort: sort ?? undefined,
       order,
       outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
       exchangeRateKrw: exchangeRateReference.rate,
     })
+  const initialPurchaseRequestResult = await getPurchaseListPage(requestedPage)
+  let purchaseRequestResult = initialPurchaseRequestResult
+  const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
+  const page = Math.min(requestedPage, totalPages)
+  if (page !== requestedPage) {
+    purchaseRequestResult = await getPurchaseListPage(page)
   }
   const {
     items,
@@ -162,11 +172,13 @@ export async function PurchasingOrdersView({
     costTotals,
     missingCostItems,
     statusCounts,
+    reviewStatusCounts,
     overduePurchasedCount,
     overduePurchaseRequestCount,
     overduePurchaseCompletedCount,
     overdueTotalCount,
   } = purchaseRequestResult
+  const purchaseStatusCounts = statusCounts as Partial<Record<PurchaseRequestStatus, number>>
   const dataFreshness = showRecommendationGenerator
     ? await getPurchasingDataFreshness(workspaceUserId)
     : null
@@ -200,7 +212,9 @@ export async function PurchasingOrdersView({
     (showPurchaseUrlColumn ? 1 : 0) +
     (isRequestedStatus ? 0 : 3) +
     (overdueOnly ? 1 : 0)
-  const listLabel = overdueOnly
+  const listLabel = isPurchaseReviewList
+    ? '발주검토'
+    : overdueOnly
     ? selectedStatus === 'purchased'
       ? '발주요청 지연'
       : selectedStatus === 'purchase_completed'
@@ -215,6 +229,7 @@ export async function PurchasingOrdersView({
   if (sort) costToggleParams.set('sort', sort)
   if (order) costToggleParams.set('order', order)
   appendOutboundDateParams(costToggleParams, selectedOutboundDates)
+  appendPurchaseReviewStatusParams(costToggleParams, selectedReviewStatuses)
   costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
@@ -226,6 +241,7 @@ export async function PurchasingOrdersView({
   if (sort) basisToggleParams.set('sort', sort)
   if (order) basisToggleParams.set('order', order)
   appendOutboundDateParams(basisToggleParams, selectedOutboundDates)
+  appendPurchaseReviewStatusParams(basisToggleParams, selectedReviewStatuses)
   if (showCosts) basisToggleParams.set('showCosts', '1')
   basisToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '0' : '1')
   const basisToggleHref = `${basePath}?${basisToggleParams.toString()}`
@@ -233,6 +249,7 @@ export async function PurchasingOrdersView({
   if (selectedStatus) excelExportParams.set('status', selectedStatus)
   if (overdueOnly) excelExportParams.set('overdueOnly', '1')
   if (search) excelExportParams.set('search', search)
+  appendPurchaseReviewStatusParams(excelExportParams, selectedReviewStatuses)
   const excelExportHref = `/api/purchasing/purchase-requests/export?${excelExportParams.toString()}`
   const sortHeaderProps = {
     status: selectedStatus,
@@ -244,6 +261,7 @@ export async function PurchasingOrdersView({
     currentOrder: order,
     basePath,
     pageSize,
+    reviewStatuses: selectedReviewStatuses,
   }
 
   return (
@@ -260,6 +278,9 @@ export async function PurchasingOrdersView({
         <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
           {selectedOutboundDates.map((date) => <input key={date} type="hidden" name="outboundDate" value={date} />)}
+          {selectedReviewStatuses.map((reviewStatus) => (
+            <input key={reviewStatus} type="hidden" name="reviewStatus" value={reviewStatus} />
+          ))}
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {pageSize !== 50 ? <input type="hidden" name="pageSize" value={pageSize} /> : null}
@@ -388,6 +409,7 @@ export async function PurchasingOrdersView({
               sort,
               order,
               outboundDates: selectedOutboundDates,
+              reviewStatuses: selectedReviewStatuses,
               pageSize,
             })
             return (
@@ -406,7 +428,7 @@ export async function PurchasingOrdersView({
             )
           })}
         </nav>
-      ) : showStatusTabs ? (
+      ) : showStatusTabs && !isPurchaseReviewList ? (
       <nav className="flex max-w-full gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0">
         {allowedStatuses.map((item) => {
           const active = item === status
@@ -419,6 +441,7 @@ export async function PurchasingOrdersView({
             sort,
             order,
             outboundDates: selectedOutboundDates,
+              reviewStatuses: selectedReviewStatuses,
             pageSize,
           })
           return (
@@ -431,7 +454,7 @@ export async function PurchasingOrdersView({
             >
               {PURCHASE_REQUEST_STATUS_LABELS[item]}
               <span className={active ? 'text-background/70' : 'text-muted-foreground'}>
-                {(statusCounts[item] ?? 0).toLocaleString('ko-KR')}
+                {(purchaseStatusCounts[item] ?? 0).toLocaleString('ko-KR')}
               </span>
             </Link>
           )
@@ -439,11 +462,11 @@ export async function PurchasingOrdersView({
       </nav>
       ) : null}
 
-      <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={nextStatus}>
+      <PurchaseBulkSelectionProvider ids={items.flatMap((item) => item.id ? [item.id] : [])} nextStatus={nextStatus}>
         <section className="min-w-0 overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-sm font-semibold">{listLabel} 목록</h2>
+              <h2 className="text-sm font-semibold">{isPurchaseReviewList ? '전상품 발주검토' : listLabel} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
@@ -454,6 +477,12 @@ export async function PurchasingOrdersView({
                 />
               ) : null}
               {isRequestedStatus ? <PurchaseRequestCreateDialog targetStockMonths={latestTargetStockMonths} /> : null}
+              {isPurchaseReviewList ? (
+                <PurchaseReviewStatusFilter
+                  selectedStatuses={selectedReviewStatuses}
+                  statusCounts={reviewStatusCounts}
+                />
+              ) : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link
@@ -486,7 +515,7 @@ export async function PurchasingOrdersView({
                   </th>
                   <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" {...sortHeaderProps} align="center" />
+                    <SortHeader label={isPurchaseReviewList ? '발주상태' : '상태'} column="status" {...sortHeaderProps} align="center" />
                   </th>
                   <th className="min-w-[280px] px-3 py-2 font-medium">
                     <SortHeader label="상품" column="productName" {...sortHeaderProps} />
@@ -495,7 +524,7 @@ export async function PurchasingOrdersView({
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">URL</th>
                   ) : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
+                    <SortHeader label={isPurchaseReviewList ? '발주수량' : quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
                   </th>
                   {isRequestedStatus ? <th className="min-w-[176px] px-3 py-2 text-center font-medium">최근 구매 이력</th> : null}
                   {isRequestedStatus ? (
@@ -560,9 +589,9 @@ export async function PurchasingOrdersView({
                       && requestDateElapsedDays >= 7
                     const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
                     const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
-                    const purchaseUrgencyStatus = isPurchaseUrgencyActionNeeded(item.status)
+                    const purchaseUrgencyStatus = item.purchaseUrgencyStatus ?? (isPurchaseUrgencyActionNeeded(item.status)
                       ? getPurchaseUrgencyStatus(item.rawData)
-                      : null
+                      : null)
                     const stockCoverageMonths = getPurchaseStockCoverageMonths(item.rawData)
                     const stickyCellClassName = isOverdueRow ? 'bg-red-50' : 'bg-background'
                     const purchaseUrlHref = typeof item.purchaseUrl === 'string' && /^https?:\/\//.test(item.purchaseUrl)
@@ -573,17 +602,20 @@ export async function PurchasingOrdersView({
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
+                    const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
+                      ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
+                      : PURCHASE_REQUEST_STATUS_LABELS[item.status]
                     return (
-                      <tr key={item.id} className={`border-t align-middle ${isOverdueRow ? 'bg-red-50/80' : ''}`}>
+                      <tr key={item.id ?? item.sku} className={`border-t align-middle ${isOverdueRow ? 'bg-red-50/80' : ''}`}>
                       <td className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
-                        <PurchaseRowCheckbox id={item.id} />
+                        {item.id ? <PurchaseRowCheckbox id={item.id} /> : null}
                       </td>
                       <td className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
                       <td className="px-2 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
-                          {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
+                          {displayStatusLabel}
                         </Badge>
                         {purchaseUrgencyStatus ? (
                           <div className="mt-1">
@@ -653,7 +685,7 @@ export async function PurchasingOrdersView({
                             {formatNumber(stageQuantity)}
                             <p className="mt-0.5 text-[11px] font-normal leading-tight text-sky-700">중국출고 작업 기준</p>
                           </div>
-                        ) : (
+                        ) : item.id ? (
                           <PurchaseQuantityField
                             id={item.id}
                             field={quantityColumn.field}
@@ -664,6 +696,8 @@ export async function PurchasingOrdersView({
                               unitCostKrw: costs.unitCostKrw,
                             } : undefined}
                           />
+                        ) : (
+                          <span className="inline-flex h-7 min-w-16 items-center justify-center text-xs text-muted-foreground">0</span>
                         )}
                         {(item.status === 'outbound_requested' || item.status === 'completed')
                           && cumulativeOutboundQuantity !== null ? (
@@ -707,64 +741,74 @@ export async function PurchasingOrdersView({
                       )}
                       {isRequestedStatus ? null : (
                         <td className="px-3 py-2 align-middle">
-                          <PurchasePlanFieldsV2
-                            id={item.id}
-                            supplierOrderNumber={item.supplierOrderNumber}
-                            dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
-                            dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
-                            dateLabel={item.status === 'china_arrived'
-                              ? '중국도착일'
-                              : item.status === 'purchased'
-                              ? '발주요청 날짜'
-                              : item.status === 'outbound_requested' || item.status === 'completed'
-                                ? '출고날짜'
-                                : '구매날짜'}
-                            purchaseMethod={item.purchaseMethod}
-                          />
-                          {(item.status === 'purchased' || item.status === 'purchase_completed') ? (
-                            <PurchaseSaasChinaModeField
-                              id={item.id}
-                              enabled={item.rawData.saasChinaMode === true}
-                            />
-                          ) : null}
+                          {item.id ? (
+                            <>
+                              <PurchasePlanFieldsV2
+                                id={item.id}
+                                supplierOrderNumber={item.supplierOrderNumber}
+                                dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
+                                dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
+                                dateLabel={item.status === 'china_arrived'
+                                  ? '중국도착일'
+                                  : item.status === 'purchased'
+                                  ? '발주요청 날짜'
+                                  : item.status === 'outbound_requested' || item.status === 'completed'
+                                    ? '출고날짜'
+                                    : '구매날짜'}
+                                purchaseMethod={item.purchaseMethod}
+                              />
+                              {(item.status === 'purchased' || item.status === 'purchase_completed') ? (
+                                <PurchaseSaasChinaModeField
+                                  id={item.id}
+                                  enabled={item.rawData.saasChinaMode === true}
+                                />
+                              ) : null}
+                            </>
+                          ) : '-'}
                         </td>
                       )}
                       {isRequestedStatus ? null : (
                         <td className="px-2 py-2 text-center align-middle">
-                          <PurchasePaymentStatusField
-                            key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`}
-                            id={item.id}
-                            paymentStatus={item.paymentStatus}
-                            paidAt={item.paymentPaidAt}
-                            enabled={item.status !== 'purchased'}
-                            bulkPaymentPending={item.bulkPaymentPending}
-                            bulkPaymentDueDate={item.bulkPaymentDueDate}
-                          />
+                          {item.id ? (
+                            <PurchasePaymentStatusField
+                              key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`}
+                              id={item.id}
+                              paymentStatus={item.paymentStatus}
+                              paidAt={item.paymentPaidAt}
+                              enabled={item.status !== 'purchased'}
+                              bulkPaymentPending={item.bulkPaymentPending}
+                              bulkPaymentDueDate={item.bulkPaymentDueDate}
+                            />
+                          ) : '-'}
                         </td>
                       )}
                       {overdueOnly ? (
                         <td className="px-3 py-2 align-middle">
-                          <PurchaseDelayReasonField
-                            id={item.id}
-                            delayReason={item.delayReason}
-                            delayNote={item.delayNote}
-                            purchasingStatus={item.purchasingStatus}
-                            purchasingStatusNote={item.purchasingStatusNote}
-                          />
+                          {item.id ? (
+                            <PurchaseDelayReasonField
+                              id={item.id}
+                              delayReason={item.delayReason}
+                              delayNote={item.delayNote}
+                              purchasingStatus={item.purchasingStatus}
+                              purchasingStatusNote={item.purchasingStatusNote}
+                            />
+                          ) : '-'}
                         </td>
                       ) : null}
                       <td className="px-2 py-2 text-center align-middle">
-                        <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
+                        {item.id ? <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} /> : '-'}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
-                        <PurchaseStatusButton
-                          id={item.id}
-                          nextStatus={getNextPurchaseStatus(item.status)}
-                          saasChinaMode={item.rawData.saasChinaMode === true}
-                        />
+                        {item.id ? (
+                          <PurchaseStatusButton
+                            id={item.id}
+                            nextStatus={getNextPurchaseStatus(item.status)}
+                            saasChinaMode={item.rawData.saasChinaMode === true}
+                          />
+                        ) : '-'}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
-                        <PurchaseDeleteButton id={item.id} productName={item.productName} />
+                        {item.id ? <PurchaseDeleteButton id={item.id} productName={item.productName} /> : '-'}
                       </td>
                       </tr>
                     )
@@ -791,6 +835,7 @@ export async function PurchasingOrdersView({
                 page={page}
                 pageSize={pageSize}
                 totalPages={totalPages}
+                reviewStatuses={selectedReviewStatuses}
               />
               <Link
                 href={purchaseOrdersHref({
@@ -802,6 +847,7 @@ export async function PurchasingOrdersView({
                   sort,
                   order,
                   outboundDates: selectedOutboundDates,
+                  reviewStatuses: selectedReviewStatuses,
                   page: Math.max(1, page - 1),
                   pageSize,
                 })}
@@ -824,6 +870,7 @@ export async function PurchasingOrdersView({
                   sort,
                   order,
                   outboundDates: selectedOutboundDates,
+                  reviewStatuses: selectedReviewStatuses,
                   page: Math.min(totalPages, page + 1),
                   pageSize,
                 })}
@@ -856,6 +903,7 @@ function SortHeader({
   currentOrder,
   basePath,
   pageSize,
+  reviewStatuses,
   align = 'left',
 }: {
   label: string
@@ -869,6 +917,7 @@ function SortHeader({
   currentOrder: 'asc' | 'desc'
   basePath: string
   pageSize: number
+  reviewStatuses: readonly PurchaseReviewListStatus[]
   align?: 'left' | 'center' | 'right'
 }) {
   const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
@@ -883,6 +932,7 @@ function SortHeader({
     sort: column,
     order: nextOrder,
     pageSize,
+    reviewStatuses,
   })
 
   return (
@@ -1102,6 +1152,14 @@ function parseOutboundDates(value: string | string[] | undefined) {
   return Array.from(new Set(values.filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item))))
 }
 
+function parsePurchaseReviewStatuses(value: string | string[] | undefined): PurchaseReviewListStatus[] {
+  const values = Array.isArray(value) ? value : value ? [value] : []
+  const statuses = Array.from(new Set(values)).filter((status): status is PurchaseReviewListStatus => (
+    PURCHASE_REVIEW_LIST_STATUSES.includes(status as PurchaseReviewListStatus)
+  ))
+  return statuses.length > 0 ? statuses : [...PURCHASE_REVIEW_LIST_STATUSES]
+}
+
 function parseStatus(value: string | undefined, allowedStatuses: readonly PurchaseRequestStatus[]): PurchaseRequestStatus | null {
   if (!value) return null
   return allowedStatuses.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
@@ -1133,6 +1191,7 @@ function purchaseOrdersHref({
   status,
   search,
   outboundDates,
+  reviewStatuses,
   showCosts,
   showRecommendationBasis,
   sort,
@@ -1144,6 +1203,7 @@ function purchaseOrdersHref({
   status?: PurchaseRequestStatus
   search?: string
   outboundDates?: readonly string[]
+  reviewStatuses?: readonly PurchaseReviewListStatus[]
   showCosts?: boolean
   showRecommendationBasis?: boolean
   sort?: string
@@ -1155,6 +1215,7 @@ function purchaseOrdersHref({
   if (status) params.set('status', status)
   if (search) params.set('search', search)
   appendOutboundDateParams(params, outboundDates)
+  appendPurchaseReviewStatusParams(params, reviewStatuses)
   if (showCosts) params.set('showCosts', '1')
   if (showRecommendationBasis !== undefined) params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (sort) params.set('sort', sort)
@@ -1167,6 +1228,10 @@ function purchaseOrdersHref({
 
 function appendOutboundDateParams(params: URLSearchParams, dates: readonly string[] | undefined) {
   dates?.forEach((date) => params.append('outboundDate', date))
+}
+
+function appendPurchaseReviewStatusParams(params: URLSearchParams, statuses: readonly PurchaseReviewListStatus[] | undefined) {
+  statuses?.forEach((status) => params.append('reviewStatus', status))
 }
 
 function formatNumber(value: unknown) {

@@ -7,7 +7,12 @@ import { products, purchaseRequestItems } from '@/lib/db/schema'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from './purchase-costs'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
-import { getPurchaseReviewOperationalMetricsBySku } from './purchase-requests'
+import {
+  getPurchaseReviewList,
+  getPurchaseReviewOperationalMetricsBySku,
+  type PurchaseReviewListItem,
+  type PurchaseReviewListStatus,
+} from './purchase-requests'
 import {
   PURCHASE_DELAY_REASON_LABELS,
   PURCHASE_DELAY_TRACKING_START_DATE,
@@ -84,14 +89,26 @@ export async function exportPurchaseRequestsExcel(input: {
   status?: PurchaseRequestStatus
   overdueOnly?: boolean
   search?: string
+  reviewStatuses?: readonly PurchaseReviewListStatus[]
 }) {
   await ensurePurchasePaymentTrackingSchema()
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
-  const rows = await getPurchaseRequestRowsForExcel(input)
-  const purchaseReviewMetricsBySku = await getPurchaseReviewOperationalMetricsBySku({
-    userId: input.userId,
-    skus: rows.map((row) => row.sku),
-  })
+  const reviewList = input.status === 'requested' && !input.overdueOnly
+    ? await getPurchaseReviewList({
+      userId: input.userId,
+      search: input.search,
+      statuses: input.reviewStatuses,
+      page: 1,
+      pageSize: Number.MAX_SAFE_INTEGER,
+    })
+    : null
+  const rows = reviewList?.items ?? await getPurchaseRequestRowsForExcel(input)
+  const purchaseReviewMetricsBySku = reviewList
+    ? new Map(reviewList.items.map((item) => [item.sku, item.purchaseReviewMetrics]))
+    : await getPurchaseReviewOperationalMetricsBySku({
+      userId: input.userId,
+      skus: rows.map((row) => row.sku),
+    })
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('발주')
 
@@ -112,11 +129,14 @@ export async function exportPurchaseRequestsExcel(input: {
   })
 
   for (const row of rows) {
+    const reviewRow = reviewList ? row as PurchaseReviewListItem : null
     const reviewMetrics = purchaseReviewMetricsBySku.get(row.sku)
     const recordedTargetStockQuantity = recommendationBasisExcelValue(row.rawData, 'targetStockQuantity')
-    const purchaseUrgencyStatus = isPurchaseUrgencyActionNeeded(row.status)
-      ? getPurchaseUrgencyStatus(row.rawData)
-      : null
+    const purchaseUrgencyStatus = reviewRow
+      ? reviewRow.purchaseUrgencyStatus
+      : isPurchaseUrgencyActionNeeded(row.status)
+        ? getPurchaseUrgencyStatus(row.rawData)
+        : null
     const stockCoverageMonths = getPurchaseStockCoverageMonths(row.rawData)
     const costs = calculatePurchaseCosts({
       requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
@@ -125,8 +145,10 @@ export async function exportPurchaseRequestsExcel(input: {
       exchangeRateKrw: row.costExchangeRateKrw ?? exchangeRateReference.rate,
     })
     sheet.addRow({
-      ID: row.id,
-      상태: PURCHASE_REQUEST_STATUS_LABELS[row.status],
+      ID: row.id ?? '',
+      상태: reviewRow
+        ? reviewRow.reviewStatus === 'review' ? '발주검토' : '발주불필요'
+        : PURCHASE_REQUEST_STATUS_LABELS[row.status],
       '구매 우선상태': purchaseUrgencyStatus
         ? PURCHASE_URGENCY_STATUS_LABELS[purchaseUrgencyStatus]
         : '',
@@ -246,6 +268,9 @@ export async function importPurchaseRequestsExcel(input: {
       const requestedQuantity = optionalInteger(data.요청수량)
       if (!sku || !productName || requestedQuantity == null || requestedQuantity < 1) {
         skipped += 1
+        // The full review export includes virtual "not required" rows at zero.
+        // They are informational only and should not make a round-trip upload fail.
+        if (sku && productName && requestedQuantity === 0 && !id) continue
         errors.push({ row: rowNumber, message: '품목코드, 상품명, 요청수량을 확인해주세요.' })
         continue
       }

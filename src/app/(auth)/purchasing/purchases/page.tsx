@@ -20,7 +20,7 @@ export default function PurchasesPage({
       allowedStatuses={REVIEW_STATUSES}
       basePath="/purchasing/purchases"
       title="발주검토"
-      description="자동 추천 발주 항목을 검토하고 담당자와 요청수량을 확정해 발주요청으로 넘깁니다."
+      description="전상품 재고와 판매 현황을 검토하고, 필요한 품목만 발주수량을 확정해 발주요청으로 넘깁니다."
       showRecommendationGenerator
     />
   )

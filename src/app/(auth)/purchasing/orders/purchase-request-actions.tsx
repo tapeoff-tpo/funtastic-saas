@@ -995,6 +995,7 @@ export function PurchasePaginationControls({
   pageSize,
   totalPages,
   reviewStatuses,
+  idSuffix = 'default',
 }: {
   basePath: string
   status: PurchaseRequestStatus | undefined
@@ -1008,6 +1009,7 @@ export function PurchasePaginationControls({
   pageSize: number
   totalPages: number
   reviewStatuses?: readonly PurchaseReviewListStatus[]
+  idSuffix?: string
 }) {
   const router = useRouter()
   const [pageInput, setPageInput] = useState(String(page))
@@ -1055,9 +1057,9 @@ export function PurchasePaginationControls({
         </select>
       </label>
       <form onSubmit={submitPage} className="flex items-center gap-1.5">
-        <label htmlFor="purchase-page-jump" className="sr-only">이동할 페이지</label>
+        <label htmlFor={`purchase-page-jump-${idSuffix}`} className="sr-only">이동할 페이지</label>
         <input
-          id="purchase-page-jump"
+          id={`purchase-page-jump-${idSuffix}`}
           type="number"
           inputMode="numeric"
           min={1}

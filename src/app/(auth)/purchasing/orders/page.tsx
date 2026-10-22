@@ -201,8 +201,6 @@ export async function PurchasingOrdersView({
   const showRecommendationBasis = recommendationBasisParam === undefined
     ? isRequestedStatus
     : recommendationBasisParam === '1'
-  const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
-  const pageEnd = Math.min(total, page * pageSize)
   const visibleColumnCount =
     8 +
     (showCosts ? (isRequestedStatus ? 3 : 4) : 0) +
@@ -504,6 +502,25 @@ export async function PurchasingOrdersView({
               {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
               {overdueOnly ? null : <PurchaseBulkStatusButton />}
             </div>
+          </div>
+
+          <div className="border-b px-3 py-2">
+            <PurchaseTablePagination
+              placement="top"
+              basePath={basePath}
+              status={selectedStatus}
+              search={search}
+              outboundDates={selectedOutboundDates}
+              showCosts={showCosts}
+              showRecommendationBasis={showRecommendationBasis}
+              sort={sort}
+              order={order}
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              totalPages={totalPages}
+              reviewStatuses={selectedReviewStatuses}
+            />
           </div>
 
           <div className="max-w-full overflow-x-auto overscroll-x-contain">
@@ -817,76 +834,133 @@ export async function PurchasingOrdersView({
               </tbody>
             </table>
           </div>
-          <div className="flex flex-col gap-2 border-t px-3 py-2 text-sm md:flex-row md:items-center md:justify-between">
-            <div className="text-xs text-muted-foreground">
-              {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
-            </div>
-            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:w-auto md:flex-nowrap">
-              <PurchasePaginationControls
-                key={`${page}-${pageSize}`}
-                basePath={basePath}
-                status={selectedStatus}
-                search={search}
-                outboundDates={selectedOutboundDates}
-                showCosts={showCosts}
-                showRecommendationBasis={showRecommendationBasis}
-                sort={sort}
-                order={order}
-                page={page}
-                pageSize={pageSize}
-                totalPages={totalPages}
-                reviewStatuses={selectedReviewStatuses}
-              />
-              <Link
-                href={purchaseOrdersHref({
-                  basePath,
-                  status: selectedStatus,
-                  search,
-                  showCosts,
-                  showRecommendationBasis,
-                  sort,
-                  order,
-                  outboundDates: selectedOutboundDates,
-                  reviewStatuses: selectedReviewStatuses,
-                  page: Math.max(1, page - 1),
-                  pageSize,
-                })}
-                aria-disabled={page <= 1}
-                className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
-                  page <= 1
-                    ? 'pointer-events-none border-border bg-muted text-muted-foreground'
-                    : 'border-border bg-background hover:bg-muted'
-                }`}
-              >
-                이전
-              </Link>
-              <Link
-                href={purchaseOrdersHref({
-                  basePath,
-                  status: selectedStatus,
-                  search,
-                  showCosts,
-                  showRecommendationBasis,
-                  sort,
-                  order,
-                  outboundDates: selectedOutboundDates,
-                  reviewStatuses: selectedReviewStatuses,
-                  page: Math.min(totalPages, page + 1),
-                  pageSize,
-                })}
-                aria-disabled={page >= totalPages}
-                className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
-                  page >= totalPages
-                    ? 'pointer-events-none border-border bg-muted text-muted-foreground'
-                    : 'border-border bg-background hover:bg-muted'
-                }`}
-              >
-                다음
-              </Link>
-            </div>
+          <div className="border-t px-3 py-2">
+            <PurchaseTablePagination
+              placement="bottom"
+              basePath={basePath}
+              status={selectedStatus}
+              search={search}
+              outboundDates={selectedOutboundDates}
+              showCosts={showCosts}
+              showRecommendationBasis={showRecommendationBasis}
+              sort={sort}
+              order={order}
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              totalPages={totalPages}
+              reviewStatuses={selectedReviewStatuses}
+            />
           </div>
         </section>
       </PurchaseBulkSelectionProvider>
+    </div>
+  )
+}
+
+function PurchaseTablePagination({
+  placement,
+  basePath,
+  status,
+  search,
+  outboundDates,
+  showCosts,
+  showRecommendationBasis,
+  sort,
+  order,
+  page,
+  pageSize,
+  total,
+  totalPages,
+  reviewStatuses,
+}: {
+  placement: 'top' | 'bottom'
+  basePath: string
+  status: PurchaseRequestStatus | undefined
+  search: string | undefined
+  outboundDates: string[]
+  showCosts: boolean
+  showRecommendationBasis: boolean
+  sort: string | undefined
+  order: 'asc' | 'desc'
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  reviewStatuses: readonly PurchaseReviewListStatus[]
+}) {
+  const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const pageEnd = Math.min(total, page * pageSize)
+
+  return (
+    <div className="flex flex-col gap-2 text-sm md:flex-row md:items-center md:justify-between">
+      <div className="text-xs text-muted-foreground">
+        {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
+      </div>
+      <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:w-auto md:flex-nowrap">
+        <PurchasePaginationControls
+          key={`${placement}-${page}-${pageSize}`}
+          basePath={basePath}
+          status={status}
+          search={search}
+          outboundDates={outboundDates}
+          showCosts={showCosts}
+          showRecommendationBasis={showRecommendationBasis}
+          sort={sort}
+          order={order}
+          page={page}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          reviewStatuses={reviewStatuses}
+          idSuffix={placement}
+        />
+        <Link
+          href={purchaseOrdersHref({
+            basePath,
+            status,
+            search,
+            showCosts,
+            showRecommendationBasis,
+            sort,
+            order,
+            outboundDates,
+            reviewStatuses,
+            page: Math.max(1, page - 1),
+            pageSize,
+          })}
+          aria-disabled={page <= 1}
+          className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
+            page <= 1
+              ? 'pointer-events-none border-border bg-muted text-muted-foreground'
+              : 'border-border bg-background hover:bg-muted'
+          }`}
+        >
+          이전
+        </Link>
+        <Link
+          href={purchaseOrdersHref({
+            basePath,
+            status,
+            search,
+            showCosts,
+            showRecommendationBasis,
+            sort,
+            order,
+            outboundDates,
+            reviewStatuses,
+            page: Math.min(totalPages, page + 1),
+            pageSize,
+          })}
+          aria-disabled={page >= totalPages}
+          className={`inline-flex h-8 flex-1 items-center justify-center rounded-md border px-3 text-xs font-medium sm:flex-none ${
+            page >= totalPages
+              ? 'pointer-events-none border-border bg-muted text-muted-foreground'
+              : 'border-border bg-background hover:bg-muted'
+          }`}
+        >
+          다음
+        </Link>
+      </div>
     </div>
   )
 }

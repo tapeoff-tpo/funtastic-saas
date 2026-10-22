@@ -45,10 +45,12 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '품목코드',
   '상품명',
   '옵션명',
-  '요청수량',
+  '발주수량',
   '최근 발주수량',
   '진행 구매수량',
   '중국출고 예정수량',
+  '국내재고',
+  '중국재고',
   '총 현재고',
   '당월 출고수량',
   '3개월 평균 출고수량',
@@ -56,7 +58,6 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '재고 보유개월',
   '실제구매수량',
   '중국입고수량',
-  '중국출고요청수량',
   '개당 원가(元)',
   '개당 원가(₩)',
   '총 원가(元)',
@@ -74,14 +75,20 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '메모',
 ] as const
 
-type PurchaseRequestExcelHeader = (typeof PURCHASE_REQUEST_EXCEL_HEADERS)[number]
+// Keep legacy columns readable for round-trip uploads without showing them in new downloads.
+const PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS = [
+  ...PURCHASE_REQUEST_EXCEL_HEADERS,
+  '중국출고요청수량',
+] as const
+
+type PurchaseRequestExcelHeader = (typeof PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS)[number]
 type PurchaseRequestExcelRow = Record<PurchaseRequestExcelHeader, string>
 
 const PURCHASE_REQUEST_EXCEL_HEADER_ALIASES: Partial<Record<PurchaseRequestExcelHeader, readonly string[]>> = {
   품목코드: ['상품코드', '제품코드', '품번코드', '품번', '단품코드', 'SKU'],
   상품명: ['품명', '품목명', '제품명'],
   옵션명: ['옵션', '옵션정보', '규격'],
-  요청수량: ['수량', '발주수량', '구매수량', '발주요청수량', '주문수량'],
+  발주수량: ['요청수량', '수량', '구매수량', '발주요청수량', '주문수량'],
 }
 
 export async function exportPurchaseRequestsExcel(input: {
@@ -155,10 +162,12 @@ export async function exportPurchaseRequestsExcel(input: {
       품목코드: row.sku,
       상품명: row.productName,
       옵션명: row.optionName ?? '',
-      요청수량: row.requestedQuantity,
+      발주수량: row.requestedQuantity,
       '최근 발주수량': reviewMetrics?.lastPurchaseQuantity ?? '',
       '진행 구매수량': reviewMetrics?.purchaseInProgressQuantity ?? 0,
       '중국출고 예정수량': reviewMetrics?.chinaOutboundScheduledQuantity ?? 0,
+      국내재고: reviewMetrics?.domesticCurrentStock ?? recommendationBasisExcelValue(row.rawData, 'domesticAvailableStock'),
+      중국재고: reviewMetrics?.chinaCurrentStock ?? recommendationBasisExcelValue(row.rawData, 'chinaAvailableStock'),
       '총 현재고': reviewMetrics?.currentStock ?? recommendationBasisExcelValue(row.rawData, 'availableStock'),
       '당월 출고수량': reviewMetrics?.currentMonthOutgoing ?? 0,
       '3개월 평균 출고수량': reviewMetrics?.threeMonthAverageOutgoing ?? 0,
@@ -168,7 +177,6 @@ export async function exportPurchaseRequestsExcel(input: {
       '재고 보유개월': stockCoverageMonths ?? '',
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
-      중국출고요청수량: outboundRequestedQuantity(row.rawData),
       '개당 원가(元)': costs.unitCostYuan ?? '',
       '개당 원가(₩)': costs.unitCostKrw ?? '',
       '총 원가(元)': costs.totalCostYuan ?? '',
@@ -187,10 +195,13 @@ export async function exportPurchaseRequestsExcel(input: {
     })
   }
 
+  sheet.getColumn('발주수량').numFmt = '#,##0'
   sheet.getColumn('개당 원가(元)').numFmt = '#,##0.00'
   sheet.getColumn('최근 발주수량').numFmt = '#,##0'
   sheet.getColumn('진행 구매수량').numFmt = '#,##0'
   sheet.getColumn('중국출고 예정수량').numFmt = '#,##0'
+  sheet.getColumn('국내재고').numFmt = '#,##0'
+  sheet.getColumn('중국재고').numFmt = '#,##0'
   sheet.getColumn('총 현재고').numFmt = '#,##0'
   sheet.getColumn('당월 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('3개월 평균 출고수량').numFmt = '#,##0.0'
@@ -220,7 +231,7 @@ export async function importPurchaseRequestsExcel(input: {
   if (!headerRow) throw new Error('발주 엑셀 헤더를 찾을 수 없습니다.')
   const columnByHeader = purchaseRequestColumnMap(sheet.getRow(headerRow))
 
-  const missing = ['품목코드', '상품명', '요청수량'].filter((header) => !columnByHeader.has(header))
+  const missing = ['품목코드', '상품명', '발주수량'].filter((header) => !columnByHeader.has(header))
   if (missing.length > 0) throw new Error(`필수 열이 없습니다: ${missing.join(', ')}`)
   const fileFingerprint = createHash('sha256')
     .update(input.defaultStatus ?? 'requested')
@@ -265,13 +276,13 @@ export async function importPurchaseRequestsExcel(input: {
       const id = data.ID.trim()
       const sku = data.품목코드.trim()
       const productName = data.상품명.trim()
-      const requestedQuantity = optionalInteger(data.요청수량)
+      const requestedQuantity = optionalInteger(data.발주수량)
       if (!sku || !productName || requestedQuantity == null || requestedQuantity < 1) {
         skipped += 1
         // The full review export includes virtual "not required" rows at zero.
         // They are informational only and should not make a round-trip upload fail.
         if (sku && productName && requestedQuantity === 0 && !id) continue
-        errors.push({ row: rowNumber, message: '품목코드, 상품명, 요청수량을 확인해주세요.' })
+        errors.push({ row: rowNumber, message: '품목코드, 상품명, 발주수량을 확인해주세요.' })
         continue
       }
 
@@ -410,7 +421,7 @@ async function getPurchaseRequestRowsForExcel(input: {
 function findHeaderRow(sheet: ExcelJS.Worksheet) {
   for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
     const columns = purchaseRequestColumnMap(sheet.getRow(rowNumber))
-    if (columns.has('품목코드') && columns.has('상품명') && columns.has('요청수량')) return rowNumber
+    if (columns.has('품목코드') && columns.has('상품명') && columns.has('발주수량')) return rowNumber
   }
   return null
 }
@@ -428,7 +439,7 @@ export function canonicalPurchaseRequestExcelHeader(value: string): PurchaseRequ
   const normalizedValue = normalizeExcelHeader(value)
   if (!normalizedValue) return null
 
-  for (const header of PURCHASE_REQUEST_EXCEL_HEADERS) {
+  for (const header of PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS) {
     const candidates = [header, ...(PURCHASE_REQUEST_EXCEL_HEADER_ALIASES[header] ?? [])]
     if (candidates.some((candidate) => normalizeExcelHeader(candidate) === normalizedValue)) return header
   }
@@ -458,7 +469,7 @@ function parsePurchaseDelayReason(value: string) {
 }
 
 function readExcelRow(row: ExcelJS.Row, columnByHeader: Map<string, number>) {
-  return Object.fromEntries(PURCHASE_REQUEST_EXCEL_HEADERS.map((header) => {
+  return Object.fromEntries(PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS.map((header) => {
     const column = columnByHeader.get(header)
     return [header, column ? cellText(row.getCell(column).value) : '']
   })) as PurchaseRequestExcelRow
@@ -514,11 +525,6 @@ function recommendationBasisExcelValue(rawData: Record<string, unknown>, key: st
   if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return ''
   const number = Number(value)
   return Number.isFinite(number) ? number : ''
-}
-
-function outboundRequestedQuantity(rawData: Record<string, unknown>) {
-  const value = rawData.outboundRequestedQuantity
-  return typeof value === 'number' || typeof value === 'string' ? String(value) : ''
 }
 
 function isPurchaseUrgencyActionNeeded(status: PurchaseRequestStatus) {

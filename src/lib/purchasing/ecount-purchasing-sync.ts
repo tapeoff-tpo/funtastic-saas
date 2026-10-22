@@ -376,7 +376,6 @@ export async function parseEcountPurchasingSnapshot(input: {
     .map<EcountChinaInventoryItem | null>((row) => {
       const sku = valueAt(row, chinaInventory, '품목코드')
       const productName = valueAt(row, chinaInventory, '품목명')
-      const quantity = positiveInteger(valueAt(row, chinaInventory, '합계'))
       const optionName = emptyToNull(valueAt(row, chinaInventory, '규격'))
       if (!sku || !productName) return null
       const warehouseQuantities = Object.fromEntries(
@@ -385,6 +384,10 @@ export async function parseEcountPurchasingSnapshot(input: {
           positiveInteger(valueAt(row, chinaInventory, header)),
         ]),
       )
+      const totalQuantity = positiveInteger(valueAt(row, chinaInventory, '합계'))
+      const warehouseQuantity = Object.values(warehouseQuantities)
+        .reduce((sum, warehouseQuantity) => sum + warehouseQuantity, 0)
+      const quantity = totalQuantity > 0 ? totalQuantity : warehouseQuantity
 
       return {
         sourceFileName: chinaInventory.fileName,

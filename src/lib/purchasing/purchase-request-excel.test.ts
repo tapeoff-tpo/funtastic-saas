@@ -88,10 +88,12 @@ describe('canonicalPurchaseRequestExcelHeader', () => {
     ['제품명', '상품명'],
     ['옵션', '옵션명'],
     ['규격', '옵션명'],
-    ['수량', '요청수량'],
-    ['발주수량', '요청수량'],
-    ['구매 수량', '요청수량'],
-    ['주문수량', '요청수량'],
+    ['요청수량', '발주수량'],
+    ['수량', '발주수량'],
+    ['발주수량', '발주수량'],
+    ['구매 수량', '발주수량'],
+    ['주문수량', '발주수량'],
+    ['중국출고요청수량', '중국출고요청수량'],
     ['지연사유', '지연사유'],
     ['지연 상세', '지연 상세'],
     ['품목 발주상태', '품목 발주상태'],
@@ -139,6 +141,8 @@ describe('exportPurchaseRequestsExcel', () => {
         lastPurchaseQuantity: 40,
         purchaseInProgressQuantity: 30,
         chinaOutboundScheduledQuantity: 15,
+        domesticCurrentStock: 76,
+        chinaCurrentStock: 15,
         currentStock: 91,
         currentMonthOutgoing: 45,
         threeMonthAverageOutgoing: 85.3,
@@ -148,6 +152,8 @@ describe('exportPurchaseRequestsExcel', () => {
         lastPurchaseQuantity: null,
         purchaseInProgressQuantity: 0,
         chinaOutboundScheduledQuantity: 0,
+        domesticCurrentStock: -3,
+        chinaCurrentStock: 0,
         currentStock: -3,
         currentMonthOutgoing: 2,
         threeMonthAverageOutgoing: 10,
@@ -157,6 +163,8 @@ describe('exportPurchaseRequestsExcel', () => {
         lastPurchaseQuantity: 20,
         purchaseInProgressQuantity: 5,
         chinaOutboundScheduledQuantity: 4,
+        domesticCurrentStock: 47,
+        chinaCurrentStock: 4,
         currentStock: 51,
         currentMonthOutgoing: 12,
         threeMonthAverageOutgoing: 22,
@@ -173,6 +181,8 @@ describe('exportPurchaseRequestsExcel', () => {
     const latestPurchaseColumn = headers.indexOf('최근 발주수량')
     const inProgressColumn = headers.indexOf('진행 구매수량')
     const outboundScheduledColumn = headers.indexOf('중국출고 예정수량')
+    const domesticStockColumn = headers.indexOf('국내재고')
+    const chinaStockColumn = headers.indexOf('중국재고')
     const targetColumn = headers.indexOf('목표수량')
     const urgencyColumn = headers.indexOf('구매 우선상태')
     const coverageColumn = headers.indexOf('재고 보유개월')
@@ -181,13 +191,20 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(latestPurchaseColumn).toBeGreaterThan(0)
     expect(inProgressColumn).toBeGreaterThan(latestPurchaseColumn)
     expect(outboundScheduledColumn).toBeGreaterThan(inProgressColumn)
+    expect(domesticStockColumn).toBeGreaterThan(outboundScheduledColumn)
+    expect(chinaStockColumn).toBeGreaterThan(domesticStockColumn)
     expect(targetColumn).toBeGreaterThan(stockColumn)
+    expect(headers).toContain('발주수량')
+    expect(headers).not.toContain('요청수량')
+    expect(headers).not.toContain('중국출고요청수량')
     expect(urgencyColumn).toBeGreaterThan(0)
     expect(coverageColumn).toBeGreaterThan(targetColumn)
     expect(sheet.getRow(2).getCell(stockColumn).value).toBe(91)
     expect(sheet.getRow(2).getCell(latestPurchaseColumn).value).toBe(40)
     expect(sheet.getRow(2).getCell(inProgressColumn).value).toBe(30)
     expect(sheet.getRow(2).getCell(outboundScheduledColumn).value).toBe(15)
+    expect(sheet.getRow(2).getCell(domesticStockColumn).value).toBe(76)
+    expect(sheet.getRow(2).getCell(chinaStockColumn).value).toBe(15)
     expect(sheet.getRow(2).getCell(targetColumn).value).toBe(128)
     expect(sheet.getRow(2).getCell(urgencyColumn).value).toBe('긴급구매')
     expect(sheet.getRow(2).getCell(coverageColumn).value).toBe(0.8)
@@ -195,6 +212,8 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getRow(3).getCell(latestPurchaseColumn).value).toBe('')
     expect(sheet.getRow(3).getCell(inProgressColumn).value).toBe(0)
     expect(sheet.getRow(3).getCell(outboundScheduledColumn).value).toBe(0)
+    expect(sheet.getRow(3).getCell(domesticStockColumn).value).toBe(-3)
+    expect(sheet.getRow(3).getCell(chinaStockColumn).value).toBe(0)
     expect(sheet.getRow(3).getCell(targetColumn).value).toBe(0)
     expect(sheet.getRow(3).getCell(urgencyColumn).value).toBe('긴급구매')
     expect(sheet.getRow(3).getCell(coverageColumn).value).toBe(-0.3)
@@ -202,6 +221,8 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getRow(4).getCell(latestPurchaseColumn).value).toBe(20)
     expect(sheet.getRow(4).getCell(inProgressColumn).value).toBe(5)
     expect(sheet.getRow(4).getCell(outboundScheduledColumn).value).toBe(4)
+    expect(sheet.getRow(4).getCell(domesticStockColumn).value).toBe(47)
+    expect(sheet.getRow(4).getCell(chinaStockColumn).value).toBe(4)
     expect(sheet.getRow(4).getCell(targetColumn).value).toBe(27)
     expect(sheet.getRow(4).getCell(urgencyColumn).value).toBe('')
     expect(sheet.getRow(4).getCell(coverageColumn).value).toBe('')
@@ -209,6 +230,8 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getRow(5).getCell(latestPurchaseColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(inProgressColumn).value).toBe(0)
     expect(sheet.getRow(5).getCell(outboundScheduledColumn).value).toBe(0)
+    expect(sheet.getRow(5).getCell(domesticStockColumn).value).toBe('')
+    expect(sheet.getRow(5).getCell(chinaStockColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(targetColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(urgencyColumn).value).toBe('')
     expect(sheet.getRow(5).getCell(coverageColumn).value).toBe('')
@@ -235,7 +258,7 @@ describe('exportPurchaseRequestsExcel', () => {
     const sheet = workbook.getWorksheet('발주')!
     const headers = (sheet.getRow(1).values as ExcelJS.CellValue[]).map(String)
     const statusColumn = headers.indexOf('상태')
-    const quantityColumn = headers.indexOf('요청수량')
+    const quantityColumn = headers.indexOf('발주수량')
 
     expect(statusColumn).toBeGreaterThan(0)
     expect(quantityColumn).toBeGreaterThan(0)

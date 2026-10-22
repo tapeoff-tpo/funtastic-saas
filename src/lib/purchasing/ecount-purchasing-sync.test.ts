@@ -252,6 +252,29 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.outboundPending).toEqual([])
   })
 
+  it('uses the warehouse total when the China-inventory total cell is blank', async () => {
+    const chinaInventory = await makeUpload('중국재고_창고합계.xlsx', [
+      '품목코드', '품목명', '규격', '품목구분', '합계', '대량창고', '중국창고',
+    ], [
+      ['100001-0001', '창고 합계 상품', '블랙', '상품', '', 12, 30],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [chinaInventory],
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaInventory).toEqual([
+      expect.objectContaining({
+        sku: '100001-0001',
+        quantity: 42,
+        warehouseQuantities: { 대량창고: 12, 중국창고: 30 },
+      }),
+    ])
+  })
+
   it('recognizes the current Ecount purchase-plan query layout and reads its aliases', async () => {
     const plan = await makeUpload('ESG002M.xlsx', [
       '일자-No.', '제품특이사항', '식품용 대상여부', '구입관리코드', '품목코드', '품목명', '옵션명', '수량',

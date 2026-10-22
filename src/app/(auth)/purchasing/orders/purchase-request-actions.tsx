@@ -754,11 +754,13 @@ export function PurchaseRequestCreateDialog({ targetStockMonths }: { targetStock
                         </div>
                         <span className="text-xs font-medium text-primary">{selected ? '선택됨' : '선택'}</span>
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums sm:grid-cols-4 xl:grid-cols-7">
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums sm:grid-cols-3 xl:grid-cols-9">
                         <ManualPurchaseMetric label="최근 발주수량" value={formatManualPurchaseNumber(candidate.lastPurchaseQuantity)} />
                         <ManualPurchaseMetric label="진행 구매수량" value={formatManualPurchaseNumber(candidate.purchaseInProgressQuantity)} />
                         <ManualPurchaseMetric label="중국출고 예정수량" value={formatManualPurchaseNumber(candidate.chinaOutboundScheduledQuantity)} />
-                        <ManualPurchaseMetric label="현재고" value={formatManualPurchaseNumber(candidate.currentStock)} />
+                        <ManualPurchaseMetric label="국내재고" value={formatManualPurchaseNumber(candidate.domesticCurrentStock)} />
+                        <ManualPurchaseMetric label="중국재고" value={formatManualPurchaseNumber(candidate.chinaCurrentStock)} />
+                        <ManualPurchaseMetric label="총 현재고" value={formatManualPurchaseNumber(candidate.currentStock)} />
                         <ManualPurchaseMetric label="당월출고" value={formatManualPurchaseNumber(candidate.currentMonthOutgoing)} />
                         <ManualPurchaseMetric label="3개월평균" value={formatManualPurchaseNumber(candidate.threeMonthAverageOutgoing)} />
                         <ManualPurchaseMetric label="목표수량" value={formatManualPurchaseNumber(candidate.targetStockQuantity)} />

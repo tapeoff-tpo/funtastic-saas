@@ -1086,12 +1086,10 @@ export async function getPurchaseRequests(input: {
   const overduePurchaseRequestWhere = and(...overduePurchaseRequestConditions)
   const overduePurchaseCompletedWhere = and(...overduePurchaseCompletedConditions)
   const chinaCurrentStock = sql<number>`(
-    SELECT COALESCE(${chinaWarehouseInventory.availableQuantity}, 0)::int
+    SELECT COALESCE(SUM(${chinaWarehouseInventory.availableQuantity}), 0)::int
     FROM ${chinaWarehouseInventory}
     WHERE ${chinaWarehouseInventory.userId} = ${purchaseRequestItems.userId}
       AND ${chinaWarehouseInventory.sku} = ${purchaseRequestItems.sku}
-      AND ${chinaWarehouseInventory.optionKey} = COALESCE(${purchaseRequestItems.optionName}, '')
-    LIMIT 1
   )`
   const [items, [{ total }], statusCounts, costRows, overduePurchaseRequestRows, overduePurchaseCompletedRows] = await Promise.all([
     db

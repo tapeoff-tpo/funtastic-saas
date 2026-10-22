@@ -1032,7 +1032,7 @@ function getStageQuantityColumn(status: PurchaseRequestStatus) {
   if (status === 'outbound_requested' || status === 'completed') {
     return { label: '출고요청수량', field: 'outboundRequestedQuantity' as const }
   }
-  return { label: '요청수량', field: 'requestedQuantity' as const }
+  return { label: '발주수량', field: 'requestedQuantity' as const }
 }
 
 function isPurchaseUrgencyActionNeeded(status: PurchaseRequestStatus) {
@@ -1104,12 +1104,6 @@ function RecommendationBasisGrid({
   const pipelineNote = !metrics && Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
     ? `진행 중 발주 ${formatNumber(pipelineQuantity)}`
     : null
-  const chinaAvailableStock = Number(rawData.chinaAvailableStock)
-  const stockNote = metrics
-    ? `국내 ${formatNumber(metrics.domesticCurrentStock)} · 중국 ${formatNumber(metrics.chinaCurrentStock)}`
-    : Number.isFinite(chinaAvailableStock)
-      ? `국내 ${formatNumber(rawData.domesticAvailableStock)} · 중국 ${formatNumber(chinaAvailableStock)}`
-      : null
   const moqNote = typeof rawData.moqProductGroupName === 'string'
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
@@ -1132,25 +1126,30 @@ function RecommendationBasisGrid({
     : rawData.recommendationState === 'monitoring'
       ? '현재 발주 보류 · 계속 관찰'
       : null
+  const domesticCurrentStock = metrics?.domesticCurrentStock ?? numericRawDataValue(rawData, 'domesticAvailableStock')
+  const chinaCurrentStock = metrics?.chinaCurrentStock ?? numericRawDataValue(rawData, 'chinaAvailableStock')
   const currentStock = metrics?.currentStock ?? numericRawDataValue(rawData, 'availableStock')
   const currentMonthOutgoing = metrics?.currentMonthOutgoing ?? numericRawDataValue(rawData, 'currentMonthOutgoing')
   const threeMonthAverageOutgoing = metrics?.threeMonthAverageOutgoing ?? numericRawDataValue(rawData, 'averageMonthlyOutgoing')
   const targetStockQuantity = numericRawDataValue(rawData, 'targetStockQuantity') ?? metrics?.targetStockQuantity
+  const stockCoverageMonths = getPurchaseStockCoverageMonths(rawData)
 
   return (
-    <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
+    <div className="grid grid-cols-2 gap-2 text-center tabular-nums sm:grid-cols-5">
       <Metric label="최근 발주수량" value={formatNumber(metrics?.lastPurchaseQuantity)} />
       <Metric label="진행 구매수량" value={formatNumber(metrics?.purchaseInProgressQuantity)} />
       <Metric label="중국출고 예정수량" value={formatNumber(metrics?.chinaOutboundScheduledQuantity)} />
+      <Metric label="국내재고" value={formatNumber(domesticCurrentStock)} />
+      <Metric label="중국재고" value={formatNumber(chinaCurrentStock)} />
       <Metric label="총 현재고" value={formatNumber(currentStock)} />
       <Metric label="당월 출고" value={formatNumber(currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(threeMonthAverageOutgoing)} />
       <Metric label="목표수량" value={formatNumber(targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || siblingOptionBundleNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
-        <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+      <Metric label="재고 보유개월" value={stockCoverageMonths == null ? '-' : `${formatNumber(stockCoverageMonths)}개월`} />
+      {pipelineNote || moqNote || siblingOptionBundleNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
+        <div className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium sm:col-span-5">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
           {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
-          {stockNote ? <span className="text-emerald-700">{stockNote}</span> : null}
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {siblingOptionBundleNote ? <span className="text-cyan-700">{siblingOptionBundleNote}</span> : null}

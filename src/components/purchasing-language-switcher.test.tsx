@@ -95,4 +95,30 @@ describe('PurchasingLanguageSwitcher', () => {
     expect(document.documentElement.lang).toBe('ko')
     expect(toaster).toHaveTextContent('저장되었습니다.')
   })
+
+  it('translates dynamic SaaS inventory protection messages without translating product data', async () => {
+    render(<GlobalTranslationFixture route="dashboard" dynamicLabel="출고 예약 4개보다 적게 줄일 수 없습니다." />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('不能减少到低于出库预留的 4 个。')
+    })
+  })
+
+  it('translates SaaS inventory Excel upload errors, including row-prefixed server errors', async () => {
+    const { rerender } = render(<GlobalTranslationFixture route="dashboard" dynamicLabel="xlsx 또는 xlsm 엑셀 파일만 업로드할 수 있습니다." />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('仅可上传 xlsx 或 xlsm Excel 文件。')
+    })
+
+    rerender(<GlobalTranslationFixture route="dashboard" dynamicLabel="2행: 엑셀의 SaaS재고ID를 현재 목록에서 찾을 수 없습니다." />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('第 2 行：无法在当前列表中找到 Excel 的 SaaS 库存 ID。')
+    })
+  })
 })

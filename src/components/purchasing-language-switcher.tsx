@@ -415,6 +415,19 @@ const PHRASE_TRANSLATIONS: Array<[RegExp, string]> = [
   [/^사용 파렛트 ([\d,]+)개$/, '已使用托盘 $1 个'],
   [/^박스 ([\d,]+)개$/, '箱 $1 个'],
   [/^([\d,]+)박스$/, '$1 箱'],
+  [/^총 ([\d,]+)개 재고 항목$/, '共 $1 个库存项目'],
+  [/^([\d,]+)개 재고 항목을 엑셀로 반영했습니다\.$/, '已通过 Excel 应用 $1 个库存项目。'],
+  [/^엑셀은 ([\d,]+)행 이하만 업로드할 수 있습니다\. ([\d,]+)행을 확인해주세요\.$/, 'Excel 最多可上传 $1 行。请确认第 $2 行。'],
+  [/^새 재고는 상품명을 입력해주세요\.$/, '新库存请输入商品名称。'],
+  [/^새 재고는 현재고를 1개 이상 입력해주세요\.$/, '新库存的现有库存请输入 1 个以上。'],
+  [/^현재고는 0 이상의 정수로 입력해주세요\.$/, '现有库存请输入 0 或以上的整数。'],
+  [/^출고 예약 ([\d,]+)개보다 적게 줄일 수 없습니다\.$/, '不能减少到低于出库预留的 $1 个。'],
+  [/^발주 연동 재고 ([\d,]+)개보다 적게 줄일 수 없습니다\.$/, '不能减少到低于采购关联库存的 $1 个。'],
+  [/^(\d+)행: 출고 예약 ([\d,]+)개보다 적게 줄일 수 없습니다\.$/, '第 $1 行：不能减少到低于出库预留的 $2 个。'],
+  [/^(\d+)행: 발주 연동 재고 ([\d,]+)개보다 적게 줄일 수 없습니다\.$/, '第 $1 行：不能减少到低于采购关联库存的 $2 个。'],
+  [/^(\d+)행의 현재고를 확인해주세요\.$/, '请确认第 $1 行的现有库存。'],
+  [/^(\d+)행의 새 SaaS 중국재고 정보를 확인해주세요\.$/, '请确认第 $1 行的新 SaaS 中国库存信息。'],
+  [/^외 ([\d,]+)건$/, '另有 $1 项'],
   [/^선택한 ([\d,]+)개 창고의 작업 가능 재고입니다\.$/, '已选择 $1 个仓库的可操作库存。'],
   [/^전체 ([\d,]+)$/, '全部 $1'],
   [/^진행 중 ([\d,]+)$/, '进行中 $1'],
@@ -521,6 +534,16 @@ const SAFE_INLINE_LABELS = new Set([
 const SAFE_INLINE_PATTERNS = [
   /^발주요청 지연 [\d,]+건$/,
   /^구매완료 입고지연 [\d,]+건$/,
+  /^총 [\d,]+개 재고 항목$/,
+  /^[\d,]+개 재고 항목을 엑셀로 반영했습니다\.$/,
+  /^엑셀은 [\d,]+행 이하만 업로드할 수 있습니다\. [\d,]+행을 확인해주세요\.$/,
+  /^출고 예약 [\d,]+개보다 적게 줄일 수 없습니다\.$/,
+  /^발주 연동 재고 [\d,]+개보다 적게 줄일 수 없습니다\.$/,
+  /^\d+행: 출고 예약 [\d,]+개보다 적게 줄일 수 없습니다\.$/,
+  /^\d+행: 발주 연동 재고 [\d,]+개보다 적게 줄일 수 없습니다\.$/,
+  /^\d+행의 현재고를 확인해주세요\.$/,
+  /^\d+행의 새 SaaS 중국재고 정보를 확인해주세요\.$/,
+  /^외 [\d,]+건$/,
 ]
 
 const APP_TRANSLATION_SCOPE = '[data-app-translate]'
@@ -551,6 +574,15 @@ function translateText(value: string) {
   const exact = EXACT_TRANSLATIONS[trimmed]
   if (exact) return value.replace(trimmed, exact)
 
+  const rowError = /^(\d+)행:\s*(.+)$/.exec(trimmed)
+  if (rowError) {
+    const message = rowError[2]!.trim()
+    const translatedMessage = translateText(message)
+    if (translatedMessage !== message) {
+      return value.replace(trimmed, `第 ${rowError[1]} 行：${translatedMessage}`)
+    }
+  }
+
   let translated = value
   for (const [pattern, replacement] of PHRASE_TRANSLATIONS) {
     translated = translated.replace(pattern, replacement)
@@ -560,6 +592,13 @@ function translateText(value: string) {
 
 function hasExactTranslation(value: string) {
   return Object.prototype.hasOwnProperty.call(EXACT_TRANSLATIONS, value)
+}
+
+function hasTranslatableRowError(value: string) {
+  const rowError = /^(\d+)행:\s*(.+)$/.exec(value)
+  if (!rowError) return false
+  const message = rowError[2]!.trim()
+  return translateText(message) !== message
 }
 
 function resolveOriginalText(current: string, storedOriginal: string | undefined) {
@@ -582,6 +621,7 @@ function shouldTranslateNode(node: Node, original: string) {
   if (element.closest(EXPLICIT_TRANSLATION_SCOPE)) return true
   if (element.closest(GLOBAL_TRANSLATION_SCOPE) || element.closest(TOAST_TRANSLATION_SCOPE)) {
     return hasExactTranslation(trimmed)
+      || hasTranslatableRowError(trimmed)
       || SAFE_INLINE_LABELS.has(trimmed)
       || SAFE_INLINE_PATTERNS.some((pattern) => pattern.test(trimmed))
       || GLOBAL_UI_VALUE_PATTERNS.some((pattern) => pattern.test(trimmed))

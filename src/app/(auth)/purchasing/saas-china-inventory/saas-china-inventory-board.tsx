@@ -8,6 +8,7 @@ import {
   adjustSaasChinaInventoryAction,
   receiveSaasChinaInventoryAction,
 } from '../saas-china-actions'
+import { SaasChinaInventoryExcelDialog } from './saas-china-inventory-excel-dialog'
 
 export type SaasChinaInventoryViewItem = {
   id: string
@@ -152,7 +153,10 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
             <h2 className="font-semibold">SaaS 중국재고 목록</h2>
             <p className="mt-1 text-xs text-muted-foreground">총 {items.length.toLocaleString('ko-KR')}개 재고 항목</p>
           </div>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="품목코드, 상품명, 옵션 검색" />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <SaasChinaInventoryExcelDialog />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="품목코드, 상품명, 옵션 검색" />
+          </div>
         </div>
         <div className="space-y-2 p-3 md:hidden">
           {filteredItems.length === 0 ? (

@@ -16,18 +16,6 @@ export const DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE = '중국창고'
 
 export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
 
-export type SaasChinaInventoryStatusReportBlankQuantityMode = 'keep' | 'zero'
-
-export type ParseSaasChinaInventoryWorkbookOptions = {
-  /**
-   * The inventory-status report uses a blank `중국창고` cell for no stock.
-   * Normal imports preserve existing SaaS inventory; the explicit snapshot
-   * mode retains those rows as a zero target so the planner can protect
-   * reservations and purchase-linked stock before applying anything.
-   */
-  inventoryStatusBlankQuantity?: SaasChinaInventoryStatusReportBlankQuantityMode
-}
-
 export type SaasChinaInventoryExcelRow = {
   rowNumber: number
   inventoryId: string | null
@@ -37,7 +25,7 @@ export type SaasChinaInventoryExcelRow = {
   optionName: string | null
   optionKey: string
   onHandQuantity: number | null
-  /** Set only for a blank `중국창고` value retained from an inventory-status report snapshot. */
+  /** Set when a blank `중국창고` report cell is automatically read as zero. */
   reportBlankQuantity?: boolean
   note: string | null
   errors: string[]
@@ -95,13 +83,12 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 
 /**
  * Reads the editable SaaS China inventory workbook. Quantity is intentionally
- * nullable: a blank current-stock cell means "leave this existing row's
- * quantity as-is"; validation of whether that is allowed happens against the
- * current database state during preview/apply.
+ * nullable: a blank current-stock cell in the SaaS template means "leave this
+ * existing row's quantity as-is." A recognized inventory-status report is a
+ * snapshot, so its blank `중국창고` cells are read as zero instead.
  */
 export async function parseSaasChinaInventoryWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
-  options: ParseSaasChinaInventoryWorkbookOptions = {},
 ): Promise<SaasChinaInventoryWorkbookParseResult> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as ExcelJS.Buffer)
@@ -121,13 +108,12 @@ export async function parseSaasChinaInventoryWorkbook(
   let totalRows = 0
   let skippedRows = 0
   let reportBlankQuantityRowCount = 0
-  const inventoryStatusBlankQuantity = options.inventoryStatusBlankQuantity ?? 'keep'
   const lastRow = Math.min(sheet.rowCount, headerRowNumber + MAX_DATA_ROWS)
   for (let rowNumber = headerRowNumber + 1; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
     const inventoryStatusReportBlankQuantity = isInventoryStatusReportBlankQuantityRow(row, columns)
     if (inventoryStatusReportBlankQuantity) reportBlankQuantityRowCount += 1
-    if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns, inventoryStatusBlankQuantity)) {
+    if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns)) {
       skippedRows += 1
       continue
     }
@@ -387,17 +373,13 @@ function isEmptyRow(row: ExcelJS.Row) {
 function shouldSkipInventoryStatusReportRow(
   row: ExcelJS.Row,
   columns: HeaderColumns,
-  blankQuantityMode: SaasChinaInventoryStatusReportBlankQuantityMode,
 ) {
   if (columns.source !== 'inventory_status_report') return false
   const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
   const productName = columns.productName ? cellText(row.getCell(columns.productName).value).trim() : ''
   // This also skips the timestamp/footer line commonly found below the total.
   if (!sku || sku === '합계' || !productName) return true
-  // Default behavior is deliberately non-destructive. Snapshot mode retains
-  // blank stock rows as zero targets; the planner only applies them to an
-  // existing SaaS inventory identity and never creates a new zero-stock row.
-  return blankQuantityMode === 'keep' && isInventoryStatusReportBlankQuantityRow(row, columns)
+  return false
 }
 
 function isInventoryStatusReportBlankQuantityRow(row: ExcelJS.Row, columns: HeaderColumns) {

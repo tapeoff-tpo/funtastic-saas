@@ -2986,8 +2986,8 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
     const existing = inventoryById ?? inventoriesByIdentity.get(identity)
     if (!existing) {
-      // A blank `중국창고` cell in the explicit inventory-status snapshot
-      // mode is a zero target only for an existing SaaS identity. It must not
+      // A blank `중국창고` cell in an inventory-status report is automatically
+      // read as a zero target only for an existing SaaS identity. It must not
       // create an empty stock record for an item that has never been tracked
       // in SaaS inventory.
       if (row.reportBlankQuantity && row.onHandQuantity === 0) {

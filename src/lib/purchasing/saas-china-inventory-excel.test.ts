@@ -66,7 +66,7 @@ describe('SaaS China inventory Excel workbook', () => {
     ]))
   })
 
-  it('reads the inventory-status report using its 중국창고 quantity column and skips report totals', async () => {
+  it('reads a blank inventory-status 중국창고 quantity as zero and skips report totals', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('재고현황')
     sheet.addRow(['회사명 : 테이포프 / 20261023'])
@@ -84,8 +84,8 @@ describe('SaaS China inventory Excel workbook', () => {
 
     expect(parsed).toMatchObject({
       source: 'inventory_status_report',
-      totalRows: 2,
-      skippedRows: 3,
+      totalRows: 3,
+      skippedRows: 2,
       reportBlankQuantityRowCount: 1,
       errors: [],
     })
@@ -99,6 +99,12 @@ describe('SaaS China inventory Excel workbook', () => {
         onHandQuantity: 12,
       }),
       expect.objectContaining({
+        rowNumber: 4,
+        sku: 'SKU-NO-CHANGE',
+        onHandQuantity: 0,
+        reportBlankQuantity: true,
+      }),
+      expect.objectContaining({
         rowNumber: 5,
         warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
         sku: 'SKU-ZERO',
@@ -106,25 +112,6 @@ describe('SaaS China inventory Excel workbook', () => {
         onHandQuantity: 0,
       }),
     ])
-
-    const snapshot = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer(), {
-      inventoryStatusBlankQuantity: 'zero',
-    })
-    expect(snapshot).toMatchObject({
-      source: 'inventory_status_report',
-      totalRows: 3,
-      skippedRows: 2,
-      reportBlankQuantityRowCount: 1,
-      errors: [],
-    })
-    expect(snapshot.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        rowNumber: 4,
-        sku: 'SKU-NO-CHANGE',
-        onHandQuantity: 0,
-        reportBlankQuantity: true,
-      }),
-    ]))
   })
 
   it('creates an uploadable empty template and exports the current list using the editable headers', async () => {

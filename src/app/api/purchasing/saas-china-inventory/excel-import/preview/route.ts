@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import {
-  parseSaasChinaInventoryWorkbook,
-  type SaasChinaInventoryStatusReportBlankQuantityMode,
-} from '@/lib/purchasing/saas-china-inventory-excel'
+import { parseSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-inventory-excel'
 import { previewSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
@@ -18,9 +15,7 @@ export async function POST(request: NextRequest) {
     const file = excelFileFromForm(form)
     if (file instanceof NextResponse) return file
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer(), {
-      inventoryStatusBlankQuantity: inventoryStatusBlankQuantityMode(form),
-    })
+    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer())
     const preview = await previewSaasChinaInventoryWorkbook({ userId: workspaceUserId, rows: parsed.rows })
     return NextResponse.json({
       preview,
@@ -42,8 +37,4 @@ function excelFileFromForm(form: FormData): File | NextResponse {
   if (!/\.(xlsx|xlsm)$/i.test(file.name)) return NextResponse.json({ error: 'xlsx 또는 xlsm 엑셀 파일만 업로드할 수 있습니다.' }, { status: 400 })
   if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: '엑셀 파일은 10MB 이하만 업로드할 수 있습니다.' }, { status: 400 })
   return file
-}
-
-function inventoryStatusBlankQuantityMode(form: FormData): SaasChinaInventoryStatusReportBlankQuantityMode {
-  return form.get('inventoryStatusBlankQuantity') === 'zero' ? 'zero' : 'keep'
 }

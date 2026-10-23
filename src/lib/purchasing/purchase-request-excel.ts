@@ -64,6 +64,7 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '총 원가(₩)',
   '구입관리코드',
   '주문서번호',
+  '송장번호',
   '발주요청 날짜',
   '구매날짜',
   '구매방법',
@@ -183,6 +184,7 @@ export async function exportPurchaseRequestsExcel(input: {
       '총 원가(₩)': costs.totalCostKrw ?? '',
       구입관리코드: row.purchaseManagementCode ?? '',
       주문서번호: row.supplierOrderNumber ?? '',
+      송장번호: row.trackingNumber ?? '',
       '발주요청 날짜': dateText(row.requestDate),
       구매날짜: dateText(row.outboundExpectedDate),
       구매방법: row.purchaseMethod ?? '',
@@ -291,6 +293,7 @@ export async function importPurchaseRequestsExcel(input: {
       const buyerCode = normalizeBuyerCode(data.담당자코드)
       const hasDelayReasonColumn = columnByHeader.has('지연사유')
       const hasDelayNoteColumn = columnByHeader.has('지연 상세')
+      const hasTrackingNumberColumn = columnByHeader.has('송장번호')
       const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
         status,
         sku,
@@ -309,6 +312,7 @@ export async function importPurchaseRequestsExcel(input: {
         memo: emptyToNull(data.메모),
         updatedAt: new Date(),
       }
+      if (hasTrackingNumberColumn) values.trackingNumber = emptyToNull(data.송장번호)
       if (hasDelayReasonColumn) values.delayReason = parsePurchaseDelayReason(data.지연사유)
       if (hasDelayNoteColumn) values.delayNote = emptyToNull(data['지연 상세'])
 
@@ -401,6 +405,7 @@ async function getPurchaseRequestRowsForExcel(input: {
       ilike(purchaseRequestItems.optionName, pattern),
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+      ilike(purchaseRequestItems.trackingNumber, pattern),
     )!)
   }
 

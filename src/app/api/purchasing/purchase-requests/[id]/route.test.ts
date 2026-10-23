@@ -71,6 +71,26 @@ describe('PATCH /api/purchasing/purchase-requests/[id]', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/purchasing/china-shipments')
   })
 
+  it('saves a purchase-complete tracking number', async () => {
+    mocks.updatePurchaseRequestPlanFields.mockResolvedValue({
+      id: 'purchase-item',
+      excludedRecommendationCount: 0,
+    })
+    const { PATCH } = await import('./route')
+
+    const response = await PATCH(
+      patchRequest({ trackingNumber: 'SF1234567890' }) as never,
+      { params: Promise.resolve({ id: 'purchase-item' }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.updatePurchaseRequestPlanFields).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'purchase-item',
+      userId: 'workspace-user',
+      trackingNumber: 'SF1234567890',
+    }))
+  })
+
   it('returns a linked SaaS purchase deletion rule as 409', async () => {
     mocks.deletePurchaseRequestItem.mockRejectedValue(new Error('SaaS 중국재고 또는 중국출고와 연결된 발주는 삭제할 수 없습니다.'))
     const { DELETE } = await import('./route')

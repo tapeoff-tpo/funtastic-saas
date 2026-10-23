@@ -137,6 +137,7 @@ export type PurchaseReviewListItem = {
   outboundExpectedDate: string | null
   purchaseManagementCode: string | null
   supplierOrderNumber: string | null
+  trackingNumber: string | null
   purchaseMethod: string | null
   paymentStatus: PurchasePaymentStatus
   paymentPaidAt: Date | null
@@ -1258,6 +1259,7 @@ export async function getPurchaseReviewList(input: {
       outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
       purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
       supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+      trackingNumber: purchaseRequestItems.trackingNumber,
       purchaseMethod: purchaseRequestItems.purchaseMethod,
       paymentStatus: purchaseRequestItems.paymentStatus,
       paymentPaidAt: purchaseRequestItems.paymentPaidAt,
@@ -1329,6 +1331,7 @@ export async function getPurchaseReviewList(input: {
       outboundExpectedDate: source?.outboundExpectedDate ?? null,
       purchaseManagementCode: source?.purchaseManagementCode ?? null,
       supplierOrderNumber: source?.supplierOrderNumber ?? null,
+      trackingNumber: source?.trackingNumber ?? null,
       purchaseMethod: source?.purchaseMethod ?? null,
       paymentStatus: normalizePaymentStatus(source?.paymentStatus),
       paymentPaidAt: source?.paymentPaidAt ?? null,
@@ -2027,6 +2030,7 @@ export async function updatePurchaseRequestPlanFields(input: {
   chinaReceivedQuantity?: number | null
   outboundRequestedQuantity?: number | null
   supplierOrderNumber?: string | null
+  trackingNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
@@ -2071,6 +2075,9 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (chinaReceivedQuantity !== undefined) values.chinaReceivedQuantity = chinaReceivedQuantity
   if (input.supplierOrderNumber !== undefined) {
     values.supplierOrderNumber = emptyToNull(input.supplierOrderNumber)
+  }
+  if (input.trackingNumber !== undefined) {
+    values.trackingNumber = emptyToNull(input.trackingNumber)
   }
   if (input.outboundExpectedDate !== undefined) {
     values.outboundExpectedDate = input.outboundExpectedDate || null

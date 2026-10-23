@@ -14,7 +14,7 @@ import {
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronDown, Download, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { Check, ChevronDown, Download, ExternalLink, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,12 +42,10 @@ const PURCHASE_REVIEW_STATUS_OPTIONS: Array<{ value: PurchaseReviewListStatus; l
 type BulkSelectionContextValue = {
   ids: string[]
   selectedIds: Set<string>
-  pendingSaasChinaModeIds: Set<string>
   nextStatus: PurchaseRequestStatus | null
   toggle: (id: string) => void
   toggleAll: () => void
   clear: () => void
-  setSaasChinaModePending: (id: string, pending: boolean) => void
 }
 
 const BulkSelectionContext = createContext<BulkSelectionContextValue | null>(null)
@@ -62,7 +60,6 @@ export function PurchaseBulkSelectionProvider({
   children: ReactNode
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-  const [pendingSaasChinaModeIds, setPendingSaasChinaModeIds] = useState<Set<string>>(() => new Set())
 
   function toggle(id: string) {
     setSelectedIds((current) => {
@@ -85,25 +82,14 @@ export function PurchaseBulkSelectionProvider({
     setSelectedIds(new Set())
   }
 
-  function setSaasChinaModePending(id: string, pending: boolean) {
-    setPendingSaasChinaModeIds((current) => {
-      const next = new Set(current)
-      if (pending) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  }
-
   return (
     <BulkSelectionContext.Provider value={{
       ids,
       selectedIds,
-      pendingSaasChinaModeIds,
       nextStatus,
       toggle,
       toggleAll,
       clear,
-      setSaasChinaModePending,
     }}>
       {children}
     </BulkSelectionContext.Provider>
@@ -149,17 +135,12 @@ export function PurchaseBulkStatusButton() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
-  const hasPendingSaasChinaMode = Array.from(context.selectedIds).some((id) => context.pendingSaasChinaModeIds.has(id))
 
   if (!context.nextStatus) return null
 
   function moveSelected() {
     const ids = Array.from(context.selectedIds)
     if (ids.length === 0) return
-    if (ids.some((id) => context.pendingSaasChinaModeIds.has(id))) {
-      setMessage('SaaS 중국재고 연동 설정을 저장 중인 행이 있어 잠시 후 다시 시도해주세요.')
-      return
-    }
     setMessage(null)
 
     startTransition(async () => {
@@ -188,7 +169,7 @@ export function PurchaseBulkStatusButton() {
         size="sm"
         variant="outline"
         onClick={moveSelected}
-        disabled={isPending || selectedCount === 0 || hasPendingSaasChinaMode}
+        disabled={isPending || selectedCount === 0}
       >
         {isPending ? <Loader2 className="animate-spin" /> : <Check />}
         선택 {selectedCount.toLocaleString('ko-KR')}건 {PURCHASE_REQUEST_STATUS_LABELS[context.nextStatus]}로 이동
@@ -1111,15 +1092,10 @@ export function PurchaseBulkDeleteButton() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
-  const hasPendingSaasChinaMode = Array.from(context.selectedIds).some((id) => context.pendingSaasChinaModeIds.has(id))
 
   function removeSelected() {
     const ids = Array.from(context.selectedIds)
     if (ids.length === 0) return
-    if (ids.some((id) => context.pendingSaasChinaModeIds.has(id))) {
-      setMessage('SaaS 중국재고 연동 설정을 저장 중인 행이 있어 잠시 후 다시 시도해주세요.')
-      return
-    }
     if (!window.confirm(`선택한 ${ids.length.toLocaleString('ko-KR')}건을 삭제할까요?`)) return
     setMessage(null)
     startTransition(async () => {
@@ -1149,7 +1125,7 @@ export function PurchaseBulkDeleteButton() {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" size="sm" variant="destructive" onClick={removeSelected} disabled={isPending || selectedCount === 0 || hasPendingSaasChinaMode}>
+      <Button type="button" size="sm" variant="destructive" onClick={removeSelected} disabled={isPending || selectedCount === 0}>
         {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
         선택 삭제 {selectedCount.toLocaleString('ko-KR')}
       </Button>
@@ -1570,9 +1546,7 @@ export function PurchaseStatusButton({
   saasChinaMode?: boolean
 }) {
   const router = useRouter()
-  const context = useBulkSelection()
   const [isPending, startTransition] = useTransition()
-  const isSaasChinaModePending = context.pendingSaasChinaModeIds.has(id)
 
   if (!nextStatus) return null
 
@@ -1585,7 +1559,7 @@ export function PurchaseStatusButton({
         >
           중국출고에서 작업
         </Link>
-        <p className="text-[11px] leading-tight text-muted-foreground">SaaS 재고 출고로 처리</p>
+        <p className="text-[11px] leading-tight text-muted-foreground">기존 중국출고 작업에서 처리</p>
       </div>
     )
   }
@@ -1607,7 +1581,7 @@ export function PurchaseStatusButton({
   }
 
   return (
-    <Button type="button" size="sm" variant="outline" onClick={moveStatus} disabled={isPending || isSaasChinaModePending}>
+    <Button type="button" size="sm" variant="outline" onClick={moveStatus} disabled={isPending}>
       {isPending ? <Loader2 className="animate-spin" /> : <Check />}
       {PURCHASE_REQUEST_STATUS_LABELS[nextStatus]}로 이동
     </Button>
@@ -1835,9 +1809,7 @@ export function PurchaseDeleteButton({
   productName: string
 }) {
   const router = useRouter()
-  const context = useBulkSelection()
   const [isPending, startTransition] = useTransition()
-  const isSaasChinaModePending = context.pendingSaasChinaModeIds.has(id)
 
   function remove() {
     if (!window.confirm(`${productName} 발주 항목을 삭제할까요?`)) return
@@ -1854,7 +1826,7 @@ export function PurchaseDeleteButton({
   }
 
   return (
-    <Button type="button" size="sm" variant="destructive" onClick={remove} disabled={isPending || isSaasChinaModePending}>
+    <Button type="button" size="sm" variant="destructive" onClick={remove} disabled={isPending}>
       {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
       삭제
     </Button>
@@ -1864,6 +1836,8 @@ export function PurchaseDeleteButton({
 export function PurchasePlanFieldsV2({
   id,
   supplierOrderNumber,
+  trackingNumber,
+  showTrackingNumber,
   dateValue,
   dateField,
   dateLabel,
@@ -1871,6 +1845,8 @@ export function PurchasePlanFieldsV2({
 }: {
   id: string
   supplierOrderNumber: string | null
+  trackingNumber: string | null
+  showTrackingNumber: boolean
   dateValue: string | Date | null
   dateField: 'requestDate' | 'outboundExpectedDate'
   dateLabel: string
@@ -1882,6 +1858,10 @@ export function PurchasePlanFieldsV2({
   const [customMethod, setCustomMethod] = useState(initialMethod === '직접입력' ? purchaseMethod ?? '' : '')
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const savedTrackingNumber = trackingNumber?.trim() ?? ''
+  const baiduTrackingHref = savedTrackingNumber
+    ? `https://www.baidu.com/s?wd=${encodeURIComponent(`${savedTrackingNumber} 快递查询`)}`
+    : null
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1893,6 +1873,7 @@ export function PurchasePlanFieldsV2({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplierOrderNumber: String(formData.get('supplierOrderNumber') ?? ''),
+          ...(showTrackingNumber ? { trackingNumber: String(formData.get('trackingNumber') ?? '') } : {}),
           [dateField]: String(formData.get(dateField) ?? '') || null,
           purchaseMethod: methodMode === '직접입력' ? customMethod : methodMode,
         }),
@@ -1903,7 +1884,7 @@ export function PurchasePlanFieldsV2({
   }
 
   return (
-    <form onSubmit={save} className="grid min-w-0 grid-cols-[minmax(120px,1fr)_126px_148px_64px] items-end gap-1.5">
+    <form onSubmit={save} className={`grid min-w-0 items-end gap-1.5 ${showTrackingNumber ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]' : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}>
       <label className="space-y-1">
         <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
         <Input
@@ -1913,6 +1894,29 @@ export function PurchasePlanFieldsV2({
           className="h-7 text-xs"
         />
       </label>
+      {showTrackingNumber ? (
+        <label className="space-y-1">
+          <span className="block text-[11px] font-medium text-muted-foreground">송장번호</span>
+          <Input
+            name="trackingNumber"
+            defaultValue={trackingNumber ?? ''}
+            placeholder="송장번호"
+            className="h-7 text-xs"
+          />
+          {baiduTrackingHref ? (
+            <a
+              href={baiduTrackingHref}
+              target="_blank"
+              rel="noreferrer"
+              title="바이두에서 송장번호 조회"
+              className="inline-flex max-w-full items-center gap-1 truncate text-[11px] text-blue-700 hover:underline"
+            >
+              <span className="truncate">{savedTrackingNumber}</span>
+              <ExternalLink className="size-3 shrink-0" />
+            </a>
+          ) : null}
+        </label>
+      ) : null}
       <label className="space-y-1">
         <span className="block text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
         <Input
@@ -1949,70 +1953,6 @@ export function PurchasePlanFieldsV2({
         {message ?? '저장'}
       </Button>
     </form>
-  )
-}
-
-export function PurchaseSaasChinaModeField({
-  id,
-  enabled,
-}: {
-  id: string
-  enabled: boolean
-}) {
-  const router = useRouter()
-  const context = useBulkSelection()
-  const [value, setValue] = useState(enabled)
-  const [message, setMessage] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-
-  function save(nextValue: boolean) {
-    const previousValue = value
-    setValue(nextValue)
-    setMessage(null)
-    context.setSaasChinaModePending(id, true)
-
-    startTransition(async () => {
-      try {
-        const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ saasChinaMode: nextValue }),
-        })
-        const body = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          setValue(previousValue)
-          setMessage(body.error ?? 'SaaS 중국재고 연동 설정을 저장하지 못했습니다.')
-          return
-        }
-
-        setMessage(nextValue ? 'SaaS 중국재고 연동 사용' : 'SaaS 중국재고 연동 해제')
-        router.refresh()
-      } finally {
-        context.setSaasChinaModePending(id, false)
-      }
-    })
-  }
-
-  return (
-    <div className="mt-2 rounded-md border border-dashed border-sky-200 bg-sky-50/60 px-2 py-1.5">
-      <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-sky-900">
-        <input
-          type="checkbox"
-          checked={value}
-          disabled={isPending}
-          onChange={(event) => save(event.target.checked)}
-          aria-label="SaaS 중국재고 연동"
-          className="size-3.5"
-        />
-        SaaS 중국재고 연동
-      </label>
-      <p className="mt-0.5 text-[11px] leading-snug text-sky-800">
-        중국창고도착 전에 선택하세요. 기존 Ecount/raw 중국재고는 변경하지 않습니다.
-      </p>
-      {message ? (
-        <p className={isPending ? 'sr-only' : 'mt-1 text-[11px] text-muted-foreground'}>{message}</p>
-      ) : null}
-    </div>
   )
 }
 

@@ -752,6 +752,7 @@ export const purchaseRequestItems = pgTable(
     buyerCode: varchar('buyer_code', { length: 50 }),
 
     supplierOrderNumber: varchar('supplier_order_number', { length: 100 }),
+    trackingNumber: varchar('tracking_number', { length: 100 }),
     outboundExpectedDate: date('outbound_expected_date'),
     purchaseMethod: varchar('purchase_method', { length: 100 }),
     purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),

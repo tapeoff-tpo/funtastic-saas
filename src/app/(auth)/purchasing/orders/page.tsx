@@ -46,7 +46,6 @@ import {
   PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
-  PurchaseSaasChinaModeField,
   PurchasePaymentStatusField,
   PurchasePaginationControls,
   PurchaseQuantityField,
@@ -570,7 +569,7 @@ export async function PurchasingOrdersView({
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
+                  {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
                   {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th>}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
@@ -638,13 +637,6 @@ export async function PurchasingOrdersView({
                               title={`재고 보유 ${formatNumber(stockCoverageMonths)}개월 · 1개월 이하`}
                             >
                               {PURCHASE_URGENCY_STATUS_LABELS[purchaseUrgencyStatus]}
-                            </Badge>
-                          </div>
-                        ) : null}
-                        {item.rawData.saasChinaMode === true ? (
-                          <div className="mt-1">
-                            <Badge className="border-sky-200 bg-sky-100 px-1.5 text-[11px] text-sky-800 hover:bg-sky-100">
-                              SaaS 중국재고
                             </Badge>
                           </div>
                         ) : null}
@@ -760,6 +752,8 @@ export async function PurchasingOrdersView({
                               <PurchasePlanFieldsV2
                                 id={item.id}
                                 supplierOrderNumber={item.supplierOrderNumber}
+                                trackingNumber={item.trackingNumber}
+                                showTrackingNumber={item.status === 'purchase_completed'}
                                 dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
                                 dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
                                 dateLabel={item.status === 'china_arrived'
@@ -771,12 +765,6 @@ export async function PurchasingOrdersView({
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
                               />
-                              {(item.status === 'purchased' || item.status === 'purchase_completed') ? (
-                                <PurchaseSaasChinaModeField
-                                  id={item.id}
-                                  enabled={item.rawData.saasChinaMode === true}
-                                />
-                              ) : null}
                             </>
                           ) : '-'}
                         </td>

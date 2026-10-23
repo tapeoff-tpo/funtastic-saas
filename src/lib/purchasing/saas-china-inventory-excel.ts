@@ -14,6 +14,8 @@ export const SAAS_CHINA_INVENTORY_ID_HEADER = 'SaaS재고ID'
 
 export const DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE = '중국창고'
 
+export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
+
 export type SaasChinaInventoryExcelRow = {
   rowNumber: number
   inventoryId: string | null
@@ -37,6 +39,7 @@ export type SaasChinaInventoryWorkbookParseResult = {
   errors: SaasChinaInventoryWorkbookParseError[]
   totalRows: number
   skippedRows: number
+  source: SaasChinaInventoryWorkbookSource
 }
 
 export type SaasChinaInventoryExcelExportRow = {
@@ -56,7 +59,7 @@ const HEADER_ALIASES = {
   warehouseCode: ['중국창고', '창고', '창고코드', 'warehouse', 'warehousecode'],
   sku: ['품목코드', '상품코드', 'sku'],
   productName: ['상품명', '품목명', 'productname'],
-  optionName: ['옵션명', '옵션', 'optionname'],
+  optionName: ['옵션명', '옵션', '규격', 'optionname'],
   onHandQuantity: ['현재고', '재고수량', '재고', '수량', 'onhandquantity'],
   note: ['메모', '비고', 'note'],
 } as const
@@ -88,12 +91,11 @@ export async function parseSaasChinaInventoryWorkbook(
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new Error('엑셀 시트를 찾을 수 없습니다.')
 
-  const headerRowNumber = findHeaderRow(sheet)
-  if (!headerRowNumber) {
+  const header = findHeaderRow(sheet)
+  if (!header) {
     throw new Error('엑셀에서 품목코드와 현재고 헤더를 찾을 수 없습니다.')
   }
-
-  const columns = headerColumns(sheet.getRow(headerRowNumber))
+  const { rowNumber: headerRowNumber, columns } = header
   if (!columns.sku || !columns.onHandQuantity) {
     throw new Error('필수 열이 없습니다: 품목코드, 현재고')
   }
@@ -104,7 +106,7 @@ export async function parseSaasChinaInventoryWorkbook(
   const lastRow = Math.min(sheet.rowCount, headerRowNumber + MAX_DATA_ROWS)
   for (let rowNumber = headerRowNumber + 1; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
-    if (isEmptyRow(row)) {
+    if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns)) {
       skippedRows += 1
       continue
     }
@@ -133,6 +135,7 @@ export async function parseSaasChinaInventoryWorkbook(
     errors: rows.flatMap((row) => row.errors.map((message) => ({ row: row.rowNumber, message }))),
     totalRows,
     skippedRows,
+    source: columns.source,
   }
 }
 
@@ -220,22 +223,30 @@ export function saasChinaInventoryExportFilename(now = new Date()) {
   return `SaaS_중국재고_현재목록_${date}.xlsx`
 }
 
-function findHeaderRow(sheet: ExcelJS.Worksheet) {
+function findHeaderRow(sheet: ExcelJS.Worksheet): { rowNumber: number; columns: HeaderColumns } | null {
   const maxRow = Math.min(sheet.rowCount, 20)
   for (let rowNumber = 1; rowNumber <= maxRow; rowNumber += 1) {
     const columns = headerColumns(sheet.getRow(rowNumber))
-    if (columns.sku && columns.onHandQuantity) return rowNumber
+    if (columns.sku && columns.onHandQuantity) return { rowNumber, columns }
   }
   return null
 }
 
-type HeaderColumns = Partial<Record<keyof typeof HEADER_ALIASES, number>>
+type HeaderColumns = Partial<Record<keyof typeof HEADER_ALIASES, number>> & {
+  source: SaasChinaInventoryWorkbookSource
+}
 
 function headerColumns(row: ExcelJS.Row): HeaderColumns {
-  const columns: HeaderColumns = {}
+  const columns: HeaderColumns = { source: 'saas_china_inventory' }
+  let chinaWarehouseColumn: number | undefined
+  let hasTotalHeader = false
+  let hasItemCategoryHeader = false
   row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
     const normalized = normalizeHeader(cellText(cell.value))
     if (!normalized) return
+    if (normalized === normalizeHeader('중국창고')) chinaWarehouseColumn = columnNumber
+    if (normalized === normalizeHeader('합계')) hasTotalHeader = true
+    if (normalized === normalizeHeader('품목구분')) hasItemCategoryHeader = true
     for (const [field, aliases] of Object.entries(HEADER_ALIASES) as Array<[keyof typeof HEADER_ALIASES, readonly string[]]>) {
       if (!columns[field] && aliases.some((alias) => normalizeHeader(alias) === normalized)) {
         columns[field] = columnNumber
@@ -243,6 +254,14 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
       }
     }
   })
+  // This report's `중국창고` is the current-stock column. In the SaaS
+  // template the same label identifies the warehouse, so recognize the
+  // report only when its neighboring inventory-status headers are present.
+  if (!columns.onHandQuantity && columns.sku && columns.productName && columns.optionName && chinaWarehouseColumn && hasTotalHeader && hasItemCategoryHeader) {
+    columns.onHandQuantity = chinaWarehouseColumn
+    delete columns.warehouseCode
+    columns.source = 'inventory_status_report'
+  }
   return columns
 }
 
@@ -330,6 +349,17 @@ function normalizeHeader(value: string) {
 function isEmptyRow(row: ExcelJS.Row) {
   const values = Array.isArray(row.values) ? row.values.slice(1) : Object.values(row.values)
   return !values.some((value) => cellText(value as ExcelJS.CellValue).trim())
+}
+
+function shouldSkipInventoryStatusReportRow(row: ExcelJS.Row, columns: HeaderColumns) {
+  if (columns.source !== 'inventory_status_report') return false
+  const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
+  if (sku === '합계') return true
+  const quantity = columns.onHandQuantity ? cellText(row.getCell(columns.onHandQuantity).value).trim() : ''
+  // A blank cell in this report means the SKU has no quantity at the China
+  // warehouse. Skip it rather than turning an absent source value into a
+  // destructive zero or an invalid new SaaS inventory record.
+  return !quantity
 }
 
 function createSheet(

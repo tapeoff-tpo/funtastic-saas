@@ -159,6 +159,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
               <p className="text-sm font-medium">엑셀 파일 선택</p>
               <p className="mt-1 text-xs text-muted-foreground">현재 목록에서는 상품명과 현재고를 수정하세요. 메모는 현재고 변경 또는 신규 등록 사유로 기록됩니다. 중국창고·품목코드·옵션명은 변경할 수 없습니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">재고현황 양식도 업로드할 수 있습니다. 품목코드·품목명·규격·중국창고 열을 사용하며, 중국창고가 빈 칸이면 현재 재고를 유지합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />

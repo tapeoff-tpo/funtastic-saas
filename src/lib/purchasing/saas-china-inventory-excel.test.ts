@@ -24,6 +24,7 @@ describe('SaaS China inventory Excel workbook', () => {
       ['광저우창고', 'SKU-2', '상품 B', '레드', '1,250', '실사'],
     ]))
 
+    expect(parsed.source).toBe('saas_china_inventory')
     expect(parsed.errors).toEqual([])
     expect(parsed.rows).toEqual([
       expect.objectContaining({
@@ -63,6 +64,47 @@ describe('SaaS China inventory Excel workbook', () => {
       expect.objectContaining({ row: 3, message: '같은 중국창고·품목코드·옵션명 조합이 엑셀에 중복되어 있습니다.' }),
       expect.objectContaining({ row: 4, message: '같은 중국창고·품목코드·옵션명 조합이 엑셀에 중복되어 있습니다.' }),
     ]))
+  })
+
+  it('reads the inventory-status report using its 중국창고 quantity column and skips report totals', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('재고현황')
+    sheet.addRow(['회사명 : 테이포프 / 20261023'])
+    sheet.addRow([
+      '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
+      '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
+    ])
+    sheet.addRow(['SKU-CHINA', '중국창고 상품', '레드', '[상품]', 12, '', '', '', '', '', 12, ''])
+    sheet.addRow(['SKU-NO-CHANGE', '빈 중국창고', '블랙', '[상품]', 5, '', '', 5, '', '', '', ''])
+    sheet.addRow(['SKU-ZERO', '0 재고', '화이트', '[상품]', 0, '', '', '', '', '', 0, ''])
+    sheet.addRow(['합계', '', '', '', 17, '', '', 5, '', '', 12, ''])
+    sheet.addRow(['20261023  오후 4:06:39'])
+
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
+
+    expect(parsed).toMatchObject({
+      source: 'inventory_status_report',
+      totalRows: 2,
+      skippedRows: 3,
+      errors: [],
+    })
+    expect(parsed.rows).toEqual([
+      expect.objectContaining({
+        rowNumber: 3,
+        warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
+        sku: 'SKU-CHINA',
+        productName: '중국창고 상품',
+        optionName: '레드',
+        onHandQuantity: 12,
+      }),
+      expect.objectContaining({
+        rowNumber: 5,
+        warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
+        sku: 'SKU-ZERO',
+        optionName: '화이트',
+        onHandQuantity: 0,
+      }),
+    ])
   })
 
   it('creates an uploadable empty template and exports the current list using the editable headers', async () => {

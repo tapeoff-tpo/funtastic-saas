@@ -51,7 +51,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <NavStateProvider>
-      <div className="fixed inset-0 flex overflow-hidden">
+      <div data-app-translate className="fixed inset-0 flex overflow-hidden">
         {collapsed ? (
           <button
             type="button"

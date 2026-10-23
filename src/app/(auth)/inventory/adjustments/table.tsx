@@ -262,9 +262,9 @@ export function InventoryAdjustmentsTable({ data, total, page, pageSize, warehou
                       {row.status === 'confirmed' ? '확정' : '미확정'}
                     </span>
                   </td>
-                  <td className="px-2 py-2 font-mono">{row.sku}</td>
-                  <td className="max-w-[220px] truncate px-2 py-2" title={row.productName}>{row.productName}</td>
-                  <td className="max-w-[180px] truncate px-2 py-2" title={row.optionName ?? ''}>{row.optionName ?? '-'}</td>
+                  <td data-no-translate className="px-2 py-2 font-mono">{row.sku}</td>
+                  <td data-no-translate className="max-w-[220px] truncate px-2 py-2" title={row.productName}>{row.productName}</td>
+                  <td data-no-translate className="max-w-[180px] truncate px-2 py-2" title={row.optionName ?? ''}>{row.optionName ?? '-'}</td>
                   <td className="px-2 py-2">{row.warehouseZone ?? '-'}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{incoming ? incoming.toLocaleString('ko-KR') : '-'}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{outgoing ? outgoing.toLocaleString('ko-KR') : '-'}</td>

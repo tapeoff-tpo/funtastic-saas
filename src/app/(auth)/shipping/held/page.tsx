@@ -146,7 +146,7 @@ function HeldOrderRow({ row }: { row: HeldShipmentRow }) {
       <td className="whitespace-nowrap px-4 py-3">{row.recipientName}</td>
 
       {/* 상품명 */}
-      <td className="max-w-[200px] truncate px-4 py-3" title={row.productName ?? ''}>
+      <td data-no-translate className="max-w-[200px] truncate px-4 py-3" title={row.productName ?? ''}>
         {row.productName ?? '-'}
         {row.quantity != null && row.quantity > 1 && (
           <span className="ml-1 text-muted-foreground">x{row.quantity}</span>

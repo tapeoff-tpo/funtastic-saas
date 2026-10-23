@@ -121,7 +121,7 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
                   <div className="mt-3 max-h-40 space-y-1 overflow-y-auto">
                     {result.errors.map((err, i) => (
                       <p key={i} className="text-sm text-red-600">
-                        상품코드: {err.sku} - {err.error}
+                        상품코드: <span data-no-translate>{err.sku}</span> - {err.error}
                       </p>
                     ))}
                   </div>

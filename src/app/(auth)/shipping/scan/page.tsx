@@ -404,7 +404,7 @@ export default function ScanPage() {
                 <div className="font-semibold">{result.order.recipientName}</div>
                 {result.items?.map((item, i) => (
                   <div key={i} className="text-white/80">
-                    {item.productName} × {item.quantity}
+                    <span data-no-translate>{item.productName}</span> × {item.quantity}
                   </div>
                 ))}
                 <div className="mt-2 text-sm text-white/50">

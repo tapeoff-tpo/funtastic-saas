@@ -175,8 +175,8 @@ export function PurchasePaymentFlowDetailList({
                     ) : '-'}
                   </td>
                   <td className="px-3 py-2 text-center">
-                    <div className="break-words font-medium text-foreground">{item.productName}</div>
-                    <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                    <div data-no-translate className="break-words font-medium text-foreground">{item.productName}</div>
+                    <div data-no-translate className="mt-0.5 break-words text-xs text-muted-foreground">
                       {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                     </div>
                   </td>

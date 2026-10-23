@@ -301,7 +301,7 @@ function ReviewLineTable({
                       </div>
                     </td>
                     <td className="px-3 py-2">
-                      <div className={line.skuMatched ? 'font-mono text-emerald-700' : 'font-mono text-amber-700'}>{line.sku || '-'}</div>
+                      <div data-no-translate className={line.skuMatched ? 'font-mono text-emerald-700' : 'font-mono text-amber-700'}>{line.sku || '-'}</div>
                     </td>
                     <Td>{line.quantity.toLocaleString('ko-KR')}</Td>
                     <Td>{formatWon(line.totalAmount)}</Td>

@@ -241,14 +241,14 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                 >
                   <ProductImage row={row} className="size-11 rounded border" />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{row.productName}</span>
+                    <span data-no-translate className="block truncate text-sm font-medium">{row.productName}</span>
                     <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground xl:hidden">
-                      B2B {row.productCode}{row.salesCodes[0] ? ` · ${row.salesCodes[0]}` : ''}
+                      B2B <span data-no-translate>{row.productCode}</span>{row.salesCodes[0] ? <> · <span data-no-translate>{row.salesCodes[0]}</span></> : ''}
                     </span>
                     <span className="mt-0.5 hidden min-w-0 items-center gap-2 text-xs text-muted-foreground xl:flex">
-                      <span className="truncate font-mono">{row.salesCodes[0] || '판매코드 미매칭'}</span>
+                      <span className="truncate font-mono">{row.salesCodes[0] ? <span data-no-translate>{row.salesCodes[0]}</span> : '판매코드 미매칭'}</span>
                       {row.salesCodes.length > 1 ? <span>외 {row.salesCodes.length - 1}개</span> : null}
-                      <span>B2B {row.productCode}</span>
+                      <span>B2B <span data-no-translate>{row.productCode}</span></span>
                       <span className="truncate">{row.sourceCategoryName || '카테고리 없음'}</span>
                     </span>
                     <span className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium xl:hidden ${
@@ -293,9 +293,9 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h2 className="truncate text-base font-semibold">{selected.productName}</h2>
+                      <h2 data-no-translate className="truncate text-base font-semibold">{selected.productName}</h2>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        판매코드 {selected.salesCodes.join(', ') || '미매칭'} · B2B {selected.productCode}
+                        판매코드 {selected.salesCodes.length ? <span data-no-translate>{selected.salesCodes.join(', ')}</span> : '미매칭'} · B2B <span data-no-translate>{selected.productCode}</span>
                       </p>
                     </div>
                     <Button type="button" variant="ghost" size="icon-sm" onClick={() => setSelectedCode(null)} title="닫기">
@@ -398,7 +398,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                             href={`/inventory?productCode=${encodeURIComponent(inventoryProductCodeValue)}&searched=1`}
                             className="min-w-0 text-right font-mono text-blue-700 hover:underline"
                           >
-                            {selected.inventorySkus.join(', ')} · {selected.inventoryAvailableStock.toLocaleString('ko-KR')}개
+                            <span data-no-translate>{selected.inventorySkus.join(', ')}</span> · {selected.inventoryAvailableStock.toLocaleString('ko-KR')}개
                           </a>
                         ) : <span className="text-right text-muted-foreground">매칭 SKU 없음</span>}
                       </div>
@@ -411,6 +411,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                                 key={code}
                                 href={`/analytics/price-table?sheet=${encodeURIComponent('상품등록')}&q=${encodeURIComponent(code)}`}
                                 className="rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-mono text-violet-700 hover:bg-violet-100"
+                                data-no-translate
                               >
                                 {code}
                               </a>
@@ -425,7 +426,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                             href={`/products?search=${encodeURIComponent(selected.salesCodes[0] || selected.productCode)}&searched=1`}
                             className="text-right font-mono text-blue-700 hover:underline"
                           >
-                            {selected.salesCodes[0] || selected.productCode}
+                            <span data-no-translate>{selected.salesCodes[0] || selected.productCode}</span>
                           </Link>
                         ) : <span className="text-right text-muted-foreground">연결된 품목코드 없음</span>}
                       </div>
@@ -437,9 +438,9 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                     <div className="max-h-40 overflow-y-auto rounded border bg-background">
                       {selected.options.length ? selected.options.map((option) => (
                         <div key={option.id} className="grid grid-cols-[1fr_72px_110px] gap-2 border-b px-3 py-2 text-xs last:border-b-0">
-                          <span className="truncate">{option.optionName}</span>
+                          <span data-no-translate className="truncate">{option.optionName}</span>
                           <span className="text-right tabular-nums">재고 {option.stockQty}</span>
-                          <span className="truncate text-right font-mono text-muted-foreground">{option.barcode || '바코드 없음'}</span>
+                          <span className="truncate text-right font-mono text-muted-foreground">{option.barcode ? <span data-no-translate>{option.barcode}</span> : '바코드 없음'}</span>
                         </div>
                       )) : <p className="px-3 py-4 text-center text-xs text-muted-foreground">단일 상품</p>}
                     </div>
@@ -563,9 +564,9 @@ function ChannelRegistrationModal({
             <div key={`${String(registration.channelProductId ?? index)}:${String(registration.sourceKey ?? '')}`} className="rounded-md border bg-muted/10 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="font-medium">{String(registration.productName ?? '등록 상품')}</p>
+                  <p className="font-medium">{registration.productName == null ? '등록 상품' : <span data-no-translate>{String(registration.productName)}</span>}</p>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
-                    상품 ID {String(registration.channelProductId ?? '-')} · 구성코드 {String(registration.sourceKey ?? '-')}
+                    상품 ID <span data-no-translate>{String(registration.channelProductId ?? '-')}</span> · 구성코드 <span data-no-translate>{String(registration.sourceKey ?? '-')}</span>
                   </p>
                 </div>
                 <Badge variant="outline">{String(registration.saleStatus ?? CHANNEL_STATUS_LABELS[channel.status] ?? channel.status)}</Badge>
@@ -576,8 +577,8 @@ function ChannelRegistrationModal({
                 <RegistrationDetail label="배송비" value={formatOptionalPrice(registration.shippingFee)} />
                 <RegistrationDetail label="수수료" value={registration.commissionRate == null ? '-' : `${registration.commissionRate}%`} />
                 <RegistrationDetail label="등록 재고" value={registration.registeredStock == null ? '-' : `${registration.registeredStock}개`} />
-                <RegistrationDetail label="옵션" value={String(registration.optionName ?? '단일 옵션')} />
-                <RegistrationDetail label="구성" value={formatComponents(registration.components)} />
+                <RegistrationDetail label="옵션" value={String(registration.optionName ?? '단일 옵션')} noTranslate={registration.optionName != null} />
+                <RegistrationDetail label="구성" value={formatComponents(registration.components)} noTranslate />
                 <RegistrationDetail label="최종 확인" value={formatDate(registration.lastCheckedAt)} />
                 <RegistrationDetail label="배송 메모" value={String(registration.notes ?? '-')} />
               </dl>
@@ -594,8 +595,8 @@ function ChannelRegistrationModal({
   )
 }
 
-function RegistrationDetail({ label, value }: { label: string; value: string }) {
-  return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 font-medium">{value}</dd></div>
+function RegistrationDetail({ label, value, noTranslate = false }: { label: string; value: string; noTranslate?: boolean }) {
+  return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd data-no-translate={noTranslate || undefined} className="mt-0.5 font-medium">{value}</dd></div>
 }
 
 function formatOptionalPrice(value: unknown) {

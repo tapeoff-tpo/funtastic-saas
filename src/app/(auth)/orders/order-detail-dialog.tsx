@@ -543,7 +543,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                               수집상품명
                             </span>
-                            <span className="text-sm">{item.productName}</span>
+                            <span data-no-translate className="text-sm">{item.productName}</span>
                           </div>
                           <div className="flex flex-wrap items-baseline gap-2">
                             <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
@@ -567,10 +567,10 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                                           onClick={() => selectProductForItem(item.id, product)}
                                           className="block w-full border-b px-2 py-1.5 text-left text-xs hover:bg-muted last:border-b-0"
                                         >
-                                          <span className="block truncate font-mono">{product.internalSku}</span>
-                                          <span className="block truncate">{product.name}</span>
+                                          <span data-no-translate className="block truncate font-mono">{product.internalSku}</span>
+                                          <span data-no-translate className="block truncate">{product.name}</span>
                                           <span className="block truncate text-[10px] text-muted-foreground">
-                                            {product.optionName ?? product.optionHint ?? '-'} · 재고 {product.availableStock ?? '-'}
+                                            <span data-no-translate>{product.optionName ?? product.optionHint ?? '-'}</span> · 재고 {product.availableStock ?? '-'}
                                           </span>
                                         </button>
                                       ))}
@@ -602,18 +602,18 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             ) : item.displayName ? (
                               <span className="text-sm font-medium">
                                 {item.sku && (
-                                  <span className="mr-2 font-mono text-[10px] text-muted-foreground">
+                                  <span data-no-translate className="mr-2 font-mono text-[10px] text-muted-foreground">
                                     {item.sku}
                                   </span>
                                 )}
-                                {item.displayName}
+                                <span data-no-translate>{item.displayName}</span>
                               </span>
                             ) : (
                               <span className="text-sm italic text-muted-foreground">미매핑</span>
                             )}
                             {!editingItems && (item.displayOptionName ?? item.optionText) && (
                               <span className="text-xs text-muted-foreground">
-                                · 옵션: {item.displayOptionName ?? item.optionText}
+                                · 옵션: <span data-no-translate>{item.displayOptionName ?? item.optionText}</span>
                               </span>
                             )}
                           </div>
@@ -621,12 +621,12 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                               {item.sku && (
                                 <span>
-                                  내부 상품코드 <span className="font-mono">{item.sku}</span>
+                                  내부 상품코드 <span data-no-translate className="font-mono">{item.sku}</span>
                                 </span>
                               )}
                               {collectedProductCode && (
                                 <span>
-                                  수집상품코드 <span className="font-mono">{collectedProductCode}</span>
+                                  수집상품코드 <span data-no-translate className="font-mono">{collectedProductCode}</span>
                                 </span>
                               )}
                             </div>
@@ -676,11 +676,11 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                               <tr key={`${row.sourceFile ?? 'row'}-${row.rowNumber ?? index}`}>
                                 <td className="whitespace-nowrap px-2 py-1">{row.sourceFile ?? '-'}</td>
                                 <td className="whitespace-nowrap px-2 py-1">{row.rowNumber ?? '-'}</td>
-                                <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
-                                <td className="min-w-[200px] px-2 py-1">{raw['수집 상품명'] ?? '-'}</td>
-                                <td className="min-w-[120px] px-2 py-1">{raw['수집 옵션'] ?? '-'}</td>
+                                <td data-no-translate className="whitespace-nowrap px-2 py-1 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
+                                <td data-no-translate className="min-w-[200px] px-2 py-1">{raw['수집 상품명'] ?? '-'}</td>
+                                <td data-no-translate className="min-w-[120px] px-2 py-1">{raw['수집 옵션'] ?? '-'}</td>
                                 <td className="whitespace-nowrap px-2 py-1 text-right">{raw['주문수량'] ?? '-'}</td>
-                                <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
+                                <td data-no-translate className="whitespace-nowrap px-2 py-1 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
                                 <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['송장번호'] ?? '-'}</td>
                               </tr>
                             )

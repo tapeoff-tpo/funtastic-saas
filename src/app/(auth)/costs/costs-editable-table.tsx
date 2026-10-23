@@ -224,7 +224,11 @@ export function CostsEditableTable({
 
   function renderCell(row: CostEditableRow, header: string) {
     const value = row.data[header]
-    if (header !== PURCHASE_URL_HEADER) return value || '-'
+    if (header !== PURCHASE_URL_HEADER) {
+      if (!value) return '-'
+      const isProductIdentity = header === codeHeader || header === nameHeader || header === '규격정보' || header === '옵션명'
+      return isProductIdentity ? <span data-no-translate>{value}</span> : value
+    }
 
     if (row.purchaseUrlVerificationStatus === 'confirm_required') {
       return <span className="inline-flex rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">확인 필요</span>
@@ -392,7 +396,7 @@ export function CostsEditableTable({
                   {isCreating ? '품목 추가' : '품목 수정'}
                 </h2>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {draft[codeHeader] || '새 품목'} · {draft[nameHeader] || '품목명'}
+                  {draft[codeHeader] ? <span data-no-translate>{draft[codeHeader]}</span> : '새 품목'} · {draft[nameHeader] ? <span data-no-translate>{draft[nameHeader]}</span> : '품목명'}
                 </p>
               </div>
               <Button type="button" variant="ghost" size="icon-sm" onClick={close} aria-label="닫기">

@@ -188,11 +188,11 @@ export function SplitShippingClient() {
               {order.items.map((item) => (
                 <li key={item.id} className="flex justify-between gap-2">
                   <span className="flex-1">
-                    {item.productName}
+                    <span data-no-translate>{item.productName}</span>
                     {item.optionText && (
-                      <span className="ml-2 text-xs text-muted-foreground">({item.optionText})</span>
+                      <span data-no-translate className="ml-2 text-xs text-muted-foreground">({item.optionText})</span>
                     )}
-                    {item.sku && <span className="ml-2 font-mono text-xs">{item.sku}</span>}
+                    {item.sku && <span data-no-translate className="ml-2 font-mono text-xs">{item.sku}</span>}
                   </span>
                   <span className="text-muted-foreground">×{item.quantity}</span>
                 </li>

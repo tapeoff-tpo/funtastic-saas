@@ -105,6 +105,7 @@ export const columns: ColumnDef<ProductRow>[] = [
     header: '상품코드',
     cell: ({ row }) => (
       <a
+        data-no-translate
         href={`/products/${row.original.id}`}
         className="font-mono text-sm text-blue-600 hover:underline"
       >
@@ -119,6 +120,7 @@ export const columns: ColumnDef<ProductRow>[] = [
     header: '상품명',
     cell: ({ row }) => (
       <a
+        data-no-translate
         href={`/products/${row.original.id}`}
         className="block max-w-[300px] truncate text-blue-600 hover:underline"
         title={row.getValue('name')}
@@ -136,7 +138,7 @@ export const columns: ColumnDef<ProductRow>[] = [
     cell: ({ row }) => {
       const opt = row.getValue('optionName') as string | null
       return opt ? (
-        <span className="block max-w-[200px] truncate text-sm" title={opt}>{opt}</span>
+        <span data-no-translate className="block max-w-[200px] truncate text-sm" title={opt}>{opt}</span>
       ) : (
         <span className="text-muted-foreground">-</span>
       )

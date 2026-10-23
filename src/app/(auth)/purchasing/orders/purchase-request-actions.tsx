@@ -729,9 +729,9 @@ export function PurchaseRequestCreateDialog({ targetStockMonths }: { targetStock
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                         <div className="min-w-0">
-                          <span className="font-medium text-foreground">{candidate.productName}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{candidate.sku}</span>
-                          {candidate.optionName ? <span className="ml-2 text-xs text-muted-foreground">· {candidate.optionName}</span> : null}
+                          <span data-no-translate className="font-medium text-foreground">{candidate.productName}</span>
+                          <span data-no-translate className="ml-2 text-xs text-muted-foreground">{candidate.sku}</span>
+                          {candidate.optionName ? <span data-no-translate className="ml-2 text-xs text-muted-foreground">· {candidate.optionName}</span> : null}
                         </div>
                         <span className="text-xs font-medium text-primary">{selected ? '선택됨' : '선택'}</span>
                       </div>

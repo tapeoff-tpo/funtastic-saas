@@ -565,7 +565,7 @@ function ProductSummaryList({
                     </td>
                     <td className="w-[280px] px-3 py-3 align-middle">
                       <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <span title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
+                        <span data-no-translate title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
                       </button>
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.createdAt)}</td>
@@ -977,7 +977,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     <div className="space-y-4">
       <div className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-xl border bg-background p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="truncate text-xl font-semibold">{item ? item.productName : '신상품 정보 등록'}</h2>
+          <h2 className="truncate text-xl font-semibold">{item ? <span data-no-translate>{item.productName}</span> : '신상품 정보 등록'}</h2>
           <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
             <CalendarDays className="h-3 w-3" />
             {item ? `최근 수정 ${formatDateTime(item.updatedAt)}` : '필요한 정보를 한 화면에서 입력한 뒤 저장하세요.'}
@@ -1212,7 +1212,7 @@ function DeleteProductDialog({ item, onDeleted }: { item: NewProductItem; onDele
           <div className="p-5">
             <Dialog.Title className="text-lg font-semibold">이 상품을 정말 삭제할까요?</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm text-muted-foreground">
-              <strong className="text-foreground">{item.productName}</strong> 상품과 첨부파일, 단계 변경 이력이 함께 삭제됩니다. 삭제 후에는 복구할 수 없습니다.
+              <strong data-no-translate className="text-foreground">{item.productName}</strong> 상품과 첨부파일, 단계 변경 이력이 함께 삭제됩니다. 삭제 후에는 복구할 수 없습니다.
             </Dialog.Description>
           </div>
           <div className="flex justify-end gap-2 border-t p-4">

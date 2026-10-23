@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Search, X } from 'lucide-react'
 
@@ -177,10 +177,10 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
     setConditions((current) => current.length <= 1 ? current : current.filter((_, idx) => idx !== index))
   }
 
-  function conditionLabel(condition: GiftCondition) {
+  function conditionLabel(condition: GiftCondition): ReactNode {
     if (condition.type === 'amount') return `상품금액 ${Number(condition.value).toLocaleString('ko-KR')}원 이상`
-    if (condition.type === 'sku') return `내부 품번 ${condition.value}`
-    return `쇼핑몰 상품코드 ${condition.value}`
+    if (condition.type === 'sku') return <>내부 품번 <span data-no-translate>{condition.value}</span></>
+    return <>쇼핑몰 상품코드 <span data-no-translate>{condition.value}</span></>
   }
 
   function displayConditions(rule: GiftRule): GiftCondition[] {
@@ -286,16 +286,18 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
                 <div className="max-h-36 overflow-y-auto rounded-md border">
                   {results.map((product) => (
                     <button key={product.internalSku} type="button" onClick={() => selectGift(product)} className="block w-full border-b px-3 py-2 text-left text-xs hover:bg-muted">
-                      <div className="font-medium">{product.name}</div>
-                      <div className="text-muted-foreground">{product.internalSku}{product.optionName ? ` · ${product.optionName}` : ''} · 재고 {product.availableStock ?? '-'}</div>
+                      <div data-no-translate className="font-medium">{product.name}</div>
+                      <div className="text-muted-foreground">
+                        <span data-no-translate>{product.internalSku}</span>{product.optionName && <> · <span data-no-translate>{product.optionName}</span></>} · 재고 {product.availableStock ?? '-'}
+                      </div>
                     </button>
                   ))}
                 </div>
               )}
               {giftSku && (
                 <div className="rounded-md bg-muted px-3 py-2 text-xs">
-                  <div className="font-medium">{giftName || giftSku}</div>
-                  <div className="font-mono text-muted-foreground">{giftSku}</div>
+                  <div data-no-translate className="font-medium">{giftName || giftSku}</div>
+                  <div data-no-translate className="font-mono text-muted-foreground">{giftSku}</div>
                 </div>
               )}
             </div>
@@ -320,10 +322,15 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
                   <div>
                     <div className="font-medium">{rule.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {rule.marketplaceId ?? '모든 쇼핑몰'} · {displayConditions(rule).map(conditionLabel).join(' + ')}
+                      {rule.marketplaceId ?? '모든 쇼핑몰'} · {displayConditions(rule).map((condition, index) => (
+                        <span key={`${condition.type}-${condition.value}-${index}`}>
+                          {index > 0 && ' + '}
+                          {conditionLabel(condition)}
+                        </span>
+                      ))}
                     </div>
                     <div className="mt-1 text-xs">
-                      사은품: {rule.giftProductName ?? rule.giftSku}{rule.giftOptionName ? ` / ${rule.giftOptionName}` : ''} × {rule.giftQuantity}
+                      사은품: <span data-no-translate>{rule.giftProductName ?? rule.giftSku}</span>{rule.giftOptionName && <> / <span data-no-translate>{rule.giftOptionName}</span></>} × {rule.giftQuantity}
                     </div>
                   </div>
                   <button type="button" onClick={() => void handleDelete(rule.id)} className="rounded-md border px-2 py-1 text-xs text-red-600 hover:bg-red-50">

@@ -497,8 +497,8 @@ function DiscontinuedPreviewCard({ summary }: { summary: DiscontinuedPreview }) 
         <StateCard label="품목 등록 확인" value={`${summary.registeredSkuCount.toLocaleString('ko-KR')}개`} />
         <StateCard label="미등록 SKU" value={`${summary.unregisteredSkus.length.toLocaleString('ko-KR')}개`} />
       </div>
-      {summary.duplicateSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 중복 SKU {summary.duplicateSkus.length}개는 한 번만 단종 처리합니다: {summary.duplicateSkus.slice(0, 8).join(', ')}{summary.duplicateSkus.length > 8 ? ' …' : ''}</div> : null}
-      {summary.unregisteredSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 품목에 없는 SKU {summary.unregisteredSkus.length}개는 새로 만들지 않고 건너뜁니다: {summary.unregisteredSkus.slice(0, 8).join(', ')}{summary.unregisteredSkus.length > 8 ? ' …' : ''}</div> : null}
+      {summary.duplicateSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 중복 SKU {summary.duplicateSkus.length}개는 한 번만 단종 처리합니다: <span data-no-translate>{summary.duplicateSkus.slice(0, 8).join(', ')}</span>{summary.duplicateSkus.length > 8 ? ' …' : ''}</div> : null}
+      {summary.unregisteredSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 품목에 없는 SKU {summary.unregisteredSkus.length}개는 새로 만들지 않고 건너뜁니다: <span data-no-translate>{summary.unregisteredSkus.slice(0, 8).join(', ')}</span>{summary.unregisteredSkus.length > 8 ? ' …' : ''}</div> : null}
     </section>
   )
 }

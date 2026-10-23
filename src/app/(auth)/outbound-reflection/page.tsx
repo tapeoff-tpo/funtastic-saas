@@ -232,8 +232,8 @@ function LineRow({ line }: { line: OutboundReflectionLine }) {
         <td className="px-3 py-3 align-top font-mono text-xs">{line.sourceOrderNumber}</td>
         <td className="px-3 py-3 align-top">{line.marketplaceName || '-'}</td>
         <td className="px-3 py-3 align-top">
-          <div className="font-medium">{line.productName || '상품명 없음'}</div>
-          <div className="mt-0.5 font-mono text-xs text-muted-foreground">{line.sku || 'SKU 미매칭'}{line.optionText ? ` · ${line.optionText}` : ''}</div>
+          <div className="font-medium">{line.productName ? <span data-no-translate>{line.productName}</span> : '상품명 없음'}</div>
+          <div className="mt-0.5 font-mono text-xs text-muted-foreground">{line.sku ? <span data-no-translate>{line.sku}</span> : 'SKU 미매칭'}{line.optionText ? <span data-no-translate>{` · ${line.optionText}`}</span> : ''}</div>
         </td>
         <td className="px-3 py-3 text-right align-top tabular-nums">{line.quantity.toLocaleString('ko-KR')}</td>
         <td className="px-3 py-3 text-right align-top tabular-nums">{line.salesAmount.toLocaleString('ko-KR')}원</td>

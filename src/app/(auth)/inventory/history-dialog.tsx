@@ -47,7 +47,7 @@ export function HistoryDialog({ inventoryId, sku, onClose }: HistoryDialogProps)
           <div>
             <h3 className="text-lg font-semibold">재고 이력</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {sku} - 전체 {total}건
+              <span data-no-translate>{sku}</span> - 전체 {total}건
             </p>
           </div>
           <button

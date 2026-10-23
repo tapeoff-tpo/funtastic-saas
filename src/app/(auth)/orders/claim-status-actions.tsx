@@ -330,7 +330,7 @@ export function ClaimStatusActions({
               (returnItems ?? []).map((item) => (
                 <div key={item.sku} className="grid grid-cols-[1fr_78px_78px] items-end gap-2 border-b p-2 last:border-b-0">
                   <div>
-                    <div className="font-mono text-xs">{item.sku}</div>
+                    <div data-no-translate className="font-mono text-xs">{item.sku}</div>
                     <div className="text-[11px] text-muted-foreground">최대 {item.quantity}개</div>
                   </div>
                   <label className="text-[11px] font-medium text-green-700">

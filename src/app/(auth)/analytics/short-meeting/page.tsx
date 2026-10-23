@@ -98,10 +98,10 @@ function SummaryCard({
 function ShortMeetingTableRow({ row }: { row: ShortMeetingRow }) {
   return (
     <tr className="border-t">
-      <td className="px-3 py-2 font-mono text-xs font-medium">{row.sku}</td>
+      <td data-no-translate className="px-3 py-2 font-mono text-xs font-medium">{row.sku}</td>
       <td className="max-w-[320px] px-3 py-2">
-        <div className="truncate font-medium" title={row.productName}>{row.productName}</div>
-        <div className="truncate text-xs text-muted-foreground" title={row.optionName}>{row.optionName}</div>
+        <div data-no-translate className="truncate font-medium" title={row.productName}>{row.productName}</div>
+        <div data-no-translate className="truncate text-xs text-muted-foreground" title={row.optionName}>{row.optionName}</div>
       </td>
       <Td>{formatQuantity(row.todayOutbound)}</Td>
       <Td>{formatQuantity(row.currentStock)}</Td>

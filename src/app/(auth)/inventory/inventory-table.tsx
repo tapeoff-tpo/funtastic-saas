@@ -264,7 +264,7 @@ export function InventoryTable({
           상품코드{getSortIndicator('sku')}
         </button>
       ),
-      cell: (info) => <span className="font-mono text-xs">{info.getValue()}</span>,
+      cell: (info) => <span data-no-translate className="font-mono text-xs">{info.getValue()}</span>,
     }),
     columnHelper.accessor('productName', {
       size: 260,
@@ -275,13 +275,16 @@ export function InventoryTable({
       ),
       cell: (info) => {
         const productName = normalizeInventoryProductName(info.getValue())
-        return <span className="block truncate" title={productName}>{productName}</span>
+        return <span data-no-translate className="block truncate" title={productName}>{productName}</span>
       },
     }),
     columnHelper.accessor('optionName', {
       size: 180,
       header: '옵션명',
-      cell: (info) => info.getValue() || '-',
+      cell: (info) => {
+        const optionName = info.getValue()
+        return optionName ? <span data-no-translate>{optionName}</span> : '-'
+      },
     }),
     columnHelper.display({
       id: 'availableStock',
@@ -592,8 +595,8 @@ export function InventoryTable({
                     className="flex w-full items-center gap-3 rounded-md border bg-white px-3 py-3 text-left shadow-sm transition-colors hover:bg-muted/50 active:bg-muted"
                     aria-label={`${mobileProductName} 상세 보기`}
                   >
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.sku}</span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{mobileProductName}</span>
+                    <span data-no-translate className="shrink-0 font-mono text-xs text-muted-foreground">{row.sku}</span>
+                    <span data-no-translate className="min-w-0 flex-1 truncate text-sm font-medium">{mobileProductName}</span>
                     <span aria-hidden="true" className="text-muted-foreground">›</span>
                   </button>
                 )
@@ -657,8 +660,8 @@ export function InventoryTable({
               <Dialog.Description className="sr-only">선택한 재고 상품의 상세 정보</Dialog.Description>
               <div className="flex items-start justify-between gap-3 border-b pb-3">
                 <div className="min-w-0">
-                  <p className="font-mono text-xs text-muted-foreground">{mobileDetailRow.sku}</p>
-                  <Dialog.Title className="mt-1 break-words text-base font-semibold">
+                  <p data-no-translate className="font-mono text-xs text-muted-foreground">{mobileDetailRow.sku}</p>
+                  <Dialog.Title data-no-translate className="mt-1 break-words text-base font-semibold">
                     {normalizeInventoryProductName(mobileDetailRow.productName)}
                   </Dialog.Title>
                 </div>
@@ -679,7 +682,7 @@ export function InventoryTable({
               <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                 <div className="col-span-2">
                   <dt className="text-xs text-muted-foreground">옵션명</dt>
-                  <dd className="mt-0.5 break-words">{mobileDetailRow.optionName || '-'}</dd>
+                  <dd data-no-translate className="mt-0.5 break-words">{mobileDetailRow.optionName || '-'}</dd>
                 </div>
                 <div className="col-span-2">
                   <dt className="text-xs text-muted-foreground">로케이션</dt>

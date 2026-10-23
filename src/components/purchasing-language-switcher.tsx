@@ -1,24 +1,15 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { APP_CHROME_KO_TO_ZH } from '@/components/app-chrome-translations'
 
 type PurchasingLanguage = 'ko' | 'zh'
 
 const STORAGE_KEY = 'funtastic-purchasing-language'
 const LANGUAGE_EVENT = 'funtastic-purchasing-language-change'
 
-const PURCHASING_PATHS = [
-  '/purchasing/china-inventory',
-  '/purchasing/saas-china-inventory',
-  '/purchasing/china-shipments',
-  '/purchasing/orders',
-  '/purchasing/payment-flow',
-  '/purchasing/purchases',
-  '/purchasing/overdue',
-]
-
 const EXACT_TRANSLATIONS: Record<string, string> = {
+  ...APP_CHROME_KO_TO_ZH,
   '발주': '采购',
   '발주금액': '采购金额',
   '발주금액 현황': '采购金额情况',
@@ -528,19 +519,25 @@ const SAFE_INLINE_LABELS = new Set([
 ])
 
 const SAFE_INLINE_PATTERNS = [
-  /발주요청 지연 [\d,]+건/,
-  /구매완료 입고지연 [\d,]+건/,
+  /^발주요청 지연 [\d,]+건$/,
+  /^구매완료 입고지연 [\d,]+건$/,
 ]
 
-const EXPLICIT_TRANSLATION_SCOPE = '[data-purchasing-translate], [data-sonner-toaster]'
+const APP_TRANSLATION_SCOPE = '[data-app-translate]'
+const PORTAL_TRANSLATION_SCOPE = '[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"], [data-radix-popper-content-wrapper]'
+const GLOBAL_TRANSLATION_SCOPE = [APP_TRANSLATION_SCOPE, PORTAL_TRANSLATION_SCOPE].join(',')
+const EXPLICIT_TRANSLATION_SCOPE = '[data-purchasing-translate]'
+const TOAST_TRANSLATION_SCOPE = '[data-sonner-toaster]'
+
+const GLOBAL_UI_VALUE_PATTERNS = [
+  /^[\d,]+(?:건|개|종|박스|파렛트|행|일|월|원)$/,
+  /^총 [\d,]+(?:건|개|종|박스|파렛트|행|일|월|원)$/,
+  /^선택 [\d,]+건$/,
+  /^\d+일 지연$/,
+]
 
 const textOriginals = new WeakMap<Text, string>()
 const attrOriginals = new WeakMap<Element, Map<string, string>>()
-
-function isPurchasingPath(pathname: string | null) {
-  if (!pathname) return false
-  return PURCHASING_PATHS.includes(pathname)
-}
 
 function readLanguage(): PurchasingLanguage {
   if (typeof window === 'undefined') return 'ko'
@@ -561,6 +558,18 @@ function translateText(value: string) {
   return translated
 }
 
+function hasExactTranslation(value: string) {
+  return Object.prototype.hasOwnProperty.call(EXACT_TRANSLATIONS, value)
+}
+
+function resolveOriginalText(current: string, storedOriginal: string | undefined) {
+  if (storedOriginal === undefined) return current
+  const translatedStoredOriginal = translateText(storedOriginal)
+  return current === storedOriginal || current === translatedStoredOriginal
+    ? storedOriginal
+    : current
+}
+
 function shouldSkip(node: Node) {
   const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
   return Boolean(element?.closest('[data-no-translate], [data-purchasing-language-control]'))
@@ -571,10 +580,26 @@ function shouldTranslateNode(node: Node, original: string) {
   const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
   if (!element || !trimmed) return false
   if (element.closest(EXPLICIT_TRANSLATION_SCOPE)) return true
+  if (element.closest(GLOBAL_TRANSLATION_SCOPE) || element.closest(TOAST_TRANSLATION_SCOPE)) {
+    return hasExactTranslation(trimmed)
+      || SAFE_INLINE_LABELS.has(trimmed)
+      || SAFE_INLINE_PATTERNS.some((pattern) => pattern.test(trimmed))
+      || GLOBAL_UI_VALUE_PATTERNS.some((pattern) => pattern.test(trimmed))
+  }
   if (SAFE_INLINE_LABELS.has(trimmed)) return true
   if (SAFE_INLINE_PATTERNS.some((pattern) => pattern.test(trimmed))) return true
   if (element.closest(TRANSLATABLE_ELEMENT_SELECTOR)) return true
   return false
+}
+
+function getTranslationRoots() {
+  const roots = Array.from(document.querySelectorAll<HTMLElement>([
+    GLOBAL_TRANSLATION_SCOPE,
+    EXPLICIT_TRANSLATION_SCOPE,
+    TOAST_TRANSLATION_SCOPE,
+  ].join(',')))
+
+  return roots.filter((root, index) => !roots.some((candidate, candidateIndex) => candidateIndex !== index && candidate.contains(root)))
 }
 
 function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
@@ -588,9 +613,7 @@ function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
     if (shouldSkip(node)) continue
     const currentText = node.textContent ?? ''
     const storedOriginal = textOriginals.get(node)
-    const original = storedOriginal === undefined || (language === 'zh' && currentText !== translateText(storedOriginal))
-      ? currentText
-      : storedOriginal
+    const original = resolveOriginalText(currentText, storedOriginal)
     if (storedOriginal !== original) textOriginals.set(node, original)
     const nextText = language === 'zh' && shouldTranslateNode(node, original) ? translateText(original) : original
     if (node.textContent !== nextText) node.textContent = nextText
@@ -607,9 +630,7 @@ function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
       const originals = attrOriginals.get(element) ?? new Map<string, string>()
       const currentValue = element.getAttribute(attr) ?? ''
       const storedOriginal = originals.get(attr)
-      const original = storedOriginal === undefined || (language === 'zh' && currentValue !== translateText(storedOriginal))
-        ? currentValue
-        : storedOriginal
+      const original = resolveOriginalText(currentValue, storedOriginal)
       if (!attrOriginals.has(element)) attrOriginals.set(element, originals)
       if (storedOriginal !== original) originals.set(attr, original)
       const nextValue = language === 'zh' && shouldTranslateNode(element, original) ? translateText(original) : original
@@ -619,8 +640,6 @@ function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
 }
 
 export function PurchasingLanguageSwitcher() {
-  const pathname = usePathname()
-  const enabled = isPurchasingPath(pathname)
   const [language, setLanguage] = useState<PurchasingLanguage>('ko')
   const [mounted, setMounted] = useState(false)
   const hasAppliedChineseTranslation = useRef(false)
@@ -650,18 +669,6 @@ export function PurchasingLanguageSwitcher() {
   }, [])
 
   useEffect(() => {
-    if (!enabled) {
-      if (hasAppliedChineseTranslation.current) {
-        applyLanguage(document.body, 'ko')
-        hasAppliedChineseTranslation.current = false
-      }
-      document.documentElement.lang = 'ko'
-      return
-    }
-
-    // Korean is the page's native language. Scanning and rewriting the entire
-    // document after every Server Component update both slows down large tables
-    // and can restore stale text from the previous tab.
     if (language === 'ko') {
       if (hasAppliedChineseTranslation.current) {
         applyLanguage(document.body, 'ko')
@@ -672,24 +679,45 @@ export function PurchasingLanguageSwitcher() {
     }
 
     const sync = () => {
-      applyLanguage(document.body, language)
+      for (const root of getTranslationRoots()) {
+        applyLanguage(root, language)
+      }
       hasAppliedChineseTranslation.current = true
       document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'ko'
     }
 
     sync()
-    const observer = new MutationObserver(sync)
+    let syncTimer: number | undefined
+    const scheduleSync = () => {
+      if (syncTimer !== undefined) return
+      syncTimer = window.setTimeout(() => {
+        syncTimer = undefined
+        sync()
+      }, 0)
+    }
+    const observer = new MutationObserver(scheduleSync)
     observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: [...ATTRIBUTE_NAMES],
+      attributeFilter: [...ATTRIBUTE_NAMES, 'data-no-translate'],
     })
-    return () => observer.disconnect()
-  }, [enabled, language, pathname])
+    return () => {
+      observer.disconnect()
+      if (syncTimer !== undefined) window.clearTimeout(syncTimer)
+    }
+  }, [language])
 
-  if (!enabled || !mounted) return null
+  useEffect(() => () => {
+    if (hasAppliedChineseTranslation.current) {
+      applyLanguage(document.body, 'ko')
+      hasAppliedChineseTranslation.current = false
+    }
+    document.documentElement.lang = 'ko'
+  }, [])
+
+  if (!mounted) return null
 
   function updateLanguage(next: PurchasingLanguage) {
     window.localStorage.setItem(STORAGE_KEY, next)

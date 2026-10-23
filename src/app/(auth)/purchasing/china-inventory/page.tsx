@@ -66,9 +66,9 @@ export default async function ChinaInventoryPage({
             return (
               <article key={item.id} className="rounded-lg border bg-background p-3">
                 <div className="min-w-0">
-                  <p className="truncate whitespace-nowrap text-sm font-medium tabular-nums">{item.sku}</p>
-                  <p className="mt-1 truncate text-sm font-medium">{item.productName}</p>
-                  <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.optionName || '-'}</p>
+                  <p data-no-translate className="truncate whitespace-nowrap text-sm font-medium tabular-nums">{item.sku}</p>
+                  <p data-no-translate className="mt-1 truncate text-sm font-medium">{item.productName}</p>
+                  <p data-no-translate className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.optionName || '-'}</p>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 divide-x rounded-md border bg-muted/20 text-center">
                   <MobileStockMetric label="총 재고" value={item.totalQuantity} />
@@ -122,10 +122,10 @@ export default async function ChinaInventoryPage({
               ) : (
                 items.map((item) => (
                   <tr key={item.id} className="border-t">
-                    <td className="px-3 py-2 font-medium">{item.sku}</td>
+                    <td data-no-translate className="px-3 py-2 font-medium">{item.sku}</td>
                     <td className="px-3 py-2">
-                      <div className="font-medium">{item.productName}</div>
-                      <div className="text-xs text-muted-foreground">{item.optionName || '-'}</div>
+                      <div data-no-translate className="font-medium">{item.productName}</div>
+                      <div data-no-translate className="text-xs text-muted-foreground">{item.optionName || '-'}</div>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {item.totalQuantity.toLocaleString('ko-KR')}

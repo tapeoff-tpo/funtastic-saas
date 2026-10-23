@@ -570,8 +570,8 @@ function ProductProfitTableRow({ row, total = false }: { row: ProductProfitRow; 
   return (
     <tr className={total ? 'border-t bg-muted/40 font-semibold' : 'border-t'}>
       <td className="max-w-[320px] px-3 py-2">
-        <div className="truncate font-medium" title={row.productName}>{row.productName}</div>
-        <div className="truncate font-mono text-xs text-muted-foreground" title={row.sku}>{row.sku}</div>
+        <div data-no-translate className="truncate font-medium" title={row.productName}>{row.productName}</div>
+        <div data-no-translate className="truncate font-mono text-xs text-muted-foreground" title={row.sku}>{row.sku}</div>
       </td>
       <Td>{formatQuantity(row.quantity)}</Td>
       <Td>{Math.round(row.orderCount).toLocaleString('ko-KR')}건</Td>
@@ -917,8 +917,8 @@ function OrderProfitTableRow({ row }: { row: OrderProfitRow }) {
       </td>
       <td className="px-3 py-2 font-medium">{row.marketplaceName}</td>
       <td className="max-w-[300px] px-3 py-2">
-        <div className="truncate font-medium" title={row.productSummary}>{row.productSummary}</div>
-        <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={row.skuSummary}>
+        <div data-no-translate className="truncate font-medium" title={row.productSummary}>{row.productSummary}</div>
+        <div data-no-translate className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={row.skuSummary}>
           {row.skuSummary}
         </div>
       </td>
@@ -939,7 +939,7 @@ function OrderProfitTableRow({ row }: { row: OrderProfitRow }) {
         )}
       </td>
       <td className="max-w-[280px] px-3 py-2 text-xs">
-        {row.missingProductCost ? <IssueDetail label="원가 대상" value={row.skuSummary} /> : null}
+        {row.missingProductCost ? <IssueDetail label="원가 대상" value={row.skuSummary} noTranslate /> : null}
         {row.missingActualShipping ? <IssueDetail label="미매칭 송장" value={row.trackingSummary} /> : null}
         {row.missingPackaging ? <IssueDetail label="인식 박스명" value={row.packageSummary} /> : null}
         {row.missingFee ? <IssueDetail label="수수료" value={`${row.marketplaceName} 연결 계정에 미설정`} /> : null}
@@ -969,11 +969,11 @@ function OrderProfitTableRow({ row }: { row: OrderProfitRow }) {
   )
 }
 
-function IssueDetail({ label, value }: { label: string; value: string }) {
+function IssueDetail({ label, value, noTranslate = false }: { label: string; value: string; noTranslate?: boolean }) {
   return (
     <div className="mb-1 last:mb-0">
       <span className="font-medium text-amber-800">{label}: </span>
-      <span className="text-muted-foreground" title={value}>{value}</span>
+      <span data-no-translate={noTranslate || undefined} className="text-muted-foreground" title={value}>{value}</span>
     </div>
   )
 }

@@ -574,7 +574,7 @@ export function ManualStatusChangeButton({
                     {order.items.map((item) => (
                       <div key={item.id} className="grid grid-cols-[1fr_88px] items-center gap-2 border-t px-3 py-2">
                         <div className="min-w-0">
-                          <div className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
+                          <div data-no-translate className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
                             {item.displayName ?? item.productName}
                           </div>
                           <div className="text-[11px] text-muted-foreground">

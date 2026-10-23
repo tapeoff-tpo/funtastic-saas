@@ -208,15 +208,15 @@ export function IncomingDialog({ onClose }: IncomingDialogProps) {
                       >
                         <td className="px-2 py-1 text-muted-foreground">{idx + 1}</td>
                         <td className="px-2 py-1 font-mono whitespace-nowrap">
-                          {row.sku}
+                          <span data-no-translate>{row.sku}</span>
                           {!row.inventoryExists && (
                             <span className="ml-1 text-amber-500 text-[10px]">미등록</span>
                           )}
                         </td>
-                        <td className="px-2 py-1 max-w-[160px] truncate" title={row.productName}>
+                        <td data-no-translate className="px-2 py-1 max-w-[160px] truncate" title={row.productName}>
                           {row.productName}
                         </td>
-                        <td className="px-2 py-1 text-muted-foreground">
+                        <td data-no-translate className="px-2 py-1 text-muted-foreground">
                           {row.optionName ?? '-'}
                         </td>
                         <td className="px-2 py-1 text-right tabular-nums">{row.currentStock}</td>
@@ -294,7 +294,7 @@ export function IncomingDialog({ onClose }: IncomingDialogProps) {
                   <div className="mt-3 max-h-40 space-y-1 overflow-y-auto">
                     {result.errors.map((err, i) => (
                       <p key={i} className="text-xs text-red-600">
-                        {err.sku}: {err.error}
+                        <span data-no-translate>{err.sku}</span>: {err.error}
                       </p>
                     ))}
                   </div>

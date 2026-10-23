@@ -440,7 +440,7 @@ export function MappingManager() {
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                     {source ? (
                       <>
-                        <div>{formatMarketplaceProductCode(source)}</div>
+                        <div data-no-translate>{formatMarketplaceProductCode(source)}</div>
                         <div className="mt-0.5 font-sans text-[10px] text-muted-foreground">
                           연결 {formatDate(source.createdAt)}
                         </div>
@@ -455,22 +455,22 @@ export function MappingManager() {
                       onClick={() => void openEdit(c.id)}
                       className="text-blue-600 hover:underline"
                     >
-                      {c.code}
+                      <span data-no-translate>{c.code}</span>
                     </button>
                     {component && (
                       <div className="mt-0.5 text-[10px] text-muted-foreground">
-                        {component.sku}{c.components.length > 1 ? ' / 세트 구성품' : ''}
+                        <span data-no-translate>{component.sku}</span>{c.components.length > 1 ? ' / 세트 구성품' : ''}
                       </div>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{component?.quantity ?? '-'}</td>
                   <td className="max-w-[320px] px-3 py-2">
-                    <div className="truncate" title={formatCollectedProductName(source)}>
+                    <div data-no-translate className="truncate" title={formatCollectedProductName(source)}>
                       {formatCollectedProductName(source)}
                     </div>
                   </td>
                   <td className="max-w-[320px] px-3 py-2">
-                    <div className="truncate" title={formatConfirmedProductName(component, c)}>
+                    <div data-no-translate className="truncate" title={formatConfirmedProductName(component, c)}>
                       {formatConfirmedProductName(component, c)}
                     </div>
                   </td>
@@ -537,15 +537,19 @@ export function MappingManager() {
                     </span>
                     <span className="text-[10px] text-muted-foreground">{u.occurrences}건</span>
                   </div>
-                  <div className="mt-1 truncate text-xs">{u.productName ?? '(이름 없음)'}</div>
+                  {u.productName ? (
+                    <div data-no-translate className="mt-1 truncate text-xs">{u.productName}</div>
+                  ) : (
+                    <div className="mt-1 truncate text-xs">(이름 없음)</div>
+                  )}
                   {u.optionText && (
-                    <div className="truncate text-[10px] text-muted-foreground">{u.optionText}</div>
+                    <div data-no-translate className="truncate text-[10px] text-muted-foreground">{u.optionText}</div>
                   )}
                   <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                    {u.marketplaceItemId}
+                    <span data-no-translate>{u.marketplaceItemId}</span>
                     {hasOptionPart && (
                       <span className="ml-1 text-[10px] text-muted-foreground/70">
-                        (품번 <strong>{productPart}</strong> / 단품 <strong>{optionPart}</strong>)
+                        (품번 <strong data-no-translate>{productPart}</strong> / 단품 <strong data-no-translate>{optionPart}</strong>)
                       </span>
                     )}
                   </div>
@@ -767,11 +771,11 @@ export function ProductSearchDialog({
                       <td className="px-2 py-1.5 text-center text-muted-foreground tabular-nums">
                         {idx + 1}
                       </td>
-                      <td className="px-2 py-1.5 font-mono">{p.internalSku}</td>
+                      <td data-no-translate className="px-2 py-1.5 font-mono">{p.internalSku}</td>
                       <td className="px-2 py-1.5">
-                        <div className="truncate">{p.name}</div>
+                        <div data-no-translate className="truncate">{p.name}</div>
                         {p.optionHint && (
-                          <div className="truncate text-[10px] text-muted-foreground">
+                          <div data-no-translate className="truncate text-[10px] text-muted-foreground">
                             {p.optionHint}
                           </div>
                         )}
@@ -1066,7 +1070,7 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
                       className="w-full rounded border px-1.5 py-1 font-mono text-xs"
                     />
                     {(c.productNameHint || c.optionNameHint) && (
-                      <div className="mt-0.5 truncate px-1 text-[10px] text-muted-foreground">
+                      <div data-no-translate className="mt-0.5 truncate px-1 text-[10px] text-muted-foreground">
                         {c.productNameHint}
                         {c.optionNameHint && <span className="ml-1">· {c.optionNameHint}</span>}
                       </div>

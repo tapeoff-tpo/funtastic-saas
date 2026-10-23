@@ -259,7 +259,7 @@ function CoreCell({ column, row }: { column: CoreColumn; row: PriceTableGridRow 
   const value = column.id === 'rowNumber' ? String(row.rowNumber) : row[column.id as keyof PriceTableGridRow]
   return (
     <td className={`border-b px-3 py-2 align-top group-hover:bg-muted/40 ${coreCellClass(column.id)}`}>
-      <span className={column.id === 'productCode' ? 'font-mono font-medium' : column.id === 'optionName' ? 'text-muted-foreground' : ''}>
+      <span data-no-translate={['productCode', 'productName', 'optionName', 'registeredProductName'].includes(column.id) || undefined} className={column.id === 'productCode' ? 'font-mono font-medium' : column.id === 'optionName' ? 'text-muted-foreground' : ''}>
         {typeof value === 'string' && value ? value : '-'}
       </span>
     </td>

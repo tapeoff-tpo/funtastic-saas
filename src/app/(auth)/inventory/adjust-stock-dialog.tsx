@@ -98,7 +98,7 @@ export function AdjustStockDialog({
         <p className="mt-1 text-sm text-muted-foreground">
           {mode === 'set'
             ? '새로운 재고 항목을 등록합니다.'
-            : `${initialSku} - 현재 재고: ${currentStock?.toLocaleString('ko-KR') ?? 0}`}
+            : <><span data-no-translate>{initialSku}</span> - 현재 재고: {currentStock?.toLocaleString('ko-KR') ?? 0}</>}
         </p>
 
         <div className="mt-4 space-y-3">

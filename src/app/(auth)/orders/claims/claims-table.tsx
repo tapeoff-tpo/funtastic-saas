@@ -80,7 +80,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
       <td className="px-3 py-3 text-sm">{claim.buyerName}</td>
 
       {/* 상품명 */}
-      <td className="px-3 py-3 text-sm text-gray-700 max-w-[180px] truncate">
+      <td data-no-translate className="px-3 py-3 text-sm text-gray-700 max-w-[180px] truncate">
         {claim.productName ?? '-'}
       </td>
 

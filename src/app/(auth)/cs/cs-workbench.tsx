@@ -468,10 +468,12 @@ export function CsWorkbench({
                   <div className="max-h-28 space-y-1 overflow-auto">
                     {barcodeOrder.items.map((item) => (
                       <div key={item.id} className="rounded border bg-gray-50 px-2 py-1.5 text-xs">
-                        <div className="truncate font-medium text-gray-900">{item.lockedProductName ?? item.productName}</div>
+                        <div data-no-translate className="truncate font-medium text-gray-900">{item.lockedProductName ?? item.productName}</div>
                         <div className="mt-0.5 text-gray-500">
-                          {item.lockedOptionName ?? item.optionText ?? '옵션 없음'} · {item.lockedQuantity ?? item.quantity}개
-                          {item.sku ? ` · ${item.sku}` : ''}
+                          {(item.lockedOptionName ?? item.optionText) ? (
+                            <span data-no-translate>{item.lockedOptionName ?? item.optionText}</span>
+                          ) : '옵션 없음'} · {item.lockedQuantity ?? item.quantity}개
+                          {item.sku && <> · <span data-no-translate>{item.sku}</span></>}
                         </div>
                       </div>
                     ))}
@@ -530,7 +532,11 @@ export function CsWorkbench({
                     <div className="text-xs text-gray-400">{ticket.internalNo ? `#${ticket.internalNo}` : ticket.marketplaceReferenceId}</div>
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="truncate font-medium text-gray-950">{ticket.productName ?? ticket.title}</div>
+                    {ticket.productName ? (
+                      <div data-no-translate className="truncate font-medium text-gray-950">{ticket.productName}</div>
+                    ) : (
+                      <div className="truncate font-medium text-gray-950">{ticket.title}</div>
+                    )}
                     <div className="mt-1 line-clamp-2 text-xs text-gray-500">{ticket.description ?? '내용 없음'}</div>
                   </td>
                   <td className="px-3 py-3 align-top">
@@ -607,7 +613,7 @@ export function CsWorkbench({
                     <dt className="text-gray-500">주문번호</dt>
                     <dd className="font-mono text-xs text-gray-900">{activeSelected.marketplaceOrderId ?? '-'}</dd>
                     <dt className="text-gray-500">상품</dt>
-                    <dd className="text-gray-900">{activeSelected.productName ?? '-'}</dd>
+                    <dd data-no-translate className="text-gray-900">{activeSelected.productName ?? '-'}</dd>
                     <dt className="text-gray-500">고객</dt>
                     <dd className="text-gray-900">{activeSelected.buyerName ?? activeSelected.recipientName ?? '-'}</dd>
                     <dt className="text-gray-500">내용</dt>

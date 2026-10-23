@@ -110,7 +110,7 @@ export function BulkPaymentDepositDialog({ item }: { item: BulkPaymentDepositIte
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-xl">
           <Dialog.Title className="text-base font-semibold">대량결제 선금 등록</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+          <Dialog.Description data-no-translate className="mt-1 text-sm text-muted-foreground">
             {item.productName}{item.optionName ? ` · ${item.optionName}` : ''}
           </Dialog.Description>
           <p className="mt-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">

@@ -562,8 +562,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                 className={`grid w-full grid-cols-[1fr_auto] gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/70 ${activeId === job.id ? 'bg-muted' : 'bg-background'}`}
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{job.product.name}</span>
-                  <span className="mt-1 block truncate font-mono text-xs text-muted-foreground">{job.product.sku}{job.product.option ? ` · ${job.product.option}` : ''}</span>
+                  <span data-no-translate className="block truncate text-sm font-medium">{job.product.name}</span>
+                  <span data-no-translate className="mt-1 block truncate font-mono text-xs text-muted-foreground">{job.product.sku}{job.product.option ? ` · ${job.product.option}` : ''}</span>
                 </span>
                 <Badge variant="outline" className={STATUS[job.status].className}>{STATUS[job.status].label}</Badge>
               </button>
@@ -581,11 +581,11 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <h2 className="truncate text-lg font-semibold">{activeProduct.name}</h2>
+                      <h2 data-no-translate className="truncate text-lg font-semibold">{activeProduct.name}</h2>
                       {activeJob ? <Badge variant="outline" className={STATUS[activeJob.status].className}>{STATUS[activeJob.status].label}</Badge> : <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">작업 설정</Badge>}
                     </div>
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
-                      {activeProduct.sku}{activeProduct.option ? ` · ${activeProduct.option}` : ''}
+                      <span data-no-translate>{activeProduct.sku}{activeProduct.option ? ` · ${activeProduct.option}` : ''}</span>
                       {!activeJob && selectedDraftProducts.length > 0 ? ` · ${selectedDraftProducts.length}개 선택` : ''}
                     </p>
                   </div>
@@ -742,8 +742,8 @@ function QueueDraft({
     <label className={`grid cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/70 ${selected ? 'bg-muted' : 'bg-background'}`}>
       <input type="checkbox" checked={selected} onChange={onSelectedChange} className="mt-0.5 size-4 accent-foreground" aria-label={`${product.name} 선택`} />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-medium">{product.name}</span>
-        <span className="mt-1 block truncate font-mono text-xs text-muted-foreground">{product.sku}{product.option ? ` · ${product.option}` : ''}</span>
+        <span data-no-translate className="block truncate text-sm font-medium">{product.name}</span>
+        <span data-no-translate className="mt-1 block truncate font-mono text-xs text-muted-foreground">{product.sku}{product.option ? ` · ${product.option}` : ''}</span>
       </span>
       <Badge variant="outline" className={STATUS.draft.className}>{STATUS.draft.label}</Badge>
     </label>

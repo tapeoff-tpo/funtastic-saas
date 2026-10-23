@@ -1848,10 +1848,10 @@ function InventoryMappingDialog({
                       <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">{target.marketplaceId}</span>
                       <span className="font-mono text-[10px] text-muted-foreground">{target.marketplaceOrderId}</span>
                     </div>
-                    <div className="mt-1 truncate font-medium">{target.productName}</div>
-                    {target.optionText && <div className="truncate text-[10px] text-muted-foreground">{target.optionText}</div>}
+                    <div data-no-translate className="mt-1 truncate font-medium">{target.productName}</div>
+                    {target.optionText && <div data-no-translate className="truncate text-[10px] text-muted-foreground">{target.optionText}</div>}
                     <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span className="truncate font-mono">상품코드 {getMappingTargetSource(target).product}</span>
+                      <span className="truncate font-mono">상품코드 <span data-no-translate>{getMappingTargetSource(target).product}</span></span>
                       <span className="shrink-0 font-medium">수량 {target.quantity}</span>
                     </div>
                   </button>
@@ -1899,9 +1899,9 @@ function InventoryMappingDialog({
                   {components.map((component, idx) => (
                     <div key={`${component.sku}-${idx}`} className="grid grid-cols-[1fr_72px_24px] items-center gap-2 rounded border bg-white px-2 py-1">
                       <div className="min-w-0">
-                        <div className="truncate font-mono text-xs">{component.sku}</div>
+                        <div data-no-translate className="truncate font-mono text-xs">{component.sku}</div>
                         <div className="truncate text-[10px] text-muted-foreground">
-                          {component.productName}{component.optionName ? ` · ${component.optionName}` : ''}
+                          <span data-no-translate>{component.productName}</span>{component.optionName && <> · <span data-no-translate>{component.optionName}</span></>}
                         </div>
                       </div>
                       <input
@@ -1942,10 +1942,10 @@ function InventoryMappingDialog({
                     <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">재고관리코드를 검색하세요.</td></tr>
                   ) : results.map((product) => (
                     <tr key={product.id} className="hover:bg-muted/40">
-                      <td className="px-2 py-1.5 font-mono">{product.internalSku}</td>
+                      <td data-no-translate className="px-2 py-1.5 font-mono">{product.internalSku}</td>
                       <td className="px-2 py-1.5">
-                        <div className="truncate">{product.name}</div>
-                        {product.optionHint && <div className="truncate text-[10px] text-muted-foreground">{product.optionHint}</div>}
+                        <div data-no-translate className="truncate">{product.name}</div>
+                        {product.optionHint && <div data-no-translate className="truncate text-[10px] text-muted-foreground">{product.optionHint}</div>}
                       </td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{product.availableStock ?? '-'}</td>
                       <td className="px-2 py-1.5 text-center">

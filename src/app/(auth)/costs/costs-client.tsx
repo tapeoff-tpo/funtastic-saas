@@ -207,12 +207,12 @@ export function CostsClient({
             ) : rows.map((row) => (
               <tr key={row.id} className="border-b last:border-b-0 hover:bg-muted/40">
                 <td className="px-3 py-2 font-mono">
-                  <Link href={`/products/${row.id}`} className="text-blue-600 hover:underline">
+                  <Link href={`/products/${row.id}`} data-no-translate className="text-blue-600 hover:underline">
                     {row.internalSku}
                   </Link>
                 </td>
                 <td className="px-3 py-2">
-                  <Link href={`/products/${row.id}`} className="line-clamp-2 text-blue-600 hover:underline">
+                  <Link href={`/products/${row.id}`} data-no-translate className="line-clamp-2 text-blue-600 hover:underline">
                     {row.name}
                   </Link>
                 </td>

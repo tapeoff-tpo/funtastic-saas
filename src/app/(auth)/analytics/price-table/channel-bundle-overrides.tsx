@@ -98,13 +98,13 @@ function BundleRow({ row }: { row: ChannelBundleOverride }) {
         <div className="font-mono text-xs text-muted-foreground">{row.channelProductId}</div>
       </td>
       <td className="px-3 py-3">
-        <div className="font-medium leading-5">{row.productName}</div>
-        {row.optionName ? <div className="mt-0.5 text-xs text-muted-foreground">옵션: {row.optionName}</div> : null}
+        <div data-no-translate className="font-medium leading-5">{row.productName}</div>
+        {row.optionName ? <div className="mt-0.5 text-xs text-muted-foreground">옵션: <span data-no-translate>{row.optionName}</span></div> : null}
         <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{row.sourceKey}</div>
       </td>
       <td className="px-3 py-3">
         {row.components.map((component) => (
-          <Link key={component.sku} href={`/inventory?search=${encodeURIComponent(component.sku)}&searched=1&focusSku=${encodeURIComponent(component.sku)}`} className="block font-mono text-xs text-primary hover:underline">
+          <Link data-no-translate key={component.sku} href={`/inventory?search=${encodeURIComponent(component.sku)}&searched=1&focusSku=${encodeURIComponent(component.sku)}`} className="block font-mono text-xs text-primary hover:underline">
             {component.sku} x {component.quantity}
           </Link>
         ))}

@@ -230,7 +230,7 @@ export default async function OrderDetailPage({
                       <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         수집상품명
                       </span>
-                      <span>{item.productName}</span>
+                      <span data-no-translate>{item.productName}</span>
                     </div>
                     {/* 확정상품명 + 옵션 — 같은 라인에 정렬 */}
                     <div className="flex flex-wrap items-baseline gap-2">
@@ -238,24 +238,24 @@ export default async function OrderDetailPage({
                         확정상품명
                       </span>
                       {item.displayName ? (
-                        <span className="font-medium">{item.displayName}</span>
+                        <span data-no-translate className="font-medium">{item.displayName}</span>
                       ) : (
                         <span className="italic text-muted-foreground">미매핑</span>
                       )}
                       {item.optionText && (
                         <span className="text-xs text-muted-foreground">
-                          · 옵션: {item.optionText}
+                          · 옵션: <span data-no-translate>{item.optionText}</span>
                         </span>
                       )}
                     </div>
                     {item.sku && (
                       <p className="mt-1 text-xs font-mono text-muted-foreground">
-                        내부 상품코드: {item.sku}
+                        내부 상품코드: <span data-no-translate>{item.sku}</span>
                       </p>
                     )}
                     {collectedProductCode && (
                       <p className="mt-1 text-xs font-mono text-muted-foreground">
-                        수집상품코드: {collectedProductCode}
+                        수집상품코드: <span data-no-translate>{collectedProductCode}</span>
                       </p>
                     )}
                   </div>
@@ -302,11 +302,11 @@ export default async function OrderDetailPage({
                         <tr key={`${row.sourceFile ?? 'row'}-${row.rowNumber ?? index}`}>
                           <td className="whitespace-nowrap px-2 py-1.5">{row.sourceFile ?? '-'}</td>
                           <td className="whitespace-nowrap px-2 py-1.5">{row.rowNumber ?? '-'}</td>
-                          <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
-                          <td className="min-w-[220px] px-2 py-1.5">{raw['수집 상품명'] ?? '-'}</td>
-                          <td className="min-w-[140px] px-2 py-1.5">{raw['수집 옵션'] ?? '-'}</td>
+                          <td data-no-translate className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
+                          <td data-no-translate className="min-w-[220px] px-2 py-1.5">{raw['수집 상품명'] ?? '-'}</td>
+                          <td data-no-translate className="min-w-[140px] px-2 py-1.5">{raw['수집 옵션'] ?? '-'}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-right">{raw['주문수량'] ?? '-'}</td>
-                          <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
+                          <td data-no-translate className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
                           <td className="whitespace-nowrap px-2 py-1.5">{raw['택배사'] ?? '-'}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['송장번호'] ?? '-'}</td>
                         </tr>
@@ -476,11 +476,11 @@ export default async function OrderDetailPage({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-mono text-xs text-muted-foreground">
+                          <p data-no-translate className="truncate font-mono text-xs text-muted-foreground">
                             {row.sku}
                           </p>
                           <p className="truncate font-medium">
-                            {row.productName ?? '(재고 미등록)'}
+                            {row.productName ? <span data-no-translate>{row.productName}</span> : '(재고 미등록)'}
                           </p>
                         </div>
                         <span
@@ -516,8 +516,8 @@ export default async function OrderDetailPage({
                           <ul className="mt-1 space-y-0.5">
                             {row.sourceItems.map((s, i) => (
                               <li key={i} className="truncate">
-                                · {s.productName}
-                                {s.optionText && ` (${s.optionText})`} × {s.orderQty}
+                                · <span data-no-translate>{s.productName}</span>
+                                {s.optionText && <> (<span data-no-translate>{s.optionText}</span>)</>} × {s.orderQty}
                               </li>
                             ))}
                           </ul>

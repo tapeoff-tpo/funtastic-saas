@@ -238,8 +238,8 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
                     {rows.map((row, idx) => (
                       <tr key={`${row.rowNum}-${idx}`} className={`border-b last:border-b-0 ${row.error || !row.inventoryExists ? 'bg-amber-50/50' : idx % 2 ? 'bg-muted/20' : ''}`}>
                         <td className="px-2 py-1 text-muted-foreground">{row.rowNum}</td>
-                        <td className="whitespace-nowrap px-2 py-1 font-mono">{row.sku}</td>
-                        <td className="max-w-[180px] truncate px-2 py-1" title={row.productName}>{row.productName}</td>
+                        <td data-no-translate className="whitespace-nowrap px-2 py-1 font-mono">{row.sku}</td>
+                        <td data-no-translate className="max-w-[180px] truncate px-2 py-1" title={row.productName}>{row.productName}</td>
                         <td className="px-2 py-1">{row.warehouseZone ?? '-'}</td>
                         <td className="px-2 py-1 font-mono">{row.sectorCode ?? '-'}</td>
                         <td className="px-2 py-1 text-right tabular-nums">{row.currentStock.toLocaleString('ko-KR')}</td>
@@ -318,7 +318,7 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
                   <div className="mt-3 max-h-40 space-y-1 overflow-y-auto">
                     {result.errors.map((err, idx) => (
                       <p key={idx} className="text-xs text-red-600">
-                        {err.rowNum ? `${err.rowNum}행 ` : ''}{err.sku}: {err.error}
+                        {err.rowNum ? `${err.rowNum}행 ` : ''}<span data-no-translate>{err.sku}</span>: {err.error}
                       </p>
                     ))}
                   </div>

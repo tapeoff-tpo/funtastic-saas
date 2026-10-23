@@ -239,8 +239,8 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                   </div>
                   {productRows.map((product) => (
                     <div key={product.key} className="grid grid-cols-[minmax(240px,1fr)_140px_90px_110px_140px] items-center gap-3 border-b px-4 py-3 text-sm">
-                      <div className="min-w-0"><b className="block truncate">{product.title}</b><span className="mt-1 block text-xs text-muted-foreground">최근 행사 종료 {product.latestEndsOn}</span></div>
-                      <span className="truncate text-xs text-muted-foreground">{product.productCode || '-'}</span>
+                      <div className="min-w-0"><b data-no-translate className="block truncate">{product.title}</b><span className="mt-1 block text-xs text-muted-foreground">최근 행사 종료 {product.latestEndsOn}</span></div>
+                      <span data-no-translate className="truncate text-xs text-muted-foreground">{product.productCode || '-'}</span>
                       <span>{product.dealCount}회</span>
                       <b>{product.soldQuantity.toLocaleString('ko-KR')}개</b>
                       <b>{won(product.salesAmount)}</b>
@@ -272,8 +272,8 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                     <span className={cn('mb-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium', statusTone(event.status))}>
                       {STATUS_LABELS[event.status] ?? event.status}
                     </span>
-                    <b className="block truncate text-sm">{event.title}</b>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">{event.productCode || '상품코드 없음'}</p>
+                    <b data-no-translate className="block truncate text-sm">{event.title}</b>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{event.productCode ? <span data-no-translate>{event.productCode}</span> : '상품코드 없음'}</p>
                   </button>
                 ))}
                 {!standingDeals.length ? <p className="px-3 py-5 text-sm text-muted-foreground">등록된 상시딜이 없습니다.</p> : null}
@@ -305,7 +305,7 @@ function EventDetail({ event, onClose }: { event: DealCalendarItem; onClose: () 
             <Detail label="상태" value={STATUS_LABELS[event.status] ?? event.status} />
             <Detail label="딜 분류" value={TYPE_LABELS[event.dealType] ?? event.dealType} />
             <Detail label="행사 기간" value={`${event.startsOn} ~ ${event.endsOn}`} wide />
-            <Detail label="상품코드" value={event.productCode || '-'} />
+            <Detail label="상품코드" value={event.productCode || '-'} noTranslate />
             <Detail label="딜 판매가" value={won(event.dealPrice)} />
             {event.dealType === 'ad_campaign' ? <><Detail label="캠페인" value={event.campaignName || '-'} /><Detail label="일 예산" value={won(event.dailyBudget)} /><Detail label="검색 입찰가" value={won(event.searchBid)} /><Detail label="추천 입찰가" value={won(event.recommendationBid)} /></> : event.platform === '10x10' ? <><Detail label="최소 할인" value={event.minimumDiscountRate == null ? '-' : `${event.minimumDiscountRate}%`} /><Detail label="신청 상품" value={event.appliedProductCount == null ? '-' : `${event.appliedProductCount}개`} /><Detail label="할인코드" value={event.discountCode || '-'} /><Detail label="프로모션 ID" value={event.externalPromotionId || '-'} /></> : <><Detail label="원가" value={won(event.unitCost)} /><Detail label="배송비" value={won(event.shippingCost)} /><Detail label="재고" value={`${event.stock}개`} /><Detail label="일 출고" value={`${event.dailyCapacity}개`} /></>}
           </section>
@@ -370,6 +370,6 @@ function AddEventModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function Detail({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
-  return <div className={cn(wide && 'col-span-2')}><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 whitespace-pre-wrap font-medium">{value}</p></div>
+function Detail({ label, value, wide = false, noTranslate = false }: { label: string; value: string; wide?: boolean; noTranslate?: boolean }) {
+  return <div className={cn(wide && 'col-span-2')}><p className="text-xs text-muted-foreground">{label}</p><p data-no-translate={noTranslate || undefined} className="mt-1 whitespace-pre-wrap font-medium">{value}</p></div>
 }

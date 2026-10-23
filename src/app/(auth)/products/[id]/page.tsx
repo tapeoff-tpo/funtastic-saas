@@ -518,7 +518,7 @@ export default function EditProductPage() {
                       </div>
                       {link.marketplaceProductId && (
                         <div className="text-xs text-muted-foreground">
-                          마켓 상품 ID: <span className="font-mono">{link.marketplaceProductId}</span>
+                          마켓 상품 ID: <span data-no-translate className="font-mono">{link.marketplaceProductId}</span>
                         </div>
                       )}
                       {(link.marketplaceCategoryId || categoryName) && (
@@ -583,8 +583,8 @@ export default function EditProductPage() {
                       <td className="px-2 py-1.5">
                         {FIELD_LABELS[log.fieldName] ?? log.fieldName}
                       </td>
-                      <td className="px-2 py-1.5">{log.oldValue ?? '-'}</td>
-                      <td className="px-2 py-1.5 font-medium">{log.newValue ?? '-'}</td>
+                      <td data-no-translate={['name', 'internal_sku', 'sku', 'option_name', 'optionName'].includes(log.fieldName) || undefined} className="px-2 py-1.5">{log.oldValue ?? '-'}</td>
+                      <td data-no-translate={['name', 'internal_sku', 'sku', 'option_name', 'optionName'].includes(log.fieldName) || undefined} className="px-2 py-1.5 font-medium">{log.newValue ?? '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -656,7 +656,7 @@ function ProductOperationsLinks({
           <h2 className="text-sm font-semibold">연결된 상품 운영</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">같은 품목코드와 옵션 SKU를 기준으로 재고, 가격, 채널 정보를 엽니다.</p>
         </div>
-        {code ? <span className="font-mono text-xs text-muted-foreground">기준 SKU {code}</span> : <span className="text-xs text-amber-700">상품코드를 입력하면 연결됩니다.</span>}
+        {code ? <span className="font-mono text-xs text-muted-foreground">기준 SKU <span data-no-translate>{code}</span></span> : <span className="text-xs text-amber-700">상품코드를 입력하면 연결됩니다.</span>}
       </div>
       {links.length ? (
         <div className="grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">

@@ -311,7 +311,7 @@ export async function PurchasingOrdersView({
         <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
           <strong>신규상품 첫 판매 확인</strong>
           <span className="ml-2">
-            {newProductFirstSaleItems.slice(0, 3).map((item) => item.productName).join(', ')}
+            <span data-no-translate>{newProductFirstSaleItems.slice(0, 3).map((item) => item.productName).join(', ')}</span>
             {newProductFirstSaleItems.length > 3 ? ` 외 ${newProductFirstSaleItems.length - 3}건` : ''}의 첫 판매가 감지되었습니다.
           </span>
         </section>
@@ -367,7 +367,7 @@ export async function PurchasingOrdersView({
             <div className="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-950">
               {missingCostItems.map((item) => (
                 <div key={`${item.sku}:${item.productName}`}>
-                  <strong>{item.sku}</strong> {item.productName}
+                  <span data-no-translate><strong>{item.sku}</strong> {item.productName}</span>
                   <span className="ml-1 text-amber-700">
                     ({[item.missingYuan ? '元' : '', item.missingKrw ? '₩' : ''].filter(Boolean).join('·')} 누락)
                   </span>
@@ -662,8 +662,8 @@ export async function PurchasingOrdersView({
                         ) : null}
                       </td>
                       <td className="px-3 py-2 align-middle">
-                        <div className="truncate font-medium" title={item.productName}>{item.productName}</div>
-                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
+                        <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>
+                        <div data-no-translate className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
                       </td>

@@ -376,9 +376,9 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
                   className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
                 >
                   <div className="min-w-0">
-                    <strong className="block truncate text-sm text-foreground">{item.productName}</strong>
+                    <strong data-no-translate className="block truncate text-sm text-foreground">{item.productName}</strong>
                     <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {optionSummary || '옵션 없음'}
+                      {optionSummary ? <span data-no-translate>{optionSummary}</span> : '옵션 없음'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground md:justify-end">
@@ -1102,8 +1102,8 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn, focusedItemId }: {
                 )}
               >
                 <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
-                <TableCell><ReadOnlyText value={item.productName} /></TableCell>
-                <TableCell><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={option.name} />) : <ReadOnlyText value={item.productOption} />}</div></TableCell>
+                <TableCell><ReadOnlyText value={item.productName} noTranslate /></TableCell>
+                <TableCell><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={option.name} noTranslate />) : <ReadOnlyText value={item.productOption} noTranslate />}</div></TableCell>
                 <TableCell className="align-middle"><ReadOnlyLink value={item.chinaPurchaseUrl} label="1688 링크" /></TableCell>
                 <TableCell className="text-right tabular-nums"><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={decimalText(option.chinaUnitPriceCny)} />) : <ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} />}</div></TableCell>
                 <TableCell><ReadOnlyShippingCost item={item} /></TableCell>
@@ -1128,8 +1128,8 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn, focusedItemId }: {
   )
 }
 
-function ReadOnlyText({ value }: { value: string | null | undefined }) {
-  return value ? <span className="block whitespace-pre-wrap break-words leading-5">{value}</span> : <span className="text-muted-foreground">-</span>
+function ReadOnlyText({ value, noTranslate = false }: { value: string | null | undefined; noTranslate?: boolean }) {
+  return value ? <span data-no-translate={noTranslate || undefined} className="block whitespace-pre-wrap break-words leading-5">{value}</span> : <span className="text-muted-foreground">-</span>
 }
 
 function ReadOnlyLink({ value, label }: { value: string | null | undefined; label: string }) {

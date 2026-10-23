@@ -710,16 +710,16 @@ export function OrderRowsBoard() {
                           {marketLabel(r.marketplaceId)}
                         </span>
                       </td>
-                      <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 align-top font-mono text-[11px]">
+                      <td data-no-translate rowSpan={compsOrEmpty.length} className="px-1.5 py-1 align-top font-mono text-[11px]">
                         {r.marketplaceOrderId}
                       </td>
-                      <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 align-top font-mono text-[11px]">
+                      <td data-no-translate rowSpan={compsOrEmpty.length} className="px-1.5 py-1 align-top font-mono text-[11px]">
                         {r.marketplaceItemId}
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="max-w-[260px] px-1.5 py-1 align-top">
-                        <div className="truncate">{r.productName}</div>
+                        <div data-no-translate className="truncate">{r.productName}</div>
                         {r.optionText && (
-                          <div className="truncate text-[10px] text-muted-foreground">{r.optionText}</div>
+                          <div data-no-translate className="truncate text-[10px] text-muted-foreground">{r.optionText}</div>
                         )}
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 text-right align-top tabular-nums">
@@ -772,11 +772,15 @@ export function OrderRowsBoard() {
                       <td className="px-1.5 py-1 font-mono text-[11px]">
                         {r.mappingCode ?? '-'}
                       </td>
-                      <td className="px-1.5 py-1 font-mono text-[11px]">{comp.sku}</td>
+                      <td data-no-translate className="px-1.5 py-1 font-mono text-[11px]">{comp.sku}</td>
                       <td className="max-w-[220px] px-1.5 py-1">
-                        <div className="truncate">{comp.productName ?? <span className="text-muted-foreground">(재고 미등록)</span>}</div>
+                        {comp.productName ? (
+                          <div data-no-translate className="truncate">{comp.productName}</div>
+                        ) : (
+                          <div className="truncate text-muted-foreground">(재고 미등록)</div>
+                        )}
                         {comp.optionName && (
-                          <div className="truncate text-[10px] text-muted-foreground">{comp.optionName}</div>
+                          <div data-no-translate className="truncate text-[10px] text-muted-foreground">{comp.optionName}</div>
                         )}
                       </td>
                       <td className="px-1.5 py-1 text-right tabular-nums">
@@ -1015,9 +1019,9 @@ function BulkMappingModal({
                         : split.product}
                     </span>
                   </div>
-                  <div className="truncate">{r.productName}</div>
+                  <div data-no-translate className="truncate">{r.productName}</div>
                   {r.optionText && (
-                    <div className="truncate text-[10px] text-muted-foreground">
+                    <div data-no-translate className="truncate text-[10px] text-muted-foreground">
                       {r.optionText}
                     </div>
                   )}
@@ -1070,8 +1074,8 @@ function BulkMappingModal({
                 {components.map((component, idx) => (
                   <div key={`${component.sku}-${idx}`} className="grid grid-cols-[1fr_72px_24px] items-center gap-2 rounded border bg-white px-2 py-1">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-xs">{component.sku}</div>
-                      <div className="truncate text-[10px] text-muted-foreground">
+                      <div data-no-translate className="truncate font-mono text-xs">{component.sku}</div>
+                      <div data-no-translate className="truncate text-[10px] text-muted-foreground">
                         {component.productName}
                         {component.optionName ? ` · ${component.optionName}` : ''}
                       </div>
@@ -1144,11 +1148,11 @@ function BulkMappingModal({
                         <td className="px-2 py-1.5 text-center text-muted-foreground tabular-nums">
                           {idx + 1}
                         </td>
-                        <td className="px-2 py-1.5 font-mono">{p.internalSku}</td>
+                        <td data-no-translate className="px-2 py-1.5 font-mono">{p.internalSku}</td>
                         <td className="px-2 py-1.5">
-                          <div className="truncate">{p.name}</div>
+                          <div data-no-translate className="truncate">{p.name}</div>
                           {p.optionHint && (
-                            <div className="truncate text-[10px] text-muted-foreground">
+                            <div data-no-translate className="truncate text-[10px] text-muted-foreground">
                               {p.optionHint}
                             </div>
                           )}

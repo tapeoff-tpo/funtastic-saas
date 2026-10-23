@@ -160,8 +160,8 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           ) : filteredItems.map((item) => (
             <article key={item.id} className="rounded-lg border bg-background p-3">
               <div className="min-w-0">
-                <p className="truncate font-medium">{item.productName}</p>
-                <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                <p data-no-translate className="truncate font-medium">{item.productName}</p>
+                <p data-no-translate className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
               </div>
               <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
                 <StockMetric label="현재고" value={item.onHandQuantity} />
@@ -195,8 +195,8 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
               ) : filteredItems.map((item) => (
                 <tr key={item.id} className="border-t">
                   <td className="px-3 py-2">
-                    <div className="font-medium">{item.productName}</div>
-                    <div className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div>
+                    <div data-no-translate className="font-medium">{item.productName}</div>
+                    <div data-no-translate className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{item.onHandQuantity.toLocaleString('ko-KR')}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700">{item.reservedQuantity.toLocaleString('ko-KR')}</td>
@@ -218,7 +218,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <form onSubmit={adjustStock} className="w-full max-w-md rounded-lg bg-background p-5 shadow-xl">
             <h3 className="text-lg font-semibold">SaaS 중국재고 수량 조정</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{adjusting.sku} · 현재고 {adjusting.onHandQuantity.toLocaleString('ko-KR')}개 · 예약 {adjusting.reservedQuantity.toLocaleString('ko-KR')}개</p>
+            <p className="mt-1 text-sm text-muted-foreground"><span data-no-translate>{adjusting.sku}</span> · 현재고 {adjusting.onHandQuantity.toLocaleString('ko-KR')}개 · 예약 {adjusting.reservedQuantity.toLocaleString('ko-KR')}개</p>
             <div className="mt-4 space-y-3">
               <Field label="조정 수량">
                 <input autoFocus type="number" step="1" value={adjustDelta} onChange={(event) => setAdjustDelta(event.target.value)} required className={inputClass} placeholder="예: 20 또는 -5" />

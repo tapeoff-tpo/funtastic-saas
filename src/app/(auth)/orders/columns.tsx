@@ -200,7 +200,7 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
               {order.items.map((item) => (
                 <div key={item.id} className="grid grid-cols-[1fr_88px] items-center gap-2 border-b p-2 last:border-b-0">
                   <div className="min-w-0">
-                    <div className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
+                    <div data-no-translate className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
                       {item.displayName ?? item.productName}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
@@ -379,16 +379,18 @@ function ProductNameCell({ order }: { order: OrderRow }) {
             key={item.id}
             className={`min-w-0 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
           >
-            <span className="block truncate font-mono text-[10px] text-muted-foreground" title={item.sku ?? ''}>
+            <span data-no-translate className="block truncate font-mono text-[10px] text-muted-foreground" title={item.sku ?? ''}>
               {item.sku ?? '-'}
             </span>
             <span
+              data-no-translate
               className="block min-w-0 truncate text-[10px] text-muted-foreground"
               title={`수집상품명: ${item.productName}`}
             >
               {item.productName}
             </span>
             <span
+              data-no-translate
               className="block min-w-0 overflow-hidden font-medium leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
               title={line}
             >
@@ -433,12 +435,12 @@ function OptionInfoCell({ order }: { order: OrderRow }) {
             className={`flex min-w-0 flex-col gap-0.5 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
           >
             {collectedOption && (
-              <span className="block truncate text-[10px] text-muted-foreground" title={`수집옵션명: ${collectedOption}`}>
+              <span data-no-translate className="block truncate text-[10px] text-muted-foreground" title={`수집옵션명: ${collectedOption}`}>
                 {collectedOption}
               </span>
             )}
             {confirmedOption ? (
-              <span className="block truncate font-medium" title={confirmedOption}>
+              <span data-no-translate className="block truncate font-medium" title={confirmedOption}>
                 {confirmedOption}
               </span>
             ) : (

@@ -114,14 +114,14 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
               <tr key={row.id} className="border-t hover:bg-muted/30">
                 <td className="sticky left-0 bg-card px-3 py-2 font-mono text-xs font-medium">
                   {row.productCode ? (
-                    <Link href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="text-primary hover:underline">
+                    <Link data-no-translate href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="text-primary hover:underline">
                       {row.productCode}
                     </Link>
                   ) : '-'}
                 </td>
                 <td className="sticky left-[130px] max-w-[320px] bg-card px-3 py-2">
-                  <div className="truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</div>
-                  {row.optionName ? <div className="truncate text-xs text-muted-foreground">{row.optionName}</div> : null}
+                  <div data-no-translate className="truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</div>
+                  {row.optionName ? <div data-no-translate className="truncate text-xs text-muted-foreground">{row.optionName}</div> : null}
                 </td>
                 {selectedColumns.map((column) => (
                   <td key={column.id} className="px-3 py-2 text-right tabular-nums">
@@ -161,13 +161,13 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
               onClick={() => setOpenRow(open ? null : row.id)}
               className="grid w-full grid-cols-[minmax(0,1fr)_28px] items-center px-3 py-2.5 text-left text-sm hover:bg-muted/30 lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]"
             >
-              <span className="hidden font-mono text-xs font-medium lg:block">{row.productCode || '-'}</span>
+              <span data-no-translate className="hidden font-mono text-xs font-medium lg:block">{row.productCode || '-'}</span>
               <span className="min-w-0 pr-4">
-                <span className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
+                <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
                 {row.optionName || row.productCode ? (
                   <span className="block truncate text-xs text-muted-foreground">
-                    <span className="font-mono lg:hidden">{row.productCode || '-'}</span>
-                    {row.optionName ? <><span className="lg:hidden"> · </span>{row.optionName}</> : null}
+                    <span data-no-translate className="font-mono lg:hidden">{row.productCode || '-'}</span>
+                    {row.optionName ? <><span className="lg:hidden"> · </span><span data-no-translate>{row.optionName}</span></> : null}
                   </span>
                 ) : null}
               </span>

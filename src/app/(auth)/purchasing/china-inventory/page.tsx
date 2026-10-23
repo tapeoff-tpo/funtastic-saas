@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { Button } from '@/components/ui/button'
@@ -19,8 +19,7 @@ export default async function ChinaInventoryPage({
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)

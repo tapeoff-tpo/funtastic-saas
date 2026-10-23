@@ -97,8 +97,6 @@ export async function getProducts(
         manageInventory: products.manageInventory,
         categoryId: products.categoryId,
         status: products.status,
-        images: products.images,
-        metadata: products.metadata,
         createdAt: products.createdAt,
         updatedAt: products.updatedAt,
         variantCount: sql<number>`cast(count(${productVariants.id}) as int)`,

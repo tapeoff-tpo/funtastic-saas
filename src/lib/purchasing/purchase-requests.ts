@@ -1225,12 +1225,17 @@ export async function getPurchaseReviewList(input: {
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const optionName = sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>'규격정보', '')), '')`
+  const normalizedSearch = input.search?.trim().toLocaleLowerCase('ko-KR') ?? ''
   const [productRows, requestedRows] = await Promise.all([
     db.select({
       sku: products.internalSku,
       productName: products.name,
       optionName,
-      metadata: products.metadata,
+      // WORKS 원본 전체는 검색할 때만 필요하다. 기본 목록 조회에서는 수천 건의
+      // 큰 JSON을 전송하지 않아 발주검토 첫 화면을 가볍게 유지한다.
+      metadata: normalizedSearch
+        ? products.metadata
+        : sql<Record<string, unknown> | null>`NULL::jsonb`,
       specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
       newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
       purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
@@ -1313,7 +1318,6 @@ export async function getPurchaseReviewList(input: {
     }
   })
   const requestedStatuses = normalizePurchaseReviewListStatuses(input.statuses)
-  const normalizedSearch = input.search?.trim().toLocaleLowerCase('ko-KR') ?? ''
   const filteredRows = baseRows.filter((row) => (
     requestedStatuses.includes(row.reviewStatus)
     && matchesPurchaseReviewSearch(row, normalizedSearch)

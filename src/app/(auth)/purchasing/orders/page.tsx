@@ -1,7 +1,7 @@
 ﻿import Link from 'next/link'
 import type { Metadata } from 'next'
 import { ExternalLink, Eye, EyeOff } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
@@ -121,8 +121,7 @@ export async function PurchasingOrdersView({
     ? parsePurchaseReviewStatuses(params.reviewStatus)
     : []
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) return null
 
   const [workspaceUserId, exchangeRateReference] = await Promise.all([

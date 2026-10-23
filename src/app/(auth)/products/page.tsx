@@ -5,7 +5,7 @@ import {
   parseAsString,
   parseAsInteger,
 } from 'nuqs/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { getProducts } from '@/lib/products/queries'
 import { ProductDataTable } from './data-table'
 import { ProductFilters } from './filters'
@@ -39,10 +39,7 @@ export default async function ProductsPage({
 }) {
   const params = await searchParamsCache.parse(searchParams)
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   if (!user) {
     return null

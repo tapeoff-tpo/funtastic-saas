@@ -112,7 +112,7 @@ export interface ProductFilters {
 }
 
 /** Product with variant count for list views */
-export interface ProductListItem extends Product {
+export type ProductListItem = Omit<Product, 'images' | 'metadata'> & {
   variantCount: number
   /** inventory.option_name (단품의 옵션명) — list 화면에서 같은 품번 그룹 안 변형 식별용 */
   optionName: string | null

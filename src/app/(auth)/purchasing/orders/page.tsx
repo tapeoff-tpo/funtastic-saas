@@ -158,7 +158,11 @@ export async function PurchasingOrdersView({
       outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
       exchangeRateKrw: exchangeRateReference.rate,
     })
-  const initialPurchaseRequestResult = await getPurchaseListPage(requestedPage)
+  const [initialPurchaseRequestResult, dataFreshness, completedOutboundDates] = await Promise.all([
+    getPurchaseListPage(requestedPage),
+    showRecommendationGenerator ? getPurchasingDataFreshness(workspaceUserId) : Promise.resolve(null),
+    status === 'completed' ? getCompletedOutboundDateOptions(workspaceUserId) : Promise.resolve([]),
+  ])
   let purchaseRequestResult = initialPurchaseRequestResult
   const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
   const page = Math.min(requestedPage, totalPages)
@@ -178,12 +182,6 @@ export async function PurchasingOrdersView({
     overdueTotalCount,
   } = purchaseRequestResult
   const purchaseStatusCounts = statusCounts as Partial<Record<PurchaseRequestStatus, number>>
-  const dataFreshness = showRecommendationGenerator
-    ? await getPurchasingDataFreshness(workspaceUserId)
-    : null
-  const completedOutboundDates = status === 'completed'
-    ? await getCompletedOutboundDateOptions(workspaceUserId)
-    : []
   const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
     if (item.rawData.source !== 'auto_purchase_recommendation') return latest
     const value = Number(item.rawData.targetStockMonths)

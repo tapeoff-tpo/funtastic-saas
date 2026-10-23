@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   experimental: {
+    // Keep recently visited dynamic screens warm long enough for practical tab switching,
+    // without leaving operational inventory and purchasing data stale for long.
+    staleTimes: {
+      dynamic: 15,
+    },
     serverActions: {
       allowedOrigins: allowedServerActionOrigins,
     },

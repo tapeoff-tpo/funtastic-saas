@@ -1,8 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { useRef } from 'react'
+import { usePathname } from 'next/navigation'
 
 const RELATED_WORK = [
   { href: '/costs', label: '품목' },
@@ -19,14 +18,6 @@ const RELATED_WORK = [
 
 export function ProductFlowNav() {
   const pathname = usePathname()
-  const router = useRouter()
-  const prefetchedHrefs = useRef(new Set<string>())
-
-  const prefetchStage = (href: string) => {
-    if (prefetchedHrefs.current.has(href)) return
-    prefetchedHrefs.current.add(href)
-    router.prefetch(href)
-  }
 
   return (
     <nav
@@ -39,9 +30,6 @@ export function ProductFlowNav() {
           <div key={stage.href}>
             <Link
               href={stage.href}
-              prefetch={false}
-              onMouseEnter={() => prefetchStage(stage.href)}
-              onFocus={() => prefetchStage(stage.href)}
               className={`block shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-medium transition-colors ${
                 pathname === stage.href ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}

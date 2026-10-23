@@ -28,7 +28,9 @@ export default async function ChinaShipmentsPage({
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [{ items: inventoryItems }, shipments, detail] = await Promise.all([
-    getSaasChinaInventory(workspaceUserId),
+    // The full inventory list is only needed while creating a new outbound request.
+    // Avoid sending every China inventory row when opening an existing shipment or the list.
+    showCreate ? getSaasChinaInventory(workspaceUserId) : Promise.resolve({ items: [] }),
     listChinaOutboundShipments(workspaceUserId),
     selectedShipmentId ? getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId: selectedShipmentId }) : Promise.resolve(null),
   ])

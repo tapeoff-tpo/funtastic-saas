@@ -25,7 +25,9 @@ describe('China outbound unsaved-work guard', () => {
 
     render(<ChinaWorkGuardProvider><Drafts /></ChinaWorkGuardProvider>)
     fireEvent.click(screen.getByRole('button', { name: '이동' }))
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('data-purchasing-translate')
+    fireEvent.click(within(dialog).getByRole('button', { name: '저장 후 이동' }))
     await waitFor(() => expect(navigate).toHaveBeenCalledOnce())
     expect(saves).toEqual(['content', 'box', 'pallet'])
   })

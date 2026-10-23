@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
 const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
@@ -14,7 +15,10 @@ const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, sa
   navigate: vi.fn(),
 }))
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/purchasing/china-shipments',
+  useRouter: () => ({ refresh: vi.fn() }),
+}))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock('./china-work-navigation', () => ({ navigateChinaWork: navigate }))
 vi.mock('../saas-china-actions', () => ({
@@ -89,6 +93,30 @@ const inventoryItem = { id: 'inventory-new', warehouseCode: '중국창고', sku:
 
 function renderShipment(detail = shipmentA, stage: 'items' | 'boxes' | 'pallets' | 'summary' = 'boxes') {
   return render(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} />)
+}
+
+function renderShipmentWithLanguage(detail = shipmentA, stage: 'items' | 'boxes' | 'pallets' | 'summary' = 'boxes') {
+  return render(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} /></>)
+}
+
+function visibleKoreanUi(root: Element) {
+  const textNodes: string[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    if (!node.parentElement?.closest('[data-no-translate]') && /[가-힣]/.test(node.textContent ?? '') && node.parentElement?.tagName !== 'OPTION') {
+      textNodes.push((node.textContent ?? '').trim())
+    }
+  }
+
+  const attributes = [...root.querySelectorAll<HTMLElement>('*')].flatMap((element) =>
+    ['placeholder', 'title', 'aria-label'].flatMap((attribute) => {
+      const value = element.getAttribute(attribute)
+      return value && /[가-힣]/.test(value) ? [`${element.tagName}.${attribute}: ${value}`] : []
+    }),
+  )
+
+  return [...textNodes.filter(Boolean), ...attributes]
 }
 
 function selectOtherShipment() {
@@ -209,6 +237,7 @@ function palletAssignmentRow(boxNo: string) {
 
 describe('ChinaShipmentsBoard', () => {
   beforeEach(() => {
+    window.localStorage.clear()
     createShipment.mockReset()
     updateShipment.mockReset()
     saveBoxSplits.mockReset()
@@ -218,6 +247,132 @@ describe('ChinaShipmentsBoard', () => {
     addShipmentItems.mockReset()
     toastError.mockReset()
     navigate.mockReset()
+  })
+
+  it('translates every visible stage 1 and 2 control while preserving product identity data', async () => {
+    const baseDetail = makeShipmentWithCompletionFilters()
+    const detail: ChinaShipmentDetailView = {
+      ...baseDetail,
+      items: baseDetail.items.map((item, index) => index === 0 ? {
+        ...item,
+        sku: 'SKU-KEEP',
+        productName: '번역 제외 상품명',
+        optionName: '번역 제외 옵션명',
+      } : item),
+    }
+    const { rerender } = renderShipmentWithLanguage(detail, 'items')
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => expect(screen.getByText('第1步 · 确认出库品项')).toBeInTheDocument())
+    expect(screen.getByRole('columnheader', { name: '商品名' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '出库数量' })).toBeInTheDocument()
+    expect(screen.getByText('添加出库品项')).toBeInTheDocument()
+    expect(screen.getByText('SKU-KEEP')).toBeInTheDocument()
+    expect(screen.getByText(/번역 제외 상품명/)).toBeInTheDocument()
+    expect(screen.getByText(/번역 제외 옵션명/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '添加品项' }))
+    await waitFor(() => expect(screen.getByText(/出库仓库：/)).toBeInTheDocument())
+    const stageOneRoot = document.querySelector('[data-purchasing-translate]')
+    expect(stageOneRoot).not.toBeNull()
+    expect(visibleKoreanUi(stageOneRoot!)).toEqual([])
+
+    rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="boxes" showCreate={false} /></>)
+
+    await waitFor(() => expect(screen.getByText('已保存箱子情况')).toBeInTheDocument())
+    expect(screen.getByText('第2步')).toBeInTheDocument()
+    expect(screen.getAllByRole('columnheader', { name: '箱号' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('columnheader', { name: '装载数量' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '添加箱子' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: '保存装箱拆分' }).length).toBeGreaterThan(0)
+    expect(screen.getByText('SKU-KEEP')).toBeInTheDocument()
+    expect(screen.getAllByText(/번역 제외 상품명/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/번역 제외 옵션명/).length).toBeGreaterThan(0)
+    const stageTwoRoot = document.querySelector('[data-purchasing-translate]')
+    expect(stageTwoRoot).not.toBeNull()
+    expect(visibleKoreanUi(stageTwoRoot!)).toEqual([])
+
+    fireEvent.click(screen.getByRole('button', { name: '한국어' }))
+    await waitFor(() => expect(screen.getByText('저장된 박스 현황')).toBeInTheDocument())
+    expect(screen.getAllByRole('columnheader', { name: '박스번호' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/번역 제외 상품명/).length).toBeGreaterThan(0)
+  })
+
+  it('translates refreshed China outbound values after Chinese mode is already active', async () => {
+    const detail: ChinaShipmentDetailView = {
+      ...shipmentA,
+      items: [{ ...shipmentA.items[0], reservedQuantity: 10 }],
+    }
+    const { rerender } = renderShipmentWithLanguage(detail, 'items')
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByText('10个')).toBeInTheDocument())
+
+    rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...detail, items: [{ ...detail.items[0], reservedQuantity: 12 }] }} selectedStep="items" showCreate={false} /></>)
+
+    await waitFor(() => expect(screen.getByText('12个')).toBeInTheDocument())
+  })
+
+  it('keeps later China outbound stages translated without translating product identity data', async () => {
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    const { rerender } = renderShipmentWithLanguage(detail, 'pallets')
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByText('托盘装载')).toBeInTheDocument())
+    const palletRoot = document.querySelector('[data-purchasing-translate]')
+    expect(palletRoot).not.toBeNull()
+    expect(visibleKoreanUi(palletRoot!)).toEqual([])
+
+    rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="summary" showCreate={false} /></>)
+
+    await waitFor(() => expect(screen.getByText('最终装载清单')).toBeInTheDocument())
+    const summaryRoot = document.querySelector('[data-purchasing-translate]')
+    expect(summaryRoot).not.toBeNull()
+    expect(visibleKoreanUi(summaryRoot!)).toEqual([])
+  })
+
+  it('translates the new China outbound request form while preserving item identity data', async () => {
+    render(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate /></>)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建中国出库申请' })).toBeInTheDocument())
+    const createRoot = document.querySelector('[data-purchasing-translate]')
+    expect(createRoot).not.toBeNull()
+    expect(visibleKoreanUi(createRoot!)).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
+    expect(visibleKoreanUi(createRoot!)).toEqual([])
+    expect(screen.getByText('새 상품')).toBeInTheDocument()
+    expect(screen.getByText('NEW-1')).toBeInTheDocument()
+  })
+
+  it('translates China shipment confirmations and Sonner feedback in Chinese mode', async () => {
+    renderShipmentWithLanguage(shipmentA, 'items')
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '删除出库作业' })).toBeInTheDocument()
+    expect(within(dialog).getByText('要删除此出库作业吗？预留库存、箱子、托盘和装载记录也会一并删除，且无法恢复。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeInTheDocument()
+    expect(visibleKoreanUi(dialog)).toEqual([])
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    const toaster = document.createElement('ol')
+    toaster.setAttribute('data-sonner-toaster', '')
+    const toast = document.createElement('li')
+    toast.textContent = '도착지와 올바른 출고수량을 입력한 뒤 저장해주세요.'
+    toaster.appendChild(toast)
+    document.body.appendChild(toaster)
+
+    await waitFor(() => expect(toast).toHaveTextContent('请输入目的地和正确的出库数量后再保存。'))
+    expect(visibleKoreanUi(toaster)).toEqual([])
+    toaster.remove()
   })
 
   it('keeps new shipment creation available while other requests are in progress', () => {

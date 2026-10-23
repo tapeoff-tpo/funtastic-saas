@@ -18,12 +18,21 @@ type Draft = {
   discard: () => void
 }
 
+type Confirmation = {
+  title: string
+  description: ReactNode
+  confirmLabel: string
+  destructive?: boolean
+  onConfirm: () => void
+}
+
 type Guard = {
   busy: boolean
   setDraft: (id: string, draft: Draft | null) => void
   getDraft: (id: string) => Draft | undefined
   hasDraftKind: (kind: DraftKind) => boolean
   requestNavigation: (navigate: () => void, kinds?: DraftKind[]) => void
+  requestConfirmation: (confirmation: Confirmation) => void
   runTask: (task: () => Promise<boolean>) => Promise<boolean>
 }
 
@@ -47,8 +56,10 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<{ navigate: () => void; kinds?: DraftKind[] } | null>(null)
+  const [pendingConfirmation, setPendingConfirmation] = useState<Confirmation | null>(null)
   const [error, setError] = useState('')
   const dialogRef = useRef<HTMLDivElement>(null)
+  const confirmationDialogRef = useRef<HTMLDivElement>(null)
 
   const setDraft = useCallback((id: string, draft: Draft | null) => {
     if (draft) drafts.current.set(id, draft)
@@ -85,6 +96,11 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     setPendingNavigation({ navigate, kinds })
   }, [])
 
+  const requestConfirmation = useCallback((confirmation: Confirmation) => {
+    if (busyRef.current) return
+    setPendingConfirmation(confirmation)
+  }, [])
+
   useEffect(() => {
     function beforeUnload(event: BeforeUnloadEvent) {
       if (drafts.current.size === 0 && !busyRef.current) return
@@ -116,6 +132,28 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown); if (previousFocus?.isConnected) previousFocus.focus() }
   }, [pendingNavigation])
+
+  useEffect(() => {
+    if (!pendingConfirmation) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const dialog = confirmationDialogRef.current
+    dialog?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !busyRef.current) {
+        event.preventDefault()
+        setPendingConfirmation(null)
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = [...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+      if (!focusable.length) { event.preventDefault(); return }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown); if (previousFocus?.isConnected) previousFocus.focus() }
+  }, [pendingConfirmation])
 
   function discardAndNavigate() {
     if (!pendingNavigation || busyRef.current) return
@@ -167,10 +205,17 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     pendingNavigation.navigate()
   }
 
-  return <GuardContext.Provider value={{ busy, setDraft, getDraft, hasDraftKind, requestNavigation, runTask }}>
+  function confirmPendingAction() {
+    const confirmation = pendingConfirmation
+    if (!confirmation || busyRef.current) return
+    setPendingConfirmation(null)
+    confirmation.onConfirm()
+  }
+
+  return <GuardContext.Provider value={{ busy, setDraft, getDraft, hasDraftKind, requestNavigation, requestConfirmation, runTask }}>
     {children}
     {pendingNavigation ? <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="china-unsaved-title" aria-describedby="china-unsaved-description" className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-xl">
+      <div ref={dialogRef} data-purchasing-translate role="dialog" aria-modal="true" aria-labelledby="china-unsaved-title" aria-describedby="china-unsaved-description" className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-xl">
         <h2 id="china-unsaved-title" className="text-lg font-semibold">저장하지 않은 내용이 있습니다</h2>
         <p id="china-unsaved-description" className="mt-2 text-sm text-muted-foreground">이동하기 전에 입력 내용을 저장할까요? 저장하지 않고 이동하면 현재 입력 중인 내용만 사라집니다.</p>
         {error ? <p role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800">{error}</p> : null}
@@ -178,6 +223,16 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
           <button type="button" disabled={busy} onClick={() => setPendingNavigation(null)} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">계속 작업</button>
           <button type="button" disabled={busy} onClick={discardAndNavigate} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">저장하지 않고 이동</button>
           <button type="button" disabled={busy} onClick={saveAndNavigate} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : null}저장 후 이동</button>
+        </div>
+      </div>
+    </div> : null}
+    {pendingConfirmation ? <div className="fixed inset-0 z-[101] flex items-center justify-center bg-black/50 p-4">
+      <div ref={confirmationDialogRef} data-purchasing-translate role="dialog" aria-modal="true" aria-labelledby="china-confirmation-title" aria-describedby="china-confirmation-description" className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-xl">
+        <h2 id="china-confirmation-title" className="text-lg font-semibold">{pendingConfirmation.title}</h2>
+        <p id="china-confirmation-description" className="mt-2 text-sm text-muted-foreground">{pendingConfirmation.description}</p>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => setPendingConfirmation(null)} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted">취소</button>
+          <button type="button" onClick={confirmPendingAction} className={`h-9 rounded-md px-3 text-sm font-medium text-primary-foreground ${pendingConfirmation.destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'}`}>{pendingConfirmation.confirmLabel}</button>
         </div>
       </div>
     </div> : null}

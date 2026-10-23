@@ -2986,6 +2986,24 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
     const existing = inventoryById ?? inventoriesByIdentity.get(identity)
     if (!existing) {
+      // A blank `중국창고` cell in the explicit inventory-status snapshot
+      // mode is a zero target only for an existing SaaS identity. It must not
+      // create an empty stock record for an item that has never been tracked
+      // in SaaS inventory.
+      if (row.reportBlankQuantity && row.onHandQuantity === 0) {
+        previewRows.push({
+          row: row.rowNumber,
+          warehouseCode: row.warehouseCode,
+          sku: row.sku,
+          productName: row.productName,
+          optionName: row.optionName,
+          beforeQuantity: null,
+          afterQuantity: 0,
+          status: 'unchanged',
+          message: '재고현황의 빈 중국창고 수량입니다. 현재 SaaS 재고가 없어 신규 등록하지 않습니다.',
+        })
+        continue
+      }
       if (!row.productName) {
         previewRows.push({
           row: row.rowNumber,
@@ -3049,6 +3067,11 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
 
     const productName = row.productName ?? existing.productName
+    const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
+      ? afterQuantity === existing.onHandQuantity
+        ? '재고현황의 빈 중국창고 수량이 0으로 확인되었습니다.'
+        : '재고현황의 빈 중국창고 수량을 0으로 변경합니다.'
+      : undefined
     previewRows.push({
       row: row.rowNumber,
       warehouseCode: row.warehouseCode,
@@ -3060,6 +3083,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
       status: afterQuantity === existing.onHandQuantity && productName === existing.productName
         ? 'unchanged'
         : 'changed',
+      ...(reportBlankQuantityMessage ? { message: reportBlankQuantityMessage } : {}),
     })
   }
 

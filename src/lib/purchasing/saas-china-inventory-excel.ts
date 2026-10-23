@@ -16,6 +16,18 @@ export const DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE = '중국창고'
 
 export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
 
+export type SaasChinaInventoryStatusReportBlankQuantityMode = 'keep' | 'zero'
+
+export type ParseSaasChinaInventoryWorkbookOptions = {
+  /**
+   * The inventory-status report uses a blank `중국창고` cell for no stock.
+   * Normal imports preserve existing SaaS inventory; the explicit snapshot
+   * mode retains those rows as a zero target so the planner can protect
+   * reservations and purchase-linked stock before applying anything.
+   */
+  inventoryStatusBlankQuantity?: SaasChinaInventoryStatusReportBlankQuantityMode
+}
+
 export type SaasChinaInventoryExcelRow = {
   rowNumber: number
   inventoryId: string | null
@@ -25,6 +37,8 @@ export type SaasChinaInventoryExcelRow = {
   optionName: string | null
   optionKey: string
   onHandQuantity: number | null
+  /** Set only for a blank `중국창고` value retained from an inventory-status report snapshot. */
+  reportBlankQuantity?: boolean
   note: string | null
   errors: string[]
 }
@@ -40,6 +54,8 @@ export type SaasChinaInventoryWorkbookParseResult = {
   totalRows: number
   skippedRows: number
   source: SaasChinaInventoryWorkbookSource
+  /** Number of item rows whose inventory-status `중국창고` cell was blank. */
+  reportBlankQuantityRowCount: number
 }
 
 export type SaasChinaInventoryExcelExportRow = {
@@ -85,6 +101,7 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
  */
 export async function parseSaasChinaInventoryWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
+  options: ParseSaasChinaInventoryWorkbookOptions = {},
 ): Promise<SaasChinaInventoryWorkbookParseResult> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as ExcelJS.Buffer)
@@ -103,15 +120,19 @@ export async function parseSaasChinaInventoryWorkbook(
   const rows: SaasChinaInventoryExcelRow[] = []
   let totalRows = 0
   let skippedRows = 0
+  let reportBlankQuantityRowCount = 0
+  const inventoryStatusBlankQuantity = options.inventoryStatusBlankQuantity ?? 'keep'
   const lastRow = Math.min(sheet.rowCount, headerRowNumber + MAX_DATA_ROWS)
   for (let rowNumber = headerRowNumber + 1; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
-    if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns)) {
+    const inventoryStatusReportBlankQuantity = isInventoryStatusReportBlankQuantityRow(row, columns)
+    if (inventoryStatusReportBlankQuantity) reportBlankQuantityRowCount += 1
+    if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns, inventoryStatusBlankQuantity)) {
       skippedRows += 1
       continue
     }
     totalRows += 1
-    rows.push(parseRow(row, rowNumber, columns))
+    rows.push(parseRow(row, rowNumber, columns, inventoryStatusReportBlankQuantity))
   }
   if (sheet.rowCount > lastRow) {
     const overflow = sheet.rowCount - lastRow
@@ -124,6 +145,7 @@ export async function parseSaasChinaInventoryWorkbook(
       optionName: null,
       optionKey: '',
       onHandQuantity: null,
+      reportBlankQuantity: false,
       note: null,
       errors: [`엑셀은 ${MAX_DATA_ROWS.toLocaleString('ko-KR')}행 이하만 업로드할 수 있습니다. ${overflow.toLocaleString('ko-KR')}행을 확인해주세요.`],
     })
@@ -136,6 +158,7 @@ export async function parseSaasChinaInventoryWorkbook(
     totalRows,
     skippedRows,
     source: columns.source,
+    reportBlankQuantityRowCount,
   }
 }
 
@@ -265,7 +288,12 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
   return columns
 }
 
-function parseRow(row: ExcelJS.Row, rowNumber: number, columns: HeaderColumns): SaasChinaInventoryExcelRow {
+function parseRow(
+  row: ExcelJS.Row,
+  rowNumber: number,
+  columns: HeaderColumns,
+  reportBlankQuantity = false,
+): SaasChinaInventoryExcelRow {
   const errors: string[] = []
   const valueAt = (field: keyof typeof HEADER_ALIASES) => (
     columns[field] ? cellText(row.getCell(columns[field]!).value).trim() : ''
@@ -278,7 +306,11 @@ function parseRow(row: ExcelJS.Row, rowNumber: number, columns: HeaderColumns): 
   const optionKey = optionName ?? ''
   const quantityText = valueAt('onHandQuantity')
   const note = valueAt('note') || null
-  const onHandQuantity = quantityText ? parseNonNegativeInteger(quantityText) : null
+  const onHandQuantity = quantityText
+    ? parseNonNegativeInteger(quantityText)
+    : reportBlankQuantity
+      ? 0
+      : null
 
   if (!sku) errors.push('품목코드를 입력해주세요.')
   if (inventoryId && !isUuid(inventoryId)) errors.push('SaaS재고ID를 확인해주세요.')
@@ -298,6 +330,7 @@ function parseRow(row: ExcelJS.Row, rowNumber: number, columns: HeaderColumns): 
     optionName,
     optionKey,
     onHandQuantity,
+    ...(reportBlankQuantity ? { reportBlankQuantity: true } : {}),
     note,
     errors,
   }
@@ -351,14 +384,28 @@ function isEmptyRow(row: ExcelJS.Row) {
   return !values.some((value) => cellText(value as ExcelJS.CellValue).trim())
 }
 
-function shouldSkipInventoryStatusReportRow(row: ExcelJS.Row, columns: HeaderColumns) {
+function shouldSkipInventoryStatusReportRow(
+  row: ExcelJS.Row,
+  columns: HeaderColumns,
+  blankQuantityMode: SaasChinaInventoryStatusReportBlankQuantityMode,
+) {
   if (columns.source !== 'inventory_status_report') return false
   const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
-  if (sku === '합계') return true
+  const productName = columns.productName ? cellText(row.getCell(columns.productName).value).trim() : ''
+  // This also skips the timestamp/footer line commonly found below the total.
+  if (!sku || sku === '합계' || !productName) return true
+  // Default behavior is deliberately non-destructive. Snapshot mode retains
+  // blank stock rows as zero targets; the planner only applies them to an
+  // existing SaaS inventory identity and never creates a new zero-stock row.
+  return blankQuantityMode === 'keep' && isInventoryStatusReportBlankQuantityRow(row, columns)
+}
+
+function isInventoryStatusReportBlankQuantityRow(row: ExcelJS.Row, columns: HeaderColumns) {
+  if (columns.source !== 'inventory_status_report') return false
+  const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
+  const productName = columns.productName ? cellText(row.getCell(columns.productName).value).trim() : ''
+  if (!sku || sku === '합계' || !productName) return false
   const quantity = columns.onHandQuantity ? cellText(row.getCell(columns.onHandQuantity).value).trim() : ''
-  // A blank cell in this report means the SKU has no quantity at the China
-  // warehouse. Skip it rather than turning an absent source value into a
-  // destructive zero or an invalid new SaaS inventory record.
   return !quantity
 }
 

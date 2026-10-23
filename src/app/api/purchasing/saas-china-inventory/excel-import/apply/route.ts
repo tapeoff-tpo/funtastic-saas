@@ -2,7 +2,10 @@ import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { parseSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-inventory-excel'
+import {
+  parseSaasChinaInventoryWorkbook,
+  type SaasChinaInventoryStatusReportBlankQuantityMode,
+} from '@/lib/purchasing/saas-china-inventory-excel'
 import {
   applySaasChinaInventoryWorkbook,
   previewSaasChinaInventoryWorkbook,
@@ -22,7 +25,9 @@ export async function POST(request: NextRequest) {
     if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: '엑셀 파일은 10MB 이하만 업로드할 수 있습니다.' }, { status: 400 })
 
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer())
+    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer(), {
+      inventoryStatusBlankQuantity: inventoryStatusBlankQuantityMode(form),
+    })
     const preview = await previewSaasChinaInventoryWorkbook({ userId: workspaceUserId, rows: parsed.rows })
     if (preview.summary.invalidCount > 0) {
       return NextResponse.json({ error: '엑셀 오류를 먼저 수정해주세요.', preview }, { status: 400 })
@@ -35,7 +40,12 @@ export async function POST(request: NextRequest) {
       sourceLabel: file.name,
     })
     revalidateSaasChinaInventoryPaths()
-    return NextResponse.json({ preview, result })
+    return NextResponse.json({
+      preview,
+      result,
+      source: parsed.source,
+      reportBlankQuantityRowCount: parsed.reportBlankQuantityRowCount,
+    })
   } catch (error) {
     console.error('SaaS China inventory Excel apply error:', error)
     return NextResponse.json(
@@ -43,6 +53,10 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     )
   }
+}
+
+function inventoryStatusBlankQuantityMode(form: FormData): SaasChinaInventoryStatusReportBlankQuantityMode {
+  return form.get('inventoryStatusBlankQuantity') === 'zero' ? 'zero' : 'keep'
 }
 
 function revalidateSaasChinaInventoryPaths() {

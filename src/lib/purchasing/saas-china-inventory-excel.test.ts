@@ -86,6 +86,7 @@ describe('SaaS China inventory Excel workbook', () => {
       source: 'inventory_status_report',
       totalRows: 2,
       skippedRows: 3,
+      reportBlankQuantityRowCount: 1,
       errors: [],
     })
     expect(parsed.rows).toEqual([
@@ -105,6 +106,25 @@ describe('SaaS China inventory Excel workbook', () => {
         onHandQuantity: 0,
       }),
     ])
+
+    const snapshot = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer(), {
+      inventoryStatusBlankQuantity: 'zero',
+    })
+    expect(snapshot).toMatchObject({
+      source: 'inventory_status_report',
+      totalRows: 3,
+      skippedRows: 2,
+      reportBlankQuantityRowCount: 1,
+      errors: [],
+    })
+    expect(snapshot.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        rowNumber: 4,
+        sku: 'SKU-NO-CHANGE',
+        onHandQuantity: 0,
+        reportBlankQuantity: true,
+      }),
+    ]))
   })
 
   it('creates an uploadable empty template and exports the current list using the editable headers', async () => {

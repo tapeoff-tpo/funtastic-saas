@@ -81,6 +81,38 @@ describe('SaaS China inventory Excel planner', () => {
     expect(result.rows[0]).toEqual(expect.objectContaining({ beforeQuantity: 10, afterQuantity: 10, status: 'unchanged' }))
   })
 
+  it('uses a blank inventory-status China quantity as a zero target only for an existing SaaS row', () => {
+    const zeroExisting = preview([
+      row({ onHandQuantity: 0, reportBlankQuantity: true }),
+    ], [inventory({ reservedQuantity: 0, availableQuantity: 10 })])
+    expect(zeroExisting.summary).toEqual({ newCount: 0, changedCount: 1, unchangedCount: 0, invalidCount: 0, rowCount: 1 })
+    expect(zeroExisting.rows[0]).toEqual(expect.objectContaining({
+      beforeQuantity: 10,
+      afterQuantity: 0,
+      status: 'changed',
+      message: '재고현황의 빈 중국창고 수량을 0으로 변경합니다.',
+    }))
+
+    const absentInventory = preview([
+      row({ sku: 'NOT-YET-TRACKED', productName: '미등록 상품', onHandQuantity: 0, reportBlankQuantity: true }),
+    ], [])
+    expect(absentInventory.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 1, invalidCount: 0, rowCount: 1 })
+    expect(absentInventory.rows[0]).toEqual(expect.objectContaining({
+      beforeQuantity: null,
+      afterQuantity: 0,
+      status: 'unchanged',
+      message: '재고현황의 빈 중국창고 수량입니다. 현재 SaaS 재고가 없어 신규 등록하지 않습니다.',
+    }))
+
+    const protectedQuantity = preview([
+      row({ onHandQuantity: 0, reportBlankQuantity: true }),
+    ])
+    expect(protectedQuantity.rows[0]).toEqual(expect.objectContaining({
+      status: 'protected',
+      message: '출고 예약 4개보다 적게 줄일 수 없습니다.',
+    }))
+  })
+
   it('allows a new identity only with a positive target and product name', () => {
     const result = preview([
       row({ sku: 'NEW-SKU', productName: '새 상품', onHandQuantity: 20 }),

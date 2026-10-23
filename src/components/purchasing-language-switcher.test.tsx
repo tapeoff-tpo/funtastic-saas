@@ -121,4 +121,20 @@ describe('PurchasingLanguageSwitcher', () => {
       expect(screen.getByTestId('dynamic-label')).toHaveTextContent('第 2 行：无法在当前列表中找到 Excel 的 SaaS 库存 ID。')
     })
   })
+
+  it('translates inventory-status snapshot controls and blank-quantity preview guidance', async () => {
+    const { rerender } = render(<GlobalTranslationFixture route="dashboard" dynamicLabel="재고현황의 빈 중국창고 수량을 0으로 반영" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('将库存现状中空白的中国仓库数量按 0 应用')
+    })
+
+    rerender(<GlobalTranslationFixture route="dashboard" dynamicLabel="빈 중국창고 수량 2행을 0 재고 대상으로 다시 검토합니다. 기존 SaaS 재고가 없는 행은 새로 등록하지 않습니다." />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('将空白中国仓库数量的 2 行重新作为 0 库存对象检查。当前没有 SaaS 库存的行不会新增登记。')
+    })
+  })
 })

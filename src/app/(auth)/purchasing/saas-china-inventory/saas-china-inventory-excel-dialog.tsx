@@ -6,6 +6,7 @@ import { AlertCircle, Check, Download, FileSpreadsheet, Loader2, Upload, X } fro
 import { toast } from 'sonner'
 
 type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'invalid'
+type InventoryStatusBlankQuantityMode = 'keep' | 'zero'
 
 type ImportPreviewRow = {
   row: number | null
@@ -41,6 +42,9 @@ export function SaasChinaInventoryExcelDialog() {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [inventoryStatusBlankQuantity, setInventoryStatusBlankQuantity] = useState<InventoryStatusBlankQuantityMode>('keep')
+  const [isInventoryStatusReport, setIsInventoryStatusReport] = useState(false)
+  const [reportBlankQuantityRowCount, setReportBlankQuantityRowCount] = useState(0)
   const [isWorking, setIsWorking] = useState(false)
 
   const hasErrors = Boolean(preview && (preview.errors.length > 0 || preview.counts.invalid > 0))
@@ -48,6 +52,9 @@ export function SaasChinaInventoryExcelDialog() {
   function resetSelection() {
     setFile(null)
     setPreview(null)
+    setInventoryStatusBlankQuantity('keep')
+    setIsInventoryStatusReport(false)
+    setReportBlankQuantityRowCount(0)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -59,6 +66,16 @@ export function SaasChinaInventoryExcelDialog() {
 
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     setFile(event.target.files?.[0] ?? null)
+    setPreview(null)
+    setInventoryStatusBlankQuantity('keep')
+    setIsInventoryStatusReport(false)
+    setReportBlankQuantityRowCount(0)
+  }
+
+  function changeInventoryStatusBlankQuantity(next: InventoryStatusBlankQuantityMode) {
+    setInventoryStatusBlankQuantity(next)
+    // The server recomputes the plan from the requested mode. Clearing the
+    // preview prevents applying a keep-mode review as a zero snapshot (or vice versa).
     setPreview(null)
   }
 
@@ -76,6 +93,7 @@ export function SaasChinaInventoryExcelDialog() {
     try {
       const form = new FormData()
       form.set('file', file)
+      form.set('inventoryStatusBlankQuantity', inventoryStatusBlankQuantity)
       const response = await fetch(mode === 'preview' ? previewUrl : applyUrl, {
         method: 'POST',
         body: form,
@@ -84,6 +102,10 @@ export function SaasChinaInventoryExcelDialog() {
       const record = asRecord(body)
       const nextPreview = normalizePreview(record?.preview ?? body)
       if (nextPreview) setPreview(nextPreview)
+      if (mode === 'preview') {
+        setIsInventoryStatusReport(readString(record?.source) === 'inventory_status_report')
+        setReportBlankQuantityRowCount(readNumber(record?.reportBlankQuantityRowCount) ?? 0)
+      }
 
       if (!response.ok) {
         toast.error(readError(record) ?? (mode === 'preview' ? '엑셀을 검토하지 못했습니다.' : '엑셀 재고 변경을 반영하지 못했습니다.'))
@@ -139,6 +161,7 @@ export function SaasChinaInventoryExcelDialog() {
               <div>
                 <h3 id="saas-inventory-excel-title" className="text-lg font-semibold">SaaS 중국재고 엑셀 변경</h3>
                 <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">현재고를 입력한 수량으로 변경합니다. 업로드에 없는 기존 재고는 삭제하지 않으며, 기존 행의 빈 셀은 현재 값을 유지합니다.</p>
+                <p className="mt-1 text-xs text-muted-foreground">엑셀 검토만으로는 재고가 변경되지 않습니다. 검토 결과 반영을 눌러야 실제 재고에 적용됩니다.</p>
               </div>
               <button type="button" onClick={closeDialog} disabled={isWorking} aria-label="엑셀 재고 변경 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
                 <X className="size-5" />
@@ -179,6 +202,26 @@ export function SaasChinaInventoryExcelDialog() {
                   엑셀 검토
                 </button>
               </div>
+              {isInventoryStatusReport && reportBlankQuantityRowCount > 0 ? (
+                <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/60 p-3">
+                  <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={inventoryStatusBlankQuantity === 'zero'}
+                      onChange={(event) => changeInventoryStatusBlankQuantity(event.target.checked ? 'zero' : 'keep')}
+                      disabled={isWorking}
+                      className="mt-0.5 size-4 rounded border-input accent-primary"
+                    />
+                    <span>재고현황의 빈 중국창고 수량을 0으로 반영</span>
+                  </label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {inventoryStatusBlankQuantity === 'zero'
+                      ? `빈 중국창고 수량 ${reportBlankQuantityRowCount.toLocaleString('ko-KR')}행을 0 재고 대상으로 다시 검토합니다. 기존 SaaS 재고가 없는 행은 새로 등록하지 않습니다.`
+                      : `빈 중국창고 수량 ${reportBlankQuantityRowCount.toLocaleString('ko-KR')}행은 현재 SaaS 재고를 유지합니다.`}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">선택을 바꾸면 검토 결과가 초기화됩니다. 다시 검토한 뒤 반영해주세요.</p>
+                </div>
+              ) : null}
             </div>
 
             {preview ? (

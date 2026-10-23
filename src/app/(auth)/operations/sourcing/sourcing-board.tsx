@@ -1,7 +1,7 @@
 'use client'
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
   CalendarDays,
@@ -102,6 +102,7 @@ type OwnerSheetProps = {
   allowNewRows?: boolean
   showSaveButton?: boolean
   isBulkSaving?: boolean
+  focusedItemId?: string | null
   onChanged: () => void
 }
 
@@ -119,17 +120,30 @@ const meetingStatusClass: Record<SourcingMeeting['status'], string> = {
 }
 
 export function SourcingBoard({ meetings, operators, viewer, exchangeRate, availableMembers }: Props) {
-  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null)
-  const [screen, setScreen] = useState<'list' | 'sheet'>('list')
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const selectedMeetingId = searchParams.get('meeting')
+  const focusedItemId = searchParams.get('item')
   const [activeOwnerId, setActiveOwnerId] = useState<string | null>(() => viewer.isMain ? null : viewer.operatorId)
   const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null
   const selectedOwnerId = viewer.isMain
     ? operators.some((operator) => operator.id === activeOwnerId) ? activeOwnerId : null
     : viewer.operatorId
 
-  function openMeeting(id: string) {
-    setSelectedMeetingId(id)
-    setScreen('sheet')
+  function openMeeting(id: string, itemId?: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('meeting', id)
+    if (itemId) {
+      params.set('item', itemId)
+    } else {
+      params.delete('item')
+    }
+    router.push(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+
+  function closeMeeting() {
+    router.replace(pathname, { scroll: false })
   }
 
   return (
@@ -140,7 +154,7 @@ export function SourcingBoard({ meetings, operators, viewer, exchangeRate, avail
         activeOwnerId={selectedOwnerId}
         onChange={setActiveOwnerId}
       />
-      {screen === 'sheet' && selectedMeeting ? (
+      {selectedMeeting ? (
         <MeetingSheet
           key={`${meetingVersion(selectedMeeting)}:${selectedOwnerId ?? 'main'}`}
           meeting={selectedMeeting}
@@ -148,7 +162,8 @@ export function SourcingBoard({ meetings, operators, viewer, exchangeRate, avail
           viewer={viewer}
           activeOwnerId={selectedOwnerId}
           exchangeRate={exchangeRate}
-          onBack={() => setScreen('list')}
+          focusedItemId={focusedItemId}
+          onBack={closeMeeting}
         />
       ) : (
         <MeetingList
@@ -215,7 +230,7 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
   activeOwnerId: string | null
   availableMembers: Array<{ id: string; displayName: string }>
   exchangeRate: CnyKrwReferenceRate
-  onOpen: (id: string) => void
+  onOpen: (id: string, itemId?: string) => void
 }) {
   const router = useRouter()
   const [meetingDate, setMeetingDate] = useState(nextWednesday())
@@ -340,7 +355,7 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
           <div>
             <h2 className="text-sm font-semibold">{isSearching ? '상품 검색 결과' : '소싱회의 목록'}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              {isSearching ? '상품을 누르면 해당 상품이 들어 있는 소싱회의를 엽니다.' : '날짜를 눌러 회의별 입력 시트를 엽니다.'}
+              {isSearching ? '상품을 누르면 해당 소싱회의의 상품 위치로 바로 이동합니다.' : '날짜를 눌러 회의별 입력 시트를 엽니다.'}
             </p>
           </div>
           <p className="text-xs text-muted-foreground" aria-live="polite">
@@ -357,7 +372,7 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => onOpen(meeting.id)}
+                  onClick={() => onOpen(meeting.id, item.id)}
                   className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
                 >
                   <div className="min-w-0">
@@ -510,12 +525,13 @@ function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }
   )
 }
 
-function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate, onBack }: {
+function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate, focusedItemId, onBack }: {
   meeting: SourcingMeeting
   operators: SourcingOperator[]
   viewer: SourcingViewer
   activeOwnerId: string | null
   exchangeRate: CnyKrwReferenceRate
+  focusedItemId: string | null
   onBack: () => void
 }) {
   const router = useRouter()
@@ -542,6 +558,18 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
     : selectedOwnerId
       ? meeting.items.filter((item) => item.ownerOperatorId === selectedOwnerId).length
       : 0
+
+  useEffect(() => {
+    if (!focusedItemId) return
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(sourcingItemAnchorId(focusedItemId))?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusedItemId, isEditing, selectedOwnerId])
 
   function saveMeetingDetails() {
     startTransition(async () => {
@@ -687,6 +715,7 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
           exchangeRate={exchangeRate.rate}
           showSaveButton={!showAllOperators}
           isBulkSaving={isSavingAll}
+          focusedItemId={focusedItemId}
           onChanged={() => router.refresh()}
         />
       ))}
@@ -705,6 +734,7 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
           allowNewRows={false}
           showSaveButton={!showAllOperators}
           isBulkSaving={isSavingAll}
+          focusedItemId={focusedItemId}
           onChanged={() => router.refresh()}
         />
       ) : null}
@@ -729,6 +759,7 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
   allowNewRows = true,
   showSaveButton = true,
   isBulkSaving = false,
+  focusedItemId = null,
   onChanged,
 }: OwnerSheetProps, ref) {
   const [rows, setRows] = useState<DraftRow[]>(() => sourceRows.map((item) => rowFromItem(item, exchangeRate)))
@@ -839,7 +870,7 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
   }
 
   if (!isEditing) {
-    return <ReadOnlyOwnerSheet owner={owner} rows={sourceRows} showOwnerColumn={showOwnerColumn} />
+    return <ReadOnlyOwnerSheet owner={owner} rows={sourceRows} showOwnerColumn={showOwnerColumn} focusedItemId={focusedItemId} />
   }
 
   return (
@@ -923,7 +954,14 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                 exchangeRateKrw: numberValue(row.exchangeRateKrw),
               })
               return (
-                <tr key={row.clientId} className="border-t align-top hover:bg-muted/20">
+                <tr
+                  key={row.clientId}
+                  id={row.itemId ? sourcingItemAnchorId(row.itemId) : undefined}
+                  className={cn(
+                    'border-t align-top hover:bg-muted/20',
+                    row.itemId === focusedItemId && 'bg-amber-50/70 ring-2 ring-inset ring-amber-300',
+                  )}
+                >
                   <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                   <TableCell><AutoGrowTextarea value={row.productName} onChange={(value) => updateRow(row.clientId, { productName: value })} placeholder="상품명" /></TableCell>
                   <TableCell>
@@ -1003,10 +1041,11 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
   )
 })
 
-function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
+function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn, focusedItemId }: {
   owner: SheetOwner
   rows: ManualSourcingItem[]
   showOwnerColumn: boolean
+  focusedItemId: string | null
 }) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card">
@@ -1054,7 +1093,14 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
           </thead>
           <tbody>
             {rows.map((item, index) => (
-              <tr key={item.id} className="border-t align-top hover:bg-muted/20">
+              <tr
+                key={item.id}
+                id={sourcingItemAnchorId(item.id)}
+                className={cn(
+                  'border-t align-top hover:bg-muted/20',
+                  item.id === focusedItemId && 'bg-amber-50/70 ring-2 ring-inset ring-amber-300',
+                )}
+              >
                 <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                 <TableCell><ReadOnlyText value={item.productName} /></TableCell>
                 <TableCell><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={option.name} />) : <ReadOnlyText value={item.productOption} />}</div></TableCell>
@@ -1301,6 +1347,10 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
 
 function blankOption(name = '', chinaUnitPriceCny = ''): DraftOption {
   return { clientId: crypto.randomUUID(), name, chinaUnitPriceCny }
+}
+
+function sourcingItemAnchorId(itemId: string) {
+  return `sourcing-item-${itemId}`
 }
 
 function meetingVersion(meeting: SourcingMeeting) {

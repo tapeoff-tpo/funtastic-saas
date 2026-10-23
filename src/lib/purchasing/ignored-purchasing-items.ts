@@ -106,16 +106,30 @@ export function isPurchasingItemIgnored(
   return false
 }
 
-export async function ensureIgnoredPurchasingItemsTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS purchasing_ignored_items (
-      user_id uuid NOT NULL,
-      identity_key text NOT NULL,
-      reason text,
-      ignored_at timestamptz NOT NULL DEFAULT now(),
-      PRIMARY KEY (user_id, identity_key)
-    )
-  `)
+let ensureIgnoredPurchasingItemsTablePromise: Promise<void> | null = null
+
+export function ensureIgnoredPurchasingItemsTable() {
+  ensureIgnoredPurchasingItemsTablePromise ??= (async () => {
+    const [row] = await db.execute<{ exists: boolean }>(sql`
+      SELECT to_regclass(current_schema() || '.purchasing_ignored_items') IS NOT NULL AS "exists"
+    `)
+    if (row?.exists) return
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS purchasing_ignored_items (
+        user_id uuid NOT NULL,
+        identity_key text NOT NULL,
+        reason text,
+        ignored_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, identity_key)
+      )
+    `)
+  })().catch((error) => {
+    ensureIgnoredPurchasingItemsTablePromise = null
+    throw error
+  })
+
+  return ensureIgnoredPurchasingItemsTablePromise
 }
 
 export async function getIgnoredPurchasingItemKeys(userId: string) {

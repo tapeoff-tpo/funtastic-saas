@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import {
+  WorkspaceDataOperationInProgressError,
+  withWorkspaceDataOperationLock,
+} from '@/lib/data-operation-lock'
 import { applyOutboundReflectionBatch } from '@/lib/outbound-reflection'
 
 export async function POST(
@@ -18,13 +22,18 @@ export async function POST(
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.trunc(limitParam), 1), 500) : 300
 
   try {
-    const result = await applyOutboundReflectionBatch(workspaceUserId, batchId, { limit })
+    const result = await withWorkspaceDataOperationLock(workspaceUserId, () => (
+      applyOutboundReflectionBatch(workspaceUserId, batchId, { limit })
+    ))
     revalidatePath('/outbound-reflection')
     revalidatePath('/inventory')
     revalidatePath('/analytics')
     revalidateTag('analytics', { expire: 0 })
     return NextResponse.json(result)
   } catch (error) {
+    if (error instanceof WorkspaceDataOperationInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
     console.error('[OutboundReflectionApply] Error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '출고반영에 실패했습니다.' },

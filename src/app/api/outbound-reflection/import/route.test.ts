@@ -13,12 +13,20 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class WorkspaceDataOperationInProgressError extends Error {
+    constructor() {
+      super('다른 엑셀 데이터 반영 작업이 진행 중입니다. 현재 작업이 끝난 뒤 다시 실행해주세요.')
+    }
+  }
+
   return {
     importOutboundReflectionBatch: vi.fn(),
     revalidatePath: vi.fn(),
+    withWorkspaceDataOperationLock: vi.fn(async (_userId: string, operation: () => Promise<unknown>) => operation()),
     InvalidExcelWorkbookError,
     ExcelWorkbookPasswordRequiredError,
     ExcelWorkbookPasswordInvalidError,
+    WorkspaceDataOperationInProgressError,
   }
 })
 
@@ -37,6 +45,11 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/admin-accounts/queries', () => ({
   getWorkspaceUserId: vi.fn().mockResolvedValue('workspace-user'),
+}))
+
+vi.mock('@/lib/data-operation-lock', () => ({
+  withWorkspaceDataOperationLock: mocks.withWorkspaceDataOperationLock,
+  WorkspaceDataOperationInProgressError: mocks.WorkspaceDataOperationInProgressError,
 }))
 
 vi.mock('@/lib/db', () => ({ db: {} }))
@@ -75,6 +88,9 @@ function importRequest(values: Record<string, unknown> = {}) {
 describe('POST /api/outbound-reflection/import', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.withWorkspaceDataOperationLock.mockImplementation(
+      async (_userId: string, operation: () => Promise<unknown>) => operation(),
+    )
   })
 
   it('returns the parser error as a 400 instead of registering an empty batch', async () => {
@@ -168,5 +184,20 @@ describe('POST /api/outbound-reflection/import', () => {
       code: 'excel_password_required',
       error: '파일이 비밀번호로 보호되어 있습니다. 파일의 비밀번호를 입력하여 주세요.',
     })
+  })
+
+  it('returns a conflict while another bulk data operation is running', async () => {
+    mocks.withWorkspaceDataOperationLock.mockRejectedValue(
+      new mocks.WorkspaceDataOperationInProgressError(),
+    )
+    const { POST } = await import('./route')
+
+    const response = await POST(importRequest() as never)
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: '다른 엑셀 데이터 반영 작업이 진행 중입니다. 현재 작업이 끝난 뒤 다시 실행해주세요.',
+    })
+    expect(mocks.importOutboundReflectionBatch).not.toHaveBeenCalled()
   })
 })

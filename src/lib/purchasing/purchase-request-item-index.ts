@@ -24,13 +24,8 @@ function resultRows<T>(result: T[] | { rows?: T[] }) {
  * the process-local promise avoids repeating the DDL for subsequent syncs.
  */
 export function ensurePurchaseRequestManagementCodeSkuLookupIndex(): Promise<void> {
-  ensurePurchaseRequestManagementCodeSkuLookupIndexPromise ??= db.transaction(async (tx) => {
-    // Serialize this upgrade across concurrently started serverless processes.
-    await tx.execute(sql`
-      SELECT pg_advisory_xact_lock(hashtext(${PURCHASE_REQUEST_MANAGEMENT_CODE_SKU_INDEX}))
-    `)
-
-    const metadataResult = await tx.execute<IndexMetadataRow>(sql`
+  ensurePurchaseRequestManagementCodeSkuLookupIndexPromise ??= (async () => {
+    const metadataResult = await db.execute<IndexMetadataRow>(sql`
       SELECT index_definition.indisunique AS "isUnique"
       FROM pg_class AS index_class
       JOIN pg_namespace AS index_namespace
@@ -41,17 +36,38 @@ export function ensurePurchaseRequestManagementCodeSkuLookupIndex(): Promise<voi
         AND index_class.relname = ${PURCHASE_REQUEST_MANAGEMENT_CODE_SKU_INDEX}
     `)
     const indexMetadata = resultRows(metadataResult)[0]
+    if (indexMetadata && !indexMetadata.isUnique) return
 
-    if (indexMetadata?.isUnique) {
+    await db.transaction(async (tx) => {
+      // Serialize the one-time repair across concurrently started serverless processes.
       await tx.execute(sql`
-        DROP INDEX IF EXISTS "purchase_request_items_user_management_code_sku"
+        SELECT pg_advisory_xact_lock(hashtext(${PURCHASE_REQUEST_MANAGEMENT_CODE_SKU_INDEX}))
       `)
-    }
 
-    await tx.execute(sql`
-      CREATE INDEX IF NOT EXISTS "purchase_request_items_user_management_code_sku"
-      ON "purchase_request_items" ("user_id", "purchase_management_code", "sku")
-    `)
+      const lockedMetadataResult = await tx.execute<IndexMetadataRow>(sql`
+        SELECT index_definition.indisunique AS "isUnique"
+        FROM pg_class AS index_class
+        JOIN pg_namespace AS index_namespace
+          ON index_namespace.oid = index_class.relnamespace
+        JOIN pg_index AS index_definition
+          ON index_definition.indexrelid = index_class.oid
+        WHERE index_namespace.nspname = current_schema()
+          AND index_class.relname = ${PURCHASE_REQUEST_MANAGEMENT_CODE_SKU_INDEX}
+      `)
+      const lockedIndexMetadata = resultRows(lockedMetadataResult)[0]
+      if (lockedIndexMetadata && !lockedIndexMetadata.isUnique) return
+
+      if (lockedIndexMetadata?.isUnique) {
+        await tx.execute(sql`
+          DROP INDEX IF EXISTS "purchase_request_items_user_management_code_sku"
+        `)
+      }
+
+      await tx.execute(sql`
+        CREATE INDEX IF NOT EXISTS "purchase_request_items_user_management_code_sku"
+        ON "purchase_request_items" ("user_id", "purchase_management_code", "sku")
+      `)
+    })
   }).catch((error) => {
     ensurePurchaseRequestManagementCodeSkuLookupIndexPromise = null
     throw error

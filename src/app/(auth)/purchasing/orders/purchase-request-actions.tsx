@@ -937,10 +937,29 @@ export function PurchaseReviewStatusFilter({
   selectedStatuses: readonly PurchaseReviewListStatus[]
   statusCounts: Record<PurchaseReviewListStatus, number>
 }) {
+  return (
+    <PurchaseReviewStatusFilterControl
+      key={selectedStatuses.join('|')}
+      selectedStatuses={selectedStatuses}
+      statusCounts={statusCounts}
+    />
+  )
+}
+
+function PurchaseReviewStatusFilterControl({
+  selectedStatuses,
+  statusCounts,
+}: {
+  selectedStatuses: readonly PurchaseReviewListStatus[]
+  statusCounts: Record<PurchaseReviewListStatus, number>
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const selected = new Set(selectedStatuses)
+  const [optimisticStatuses, setOptimisticStatuses] = useState<PurchaseReviewListStatus[]>([...selectedStatuses])
+  const [isPending, startTransition] = useTransition()
+
+  const selected = new Set(optimisticStatuses)
 
   function toggle(status: PurchaseReviewListStatus) {
     const next = new Set(selected)
@@ -951,6 +970,11 @@ export function PurchaseReviewStatusFilter({
       next.add(status)
     }
 
+    const nextStatuses = PURCHASE_REVIEW_STATUS_OPTIONS
+      .filter((option) => next.has(option.value))
+      .map((option) => option.value)
+    setOptimisticStatuses(nextStatuses)
+
     const params = new URLSearchParams(searchParams.toString())
     params.delete('reviewStatus')
     PURCHASE_REVIEW_STATUS_OPTIONS.forEach((option) => {
@@ -958,11 +982,13 @@ export function PurchaseReviewStatusFilter({
     })
     params.delete('page')
     const query = params.toString()
-    router.push(query ? `${pathname}?${query}` : pathname)
+    startTransition(() => {
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    })
   }
 
   return (
-    <fieldset className="flex h-7 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs">
+    <fieldset aria-busy={isPending} className="flex h-7 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs">
       <legend className="sr-only">발주상태 필터</legend>
       <span className="whitespace-nowrap text-muted-foreground">발주상태</span>
       {PURCHASE_REVIEW_STATUS_OPTIONS.map((option) => {
@@ -980,6 +1006,7 @@ export function PurchaseReviewStatusFilter({
           </label>
         )
       })}
+      {isPending ? <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="발주상태 적용 중" /> : null}
     </fieldset>
   )
 }

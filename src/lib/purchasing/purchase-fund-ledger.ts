@@ -90,9 +90,42 @@ const STATUS_PRIORITY: Record<PurchaseRequestStatus, number> = {
 
 let ensureSchemaPromise: Promise<void> | null = null
 
+type PurchaseFundLedgerSchemaRow = {
+  hasTable: boolean
+  hasSourceKeyIndex: boolean
+  hasOccurredOnIndex: boolean
+  hasRls: boolean
+}
+
+function resultRows<T>(result: T[] | { rows?: T[] }) {
+  return Array.isArray(result) ? result : result.rows ?? []
+}
+
+async function hasPurchaseFundLedgerSchema() {
+  const [row] = resultRows<PurchaseFundLedgerSchemaRow>(await db.execute(sql`
+    SELECT
+      to_regclass(current_schema() || '.purchase_fund_entries') IS NOT NULL AS "hasTable",
+      to_regclass(current_schema() || '.purchase_fund_entries_user_source_key') IS NOT NULL AS "hasSourceKeyIndex",
+      to_regclass(current_schema() || '.purchase_fund_entries_user_occurred_on') IS NOT NULL AS "hasOccurredOnIndex",
+      COALESCE((
+        SELECT relrowsecurity
+        FROM pg_class
+        WHERE oid = to_regclass(current_schema() || '.purchase_fund_entries')
+      ), false) AS "hasRls"
+  `))
+  return row?.hasTable === true
+    && row?.hasSourceKeyIndex === true
+    && row?.hasOccurredOnIndex === true
+    && row?.hasRls === true
+}
+
 export function ensurePurchaseFundLedgerSchema() {
   ensureSchemaPromise ??= (async () => {
     await ensurePurchasePaymentTrackingSchema()
+    // The migration owns this schema. Avoid table/index DDL on every cold
+    // start once production already has the required objects.
+    if (await hasPurchaseFundLedgerSchema()) return
+
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS purchase_fund_entries (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

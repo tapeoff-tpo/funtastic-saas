@@ -12,6 +12,10 @@ import {
   ExcelWorkbookPasswordRequiredError,
   InvalidExcelWorkbookError,
 } from '@/lib/orders/excel-workbook-buffer'
+import {
+  WorkspaceDataOperationInProgressError,
+  withWorkspaceDataOperationLock,
+} from '@/lib/data-operation-lock'
 import { importOutboundReflectionBatch } from '@/lib/outbound-reflection'
 
 export const runtime = 'nodejs'
@@ -37,15 +41,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const mappings = await resolveMappings(workspaceUserId, templateId)
-    const result = await importOutboundReflectionBatch({
-      userId: workspaceUserId,
-      fileName: file.name,
-      fileBuffer: await file.arrayBuffer(),
-      filePassword,
-      mappings,
-      fallbackMarketplaceId: marketplaceId || undefined,
-      applyInventory,
-    })
+    const result = await withWorkspaceDataOperationLock(workspaceUserId, async () => (
+      importOutboundReflectionBatch({
+        userId: workspaceUserId,
+        fileName: file.name,
+        fileBuffer: await file.arrayBuffer(),
+        filePassword,
+        mappings,
+        fallbackMarketplaceId: marketplaceId || undefined,
+        applyInventory,
+      })
+    ))
     // A duplicate upload intentionally returns a zero-row skipped result with
     // its existing queue ID. Only that response may bypass the parse error.
     const isExistingDuplicate = result.skipped && Boolean(result.batchId)
@@ -61,6 +67,9 @@ export async function POST(request: NextRequest) {
     revalidatePath('/outbound-reflection')
     return NextResponse.json(result)
   } catch (error) {
+    if (error instanceof WorkspaceDataOperationInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
     if (error instanceof ExcelWorkbookPasswordRequiredError) {
       return NextResponse.json(
         { code: 'excel_password_required', error: error.message },

@@ -1226,6 +1226,7 @@ export async function getPurchaseReviewList(input: {
   const pageSize = input.pageSize ?? 50
   const optionName = sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>'규격정보', '')), '')`
   const normalizedSearch = input.search?.trim().toLocaleLowerCase('ko-KR') ?? ''
+  const includeFullRawData = normalizedSearch.length > 0
   const [productRows, requestedRows] = await Promise.all([
     db.select({
       sku: products.internalSku,
@@ -1246,7 +1247,38 @@ export async function getPurchaseReviewList(input: {
       sql`${products.metadata}->'esa009m' IS NOT NULL`,
     )).orderBy(asc(products.internalSku)),
     db.select({
-      ...getTableColumns(purchaseRequestItems),
+      id: purchaseRequestItems.id,
+      sku: purchaseRequestItems.sku,
+      productName: purchaseRequestItems.productName,
+      optionName: purchaseRequestItems.optionName,
+      requestedQuantity: purchaseRequestItems.requestedQuantity,
+      actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+      chinaReceivedQuantity: purchaseRequestItems.chinaReceivedQuantity,
+      requestDate: purchaseRequestItems.requestDate,
+      outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
+      purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+      supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+      purchaseMethod: purchaseRequestItems.purchaseMethod,
+      paymentStatus: purchaseRequestItems.paymentStatus,
+      paymentPaidAt: purchaseRequestItems.paymentPaidAt,
+      bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+      bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
+      delayReason: purchaseRequestItems.delayReason,
+      delayNote: purchaseRequestItems.delayNote,
+      memo: purchaseRequestItems.memo,
+      buyerCode: purchaseRequestItems.buyerCode,
+      buyerName: purchaseRequestItems.buyerName,
+      managerCode: purchaseRequestItems.managerCode,
+      costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
+      updatedAt: purchaseRequestItems.updatedAt,
+      createdAt: purchaseRequestItems.createdAt,
+      // Full raw source rows can be large. They are needed for a text search
+      // and for the 10~200 visible rows, not for every review-row calculation.
+      rawData: includeFullRawData
+        ? purchaseRequestItems.rawData
+        : sql<Record<string, unknown>>`'{}'::jsonb`,
+      rawDataSource: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'source', '')`,
+      rawStockCoverageMonths: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'stockCoverageMonths', '')`,
     }).from(purchaseRequestItems).where(and(
       eq(purchaseRequestItems.userId, input.userId),
       eq(purchaseRequestItems.status, 'requested'),
@@ -1290,7 +1322,9 @@ export async function getPurchaseReviewList(input: {
       requestedQuantity,
       actualPurchaseQuantity: source?.actualPurchaseQuantity ?? null,
       chinaReceivedQuantity: source?.chinaReceivedQuantity ?? null,
-      rawData: source?.rawData ?? {},
+      rawData: includeFullRawData
+        ? source?.rawData ?? {}
+        : purchaseReviewRawDataSummary(source?.rawDataSource, source?.rawStockCoverageMonths),
       requestDate: source?.requestDate ?? null,
       outboundExpectedDate: source?.outboundExpectedDate ?? null,
       purchaseManagementCode: source?.purchaseManagementCode ?? null,
@@ -1348,16 +1382,36 @@ export async function getPurchaseReviewList(input: {
     }))
   const total = sortedRows.length
   const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize)
-  const metricsBySku = await getPurchaseReviewOperationalMetricsBySku({
-    userId: input.userId,
-    skus: pageRows.map((row) => row.sku),
-    targetStockMonths: input.targetStockMonths,
-  })
+  const pageRequestIds = pageRows
+    .map((row) => row.id)
+    .filter((id): id is string => Boolean(id))
+  const [metricsBySku, pageRawDataRows] = await Promise.all([
+    getPurchaseReviewOperationalMetricsBySku({
+      userId: input.userId,
+      skus: pageRows.map((row) => row.sku),
+      targetStockMonths: input.targetStockMonths,
+    }),
+    includeFullRawData || pageRequestIds.length === 0
+      ? Promise.resolve([])
+      : db
+        .select({
+          id: purchaseRequestItems.id,
+          rawData: purchaseRequestItems.rawData,
+        })
+        .from(purchaseRequestItems)
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          inArray(purchaseRequestItems.id, pageRequestIds),
+        )),
+  ])
+  const pageRawDataById = new Map(pageRawDataRows.map((row) => [row.id, row.rawData]))
   const urgentProductNames = getUrgentPurchaseProductNames(baseRows)
   const items: PurchaseReviewListItem[] = pageRows.map((row) => {
     const metrics = metricsBySku.get(row.sku) ?? emptyPurchaseReviewOperationalMetrics()
+    const rawData = row.id ? pageRawDataById.get(row.id) ?? row.rawData : row.rawData
     return {
       ...row,
+      rawData,
       chinaCurrentStock: metrics.chinaCurrentStock,
       purchaseReviewMetrics: metrics,
       purchaseReviewHistory: purchaseReviewHistoryFromMetrics(metrics),
@@ -1420,6 +1474,19 @@ function normalizePurchaseReviewListStatuses(value: readonly PurchaseReviewListS
   const selected = Array.from(new Set(value ?? []))
     .filter((status): status is PurchaseReviewListStatus => PURCHASE_REVIEW_LIST_STATUSES.includes(status))
   return selected.length > 0 ? selected : [...PURCHASE_REVIEW_LIST_STATUSES]
+}
+
+function purchaseReviewRawDataSummary(
+  source: string | null | undefined,
+  stockCoverageMonths: string | null | undefined,
+): Record<string, unknown> {
+  if (source !== 'auto_purchase_recommendation') return {}
+
+  const rawData: Record<string, unknown> = { source }
+  if (stockCoverageMonths !== null && stockCoverageMonths !== undefined) {
+    rawData.stockCoverageMonths = stockCoverageMonths
+  }
+  return rawData
 }
 
 function matchesPurchaseReviewSearch(row: {

@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import {
+  WorkspaceDataOperationInProgressError,
+  withWorkspaceDataOperationLock,
+} from '@/lib/data-operation-lock'
+import {
   classifyEcountPurchasingUpload,
   getEcountChinaInventorySnapshotDate,
   getEcountReportLabel,
@@ -39,6 +43,8 @@ const MAX_BUNDLED_TOTAL_SIZE = 25 * 1024 * 1024
 const MAX_UNPACKED_BUNDLE_SIZE = MAX_BUNDLED_TOTAL_SIZE + 256 * 1024
 const REPORT_KINDS: EcountReportKind[] = ['purchaseRequest', 'purchasePlan', 'purchaseHistory', 'chinaInventory', 'chinaOutbound']
 
+type PurchasingRawDataRequest = Awaited<ReturnType<typeof readPurchasingRawDataRequest>>
+
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
@@ -48,7 +54,7 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
 
   try {
-    let uploadRequest: Awaited<ReturnType<typeof readPurchasingRawDataRequest>>
+    let uploadRequest: PurchasingRawDataRequest
     try {
       uploadRequest = await readPurchasingRawDataRequest(request)
     } catch (error) {
@@ -56,7 +62,7 @@ export async function POST(request: NextRequest) {
         error: error instanceof Error ? error.message : '업로드 파일을 읽지 못했습니다.',
       }, { status: 400 })
     }
-    const { mode, fields, uploads } = uploadRequest
+    const { uploads } = uploadRequest
     if (uploads.length === 0 || uploads.length > REPORT_KINDS.length) {
       return NextResponse.json({ error: '변경할 원본 파일을 1~5개 선택해주세요.' }, { status: 400 })
     }
@@ -74,100 +80,118 @@ export async function POST(request: NextRequest) {
     }
 
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const classified: StoredEcountRawFile[] = []
-    for (const upload of uploads) {
-      try {
-        const { kind } = await classifyEcountPurchasingUpload(upload)
-        if (classified.some((item) => item.kind === kind)) {
-          return NextResponse.json({ error: `${getEcountReportLabel(kind)} 파일이 두 개 이상 선택되었습니다.` }, { status: 400 })
-        }
-        classified.push({ ...upload, kind, updatedAt: new Date().toISOString() })
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : '파일 구조를 확인하지 못했습니다.'
-        return NextResponse.json({
-          error: detail.startsWith(`${upload.fileName}:`) ? detail : `${upload.fileName}: ${detail}`,
-        }, { status: 400 })
-      }
-    }
-
-    const stored = await getStoredEcountRawFiles(workspaceUserId)
-    let accumulated: StoredEcountRawFile[]
-    try {
-      accumulated = await mergeEcountRawFiles(stored, classified)
-    } catch (error) {
-      return NextResponse.json({
-        error: error instanceof Error ? `기존 누적 원본과 새 파일을 합치지 못했습니다: ${error.message}` : '기존 누적 원본과 새 파일을 합치지 못했습니다.',
-      }, { status: 400 })
-    }
-    const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
-    for (const file of accumulated) combined.set(file.kind, file)
-    const changedKinds = classified.map((file) => file.kind)
-    const purchaseHistoryBridgeKeys = await getPurchaseHistoryBridgeKeys({
-      userId: workspaceUserId,
-      stored,
-      incoming: classified,
-      combinedFiles: [...combined.values()],
-      chinaInventoryWasUpdated: changedKinds.includes('chinaInventory'),
-    })
-    let snapshot
-    try {
-      snapshot = await parseEcountPurchasingSnapshot({
-        files: [...combined.values()],
-        asOfDate: fields.asOfDate,
-        domesticInventoryReflectedThrough: fields.domesticInventoryReflectedThrough,
-        purchasePlanConfirmedSince: fields.purchasePlanConfirmedSince,
-        allowMissingReports: true,
-        purchaseHistoryBridgeKeys,
+    return await withWorkspaceDataOperationLock(workspaceUserId, () => (
+      processPurchasingRawDataRequest({
+        workspaceUserId,
+        requestedByUserId: user.id,
+        uploadRequest,
       })
-    } catch (error) {
-      return NextResponse.json({
-        error: error instanceof Error ? error.message : '파일 내용을 검증하지 못했습니다.',
-      }, { status: 400 })
-    }
-    const summary = summarizeEcountPurchasingSnapshot(snapshot)
-
-    if (mode === 'preview') {
-      return NextResponse.json({
-        mode,
-        summary,
-        storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-        changedKinds,
-        currentState: await getEcountPurchasingSyncState(workspaceUserId),
-      })
-    }
-
-    const result = await syncEcountPurchasingSnapshot({
-      userId: workspaceUserId,
-      requestedByUserId: user.id,
-      snapshot,
-      reportKinds: changedKinds,
-    })
-    await saveStoredEcountRawFiles(workspaceUserId, accumulated)
-    await Promise.all(classified.map((file) => recordDataRefresh({
-      userId: workspaceUserId,
-      source: `purchasing_raw:${file.kind}`,
-      metadata: { fileName: file.fileName },
-    })))
-    revalidatePath('/purchasing/raw-data')
-    revalidatePath('/purchasing/purchases')
-    revalidatePath('/purchasing/orders')
-    revalidatePath('/purchasing/china-inventory')
-    revalidatePath('/purchasing/overdue')
-    return NextResponse.json({
-      mode,
-      summary,
-      result,
-      storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-      changedKinds,
-      currentState: await getEcountPurchasingSyncState(workspaceUserId),
-    })
+    ))
   } catch (error) {
+    if (error instanceof WorkspaceDataOperationInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
     console.error('[purchasing-raw-data]', error)
     return NextResponse.json(
       { error: getPurchasingRawDataErrorMessage(error) },
       { status: 500 },
     )
   }
+}
+
+async function processPurchasingRawDataRequest(input: {
+  workspaceUserId: string
+  requestedByUserId: string
+  uploadRequest: PurchasingRawDataRequest
+}) {
+  const { mode, fields, uploads } = input.uploadRequest
+  const classified: StoredEcountRawFile[] = []
+  for (const upload of uploads) {
+    try {
+      const { kind } = await classifyEcountPurchasingUpload(upload)
+      if (classified.some((item) => item.kind === kind)) {
+        return NextResponse.json({ error: `${getEcountReportLabel(kind)} 파일이 두 개 이상 선택되었습니다.` }, { status: 400 })
+      }
+      classified.push({ ...upload, kind, updatedAt: new Date().toISOString() })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '파일 구조를 확인하지 못했습니다.'
+      return NextResponse.json({
+        error: detail.startsWith(`${upload.fileName}:`) ? detail : `${upload.fileName}: ${detail}`,
+      }, { status: 400 })
+    }
+  }
+
+  const stored = await getStoredEcountRawFiles(input.workspaceUserId)
+  let accumulated: StoredEcountRawFile[]
+  try {
+    accumulated = await mergeEcountRawFiles(stored, classified)
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? `기존 누적 원본과 새 파일을 합치지 못했습니다: ${error.message}` : '기존 누적 원본과 새 파일을 합치지 못했습니다.',
+    }, { status: 400 })
+  }
+  const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
+  for (const file of accumulated) combined.set(file.kind, file)
+  const changedKinds = classified.map((file) => file.kind)
+  const purchaseHistoryBridgeKeys = await getPurchaseHistoryBridgeKeys({
+    userId: input.workspaceUserId,
+    stored,
+    incoming: classified,
+    combinedFiles: [...combined.values()],
+    chinaInventoryWasUpdated: changedKinds.includes('chinaInventory'),
+  })
+  let snapshot
+  try {
+    snapshot = await parseEcountPurchasingSnapshot({
+      files: [...combined.values()],
+      asOfDate: fields.asOfDate,
+      domesticInventoryReflectedThrough: fields.domesticInventoryReflectedThrough,
+      purchasePlanConfirmedSince: fields.purchasePlanConfirmedSince,
+      allowMissingReports: true,
+      purchaseHistoryBridgeKeys,
+    })
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : '파일 내용을 검증하지 못했습니다.',
+    }, { status: 400 })
+  }
+  const summary = summarizeEcountPurchasingSnapshot(snapshot)
+
+  if (mode === 'preview') {
+    return NextResponse.json({
+      mode,
+      summary,
+      storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
+      changedKinds,
+      currentState: await getEcountPurchasingSyncState(input.workspaceUserId),
+    })
+  }
+
+  const result = await syncEcountPurchasingSnapshot({
+    userId: input.workspaceUserId,
+    requestedByUserId: input.requestedByUserId,
+    snapshot,
+    reportKinds: changedKinds,
+  })
+  await saveStoredEcountRawFiles(input.workspaceUserId, accumulated)
+  await Promise.all(classified.map((file) => recordDataRefresh({
+    userId: input.workspaceUserId,
+    source: `purchasing_raw:${file.kind}`,
+    metadata: { fileName: file.fileName },
+  })))
+  revalidatePath('/purchasing/raw-data')
+  revalidatePath('/purchasing/purchases')
+  revalidatePath('/purchasing/orders')
+  revalidatePath('/purchasing/china-inventory')
+  revalidatePath('/purchasing/overdue')
+  return NextResponse.json({
+    mode,
+    summary,
+    result,
+    storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
+    changedKinds,
+    currentState: await getEcountPurchasingSyncState(input.workspaceUserId),
+  })
 }
 
 async function readPurchasingRawDataRequest(request: NextRequest): Promise<{

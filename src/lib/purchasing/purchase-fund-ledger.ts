@@ -341,9 +341,10 @@ export async function reconcilePurchaseFundDebitsInTransaction(
     userId: string
     fallbackExchangeRateKrw: number
     existingEntryMode?: PurchaseFundDebitExistingEntryMode
+    supplierOrderNumber?: string | null
   },
 ) {
-  const rows = await loadPurchaseDebitSourceRows(tx, input.userId)
+  const rows = await loadPurchaseDebitSourceRows(tx, input.userId, input.supplierOrderNumber)
   const snapshots = buildPurchaseDebitSnapshots(rows, input.fallbackExchangeRateKrw)
 
   for (const values of chunks(snapshots, 250)) {
@@ -565,7 +566,20 @@ export async function getPurchaseFundLedgerData(
   }
 }
 
-async function loadPurchaseDebitSourceRows(executor: DbExecutor, userId: string) {
+async function loadPurchaseDebitSourceRows(
+  executor: DbExecutor,
+  userId: string,
+  supplierOrderNumber?: string | null,
+) {
+  const supplierOrderReference = normalizeSupplierOrderReference(supplierOrderNumber)
+  const conditions = [
+    eq(purchaseRequestItems.userId, userId),
+    sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL`,
+  ]
+  if (supplierOrderReference) {
+    conditions.push(sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) = ${supplierOrderReference}`)
+  }
+
   return executor
     .select({
       id: purchaseRequestItems.id,
@@ -590,10 +604,7 @@ async function loadPurchaseDebitSourceRows(executor: DbExecutor, userId: string)
       eq(products.userId, purchaseRequestItems.userId),
       eq(products.internalSku, purchaseRequestItems.sku),
     ))
-    .where(and(
-      eq(purchaseRequestItems.userId, userId),
-      sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL`,
-    )) as Promise<PurchaseFundDebitSourceRow[]>
+    .where(and(...conditions)) as Promise<PurchaseFundDebitSourceRow[]>
 }
 
 function purchaseDebitLineKey(row: PurchaseFundDebitSourceRow) {

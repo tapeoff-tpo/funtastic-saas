@@ -2057,11 +2057,11 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (chinaReceivedQuantity === null) return null
   if (outboundRequestedQuantity === null) return null
   const now = new Date()
-  const shouldReconcileFund = input.supplierOrderNumber !== undefined
+  const mayReconcileFund = input.supplierOrderNumber !== undefined
     || requestedQuantity !== undefined
     || actualPurchaseQuantity !== undefined
-  if (shouldReconcileFund) await ensurePurchaseFundLedgerSchema()
-  const exchangeRateReference = input.paymentStatus === undefined && !shouldReconcileFund
+  if (mayReconcileFund) await ensurePurchaseFundLedgerSchema()
+  const exchangeRateReference = input.paymentStatus === undefined && !mayReconcileFund
     ? null
     : await getLatestCnyKrwReferenceRate()
   const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
@@ -2128,6 +2128,19 @@ export async function updatePurchaseRequestPlanFields(input: {
 
     const effectiveBulkPaymentPending = input.bulkPaymentPending ?? current.bulkPaymentPending
     if (input.bulkPaymentDueDate && !effectiveBulkPaymentPending) return null
+
+    const supplierOrderNumber = input.supplierOrderNumber === undefined
+      ? undefined
+      : emptyToNull(input.supplierOrderNumber)
+    const supplierOrderNumberChanged = supplierOrderNumber !== undefined
+      && supplierOrderNumber !== emptyToNull(current.supplierOrderNumber)
+    const requestedQuantityChanged = requestedQuantity !== undefined
+      && requestedQuantity !== current.requestedQuantity
+    const actualPurchaseQuantityChanged = actualPurchaseQuantity !== undefined
+      && actualPurchaseQuantity !== current.actualPurchaseQuantity
+    const shouldReconcileFund = (supplierOrderNumberChanged && supplierOrderNumber !== null)
+      || requestedQuantityChanged
+      || actualPurchaseQuantityChanged
 
     if (input.paymentStatus !== undefined && !current.costExchangeRateKrw && exchangeRateReference) {
       values.costExchangeRateKrw = String(exchangeRateReference.rate)
@@ -2197,6 +2210,11 @@ export async function updatePurchaseRequestPlanFields(input: {
         userId: input.userId,
         fallbackExchangeRateKrw: exchangeRateReference?.rate ?? 200,
         existingEntryMode: 'preserve',
+        supplierOrderNumber: supplierOrderNumberChanged
+          && requestedQuantity === undefined
+          && actualPurchaseQuantity === undefined
+          ? supplierOrderNumber
+          : undefined,
       })
     }
 

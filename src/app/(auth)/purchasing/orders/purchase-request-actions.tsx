@@ -1856,9 +1856,13 @@ export function PurchasePlanFieldsV2({
   const initialMethod = purchaseMethod === '개인' || purchaseMethod === '법인' ? purchaseMethod : purchaseMethod ? '직접입력' : '개인'
   const [methodMode, setMethodMode] = useState(initialMethod)
   const [customMethod, setCustomMethod] = useState(initialMethod === '직접입력' ? purchaseMethod ?? '' : '')
+  const [purchaseMethodDirty, setPurchaseMethodDirty] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
-  const savedTrackingNumber = trackingNumber?.trim() ?? ''
+  const [savedSupplierOrderNumber, setSavedSupplierOrderNumber] = useState(() => supplierOrderNumber?.trim() ?? '')
+  const [savedTrackingNumber, setSavedTrackingNumber] = useState(() => trackingNumber?.trim() ?? '')
+  const [savedDateValue, setSavedDateValue] = useState(() => formatDateInput(dateValue))
+  const [savedPurchaseMethod, setSavedPurchaseMethod] = useState(() => purchaseMethod?.trim() ?? '')
   const baiduTrackingHref = savedTrackingNumber
     ? `https://www.baidu.com/s?wd=${encodeURIComponent(`${savedTrackingNumber} 快递查询`)}`
     : null
@@ -1866,20 +1870,48 @@ export function PurchasePlanFieldsV2({
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
+    const nextSupplierOrderNumber = String(formData.get('supplierOrderNumber') ?? '').trim()
+    const nextTrackingNumber = String(formData.get('trackingNumber') ?? '').trim()
+    const nextDateValue = String(formData.get(dateField) ?? '')
+    const nextPurchaseMethod = (methodMode === '직접입력' ? customMethod : methodMode).trim()
+    const values: Record<string, string | null> = {}
+
+    if (nextSupplierOrderNumber !== savedSupplierOrderNumber) {
+      values.supplierOrderNumber = nextSupplierOrderNumber || null
+    }
+    if (showTrackingNumber && nextTrackingNumber !== savedTrackingNumber) {
+      values.trackingNumber = nextTrackingNumber || null
+    }
+    if (nextDateValue !== savedDateValue) {
+      values[dateField] = nextDateValue || null
+    }
+    if (purchaseMethodDirty && nextPurchaseMethod !== savedPurchaseMethod) {
+      values.purchaseMethod = nextPurchaseMethod || null
+    }
+    if (Object.keys(values).length === 0) {
+      setMessage('변경사항 없음')
+      return
+    }
+
     setMessage(null)
     startTransition(async () => {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supplierOrderNumber: String(formData.get('supplierOrderNumber') ?? ''),
-          ...(showTrackingNumber ? { trackingNumber: String(formData.get('trackingNumber') ?? '') } : {}),
-          [dateField]: String(formData.get(dateField) ?? '') || null,
-          purchaseMethod: methodMode === '직접입력' ? customMethod : methodMode,
-        }),
+        body: JSON.stringify(values),
       })
-      setMessage(response.ok ? '저장됨' : '저장 실패')
-      if (response.ok) router.refresh()
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        setMessage(body.error ?? '저장 실패')
+        return
+      }
+
+      setSavedSupplierOrderNumber(nextSupplierOrderNumber)
+      setSavedTrackingNumber(nextTrackingNumber)
+      setSavedDateValue(nextDateValue)
+      setSavedPurchaseMethod(nextPurchaseMethod)
+      setPurchaseMethodDirty(false)
+      setMessage('저장됨')
     })
   }
 
@@ -1931,7 +1963,10 @@ export function PurchasePlanFieldsV2({
         <div className="flex items-center gap-1">
           <select
             value={methodMode}
-            onChange={(event) => setMethodMode(event.target.value)}
+            onChange={(event) => {
+              setMethodMode(event.target.value)
+              setPurchaseMethodDirty(true)
+            }}
             className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
           >
             <option value="개인">개인</option>
@@ -1941,7 +1976,10 @@ export function PurchasePlanFieldsV2({
           {methodMode === '직접입력' ? (
             <Input
               value={customMethod}
-              onChange={(event) => setCustomMethod(event.target.value)}
+              onChange={(event) => {
+                setCustomMethod(event.target.value)
+                setPurchaseMethodDirty(true)
+              }}
               placeholder="직접입력"
               className="h-7 w-20 text-xs"
             />

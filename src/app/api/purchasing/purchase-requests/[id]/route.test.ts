@@ -89,6 +89,8 @@ describe('PATCH /api/purchasing/purchase-requests/[id]', () => {
       userId: 'workspace-user',
       trackingNumber: 'SF1234567890',
     }))
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith('/purchasing/payment-flow')
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith('/purchasing/china-shipments')
   })
 
   it('returns a linked SaaS purchase deletion rule as 409', async () => {

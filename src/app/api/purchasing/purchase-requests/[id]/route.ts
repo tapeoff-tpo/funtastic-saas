@@ -66,10 +66,23 @@ export async function PATCH(
   revalidatePath('/purchasing/overdue')
   revalidatePath('/purchasing/purchases')
   revalidatePath('/purchasing/orders')
-  revalidatePath('/purchasing/payment-flow')
-  revalidatePath('/purchasing/saas-china-inventory')
-  revalidatePath('/purchasing/china-shipments')
-  revalidatePath('/costs')
+  const paymentFlowChanged = body.data.supplierOrderNumber !== undefined
+    || body.data.requestedQuantity !== undefined
+    || body.data.actualPurchaseQuantity !== undefined
+    || body.data.paymentStatus !== undefined
+    || body.data.bulkPaymentPending !== undefined
+    || body.data.bulkPaymentDueDate !== undefined
+  if (paymentFlowChanged) {
+    revalidatePath('/purchasing/payment-flow')
+    revalidatePath('/costs')
+  }
+  const chinaOutboundChanged = body.data.saasChinaMode !== undefined
+    || body.data.chinaReceivedQuantity !== undefined
+    || body.data.outboundRequestedQuantity !== undefined
+  if (chinaOutboundChanged) {
+    revalidatePath('/purchasing/saas-china-inventory')
+    revalidatePath('/purchasing/china-shipments')
+  }
   return NextResponse.json({ id: row.id, excludedRecommendationCount: row.excludedRecommendationCount })
 }
 

@@ -299,6 +299,9 @@ function parseRow(
       : null
 
   if (!sku) errors.push('품목코드를 입력해주세요.')
+  if (columns.source === 'inventory_status_report' && !productName) {
+    errors.push('재고현황의 품목명을 입력해주세요.')
+  }
   if (inventoryId && !isUuid(inventoryId)) errors.push('SaaS재고ID를 확인해주세요.')
   if (warehouseCode.length > 100) errors.push('중국창고는 100자 이하로 입력해주세요.')
   if (sku.length > 100) errors.push('품목코드는 100자 이하로 입력해주세요.')
@@ -376,10 +379,16 @@ function shouldSkipInventoryStatusReportRow(
 ) {
   if (columns.source !== 'inventory_status_report') return false
   const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
-  const productName = columns.productName ? cellText(row.getCell(columns.productName).value).trim() : ''
-  // This also skips the timestamp/footer line commonly found below the total.
-  if (!sku || sku === '합계' || !productName) return true
-  return false
+  if (sku === '합계') return true
+  // The source report writes one timestamp-only footer below its total row.
+  // Every other nonempty row must be parsed and validated so a malformed row
+  // cannot silently turn into an omission in a full snapshot.
+  const values = Array.isArray(row.values) ? row.values.slice(1) : Object.values(row.values)
+  const nonEmptyValues = values
+    .map((value) => cellText(value as ExcelJS.CellValue).trim())
+    .filter(Boolean)
+  return nonEmptyValues.length === 1
+    && /^\d{8}\s+(?:오전|오후)\s+\d{1,2}:\d{2}(?::\d{2})?$/.test(nonEmptyValues[0])
 }
 
 function isInventoryStatusReportBlankQuantityRow(row: ExcelJS.Row, columns: HeaderColumns) {

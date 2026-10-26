@@ -180,6 +180,25 @@ describe('SaaS China inventory Excel planner', () => {
     ]))
   })
 
+  it('blocks malformed report identities without also classifying them as omitted removals', () => {
+    const result = preview([
+      row({
+        productName: null,
+        errors: ['재고현황의 품목명을 입력해주세요.'],
+      }),
+    ], [inventory({ reservedQuantity: 0, availableQuantity: 10 })], new Map(), {
+      fullSnapshot: true,
+      snapshotWarehouseCodes: ['중국창고'],
+    })
+
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 0, removedCount: 0, invalidCount: 1, rowCount: 1 })
+    expect(result.rows).toEqual([expect.objectContaining({
+      sku: 'SKU-A',
+      status: 'invalid',
+      message: '재고현황의 품목명을 입력해주세요.',
+    })])
+  })
+
   it('does not remove an omitted identity in another warehouse from a default-China snapshot', () => {
     const result = preview([
       row({ onHandQuantity: 10, productName: '기존 상품명' }),

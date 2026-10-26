@@ -3016,6 +3016,12 @@ export function buildSaasChinaInventoryWorkbookPreview(
   const snapshotIdentityKeys = new Set<string>()
 
   for (const row of rows) {
+    const identity = saasChinaInventoryIdentityKey(row.warehouseCode, row.sku, row.optionKey)
+    const isSnapshotRow = input.fullSnapshot && snapshotWarehouseCodes.has(row.warehouseCode)
+    // A malformed report row still proves that this identity was present in
+    // the source. It will block the whole import below, but must never also
+    // be interpreted as a missing identity and shown as a removal.
+    if (isSnapshotRow && row.sku) snapshotIdentityKeys.add(identity)
     const rowErrors = [...row.errors, ...validateSaasChinaInventoryWorkbookRow(row)]
     if (duplicateRowNumbers.has(row.rowNumber)) {
       rowErrors.push('같은 중국창고·품목코드·옵션명 조합이 엑셀에 중복되어 있습니다.')
@@ -3035,9 +3041,6 @@ export function buildSaasChinaInventoryWorkbookPreview(
       continue
     }
 
-    const identity = saasChinaInventoryIdentityKey(row.warehouseCode, row.sku, row.optionKey)
-    const isSnapshotRow = input.fullSnapshot && snapshotWarehouseCodes.has(row.warehouseCode)
-    if (isSnapshotRow) snapshotIdentityKeys.add(identity)
     const inventoryById = row.inventoryId ? inventoriesById.get(row.inventoryId) : null
     if (row.inventoryId && !inventoryById) {
       previewRows.push({

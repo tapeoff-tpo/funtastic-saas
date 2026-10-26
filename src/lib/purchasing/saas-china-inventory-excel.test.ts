@@ -114,6 +114,34 @@ describe('SaaS China inventory Excel workbook', () => {
     ])
   })
 
+  it('keeps malformed inventory-status data rows so a full snapshot is blocked instead of silently omitting them', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('재고현황')
+    sheet.addRow(['회사명 : 테이포프 / 20261023'])
+    sheet.addRow([
+      '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
+      '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
+    ])
+    sheet.addRow(['SKU-MISSING-NAME', '', '레드', '[상품]', 6, '', '', '', '', '', 6, ''])
+    sheet.addRow(['합계', '', '', '', 6, '', '', '', '', '', 6, ''])
+    sheet.addRow(['20261023  오후 4:06:39'])
+
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
+
+    expect(parsed).toMatchObject({
+      source: 'inventory_status_report',
+      totalRows: 1,
+      skippedRows: 2,
+      errors: [expect.objectContaining({ row: 3, message: '재고현황의 품목명을 입력해주세요.' })],
+    })
+    expect(parsed.rows).toEqual([expect.objectContaining({
+      rowNumber: 3,
+      sku: 'SKU-MISSING-NAME',
+      productName: null,
+      onHandQuantity: 6,
+    })])
+  })
+
   it('creates an uploadable empty template and exports the current list using the editable headers', async () => {
     const template = await exportSaasChinaInventoryTemplateWorkbook()
     const templateWorkbook = new ExcelJS.Workbook()

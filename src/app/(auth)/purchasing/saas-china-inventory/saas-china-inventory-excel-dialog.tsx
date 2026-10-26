@@ -31,7 +31,6 @@ type ImportPreviewError = {
 }
 
 const templateUrl = '/api/purchasing/saas-china-inventory/excel-template'
-const exportUrl = '/api/purchasing/saas-china-inventory/excel-export'
 const previewUrl = '/api/purchasing/saas-china-inventory/excel-import/preview'
 const applyUrl = '/api/purchasing/saas-china-inventory/excel-import/apply'
 
@@ -167,10 +166,6 @@ export function SaasChinaInventoryExcelDialog() {
               <a href={templateUrl} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
                 <Download className="size-4" />
                 양식 다운로드
-              </a>
-              <a href={exportUrl} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
-                <Download className="size-4" />
-                현재 목록 다운로드
               </a>
             </div>
 

@@ -2,7 +2,7 @@
 
 import { type FormEvent, type ReactNode, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, Loader2, Pencil, Plus } from 'lucide-react'
+import { Box, Download, Loader2, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   adjustSaasChinaInventoryAction,
@@ -37,6 +37,8 @@ const emptyReceiveForm = {
   quantity: '',
   note: '',
 }
+
+const exportUrl = '/api/purchasing/saas-china-inventory/excel-export'
 
 export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaInventoryViewItem[]; summary: Summary }) {
   const router = useRouter()
@@ -155,6 +157,10 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <SaasChinaInventoryExcelDialog />
+            <a href={exportUrl} className="inline-flex h-9 w-full shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted sm:w-auto">
+              <Download className="size-4" />
+              현재 목록 다운로드
+            </a>
             <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="품목코드, 상품명, 옵션 검색" />
           </div>
         </div>

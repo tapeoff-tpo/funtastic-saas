@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import type { SaasChinaInventoryExcelRow } from './saas-china-inventory-excel'
+import {
+  isSaasChinaInventoryExcludedWarehouseCode,
+  SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR,
+  type SaasChinaInventoryExcelRow,
+} from './saas-china-inventory-excel'
 import {
   chinaOutboundBoxItems,
   chinaOutboundBoxes,
@@ -901,6 +905,7 @@ export async function receiveSaasChinaInventory(input: SaasChinaInventoryInput) 
   const sku = requiredText(input.sku, '품목코드')
   const productName = requiredText(input.productName, '상품명')
   const warehouseCode = requiredText(input.warehouseCode, '중국창고')
+  assertSaasChinaInventoryWarehouseAllowed(warehouseCode)
   const optionName = optionalText(input.optionName)
   const optionKey = optionName ?? ''
 
@@ -1375,6 +1380,7 @@ export async function receiveSaasChinaPurchaseArrivalInTransaction(
   const sku = requiredText(input.sku, '품목코드')
   const productName = requiredText(input.productName, '상품명')
   const warehouseCode = requiredText(input.warehouseCode ?? SAAS_CHINA_DEFAULT_WAREHOUSE_CODE, '중국창고')
+  assertSaasChinaInventoryWarehouseAllowed(warehouseCode)
   const optionName = optionalText(input.optionName)
   const optionKey = optionName ?? ''
 
@@ -3435,6 +3441,12 @@ function normalizeSaasChinaInventoryWorkbookRow(
 function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventoryWorkbookRow) {
   const errors: string[] = []
   if (!row.warehouseCode) errors.push('중국창고를 입력해주세요.')
+  if (
+    isSaasChinaInventoryExcludedWarehouseCode(row.warehouseCode)
+    && !row.errors.includes(SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR)
+  ) {
+    errors.push(SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR)
+  }
   if (!row.sku) errors.push('품목코드를 입력해주세요.')
   if (row.inventoryId && !isUuid(row.inventoryId)) errors.push('SaaS재고ID를 확인해주세요.')
   if (row.warehouseCode.length > 100) errors.push('중국창고는 100자 이하로 입력해주세요.')
@@ -3447,6 +3459,12 @@ function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventory
     errors.push('현재고는 0 이상의 정수로 입력해주세요.')
   }
   return errors
+}
+
+function assertSaasChinaInventoryWarehouseAllowed(warehouseCode: string) {
+  if (isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)) {
+    throw new Error(SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR)
+  }
 }
 
 function duplicateSaasChinaInventoryWorkbookRowNumbers(rows: readonly NormalizedSaasChinaInventoryWorkbookRow[]) {

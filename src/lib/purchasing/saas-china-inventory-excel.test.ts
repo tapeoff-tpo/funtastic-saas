@@ -6,6 +6,7 @@ import {
   exportSaasChinaInventoryWorkbook,
   parseSaasChinaInventoryWorkbook,
   saasChinaInventoryExportFilename,
+  SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR,
   SAAS_CHINA_INVENTORY_EXCEL_HEADERS,
   SAAS_CHINA_INVENTORY_STATUS_HEADERS,
   SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
@@ -59,7 +60,25 @@ describe('SaaS China inventory Excel workbook', () => {
     ]))
   })
 
-  it('expands every positive inventory-status warehouse quantity and omits blank or zero cells', async () => {
+  it('rejects retired warehouse codes in generic SaaS inventory uploads', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['부품관리', 'SKU-PARTS', '부품 상품', '', 10],
+      ['브랜드', 'SKU-BRAND', '브랜드 상품', '', 20],
+      ['원재료 창고', 'SKU-MATERIAL', '원재료 상품', '', 30],
+      ['중국창고', 'SKU-CHINA', '중국 상품', '', 40],
+    ]))
+
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ row: 2, message: SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR }),
+      expect.objectContaining({ row: 3, message: SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR }),
+      expect.objectContaining({ row: 4, message: SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR }),
+    ]))
+    expect(parsed.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rowNumber: 5, warehouseCode: '중국창고', sku: 'SKU-CHINA', onHandQuantity: 40, errors: [] }),
+    ]))
+  })
+
+  it('ignores retired Ecount warehouse columns while retaining positive allowed warehouse quantities', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('재고현황')
     sheet.addRow(['회사명 : 테이포프 / 20261023'])
@@ -67,10 +86,10 @@ describe('SaaS China inventory Excel workbook', () => {
       '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
       '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
     ])
-    sheet.addRow(['SKU-CHINA', '중국창고 상품', '레드', '[상품]', 14, 2, '', '', '', '', 12, ''])
+    sheet.addRow(['SKU-CHINA', '중국창고 상품', '레드', '[상품]', 37, 2, 3, 7, 4, 1, 12, 8])
     sheet.addRow(['SKU-NO-CHANGE', '빈 중국창고', '블랙', '[상품]', 5, '', '', 5, '', '', '', ''])
     sheet.addRow(['SKU-ZERO', '0 재고', '화이트', '[상품]', 0, '', '', '', '', '', 0, ''])
-    sheet.addRow(['합계', '', '', '', 17, '', '', 5, '', '', 12, ''])
+    sheet.addRow(['합계', '', '', '', 42, 2, 3, 12, 4, 1, 12, 8])
     sheet.addRow(['20261023  오후 4:06:39'])
 
     const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
@@ -79,18 +98,27 @@ describe('SaaS China inventory Excel workbook', () => {
       source: 'inventory_status_report',
       totalRows: 3,
       skippedRows: 2,
-      reportEmptyQuantityCellCount: 18,
+      reportEmptyQuantityCellCount: 7,
       errors: [],
     })
     expect(parsed.rows).toEqual([
       expect.objectContaining({
         rowNumber: 3,
-        warehouseCode: '부품관리',
+        warehouseCode: '스마일배송(개인个人1688)',
         sku: 'SKU-CHINA',
         productName: '중국창고 상품',
         optionName: '레드',
         itemCategory: '[상품]',
-        onHandQuantity: 2,
+        onHandQuantity: 7,
+      }),
+      expect.objectContaining({
+        rowNumber: 3,
+        warehouseCode: '중국발생비용 (中国产生费用)',
+        sku: 'SKU-CHINA',
+        productName: '중국창고 상품',
+        optionName: '레드',
+        itemCategory: '[상품]',
+        onHandQuantity: 1,
       }),
       expect.objectContaining({
         rowNumber: 3,
@@ -102,6 +130,13 @@ describe('SaaS China inventory Excel workbook', () => {
         onHandQuantity: 12,
       }),
       expect.objectContaining({
+        rowNumber: 3,
+        warehouseCode: '쿠팡',
+        sku: 'SKU-CHINA',
+        itemCategory: '[상품]',
+        onHandQuantity: 8,
+      }),
+      expect.objectContaining({
         rowNumber: 4,
         warehouseCode: '스마일배송(개인个人1688)',
         sku: 'SKU-NO-CHANGE',
@@ -109,6 +144,11 @@ describe('SaaS China inventory Excel workbook', () => {
         onHandQuantity: 5,
       }),
     ])
+    expect(parsed.rows).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ warehouseCode: '부품관리' }),
+      expect.objectContaining({ warehouseCode: '브랜드' }),
+      expect.objectContaining({ warehouseCode: '원재료 창고' }),
+    ]))
   })
 
   it('keeps malformed inventory-status data rows so a full snapshot is blocked instead of silently omitting them', async () => {
@@ -167,6 +207,13 @@ describe('SaaS China inventory Excel workbook', () => {
     expect(templateWorkbook.getWorksheet('작성안내')?.getCell('B5').text).toContain('재고 식별키')
     expect(await parseSaasChinaInventoryWorkbook(template)).toMatchObject({ rows: [], errors: [] })
 
+    expect(SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES).toEqual([
+      '스마일배송(개인个人1688)',
+      '중국발생비용 (中国产生费用)',
+      '중국창고',
+      '쿠팡',
+    ])
+
     const current = await exportSaasChinaInventoryWorkbook([
       {
         id: '11111111-1111-4111-8111-111111111111',
@@ -195,6 +242,33 @@ describe('SaaS China inventory Excel workbook', () => {
         itemCategory: '[원재료]',
         onHandQuantity: 4,
       },
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        warehouseCode: '부품관리',
+        sku: 'SKU-RETIRED-PARTS',
+        productName: '제외 대상 부품',
+        optionName: null,
+        itemCategory: '[상품]',
+        onHandQuantity: 10,
+      },
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        warehouseCode: '브랜드',
+        sku: 'SKU-RETIRED-BRAND',
+        productName: '제외 대상 브랜드',
+        optionName: null,
+        itemCategory: '[상품]',
+        onHandQuantity: 20,
+      },
+      {
+        id: '66666666-6666-4666-8666-666666666666',
+        warehouseCode: '원재료 창고',
+        sku: 'SKU-RETIRED-MATERIAL',
+        productName: '제외 대상 원재료',
+        optionName: null,
+        itemCategory: '[원재료]',
+        onHandQuantity: 30,
+      },
     ])
     const currentWorkbook = new ExcelJS.Workbook()
     await currentWorkbook.xlsx.load(current as unknown as ExcelJS.Buffer)
@@ -203,15 +277,22 @@ describe('SaaS China inventory Excel workbook', () => {
     const inventoryStatusSheet = sheet!
     const headerValues = inventoryStatusSheet.getRow(1).values
     expect(Array.isArray(headerValues) ? headerValues.slice(1) : []).toEqual([
-      ...SAAS_CHINA_INVENTORY_STATUS_HEADERS,
-      ...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
+      '품목코드',
+      '품목명',
+      '규격',
+      '품목구분',
+      '합계',
+      '스마일배송(개인个人1688)',
+      '중국발생비용 (中国产生费用)',
+      '중국창고',
+      '쿠팡',
       '테스트창고',
     ])
     expect(inventoryStatusSheet.getCell('E2').value).toBe(4)
-    expect(inventoryStatusSheet.getCell('M2').value).toBe(4)
+    expect(inventoryStatusSheet.getCell('J2').value).toBe(4)
     expect(inventoryStatusSheet.getCell('E3').value).toBe(15)
-    expect(inventoryStatusSheet.getCell('H3').value).toBe(3)
-    expect(inventoryStatusSheet.getCell('K3').value).toBe(12)
+    expect(inventoryStatusSheet.getCell('F3').value).toBe(3)
+    expect(inventoryStatusSheet.getCell('H3').value).toBe(12)
     const parsed = await parseSaasChinaInventoryWorkbook(current)
     expect(parsed.source).toBe('inventory_status_report')
     expect(parsed.rows).toEqual(expect.arrayContaining([
@@ -255,11 +336,11 @@ describe('SaaS China inventory Excel workbook', () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('재고현황')
     sheet.addRow([
-      '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
-      '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
+      ...SAAS_CHINA_INVENTORY_STATUS_HEADERS,
+      ...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
     ])
-    for (let index = 0; index < 143; index += 1) {
-      sheet.addRow([`SKU-${index}`, `상품 ${index}`, '', '[상품]', 7, 1, 1, 1, 1, 1, 1, 1])
+    for (let index = 0; index < 251; index += 1) {
+      sheet.addRow([`SKU-${index}`, `상품 ${index}`, '', '[상품]', 4, 1, 1, 1, 1])
     }
 
     const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
@@ -267,7 +348,7 @@ describe('SaaS China inventory Excel workbook', () => {
     expect(parsed.rows).toHaveLength(1_001)
     expect(parsed.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        message: '재고현황 파일은 1,000개 재고 행 이하만 업로드할 수 있습니다. 1개 항목을 확인해주세요.',
+        message: '재고현황 파일은 1,000개 재고 행 이하만 업로드할 수 있습니다. 4개 항목을 확인해주세요.',
       }),
     ]))
   })

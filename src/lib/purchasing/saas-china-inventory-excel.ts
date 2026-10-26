@@ -21,14 +21,30 @@ export const SAAS_CHINA_INVENTORY_STATUS_HEADERS = [
   '합계',
 ] as const
 
-// Keep the standard Ecount inventory-status order. Extra warehouses are
-// appended by the exporter, so a new warehouse is never omitted from a
-// downloadable full snapshot.
-export const SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES = [
+// These are Ecount operational columns, not SaaS China-inventory locations.
+// A source inventory-status workbook may retain them, but SaaS imports must
+// ignore them so they cannot recreate retired warehouse stock.
+export const SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_CODES = [
   '부품관리',
   '브랜드',
-  '스마일배송(개인个人1688)',
   '원재료 창고',
+] as const
+
+export const SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR = '부품관리, 브랜드, 원재료 창고는 SaaS 중국재고에서 사용하지 않습니다.'
+
+const saasChinaInventoryExcludedWarehouseCodeSet = new Set(
+  SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_CODES.map((warehouseCode) => normalizeHeader(warehouseCode)),
+)
+
+export function isSaasChinaInventoryExcludedWarehouseCode(warehouseCode: string) {
+  return saasChinaInventoryExcludedWarehouseCodeSet.has(normalizeHeader(warehouseCode))
+}
+
+// Keep the SaaS locations from the standard Ecount inventory-status order.
+// Extra active warehouses are appended by the exporter, unless they are a
+// retired Ecount-only location above.
+export const SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES = [
+  '스마일배송(개인个人1688)',
   '중국발생비용 (中国产生费用)',
   '중국창고',
   '쿠팡',
@@ -259,7 +275,8 @@ export async function exportSaasChinaInventoryWorkbook(rows: readonly SaasChinaI
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
-  const warehouseCodes = inventoryStatusWarehouseCodes(rows)
+  const activeRows = rows.filter((row) => !isSaasChinaInventoryExcludedWarehouseCode(row.warehouseCode))
+  const warehouseCodes = inventoryStatusWarehouseCodes(activeRows)
   const headers = [...SAAS_CHINA_INVENTORY_STATUS_HEADERS, ...warehouseCodes]
   const sheet = createSheet(
     workbook,
@@ -269,7 +286,7 @@ export async function exportSaasChinaInventoryWorkbook(rows: readonly SaasChinaI
   )
 
   const grouped = new Map<string, InventoryStatusExportRow>()
-  for (const value of rows) {
+  for (const value of activeRows) {
     const sku = value.sku.trim()
     const productName = value.productName.trim()
     const optionName = value.optionName?.trim() || null
@@ -333,7 +350,11 @@ function inventoryStatusWarehouseCodes(rows: readonly SaasChinaInventoryExcelExp
   const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
   const extraCodes = [...new Set(rows
     .map((row) => row.warehouseCode.trim())
-    .filter((warehouseCode) => warehouseCode && !standardSet.has(warehouseCode)))]
+    .filter((warehouseCode) => (
+      warehouseCode
+      && !standardSet.has(warehouseCode)
+      && !isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)
+    )))]
     .sort(collator.compare)
   return [...standardCodes, ...extraCodes]
 }
@@ -420,7 +441,11 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
     const reportWarehouseColumns: Array<{ warehouseCode: string; columnNumber: number }> = []
     for (let columnNumber = itemCategoryColumn + 1; columnNumber <= row.cellCount; columnNumber += 1) {
       const warehouseCode = cellText(row.getCell(columnNumber).value).trim()
-      if (!warehouseCode || normalizeHeader(warehouseCode) === normalizeHeader('합계')) continue
+      if (
+        !warehouseCode
+        || normalizeHeader(warehouseCode) === normalizeHeader('합계')
+        || isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)
+      ) continue
       reportWarehouseColumns.push({ warehouseCode, columnNumber })
     }
     if (reportWarehouseColumns.length > 0) {
@@ -543,6 +568,9 @@ function parseRow(
     errors.push('재고현황의 품목명을 입력해주세요.')
   }
   if (inventoryId && !isUuid(inventoryId)) errors.push('SaaS재고ID를 확인해주세요.')
+  if (isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)) {
+    errors.push(SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR)
+  }
   if (warehouseCode.length > 100) errors.push('중국창고는 100자 이하로 입력해주세요.')
   if (sku.length > 100) errors.push('품목코드는 100자 이하로 입력해주세요.')
   if (productName && productName.length > 1_000) errors.push('상품명은 1,000자 이하로 입력해주세요.')

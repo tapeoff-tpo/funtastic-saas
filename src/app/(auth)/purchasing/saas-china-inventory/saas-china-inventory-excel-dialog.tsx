@@ -42,7 +42,7 @@ export function SaasChinaInventoryExcelDialog() {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [isInventoryStatusReport, setIsInventoryStatusReport] = useState(false)
-  const [reportBlankQuantityRowCount, setReportBlankQuantityRowCount] = useState(0)
+  const [reportEmptyQuantityCellCount, setReportEmptyQuantityCellCount] = useState(0)
   const [isWorking, setIsWorking] = useState(false)
 
   const hasErrors = Boolean(preview && (
@@ -55,7 +55,7 @@ export function SaasChinaInventoryExcelDialog() {
     setFile(null)
     setPreview(null)
     setIsInventoryStatusReport(false)
-    setReportBlankQuantityRowCount(0)
+    setReportEmptyQuantityCellCount(0)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -69,7 +69,7 @@ export function SaasChinaInventoryExcelDialog() {
     setFile(event.target.files?.[0] ?? null)
     setPreview(null)
     setIsInventoryStatusReport(false)
-    setReportBlankQuantityRowCount(0)
+    setReportEmptyQuantityCellCount(0)
   }
 
   async function upload(mode: 'preview' | 'apply') {
@@ -96,7 +96,7 @@ export function SaasChinaInventoryExcelDialog() {
       if (nextPreview) setPreview(nextPreview)
       if (mode === 'preview') {
         setIsInventoryStatusReport(readString(record?.source) === 'inventory_status_report')
-        setReportBlankQuantityRowCount(readNumber(record?.reportBlankQuantityRowCount) ?? 0)
+        setReportEmptyQuantityCellCount(readNumber(record?.reportEmptyQuantityCellCount) ?? 0)
       }
 
       if (!response.ok) {
@@ -155,7 +155,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 id="saas-inventory-excel-title" className="text-lg font-semibold">SaaS 중국재고 엑셀 변경</h3>
-                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">일반 SaaS 양식은 입력한 행만 수정합니다. 재고현황 양식은 중국창고 전체 최신 목록으로 반영합니다.</p>
+                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">일반 SaaS 양식은 입력한 행만 수정합니다. 재고현황 양식은 모든 창고의 전체 최신 목록으로 반영합니다.</p>
                 <p className="mt-1 text-xs text-muted-foreground">엑셀 검토만으로는 재고가 변경되지 않습니다. 검토 결과 반영을 눌러야 실제 재고에 적용됩니다.</p>
               </div>
               <button type="button" onClick={closeDialog} disabled={isWorking} aria-label="엑셀 재고 변경 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
@@ -177,7 +177,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
               <p className="text-sm font-medium">엑셀 파일 선택</p>
               <p className="mt-1 text-xs text-muted-foreground">현재 목록에서는 상품명과 현재고를 수정하세요. 메모는 현재고 변경 또는 신규 등록 사유로 기록됩니다. 중국창고·품목코드·옵션명은 변경할 수 없습니다.</p>
-              <p className="mt-1 text-xs text-muted-foreground">재고현황 양식도 업로드할 수 있습니다. 품목코드·품목명·규격·중국창고 열을 사용하며, 중국창고가 빈 칸이면 0으로 읽습니다. 이 양식은 중국창고 전체 최신 목록이므로 파일에 없는 기존 중국창고 재고는 목록에서 제거합니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">재고현황 양식도 업로드할 수 있습니다. 품목코드·품목명·규격과 모든 창고 열을 사용합니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리하며, 이 양식은 전체 최신 목록이므로 파일에 없는 기존 재고는 목록에서 제거합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />
@@ -199,10 +199,10 @@ export function SaasChinaInventoryExcelDialog() {
               </div>
               {isInventoryStatusReport ? (
                 <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/60 p-3">
-                  <p className="text-sm font-medium text-foreground">재고현황 양식은 중국창고 전체 최신 재고로 반영합니다.</p>
+                  <p className="text-sm font-medium text-foreground">재고현황 양식은 모든 창고의 전체 최신 재고로 반영합니다.</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {reportBlankQuantityRowCount > 0 ? <span>빈 중국창고 수량 {reportBlankQuantityRowCount.toLocaleString('ko-KR')}행은 0으로 읽습니다. </span> : null}
-                    <span>파일에 없는 기존 중국창고 항목은 목록에서 제거합니다. </span>
+                    {reportEmptyQuantityCellCount > 0 ? <span>빈 칸 또는 0 수량 {reportEmptyQuantityCellCount.toLocaleString('ko-KR')}칸은 재고 없음으로 처리합니다. </span> : null}
+                    <span>파일에 없는 기존 재고 항목은 목록에서 제거합니다. </span>
                     <span>출고 예약 또는 발주 연동 재고가 있으면 전체 반영이 차단됩니다.</span>
                   </p>
                 </div>

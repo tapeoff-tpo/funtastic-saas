@@ -6,7 +6,6 @@ import { parseSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-inv
 import {
   applySaasChinaInventoryWorkbook,
   previewSaasChinaInventoryWorkbook,
-  SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
 } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
@@ -25,12 +24,10 @@ export async function POST(request: NextRequest) {
     const workspaceUserId = await getWorkspaceUserId(user.id)
     const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer())
     const fullSnapshot = parsed.source === 'inventory_status_report'
-    const snapshotWarehouseCodes = fullSnapshot ? [SAAS_CHINA_DEFAULT_WAREHOUSE_CODE] : undefined
     const preview = await previewSaasChinaInventoryWorkbook({
       userId: workspaceUserId,
       rows: parsed.rows,
       fullSnapshot,
-      snapshotWarehouseCodes,
     })
     if (preview.summary.invalidCount > 0) {
       return NextResponse.json({ error: '엑셀 오류를 먼저 수정해주세요.', preview }, { status: 400 })
@@ -42,7 +39,6 @@ export async function POST(request: NextRequest) {
       rows: parsed.rows,
       sourceLabel: file.name,
       fullSnapshot,
-      snapshotWarehouseCodes,
     })
     revalidateSaasChinaInventoryPaths()
     return NextResponse.json({
@@ -50,7 +46,7 @@ export async function POST(request: NextRequest) {
       result,
       source: parsed.source,
       fullSnapshot,
-      reportBlankQuantityRowCount: parsed.reportBlankQuantityRowCount,
+      reportEmptyQuantityCellCount: parsed.reportEmptyQuantityCellCount,
     })
   } catch (error) {
     console.error('SaaS China inventory Excel apply error:', error)

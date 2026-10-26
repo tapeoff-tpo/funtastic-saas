@@ -66,7 +66,7 @@ describe('SaaS China inventory Excel workbook', () => {
     ]))
   })
 
-  it('reads a blank inventory-status 중국창고 quantity as zero and skips report totals', async () => {
+  it('expands every positive inventory-status warehouse quantity and omits blank or zero cells', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('재고현황')
     sheet.addRow(['회사명 : 테이포프 / 20261023'])
@@ -74,7 +74,7 @@ describe('SaaS China inventory Excel workbook', () => {
       '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
       '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
     ])
-    sheet.addRow(['SKU-CHINA', '중국창고 상품', '레드', '[상품]', 12, '', '', '', '', '', 12, ''])
+    sheet.addRow(['SKU-CHINA', '중국창고 상품', '레드', '[상품]', 14, 2, '', '', '', '', 12, ''])
     sheet.addRow(['SKU-NO-CHANGE', '빈 중국창고', '블랙', '[상품]', 5, '', '', 5, '', '', '', ''])
     sheet.addRow(['SKU-ZERO', '0 재고', '화이트', '[상품]', 0, '', '', '', '', '', 0, ''])
     sheet.addRow(['합계', '', '', '', 17, '', '', 5, '', '', 12, ''])
@@ -86,10 +86,18 @@ describe('SaaS China inventory Excel workbook', () => {
       source: 'inventory_status_report',
       totalRows: 3,
       skippedRows: 2,
-      reportBlankQuantityRowCount: 1,
+      reportEmptyQuantityCellCount: 18,
       errors: [],
     })
     expect(parsed.rows).toEqual([
+      expect.objectContaining({
+        rowNumber: 3,
+        warehouseCode: '부품관리',
+        sku: 'SKU-CHINA',
+        productName: '중국창고 상품',
+        optionName: '레드',
+        onHandQuantity: 2,
+      }),
       expect.objectContaining({
         rowNumber: 3,
         warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
@@ -100,16 +108,9 @@ describe('SaaS China inventory Excel workbook', () => {
       }),
       expect.objectContaining({
         rowNumber: 4,
+        warehouseCode: '스마일배송(개인个人1688)',
         sku: 'SKU-NO-CHANGE',
-        onHandQuantity: 0,
-        reportBlankQuantity: true,
-      }),
-      expect.objectContaining({
-        rowNumber: 5,
-        warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
-        sku: 'SKU-ZERO',
-        optionName: '화이트',
-        onHandQuantity: 0,
+        onHandQuantity: 5,
       }),
     ])
   })
@@ -140,6 +141,26 @@ describe('SaaS China inventory Excel workbook', () => {
       productName: null,
       onHandQuantity: 6,
     })])
+  })
+
+  it('does not treat a similarly shaped workbook without the China warehouse report column as a full snapshot', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('재고현황처럼 보이는 파일')
+    sheet.addRow(['품목코드', '품목명', '규격', '품목구분', '합계', '부품관리'])
+    sheet.addRow(['SKU-OTHER', '다른 양식', '레드', '[상품]', 2, 2])
+
+    await expect(parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer()))
+      .rejects.toThrow('엑셀에서 품목코드와 현재고 헤더를 찾을 수 없습니다.')
+  })
+
+  it('requires the China warehouse column to be a post-category quantity column before enabling a full snapshot', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('재고현황처럼 보이는 파일')
+    sheet.addRow(['중국창고', '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리'])
+    sheet.addRow(['창고 메모', 'SKU-OTHER', '다른 양식', '레드', '[상품]', 2, 2])
+
+    await expect(parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer()))
+      .rejects.toThrow('엑셀에서 품목코드와 현재고 헤더를 찾을 수 없습니다.')
   })
 
   it('creates an uploadable empty template and exports the current list using the editable headers', async () => {
@@ -189,5 +210,26 @@ describe('SaaS China inventory Excel workbook', () => {
       row: 1002,
       message: '엑셀은 1,000행 이하만 업로드할 수 있습니다. 1행을 확인해주세요.',
     })])
+  })
+
+  it('blocks an inventory-status report that expands beyond 1,000 warehouse inventory rows', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('재고현황')
+    sheet.addRow([
+      '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드',
+      '스마일배송(개인个人1688)', '원재료 창고', '중국발생비용 (中国产生费用)', '중국창고', '쿠팡',
+    ])
+    for (let index = 0; index < 143; index += 1) {
+      sheet.addRow([`SKU-${index}`, `상품 ${index}`, '', '[상품]', 7, 1, 1, 1, 1, 1, 1, 1])
+    }
+
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
+
+    expect(parsed.rows).toHaveLength(1_001)
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: '재고현황 파일은 1,000개 재고 행 이하만 업로드할 수 있습니다. 1개 항목을 확인해주세요.',
+      }),
+    ]))
   })
 })

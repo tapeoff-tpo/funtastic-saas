@@ -180,6 +180,57 @@ describe('SaaS China inventory Excel planner', () => {
     ]))
   })
 
+  it('reconciles every active warehouse when a full snapshot has no explicit warehouse scope', () => {
+    const result = preview([
+      row({ onHandQuantity: 10, productName: '기존 상품명' }),
+    ], [
+      inventory(),
+      inventory({
+        id: 'bulk-warehouse',
+        warehouseCode: '대량',
+        sku: 'SKU-B',
+        productName: '대량 창고 재고',
+        onHandQuantity: 5,
+        reservedQuantity: 0,
+        availableQuantity: 5,
+      }),
+    ], new Map(), { fullSnapshot: true })
+
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0, rowCount: 2 })
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        row: null,
+        inventoryId: 'bulk-warehouse',
+        warehouseCode: '대량',
+        sku: 'SKU-B',
+        status: 'removed',
+      }),
+    ]))
+  })
+
+  it('keeps distinct warehouse plans from the same source row separate', () => {
+    const result = preview([
+      row({ rowNumber: 2, warehouseCode: '중국창고', onHandQuantity: 12, productName: '기존 상품명' }),
+      row({ rowNumber: 2, warehouseCode: '대량', onHandQuantity: 4, productName: '대량 상품' }),
+    ], [
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
+      inventory({
+        id: 'bulk-warehouse',
+        warehouseCode: '대량',
+        productName: '대량 상품',
+        onHandQuantity: 2,
+        reservedQuantity: 0,
+        availableQuantity: 2,
+      }),
+    ])
+
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 2, unchangedCount: 0, removedCount: 0, invalidCount: 0, rowCount: 2 })
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ row: 2, warehouseCode: '중국창고', beforeQuantity: 10, afterQuantity: 12, status: 'changed' }),
+      expect.objectContaining({ row: 2, warehouseCode: '대량', beforeQuantity: 2, afterQuantity: 4, status: 'changed' }),
+    ]))
+  })
+
   it('blocks malformed report identities without also classifying them as omitted removals', () => {
     const result = preview([
       row({

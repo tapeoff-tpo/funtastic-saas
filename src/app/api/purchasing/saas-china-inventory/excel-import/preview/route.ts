@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { parseSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-inventory-excel'
-import {
-  previewSaasChinaInventoryWorkbook,
-  SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
-} from '@/lib/purchasing/saas-china-outbound'
+import { previewSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
 
@@ -24,13 +21,12 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       rows: parsed.rows,
       fullSnapshot,
-      snapshotWarehouseCodes: fullSnapshot ? [SAAS_CHINA_DEFAULT_WAREHOUSE_CODE] : undefined,
     })
     return NextResponse.json({
       preview,
       source: parsed.source,
       fullSnapshot,
-      reportBlankQuantityRowCount: parsed.reportBlankQuantityRowCount,
+      reportEmptyQuantityCellCount: parsed.reportEmptyQuantityCellCount,
     })
   } catch (error) {
     console.error('SaaS China inventory Excel preview error:', error)

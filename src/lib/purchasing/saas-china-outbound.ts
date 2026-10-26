@@ -1100,15 +1100,23 @@ export async function applySaasChinaInventoryWorkbook(input: {
       inventory,
     ]))
     const inventoriesById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
-    const plansByRow = new Map(preview.rows.flatMap((row) => row.row == null ? [] : [[row.row, row] as const]))
+    // An inventory-status workbook can expand one physical Excel row into
+    // multiple warehouse identities. A row number alone is therefore not a
+    // sufficient apply-plan key.
+    const plansByWorkbookIdentity = new Map(preview.rows.flatMap((row) => row.row == null ? [] : [[
+      saasChinaInventoryWorkbookPlanKey(row.row, row.warehouseCode, row.sku, row.optionName),
+      row,
+    ] as const]))
     const batchId = randomUUID()
     let createdCount = 0
     let updatedCount = 0
     let archivedCount = 0
 
-    for (const rawRow of input.rows) {
+    for (const [rowIndex, rawRow] of input.rows.entries()) {
       const row = normalizeSaasChinaInventoryWorkbookRow(rawRow)
-      const plan = plansByRow.get(row.rowNumber)
+      const plan = plansByWorkbookIdentity.get(
+        saasChinaInventoryWorkbookPlanKey(row.rowNumber, row.warehouseCode, row.sku, row.optionName),
+      )
       if (!plan || plan.status === 'unchanged') continue
       // Invalid/protected rows were rejected above; retaining this guard means a
       // future caller cannot partially apply a plan that was not validated.
@@ -1155,7 +1163,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
           reservedBefore: 0,
           onHandAfter: targetOnHand,
           reservedAfter: 0,
-          sourceKey: `saas-china-excel:${batchId}:${row.rowNumber}`,
+          sourceKey: `saas-china-excel:${batchId}:${row.rowNumber}:${rowIndex + 1}`,
           note: row.note ?? excelInventoryNote(input.sourceLabel),
           createdBy: input.createdBy,
         })
@@ -1191,7 +1199,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
           reservedBefore: existing.reservedQuantity,
           onHandAfter: targetOnHand,
           reservedAfter: existing.reservedQuantity,
-          sourceKey: `saas-china-excel:${batchId}:${row.rowNumber}`,
+          sourceKey: `saas-china-excel:${batchId}:${row.rowNumber}:${rowIndex + 1}`,
           note: row.note ?? excelInventoryNote(input.sourceLabel),
           createdBy: input.createdBy,
         })
@@ -2982,7 +2990,7 @@ type SaasChinaInventoryWorkbookPlanInput = {
   linkedOnHandByInventoryId: ReadonlyMap<string, number>
   /** A recognized inventory-status report is an authoritative list, unlike the editable template. */
   fullSnapshot?: boolean
-  /** The report only represents these warehouse codes. Other warehouses are never omitted by it. */
+  /** An explicit warehouse scope. Omit it when the report replaces every active warehouse. */
   snapshotWarehouseCodes?: readonly string[]
 }
 
@@ -3004,20 +3012,22 @@ export function buildSaasChinaInventoryWorkbookPreview(
   ]))
   const inventoriesById = new Map(workspaceInventories.map((inventory) => [inventory.id, inventory]))
   const rows = input.rows.map(normalizeSaasChinaInventoryWorkbookRow)
-  const snapshotWarehouseCodes = input.fullSnapshot
-    ? new Set((input.snapshotWarehouseCodes?.length
-      ? input.snapshotWarehouseCodes
-      : rows.map((row) => row.warehouseCode))
+  // A specified scope limits an authoritative report to those warehouses.
+  // Without a scope, the report is the source of truth for every active
+  // warehouse, including warehouses with no positive cell in this workbook.
+  const snapshotWarehouseCodes = input.fullSnapshot && input.snapshotWarehouseCodes?.length
+    ? new Set(input.snapshotWarehouseCodes
       .map((warehouseCode) => warehouseCode.trim())
       .filter(Boolean))
-    : new Set<string>()
+    : null
   const duplicateRowNumbers = duplicateSaasChinaInventoryWorkbookRowNumbers(rows)
   const previewRows: SaasChinaInventoryWorkbookPreviewRow[] = []
   const snapshotIdentityKeys = new Set<string>()
 
   for (const row of rows) {
     const identity = saasChinaInventoryIdentityKey(row.warehouseCode, row.sku, row.optionKey)
-    const isSnapshotRow = input.fullSnapshot && snapshotWarehouseCodes.has(row.warehouseCode)
+    const isSnapshotRow = input.fullSnapshot
+      && (snapshotWarehouseCodes == null || snapshotWarehouseCodes.has(row.warehouseCode))
     // A malformed report row still proves that this identity was present in
     // the source. It will block the whole import below, but must never also
     // be interpreted as a missing identity and shown as a removal.
@@ -3183,7 +3193,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
 
   if (input.fullSnapshot) {
     for (const existing of workspaceInventories) {
-      if (existing.archivedAt || !snapshotWarehouseCodes.has(existing.warehouseCode)) continue
+      if (existing.archivedAt || (snapshotWarehouseCodes != null && !snapshotWarehouseCodes.has(existing.warehouseCode))) continue
       const identity = saasChinaInventoryIdentityKey(existing.warehouseCode, existing.sku, existing.optionKey)
       if (snapshotIdentityKeys.has(identity)) continue
 
@@ -3297,6 +3307,15 @@ function duplicateSaasChinaInventoryWorkbookRowNumbers(rows: readonly Normalized
 
 function saasChinaInventoryIdentityKey(warehouseCode: string, sku: string, optionKey: string) {
   return `${warehouseCode}\u0000${sku}\u0000${optionKey}`
+}
+
+function saasChinaInventoryWorkbookPlanKey(
+  rowNumber: number,
+  warehouseCode: string,
+  sku: string,
+  optionName: string | null,
+) {
+  return `${rowNumber}\u0000${saasChinaInventoryIdentityKey(warehouseCode, sku, optionName ?? '')}`
 }
 
 function excelInventoryNote(sourceLabel: string | null | undefined) {

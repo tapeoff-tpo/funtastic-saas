@@ -122,13 +122,13 @@ describe('PurchasingLanguageSwitcher', () => {
     })
   })
 
-  it('translates automatic inventory-status blank-quantity guidance', async () => {
-    render(<GlobalTranslationFixture route="dashboard" dynamicLabel="재고현황 양식의 빈 중국창고 수량 2행은 0으로 읽습니다." />)
+  it('translates automatic inventory-status empty-quantity guidance', async () => {
+    render(<GlobalTranslationFixture route="dashboard" dynamicLabel="빈 칸 또는 0 수량 2칸은 재고 없음으로 처리합니다." />)
 
     fireEvent.click(await screen.findByRole('button', { name: '中文' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('库存现状格式中空白中国仓库数量的 2 行按 0 读取。')
+      expect(screen.getByTestId('dynamic-label')).toHaveTextContent('空白或 0 数量的 2 格会按无库存处理。')
     })
   })
 })

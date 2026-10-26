@@ -25,7 +25,7 @@ export type SaasChinaInventoryExcelRow = {
   optionName: string | null
   optionKey: string
   onHandQuantity: number | null
-  /** Set when a blank `중국창고` report cell is automatically read as zero. */
+  /** Kept for compatibility with legacy single-warehouse report rows. */
   reportBlankQuantity?: boolean
   note: string | null
   errors: string[]
@@ -42,8 +42,8 @@ export type SaasChinaInventoryWorkbookParseResult = {
   totalRows: number
   skippedRows: number
   source: SaasChinaInventoryWorkbookSource
-  /** Number of item rows whose inventory-status `중국창고` cell was blank. */
-  reportBlankQuantityRowCount: number
+  /** Blank or zero cells omitted from an inventory-status report snapshot. */
+  reportEmptyQuantityCellCount: number
 }
 
 export type SaasChinaInventoryExcelExportRow = {
@@ -85,7 +85,8 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
  * Reads the editable SaaS China inventory workbook. Quantity is intentionally
  * nullable: a blank current-stock cell in the SaaS template means "leave this
  * existing row's quantity as-is." A recognized inventory-status report is a
- * snapshot, so its blank `중국창고` cells are read as zero instead.
+ * snapshot, so each warehouse column expands into its own positive stock row.
+ * Blank and zero warehouse cells mean that no active inventory remains there.
  */
 export async function parseSaasChinaInventoryWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
@@ -107,18 +108,22 @@ export async function parseSaasChinaInventoryWorkbook(
   const rows: SaasChinaInventoryExcelRow[] = []
   let totalRows = 0
   let skippedRows = 0
-  let reportBlankQuantityRowCount = 0
+  let reportEmptyQuantityCellCount = 0
   const lastRow = Math.min(sheet.rowCount, headerRowNumber + MAX_DATA_ROWS)
   for (let rowNumber = headerRowNumber + 1; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
-    const inventoryStatusReportBlankQuantity = isInventoryStatusReportBlankQuantityRow(row, columns)
-    if (inventoryStatusReportBlankQuantity) reportBlankQuantityRowCount += 1
     if (isEmptyRow(row) || shouldSkipInventoryStatusReportRow(row, columns)) {
       skippedRows += 1
       continue
     }
     totalRows += 1
-    rows.push(parseRow(row, rowNumber, columns, inventoryStatusReportBlankQuantity))
+    if (columns.source === 'inventory_status_report') {
+      const parsed = parseInventoryStatusReportRow(row, rowNumber, columns)
+      rows.push(...parsed.rows)
+      reportEmptyQuantityCellCount += parsed.emptyQuantityCellCount
+      continue
+    }
+    rows.push(parseRow(row, rowNumber, columns))
   }
   if (sheet.rowCount > lastRow) {
     const overflow = sheet.rowCount - lastRow
@@ -131,9 +136,24 @@ export async function parseSaasChinaInventoryWorkbook(
       optionName: null,
       optionKey: '',
       onHandQuantity: null,
-      reportBlankQuantity: false,
       note: null,
       errors: [`엑셀은 ${MAX_DATA_ROWS.toLocaleString('ko-KR')}행 이하만 업로드할 수 있습니다. ${overflow.toLocaleString('ko-KR')}행을 확인해주세요.`],
+    })
+  }
+  if (rows.length > MAX_DATA_ROWS) {
+    const overflow = rows.length - MAX_DATA_ROWS
+    rows.splice(MAX_DATA_ROWS)
+    rows.push({
+      rowNumber: headerRowNumber + 1,
+      inventoryId: null,
+      warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
+      sku: '',
+      productName: null,
+      optionName: null,
+      optionKey: '',
+      onHandQuantity: null,
+      note: null,
+      errors: [`재고현황 파일은 ${MAX_DATA_ROWS.toLocaleString('ko-KR')}개 재고 행 이하만 업로드할 수 있습니다. ${overflow.toLocaleString('ko-KR')}개 항목을 확인해주세요.`],
     })
   }
 
@@ -144,7 +164,7 @@ export async function parseSaasChinaInventoryWorkbook(
     totalRows,
     skippedRows,
     source: columns.source,
-    reportBlankQuantityRowCount,
+    reportEmptyQuantityCellCount,
   }
 }
 
@@ -171,7 +191,7 @@ export async function exportSaasChinaInventoryTemplateWorkbook() {
   guide.addRow(['옵션명', '중국창고·품목코드·옵션명은 재고 식별키입니다. 새 행의 키를 정확히 입력하세요. 현재 목록 파일에서는 이 세 항목을 변경할 수 없으며, 다른 키의 재고는 새 행으로 추가합니다.'])
   guide.addRow(['현재고', '기존 재고는 절대 수량으로 변경합니다. 비우면 현재 수량을 유지합니다. 새 재고는 1개 이상 필요합니다.'])
   guide.addRow(['메모', '현재고 변경 또는 신규 등록 시 재고 이력에 남습니다. 수량이나 상품명 변경 없이 메모만 저장할 수는 없습니다.'])
-  guide.addRow(['주의', '이 양식은 부분 변경용입니다. 엑셀에 없는 재고 행은 유지됩니다. 재고현황 보고서는 중국창고 전체 최신 목록으로 반영되며, 파일에 없는 행은 목록에서 제외됩니다. 출고 예약 또는 발주 연동 수량보다 적게 줄일 수 없습니다.'])
+  guide.addRow(['주의', '이 양식은 부분 변경용입니다. 엑셀에 없는 재고 행은 유지됩니다. 재고현황 보고서는 모든 창고 열의 전체 최신 목록으로 반영됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리하며, 파일에 없는 기존 행은 목록에서 제외됩니다. 출고 예약 또는 발주 연동 수량보다 적게 줄일 수 없습니다.'])
   guide.getRow(1).eachCell((cell) => {
     cell.fill = HEADER_FILL
     cell.font = { bold: true }
@@ -243,19 +263,20 @@ function findHeaderRow(sheet: ExcelJS.Worksheet): { rowNumber: number; columns: 
 
 type HeaderColumns = Partial<Record<keyof typeof HEADER_ALIASES, number>> & {
   source: SaasChinaInventoryWorkbookSource
+  reportWarehouseColumns?: Array<{ warehouseCode: string; columnNumber: number }>
 }
 
 function headerColumns(row: ExcelJS.Row): HeaderColumns {
   const columns: HeaderColumns = { source: 'saas_china_inventory' }
   let chinaWarehouseColumn: number | undefined
   let hasTotalHeader = false
-  let hasItemCategoryHeader = false
+  let itemCategoryColumn: number | undefined
   row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
     const normalized = normalizeHeader(cellText(cell.value))
     if (!normalized) return
     if (normalized === normalizeHeader('중국창고')) chinaWarehouseColumn = columnNumber
     if (normalized === normalizeHeader('합계')) hasTotalHeader = true
-    if (normalized === normalizeHeader('품목구분')) hasItemCategoryHeader = true
+    if (normalized === normalizeHeader('품목구분')) itemCategoryColumn = columnNumber
     for (const [field, aliases] of Object.entries(HEADER_ALIASES) as Array<[keyof typeof HEADER_ALIASES, readonly string[]]>) {
       if (!columns[field] && aliases.some((alias) => normalizeHeader(alias) === normalized)) {
         columns[field] = columnNumber
@@ -263,15 +284,112 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
       }
     }
   })
-  // This report's `중국창고` is the current-stock column. In the SaaS
-  // template the same label identifies the warehouse, so recognize the
-  // report only when its neighboring inventory-status headers are present.
-  if (!columns.onHandQuantity && columns.sku && columns.productName && columns.optionName && chinaWarehouseColumn && hasTotalHeader && hasItemCategoryHeader) {
-    columns.onHandQuantity = chinaWarehouseColumn
-    delete columns.warehouseCode
-    columns.source = 'inventory_status_report'
+  // This report's warehouse headers are quantity columns. In the SaaS
+  // template `중국창고` identifies one warehouse, so recognize the report
+  // only when its neighboring inventory-status headers and a post-category
+  // China-warehouse quantity column are all present. This strict signature
+  // prevents a similarly shaped partial-update workbook from becoming a
+  // destructive full snapshot.
+  if (
+    !columns.onHandQuantity
+    && columns.sku
+    && columns.productName
+    && columns.optionName
+    && chinaWarehouseColumn
+    && hasTotalHeader
+    && itemCategoryColumn
+    && chinaWarehouseColumn > itemCategoryColumn
+  ) {
+    const reportWarehouseColumns: Array<{ warehouseCode: string; columnNumber: number }> = []
+    for (let columnNumber = itemCategoryColumn + 1; columnNumber <= row.cellCount; columnNumber += 1) {
+      const warehouseCode = cellText(row.getCell(columnNumber).value).trim()
+      if (!warehouseCode || normalizeHeader(warehouseCode) === normalizeHeader('합계')) continue
+      reportWarehouseColumns.push({ warehouseCode, columnNumber })
+    }
+    if (reportWarehouseColumns.length > 0) {
+      columns.onHandQuantity = chinaWarehouseColumn
+      delete columns.warehouseCode
+      columns.source = 'inventory_status_report'
+      columns.reportWarehouseColumns = reportWarehouseColumns
+    }
   }
   return columns
+}
+
+function parseInventoryStatusReportRow(
+  row: ExcelJS.Row,
+  rowNumber: number,
+  columns: HeaderColumns,
+): { rows: SaasChinaInventoryExcelRow[]; emptyQuantityCellCount: number } {
+  const valueAt = (field: keyof typeof HEADER_ALIASES) => (
+    columns[field] ? cellText(row.getCell(columns[field]!).value).trim() : ''
+  )
+  const inventoryId = valueAt('inventoryId') || null
+  const sku = valueAt('sku')
+  const productName = valueAt('productName') || null
+  const optionName = valueAt('optionName') || null
+  const optionKey = optionName ?? ''
+  const note = valueAt('note') || null
+  const commonErrors: string[] = []
+
+  if (!sku) commonErrors.push('품목코드를 입력해주세요.')
+  if (!productName) commonErrors.push('재고현황의 품목명을 입력해주세요.')
+  if (inventoryId && !isUuid(inventoryId)) commonErrors.push('SaaS재고ID를 확인해주세요.')
+  if (sku.length > 100) commonErrors.push('품목코드는 100자 이하로 입력해주세요.')
+  if (productName && productName.length > 1_000) commonErrors.push('상품명은 1,000자 이하로 입력해주세요.')
+  if (optionName && optionName.length > 200) commonErrors.push('옵션명은 200자 이하로 입력해주세요.')
+  if (note && note.length > 2_000) commonErrors.push('메모는 2,000자 이하로 입력해주세요.')
+
+  const reportWarehouseColumns = columns.reportWarehouseColumns ?? []
+  const parsedRows: SaasChinaInventoryExcelRow[] = []
+  let emptyQuantityCellCount = 0
+
+  for (const { warehouseCode, columnNumber } of reportWarehouseColumns) {
+    const quantityText = cellText(row.getCell(columnNumber).value).trim()
+    const quantity = quantityText ? parseNonNegativeInteger(quantityText) : null
+    if (!quantityText || quantity === 0) {
+      emptyQuantityCellCount += 1
+      continue
+    }
+
+    const errors = [...commonErrors]
+    if (warehouseCode.length > 100) errors.push('창고명은 100자 이하로 입력해주세요.')
+    if (quantity == null) errors.push(`${warehouseCode} 재고는 0 이상의 정수로 입력해주세요.`)
+    parsedRows.push({
+      rowNumber,
+      inventoryId,
+      warehouseCode,
+      sku,
+      productName,
+      optionName,
+      optionKey,
+      onHandQuantity: quantity,
+      note,
+      errors,
+    })
+  }
+
+  // A malformed all-zero report row still has to block the full snapshot.
+  // Otherwise it could silently omit a source identity and archive live stock.
+  if (parsedRows.length === 0 && commonErrors.length > 0) {
+    const warehouseCode = reportWarehouseColumns[0]?.warehouseCode ?? DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE
+    parsedRows.push({
+      rowNumber,
+      inventoryId,
+      warehouseCode,
+      sku,
+      productName,
+      optionName,
+      optionKey,
+      onHandQuantity: null,
+      note,
+      errors: warehouseCode.length > 100
+        ? [...commonErrors, '창고명은 100자 이하로 입력해주세요.']
+        : commonErrors,
+    })
+  }
+
+  return { rows: parsedRows, emptyQuantityCellCount }
 }
 
 function parseRow(
@@ -389,15 +507,6 @@ function shouldSkipInventoryStatusReportRow(
     .filter(Boolean)
   return nonEmptyValues.length === 1
     && /^\d{8}\s+(?:오전|오후)\s+\d{1,2}:\d{2}(?::\d{2})?$/.test(nonEmptyValues[0])
-}
-
-function isInventoryStatusReportBlankQuantityRow(row: ExcelJS.Row, columns: HeaderColumns) {
-  if (columns.source !== 'inventory_status_report') return false
-  const sku = columns.sku ? cellText(row.getCell(columns.sku).value).trim() : ''
-  const productName = columns.productName ? cellText(row.getCell(columns.productName).value).trim() : ''
-  if (!sku || sku === '합계' || !productName) return false
-  const quantity = columns.onHandQuantity ? cellText(row.getCell(columns.onHandQuantity).value).trim() : ''
-  return !quantity
 }
 
 function createSheet(

@@ -106,6 +106,59 @@ describe('applySaasChinaInventoryWorkbook', () => {
     expect(tx.insert).not.toHaveBeenCalled()
   })
 
+  it('applies distinct warehouse identities from one physical report row with separate movement keys', async () => {
+    const chinaInventory = { ...inventory(), reservedQuantity: 0, availableQuantity: 10 }
+    const bulkInventory = {
+      ...inventory(),
+      id: 'inventory-b',
+      warehouseCode: '대량',
+      productName: '대량 상품',
+      onHandQuantity: 2,
+      reservedQuantity: 0,
+      availableQuantity: 2,
+    }
+    const tx = transaction([chinaInventory, bulkInventory])
+    const updateValues: Array<Record<string, unknown>> = []
+    const movementValues = vi.fn().mockResolvedValue(undefined)
+    let updateIndex = 0
+    tx.update.mockImplementation(() => ({
+      set: (values: Record<string, unknown>) => {
+        const existing = [chinaInventory, bulkInventory][updateIndex++]!
+        updateValues.push(values)
+        return {
+          where: () => ({
+            returning: async () => [{ ...existing, ...values }],
+          }),
+        }
+      },
+    }))
+    tx.insert.mockImplementation((table: unknown) => {
+      if (table === saasChinaInventoryMovements) return { values: movementValues }
+      throw new Error('unexpected insert')
+    })
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId,
+      createdBy: 'operator-a',
+      rows: [
+        excelRow({ rowNumber: 2, warehouseCode: '중국창고', onHandQuantity: 12 }),
+        excelRow({ rowNumber: 2, warehouseCode: '대량', onHandQuantity: 4 }),
+      ],
+      sourceLabel: '재고현황.xlsx',
+      fullSnapshot: true,
+    })).resolves.toEqual({ createdCount: 0, updatedCount: 2, archivedCount: 0, unchangedCount: 0 })
+
+    expect(updateValues).toEqual([
+      expect.objectContaining({ onHandQuantity: 12, availableQuantity: 12 }),
+      expect.objectContaining({ onHandQuantity: 4, availableQuantity: 4 }),
+    ])
+    expect(movementValues).toHaveBeenCalledTimes(2)
+    expect(movementValues.mock.calls.map(([movement]) => movement.inventoryId)).toEqual([inventoryId, 'inventory-b'])
+    const sourceKeys = movementValues.mock.calls.map(([movement]) => movement.sourceKey)
+    expect(new Set(sourceKeys).size).toBe(2)
+  })
+
   it('does not mutate listed rows when an omitted snapshot identity is protected', async () => {
     const tx = transaction([
       { ...inventory(), reservedQuantity: 0, availableQuantity: 10 },

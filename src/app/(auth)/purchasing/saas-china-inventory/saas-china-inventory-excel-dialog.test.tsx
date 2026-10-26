@@ -87,21 +87,21 @@ describe('SaasChinaInventoryExcelDialog', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
   })
 
-  it('automatically reads blank China warehouse quantities as zero in an inventory-status report', async () => {
+  it('treats blank and zero warehouse quantities as no inventory in an inventory-status report', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response({
         source: 'inventory_status_report',
-        reportBlankQuantityRowCount: 2,
+        reportEmptyQuantityCellCount: 2,
         preview: {
-          summary: { newCount: 0, changedCount: 1, unchangedCount: 1, invalidCount: 0 },
-          rows: [{ row: 2, status: 'changed', warehouseCode: '중국창고', sku: 'SKU-01', productName: '상품', optionName: '', beforeQuantity: 10, afterQuantity: 0, message: '재고현황의 빈 중국창고 수량을 0으로 변경합니다.' }],
+          summary: { newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0 },
+          rows: [{ row: null, status: 'removed', warehouseCode: '중국창고', sku: 'SKU-01', productName: '상품', optionName: '', beforeQuantity: 10, afterQuantity: 0, message: '재고현황 파일에 없어 SaaS 중국재고 목록에서 제거합니다.' }],
           errors: [],
         },
       }))
       .mockResolvedValueOnce(response({
         source: 'inventory_status_report',
-        reportBlankQuantityRowCount: 2,
-        preview: { summary: { newCount: 0, changedCount: 1, unchangedCount: 1, invalidCount: 0 }, rows: [], errors: [] },
+        reportEmptyQuantityCellCount: 2,
+        preview: { summary: { newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0 }, rows: [], errors: [] },
       }))
 
     render(<SaasChinaInventoryExcelDialog />)
@@ -111,8 +111,8 @@ describe('SaasChinaInventoryExcelDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
 
     const apply = await screen.findByRole('button', { name: '검토 결과 반영' })
-    expect(screen.getByText('재고현황 양식은 중국창고 전체 최신 재고로 반영합니다.')).toBeInTheDocument()
-    expect(screen.getByText('빈 중국창고 수량 2행은 0으로 읽습니다.', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('재고현황 양식은 모든 창고의 전체 최신 재고로 반영합니다.')).toBeInTheDocument()
+    expect(screen.getByText('빈 칸 또는 0 수량 2칸은 재고 없음으로 처리합니다.', { exact: false })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     const previewBody = (fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData
     expect(previewBody.get('inventoryStatusBlankQuantity')).toBeNull()
@@ -126,7 +126,7 @@ describe('SaasChinaInventoryExcelDialog', () => {
   it('shows rows omitted from an inventory-status report as list removals before applying the full snapshot', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
       source: 'inventory_status_report',
-      reportBlankQuantityRowCount: 0,
+      reportEmptyQuantityCellCount: 0,
       preview: {
         summary: { newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0 },
         rows: [

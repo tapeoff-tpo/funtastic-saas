@@ -65,7 +65,7 @@ export type SaasChinaInventoryWorkbookParseResult = {
   totalRows: number
   skippedRows: number
   source: SaasChinaInventoryWorkbookSource
-  /** Blank or zero cells omitted from an inventory-status report snapshot. */
+  /** Blank or zero quantity cells omitted from the replacement snapshot. */
   reportEmptyQuantityCellCount: number
 }
 
@@ -107,11 +107,10 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 }
 
 /**
- * Reads the editable SaaS China inventory workbook. Quantity is intentionally
- * nullable: a blank current-stock cell in the SaaS template means "leave this
- * existing row's quantity as-is." A recognized inventory-status report is a
- * snapshot, so each warehouse column expands into its own positive stock row.
- * Blank and zero warehouse cells mean that no active inventory remains there.
+ * Reads the editable SaaS China inventory workbook. Every upload replaces the
+ * active snapshot, so each provided row is a new active record. A recognized
+ * inventory-status report expands each positive warehouse quantity into its
+ * own record. Blank and zero warehouse cells leave no active inventory there.
  */
 export async function parseSaasChinaInventoryWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
@@ -148,7 +147,24 @@ export async function parseSaasChinaInventoryWorkbook(
       reportEmptyQuantityCellCount += parsed.emptyQuantityCellCount
       continue
     }
-    rows.push(parseRow(row, rowNumber, columns))
+    const parsed = parseRow(row, rowNumber, columns)
+    // Every upload now creates a complete replacement snapshot. A blank or
+    // literal zero quantity therefore means that this identity has no active
+    // stock in the new snapshot, just like a blank/zero warehouse cell in an
+    // inventory-status report. Keep malformed non-empty values in the preview
+    // so they still block the replacement instead of being silently omitted.
+    const quantityText = columns.onHandQuantity
+      ? cellText(row.getCell(columns.onHandQuantity).value).trim()
+      : ''
+    if (!quantityText) {
+      reportEmptyQuantityCellCount += 1
+      continue
+    }
+    if (parsed.onHandQuantity === 0) {
+      reportEmptyQuantityCellCount += 1
+      continue
+    }
+    rows.push(parsed)
   }
   if (sheet.rowCount > lastRow) {
     const overflow = sheet.rowCount - lastRow
@@ -213,12 +229,12 @@ export async function exportSaasChinaInventoryTemplateWorkbook() {
   guide.columns = [{ width: 22 }, { width: 90 }]
   guide.addRow(['항목', '입력 방법'])
   guide.addRow(['중국창고', `비우면 ${DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE}로 처리합니다.`])
-  guide.addRow(['품목코드', '필수입니다. 중국창고·품목코드·옵션명 조합으로 기존 재고를 찾습니다.'])
-  guide.addRow(['상품명', '기존 재고는 비우면 기존 상품명을 유지합니다. 새 재고는 반드시 입력합니다.'])
-  guide.addRow(['옵션명', '중국창고·품목코드·옵션명은 재고 식별키입니다. 새 행의 키를 정확히 입력하세요. 현재 목록 파일에서는 이 세 항목을 변경할 수 없으며, 다른 키의 재고는 새 행으로 추가합니다.'])
-  guide.addRow(['현재고', '기존 재고는 절대 수량으로 변경합니다. 비우면 현재 수량을 유지합니다. 새 재고는 1개 이상 필요합니다.'])
-  guide.addRow(['메모', '현재고 변경 또는 신규 등록 시 재고 이력에 남습니다. 수량이나 상품명 변경 없이 메모만 저장할 수는 없습니다.'])
-  guide.addRow(['주의', '이 양식은 부분 변경용입니다. 엑셀에 없는 재고 행은 유지됩니다. 재고현황 보고서는 모든 창고 열의 전체 최신 목록으로 반영됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리하며, 파일에 없는 기존 행은 목록에서 제외됩니다. 출고 예약 또는 발주 연동 수량보다 적게 줄일 수 없습니다.'])
+  guide.addRow(['품목코드', '필수입니다. 중국창고·품목코드·옵션명 조합으로 새 활성 재고를 만듭니다.'])
+  guide.addRow(['상품명', '필수입니다. 새 파일에 있는 모든 재고 행을 새로 생성합니다.'])
+  guide.addRow(['옵션명', '중국창고·품목코드·옵션명은 재고 식별키입니다. 새 목록에 필요한 행을 모두 입력하세요.'])
+  guide.addRow(['현재고', '현재 활성 재고로 만들 수량을 1개 이상 입력합니다. 0 재고는 행에서 제외하세요.'])
+  guide.addRow(['메모', '새로 생성한 재고의 시작 이력에 남습니다.'])
+  guide.addRow(['주의', '이 양식도 전체 교체용입니다. 반영하면 기존 활성 재고를 전부 목록에서 삭제하고, 이 파일의 행만 새 활성 재고로 생성합니다. 출고 예약 또는 발주 연동 재고가 있으면 전체 교체가 차단됩니다.'])
   guide.getRow(1).eachCell((cell) => {
     cell.fill = HEADER_FILL
     cell.font = { bold: true }
@@ -313,7 +329,7 @@ type InventoryStatusExportRow = {
 
 function inventoryStatusWarehouseCodes(rows: readonly SaasChinaInventoryExcelExportRow[]) {
   const standardCodes = [...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES]
-  const standardSet = new Set(standardCodes)
+  const standardSet = new Set<string>(standardCodes)
   const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
   const extraCodes = [...new Set(rows
     .map((row) => row.warehouseCode.trim())

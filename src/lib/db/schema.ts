@@ -942,12 +942,15 @@ export const saasChinaInventory = pgTable(
   (table) => [
     // Allows children to prove the inventory row belongs to their workspace.
     uniqueIndex('saas_china_inventory_id_user').on(table.id, table.userId),
-    uniqueIndex('saas_china_inventory_user_warehouse_sku_option').on(
+    // A full Excel replacement retires the former active snapshot and creates
+    // a new row for every workbook identity. Keep historical rows available
+    // to their outbound/purchase records while enforcing one current row.
+    uniqueIndex('saas_china_inventory_user_warehouse_sku_option_active').on(
       table.userId,
       table.warehouseCode,
       table.sku,
       table.optionKey,
-    ),
+    ).where(sql`${table.archivedAt} IS NULL`),
     index('saas_china_inventory_user_sku').on(table.userId, table.sku),
     index('saas_china_inventory_user_warehouse_available').on(
       table.userId,

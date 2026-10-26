@@ -20,28 +20,19 @@ async function workbookBuffer(rows: Array<Array<string | number | null | undefin
 }
 
 describe('SaaS China inventory Excel workbook', () => {
-  it('parses absolute on-hand targets while keeping a blank quantity nullable and defaulting the warehouse', async () => {
+  it('omits blank and zero generic-template quantities as no inventory while defaulting the warehouse', async () => {
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
       ['', 'SKU-1', '상품 A', '', '', '이름만 수정'],
+      ['', 'SKU-0', '상품 0', '', 0, '재고 없음'],
       ['광저우창고', 'SKU-2', '상품 B', '레드', '1,250', '실사'],
     ]))
 
     expect(parsed.source).toBe('saas_china_inventory')
     expect(parsed.errors).toEqual([])
+    expect(parsed.reportEmptyQuantityCellCount).toBe(2)
     expect(parsed.rows).toEqual([
       expect.objectContaining({
-        rowNumber: 2,
-        inventoryId: null,
-        warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
-        sku: 'SKU-1',
-        productName: '상품 A',
-        optionName: null,
-        optionKey: '',
-        onHandQuantity: null,
-        note: '이름만 수정',
-      }),
-      expect.objectContaining({
-        rowNumber: 3,
+        rowNumber: 4,
         inventoryId: null,
         warehouseCode: '광저우창고',
         sku: 'SKU-2',
@@ -56,7 +47,7 @@ describe('SaaS China inventory Excel workbook', () => {
 
   it('flags invalid quantities and duplicate warehouse/SKU/option identities before preview', async () => {
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
-      ['중국창고', 'SKU-1', '상품 A', '', '-1'],
+      ['중국창고', 'SKU-1', '상품 A', '', '수량없음'],
       ['중국창고', 'SKU-2', '상품 B', '블랙', '10'],
       ['중국창고', 'SKU-2', '상품 B', '블랙', '20'],
     ]))
@@ -208,16 +199,19 @@ describe('SaaS China inventory Excel workbook', () => {
     const currentWorkbook = new ExcelJS.Workbook()
     await currentWorkbook.xlsx.load(current as unknown as ExcelJS.Buffer)
     const sheet = currentWorkbook.getWorksheet('재고현황')
-    expect(sheet?.getRow(1).values.slice(1)).toEqual([
+    expect(sheet).toBeDefined()
+    const inventoryStatusSheet = sheet!
+    const headerValues = inventoryStatusSheet.getRow(1).values
+    expect(Array.isArray(headerValues) ? headerValues.slice(1) : []).toEqual([
       ...SAAS_CHINA_INVENTORY_STATUS_HEADERS,
       ...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
       '테스트창고',
     ])
-    expect(sheet?.getCell('E2').value).toBe(4)
-    expect(sheet?.getCell('M2').value).toBe(4)
-    expect(sheet?.getCell('E3').value).toBe(15)
-    expect(sheet?.getCell('H3').value).toBe(3)
-    expect(sheet?.getCell('K3').value).toBe(12)
+    expect(inventoryStatusSheet.getCell('E2').value).toBe(4)
+    expect(inventoryStatusSheet.getCell('M2').value).toBe(4)
+    expect(inventoryStatusSheet.getCell('E3').value).toBe(15)
+    expect(inventoryStatusSheet.getCell('H3').value).toBe(3)
+    expect(inventoryStatusSheet.getCell('K3').value).toBe(12)
     const parsed = await parseSaasChinaInventoryWorkbook(current)
     expect(parsed.source).toBe('inventory_status_report')
     expect(parsed.rows).toEqual(expect.arrayContaining([

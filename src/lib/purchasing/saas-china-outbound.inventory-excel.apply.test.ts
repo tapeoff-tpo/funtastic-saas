@@ -32,7 +32,7 @@ function excelRow(overrides: Partial<SaasChinaInventoryExcelRow> = {}): SaasChin
   }
 }
 
-function inventory(): Row {
+function inventory(overrides: Partial<Row> = {}): Row {
   return {
     id: inventoryId,
     userId: workspaceUserId,
@@ -45,6 +45,8 @@ function inventory(): Row {
     onHandQuantity: 10,
     reservedQuantity: 4,
     availableQuantity: 6,
+    archivedAt: null,
+    ...overrides,
   }
 }
 
@@ -72,7 +74,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
     mocks.execute.mockResolvedValue(undefined)
   })
 
-  it('validates every row before mutating any inventory row', async () => {
+  it('validates every partial-update row before mutating any inventory row', async () => {
     const tx = transaction([
       inventory(),
       { ...inventory(), id: 'inventory-b', sku: 'SKU-B', productName: '상품 B' },
@@ -93,7 +95,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
     expect(tx.insert).not.toHaveBeenCalled()
   })
 
-  it('revalidates the exported inventory identity before any mutation', async () => {
+  it('revalidates a partial update exported inventory identity before any mutation', async () => {
     const tx = transaction([inventory()])
     mocks.transaction.mockImplementation((callback) => callback(tx))
 
@@ -108,7 +110,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
     expect(tx.insert).not.toHaveBeenCalled()
   })
 
-  it('applies distinct warehouse identities from one physical report row with separate movement keys', async () => {
+  it('retires every former active row and creates fresh rows for every full-snapshot identity', async () => {
     const chinaInventory = { ...inventory(), reservedQuantity: 0, availableQuantity: 10 }
     const bulkInventory = {
       ...inventory(),
@@ -119,13 +121,128 @@ describe('applySaasChinaInventoryWorkbook', () => {
       reservedQuantity: 0,
       availableQuantity: 2,
     }
-    const tx = transaction([chinaInventory, bulkInventory])
+    const staleInventory = {
+      ...inventory(),
+      id: 'inventory-c',
+      warehouseCode: '기존창고',
+      sku: 'STALE-SKU',
+      productName: '파일에 없는 기존 재고',
+      onHandQuantity: 5,
+      reservedQuantity: 0,
+      availableQuantity: 5,
+    }
+    const tx = transaction([chinaInventory, bulkInventory, staleInventory])
     const updateValues: Array<Record<string, unknown>> = []
+    const inventoryInsertValues: Array<Record<string, unknown>> = []
     const movementValues = vi.fn().mockResolvedValue(undefined)
-    let updateIndex = 0
+    const freshInventories = [
+      { id: 'fresh-china' },
+      { id: 'fresh-bulk' },
+    ]
+    let insertedInventoryIndex = 0
     tx.update.mockImplementation(() => ({
       set: (values: Record<string, unknown>) => {
-        const existing = [chinaInventory, bulkInventory][updateIndex++]!
+        updateValues.push(values)
+        return {
+          where: () => ({
+            returning: async () => [chinaInventory, bulkInventory, staleInventory].map(({ id }) => ({ id })),
+          }),
+        }
+      },
+    }))
+    tx.insert.mockImplementation((table: unknown) => {
+      if (table === saasChinaInventory) {
+        return {
+          values: (values: Record<string, unknown>) => {
+            inventoryInsertValues.push(values)
+            const created = freshInventories[insertedInventoryIndex++]
+            return { returning: async () => [created] }
+          },
+        }
+      }
+      if (table === saasChinaInventoryMovements) return { values: movementValues }
+      throw new Error('unexpected insert')
+    })
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId,
+      createdBy: 'operator-a',
+      rows: [
+        excelRow({ rowNumber: 2, warehouseCode: '중국창고', productName: '상품 A', itemCategory: '[상품]', onHandQuantity: 12 }),
+        excelRow({ rowNumber: 2, warehouseCode: '대량', productName: '대량 상품', itemCategory: '[상품]', onHandQuantity: 4 }),
+      ],
+      sourceLabel: '재고현황.xlsx',
+      fullSnapshot: true,
+    })).resolves.toEqual({ createdCount: 2, updatedCount: 0, archivedCount: 3, unchangedCount: 0 })
+
+    expect(updateValues).toEqual([expect.objectContaining({
+      archivedAt: expect.any(Date),
+      updatedAt: expect.any(Date),
+    })])
+    expect(inventoryInsertValues).toEqual([
+      expect.objectContaining({
+        warehouseCode: '중국창고',
+        sku: 'SKU-A',
+        productName: '상품 A',
+        itemCategory: '[상품]',
+        onHandQuantity: 12,
+        reservedQuantity: 0,
+        availableQuantity: 12,
+      }),
+      expect.objectContaining({
+        warehouseCode: '대량',
+        sku: 'SKU-A',
+        productName: '대량 상품',
+        itemCategory: '[상품]',
+        onHandQuantity: 4,
+        reservedQuantity: 0,
+        availableQuantity: 4,
+      }),
+    ])
+    expect(movementValues).toHaveBeenCalledTimes(2)
+    expect(movementValues.mock.calls.map(([movement]) => movement.inventoryId)).toEqual(['fresh-china', 'fresh-bulk'])
+    expect(movementValues.mock.calls.map(([movement]) => movement.movementType)).toEqual(['opening_balance', 'opening_balance'])
+    const sourceKeys = movementValues.mock.calls.map(([movement]) => movement.sourceKey)
+    expect(new Set(sourceKeys).size).toBe(2)
+  })
+
+  it.each([
+    [
+      'outbound reservation',
+      inventory({ id: 'reserved-row', sku: 'SKU-B', productName: '상품 B', onHandQuantity: 5, reservedQuantity: 2, availableQuantity: 3 }),
+      [] as Row[],
+      '출고 예약 2개',
+    ],
+    [
+      'purchase-linked quantity',
+      inventory({ id: 'linked-row', sku: 'SKU-B', productName: '상품 B', onHandQuantity: 5, reservedQuantity: 0, availableQuantity: 5 }),
+      [{ id: 'purchase-link', inventoryId: 'linked-row', linkedOnHand: 3 }],
+      '발주 연동 재고 3개',
+    ],
+  ])('does not retire or replace any active rows when a full snapshot has an active %s', async (_kind, protectedInventory, linkedBalances, expectedMessage) => {
+    const tx = transaction([protectedInventory], linkedBalances)
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId,
+      createdBy: 'operator-a',
+      rows: [excelRow({ sku: 'SKU-B', productName: '상품 B', onHandQuantity: 5 })],
+      sourceLabel: '재고현황.xlsx',
+      fullSnapshot: true,
+    })).rejects.toThrow(expectedMessage)
+
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('keeps a partial workbook update as an in-place adjustment', async () => {
+    const existing = { ...inventory(), reservedQuantity: 0, availableQuantity: 10 }
+    const tx = transaction([existing])
+    const updateValues: Array<Record<string, unknown>> = []
+    const movementValues = vi.fn().mockResolvedValue(undefined)
+    tx.update.mockImplementation(() => ({
+      set: (values: Record<string, unknown>) => {
         updateValues.push(values)
         return {
           where: () => ({
@@ -136,103 +253,27 @@ describe('applySaasChinaInventoryWorkbook', () => {
     }))
     tx.insert.mockImplementation((table: unknown) => {
       if (table === saasChinaInventoryMovements) return { values: movementValues }
-      throw new Error('unexpected insert')
+      throw new Error('partial update must not create a replacement inventory row')
     })
-    mocks.transaction.mockImplementation((callback) => callback(tx))
-
-    await expect(applySaasChinaInventoryWorkbook({
-      userId: workspaceUserId,
-      createdBy: 'operator-a',
-      rows: [
-        excelRow({ rowNumber: 2, warehouseCode: '중국창고', itemCategory: '[상품]', onHandQuantity: 12 }),
-        excelRow({ rowNumber: 2, warehouseCode: '대량', itemCategory: '[상품]', onHandQuantity: 4 }),
-      ],
-      sourceLabel: '재고현황.xlsx',
-      fullSnapshot: true,
-    })).resolves.toEqual({ createdCount: 0, updatedCount: 2, archivedCount: 0, unchangedCount: 0 })
-
-    expect(updateValues).toEqual([
-      expect.objectContaining({ onHandQuantity: 12, availableQuantity: 12, itemCategory: '[상품]' }),
-      expect.objectContaining({ onHandQuantity: 4, availableQuantity: 4, itemCategory: '[상품]' }),
-    ])
-    expect(movementValues).toHaveBeenCalledTimes(2)
-    expect(movementValues.mock.calls.map(([movement]) => movement.inventoryId)).toEqual([inventoryId, 'inventory-b'])
-    const sourceKeys = movementValues.mock.calls.map(([movement]) => movement.sourceKey)
-    expect(new Set(sourceKeys).size).toBe(2)
-  })
-
-  it('does not mutate listed rows when an omitted snapshot identity is protected', async () => {
-    const tx = transaction([
-      { ...inventory(), reservedQuantity: 0, availableQuantity: 10 },
-      { ...inventory(), id: 'inventory-b', sku: 'SKU-B', productName: '상품 B', onHandQuantity: 5, reservedQuantity: 2, availableQuantity: 3 },
-    ])
     mocks.transaction.mockImplementation((callback) => callback(tx))
 
     await expect(applySaasChinaInventoryWorkbook({
       userId: workspaceUserId,
       createdBy: 'operator-a',
       rows: [excelRow({ onHandQuantity: 12 })],
-      sourceLabel: '재고현황.xlsx',
-      fullSnapshot: true,
-      snapshotWarehouseCodes: ['중국창고'],
-    })).rejects.toThrow('재고현황 파일에 없어 제거할 수 없습니다. 출고 예약 2개를 먼저 처리해주세요.')
-
-    expect(tx.update).not.toHaveBeenCalled()
-    expect(tx.insert).not.toHaveBeenCalled()
-  })
-
-  it('archives a safe omitted snapshot identity and writes its quantity adjustment to the ledger', async () => {
-    const omitted = {
-      ...inventory(),
-      id: 'inventory-b',
-      sku: 'SKU-B',
-      productName: '상품 B',
-      onHandQuantity: 5,
-      reservedQuantity: 0,
-      availableQuantity: 5,
-    }
-    const tx = transaction([
-      { ...inventory(), reservedQuantity: 0, availableQuantity: 10 },
-      omitted,
-    ])
-    const updateValues: Array<Record<string, unknown>> = []
-    const movementValues = vi.fn().mockResolvedValue(undefined)
-    tx.update.mockImplementation(() => ({
-      set: (values: Record<string, unknown>) => {
-        updateValues.push(values)
-        return {
-          where: () => ({
-            returning: async () => [{ ...omitted, ...values }],
-          }),
-        }
-      },
-    }))
-    tx.insert.mockImplementation((table: unknown) => {
-      if (table === saasChinaInventoryMovements) return { values: movementValues }
-      throw new Error('unexpected insert')
-    })
-    mocks.transaction.mockImplementation((callback) => callback(tx))
-
-    await expect(applySaasChinaInventoryWorkbook({
-      userId: workspaceUserId,
-      createdBy: 'operator-a',
-      rows: [excelRow({ onHandQuantity: 10 })],
-      sourceLabel: '재고현황.xlsx',
-      fullSnapshot: true,
-      snapshotWarehouseCodes: ['중국창고'],
-    })).resolves.toEqual({ createdCount: 0, updatedCount: 0, archivedCount: 1, unchangedCount: 1 })
+      sourceLabel: '현재목록.xlsx',
+    })).resolves.toEqual({ createdCount: 0, updatedCount: 1, archivedCount: 0, unchangedCount: 0 })
 
     expect(updateValues).toEqual([expect.objectContaining({
-      onHandQuantity: 0,
-      availableQuantity: 0,
-      archivedAt: expect.any(Date),
+      onHandQuantity: 12,
+      availableQuantity: 12,
+      archivedAt: null,
     })])
     expect(movementValues).toHaveBeenCalledWith(expect.objectContaining({
-      inventoryId: 'inventory-b',
+      inventoryId,
       movementType: 'manual_adjustment',
-      onHandDelta: -5,
-      onHandAfter: 0,
-      reservedAfter: 0,
+      onHandDelta: 2,
+      onHandAfter: 12,
     }))
   })
 })

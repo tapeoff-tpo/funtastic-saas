@@ -40,7 +40,7 @@ export function SaasChinaInventoryExcelDialog() {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
-  const [isInventoryStatusReport, setIsInventoryStatusReport] = useState(false)
+  const [isFullReplacement, setIsFullReplacement] = useState(false)
   const [reportEmptyQuantityCellCount, setReportEmptyQuantityCellCount] = useState(0)
   const [isWorking, setIsWorking] = useState(false)
 
@@ -53,7 +53,7 @@ export function SaasChinaInventoryExcelDialog() {
   function resetSelection() {
     setFile(null)
     setPreview(null)
-    setIsInventoryStatusReport(false)
+    setIsFullReplacement(false)
     setReportEmptyQuantityCellCount(0)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -67,7 +67,7 @@ export function SaasChinaInventoryExcelDialog() {
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     setFile(event.target.files?.[0] ?? null)
     setPreview(null)
-    setIsInventoryStatusReport(false)
+    setIsFullReplacement(false)
     setReportEmptyQuantityCellCount(0)
   }
 
@@ -94,7 +94,7 @@ export function SaasChinaInventoryExcelDialog() {
       const nextPreview = normalizePreview(record?.preview ?? body)
       if (nextPreview) setPreview(nextPreview)
       if (mode === 'preview') {
-        setIsInventoryStatusReport(readString(record?.source) === 'inventory_status_report')
+        setIsFullReplacement(record?.fullSnapshot === true)
         setReportEmptyQuantityCellCount(readNumber(record?.reportEmptyQuantityCellCount) ?? 0)
       }
 
@@ -112,13 +112,12 @@ export function SaasChinaInventoryExcelDialog() {
         return
       }
 
-      const changedCount = nextPreview?.counts.new ?? 0
-      const updateCount = nextPreview?.counts.changed ?? 0
-      const appliedCount = changedCount + updateCount
-      const removedCount = nextPreview?.counts.removed ?? 0
+      const result = asRecord(record?.result)
+      const createdCount = readNumber(result?.createdCount) ?? nextPreview?.counts.new ?? 0
+      const removedCount = readNumber(result?.archivedCount) ?? nextPreview?.counts.removed ?? 0
       toast.success(removedCount > 0
-        ? `${appliedCount.toLocaleString('ko-KR')}개 재고 항목을 반영하고 ${removedCount.toLocaleString('ko-KR')}개 항목을 목록에서 제거했습니다.`
-        : appliedCount > 0 ? `${appliedCount.toLocaleString('ko-KR')}개 재고 항목을 엑셀로 반영했습니다.` : '엑셀 재고 변경을 반영했습니다.')
+        ? `${removedCount.toLocaleString('ko-KR')}개 기존 재고를 삭제하고 ${createdCount.toLocaleString('ko-KR')}개 재고를 새로 생성했습니다.`
+        : createdCount > 0 ? `${createdCount.toLocaleString('ko-KR')}개 재고를 새로 생성했습니다.` : '엑셀 재고 전체 교체를 반영했습니다.')
       setOpen(false)
       resetSelection()
       router.refresh()
@@ -154,7 +153,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 id="saas-inventory-excel-title" className="text-lg font-semibold">SaaS 중국재고 엑셀 변경</h3>
-                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">일반 SaaS 양식은 입력한 행만 수정합니다. 재고현황 양식은 모든 창고의 전체 최신 목록으로 반영합니다.</p>
+                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">업로드한 엑셀은 기존 활성 재고를 전부 삭제하고, 파일의 재고 행만 새 목록으로 생성합니다.</p>
                 <p className="mt-1 text-xs text-muted-foreground">엑셀 검토만으로는 재고가 변경되지 않습니다. 검토 결과 반영을 눌러야 실제 재고에 적용됩니다.</p>
               </div>
               <button type="button" onClick={closeDialog} disabled={isWorking} aria-label="엑셀 재고 변경 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
@@ -171,8 +170,8 @@ export function SaasChinaInventoryExcelDialog() {
 
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
               <p className="text-sm font-medium">엑셀 파일 선택</p>
-              <p className="mt-1 text-xs text-muted-foreground">양식 다운로드는 입력한 행만 수정합니다. 상품명과 현재고를 수정하고, 메모에는 변경 또는 신규 등록 사유를 기록하세요.</p>
-              <p className="mt-1 text-xs text-muted-foreground">현재 목록 다운로드 파일과 재고현황 양식은 품목코드·품목명·규격·품목구분, 모든 창고 열을 사용합니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리하며, 이 양식은 전체 최신 목록이므로 파일에 없는 기존 재고는 목록에서 제거합니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">현재 목록 다운로드 파일을 기준으로 수정하면 창고별 수량과 품목구분을 그대로 유지할 수 있습니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">새 파일을 반영하면 기존 활성 재고 전체가 삭제되고, 파일에 적힌 재고 행만 새로 생성됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />
@@ -192,13 +191,13 @@ export function SaasChinaInventoryExcelDialog() {
                   엑셀 검토
                 </button>
               </div>
-              {isInventoryStatusReport ? (
+              {isFullReplacement ? (
                 <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/60 p-3">
-                  <p className="text-sm font-medium text-foreground">재고현황 양식은 모든 창고의 전체 최신 재고로 반영합니다.</p>
+                  <p className="text-sm font-medium text-foreground">이 엑셀은 SaaS 중국재고 전체를 새 목록으로 교체합니다.</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {reportEmptyQuantityCellCount > 0 ? <span>빈 칸 또는 0 수량 {reportEmptyQuantityCellCount.toLocaleString('ko-KR')}칸은 재고 없음으로 처리합니다. </span> : null}
-                    <span>파일에 없는 기존 재고 항목은 목록에서 제거합니다. </span>
-                    <span>출고 예약 또는 발주 연동 재고가 있으면 전체 반영이 차단됩니다.</span>
+                    <span>파일에 있는 모든 재고 행을 새로 생성하고, 기존 활성 재고는 목록에서 삭제합니다. </span>
+                    <span>출고 예약 또는 발주 연동 재고가 있으면 전체 교체가 차단됩니다.</span>
                   </p>
                 </div>
               ) : null}
@@ -209,7 +208,7 @@ export function SaasChinaInventoryExcelDialog() {
                 <PreviewSummary preview={preview} />
                 {preview.rows.length > 0 ? <PreviewTable rows={preview.rows} /> : null}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <p className="text-xs text-muted-foreground">검토 후에도 예약 수량이나 발주 연동 수량보다 적게 변경하거나 목록에서 제거할 수는 없습니다.</p>
+                  <p className="text-xs text-muted-foreground">출고 예약 또는 발주 연동 재고가 있으면 기존 활성 재고를 삭제할 수 없어 전체 교체가 차단됩니다.</p>
                   <button type="button" onClick={() => void upload('apply')} disabled={isWorking || hasErrors} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                     {isWorking ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
                     검토 결과 반영
@@ -229,10 +228,10 @@ function PreviewSummary({ preview }: { preview: ImportPreview }) {
   return (
     <section className={`rounded-lg border p-4 ${hasErrors ? 'border-red-200 bg-red-50/70' : 'border-emerald-200 bg-emerald-50/70'}`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span>신규 <strong>{preview.counts.new.toLocaleString('ko-KR')}개</strong></span>
-        <span>변경 <strong>{preview.counts.changed.toLocaleString('ko-KR')}개</strong></span>
-        <span>변경 없음 <strong>{preview.counts.unchanged.toLocaleString('ko-KR')}개</strong></span>
-        {preview.counts.removed > 0 ? <span className="font-medium text-amber-800">목록 제거 <strong>{preview.counts.removed.toLocaleString('ko-KR')}개</strong></span> : null}
+        <span>새 목록 생성 <strong>{preview.counts.new.toLocaleString('ko-KR')}개</strong></span>
+        {preview.counts.changed > 0 ? <span>변경 <strong>{preview.counts.changed.toLocaleString('ko-KR')}개</strong></span> : null}
+        {preview.counts.unchanged > 0 ? <span>변경 없음 <strong>{preview.counts.unchanged.toLocaleString('ko-KR')}개</strong></span> : null}
+        {preview.counts.removed > 0 ? <span className="font-medium text-amber-800">기존 목록 삭제 <strong>{preview.counts.removed.toLocaleString('ko-KR')}개</strong></span> : null}
         {preview.counts.invalid > 0 ? <span className="font-medium text-red-800">확인 필요 {preview.counts.invalid.toLocaleString('ko-KR')}개</span> : null}
       </div>
       {hasErrors ? (
@@ -298,10 +297,10 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
 
 function StatusBadge({ status }: { status: PreviewStatus }) {
   const label: Record<PreviewStatus, string> = {
-    new: '신규 추가',
+    new: '새 목록 생성',
     changed: '변경',
     unchanged: '변경 없음',
-    removed: '목록 제거',
+    removed: '기존 목록 삭제',
     protected: '처리 불가',
     invalid: '확인 필요',
   }

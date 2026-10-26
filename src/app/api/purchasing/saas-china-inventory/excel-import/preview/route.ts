@@ -16,7 +16,9 @@ export async function POST(request: NextRequest) {
     if (file instanceof NextResponse) return file
     const workspaceUserId = await getWorkspaceUserId(user.id)
     const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer())
-    const fullSnapshot = parsed.source === 'inventory_status_report'
+    // Every upload is the newest complete SaaS China inventory list. Never
+    // patch a prior active snapshot with the rows from a new workbook.
+    const fullSnapshot = true
     const preview = await previewSaasChinaInventoryWorkbook({
       userId: workspaceUserId,
       rows: parsed.rows,

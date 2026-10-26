@@ -96,7 +96,7 @@ describe('SaaS China inventory Excel planner', () => {
 
   it('keeps blank quantities unchanged and does not infer deletes from absent workbook identities in the partial-update template', () => {
     const result = preview([row({ onHandQuantity: null })], [
-      inventory(),
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
       inventory({ id: 'inventory-b', sku: 'SKU-B', productName: '엑셀에 없는 재고', onHandQuantity: 5, reservedQuantity: 0, availableQuantity: 5 }),
     ])
 
@@ -165,11 +165,11 @@ describe('SaaS China inventory Excel planner', () => {
     }))
   })
 
-  it('reconciles a full inventory-status snapshot by removing omitted default-warehouse identities', () => {
+  it('replaces matching and omitted active identities with fresh full-snapshot rows', () => {
     const result = preview([
       row({ onHandQuantity: 10, productName: '기존 상품명' }),
     ], [
-      inventory(),
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
       inventory({
         id: 'inventory-b',
         sku: 'SKU-B',
@@ -183,8 +183,23 @@ describe('SaaS China inventory Excel planner', () => {
       snapshotWarehouseCodes: ['중국창고'],
     })
 
-    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0, rowCount: 2 })
+    expect(result.summary).toEqual({ newCount: 1, changedCount: 0, unchangedCount: 0, removedCount: 2, invalidCount: 0, rowCount: 3 })
     expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        row: 2,
+        sku: 'SKU-A',
+        beforeQuantity: null,
+        afterQuantity: 10,
+        status: 'new',
+      }),
+      expect.objectContaining({
+        row: null,
+        inventoryId,
+        sku: 'SKU-A',
+        beforeQuantity: 10,
+        afterQuantity: 0,
+        status: 'removed',
+      }),
       expect.objectContaining({
         row: null,
         inventoryId: 'inventory-b',
@@ -196,11 +211,11 @@ describe('SaaS China inventory Excel planner', () => {
     ]))
   })
 
-  it('reconciles every active warehouse when a full snapshot has no explicit warehouse scope', () => {
+  it('replaces every active warehouse when a full snapshot has no explicit warehouse scope', () => {
     const result = preview([
       row({ onHandQuantity: 10, productName: '기존 상품명' }),
     ], [
-      inventory(),
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
       inventory({
         id: 'bulk-warehouse',
         warehouseCode: '대량',
@@ -212,8 +227,16 @@ describe('SaaS China inventory Excel planner', () => {
       }),
     ], new Map(), { fullSnapshot: true })
 
-    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0, rowCount: 2 })
+    expect(result.summary).toEqual({ newCount: 1, changedCount: 0, unchangedCount: 0, removedCount: 2, invalidCount: 0, rowCount: 3 })
     expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ row: 2, sku: 'SKU-A', status: 'new' }),
+      expect.objectContaining({
+        row: null,
+        inventoryId,
+        warehouseCode: '중국창고',
+        sku: 'SKU-A',
+        status: 'removed',
+      }),
       expect.objectContaining({
         row: null,
         inventoryId: 'bulk-warehouse',
@@ -221,6 +244,27 @@ describe('SaaS China inventory Excel planner', () => {
         sku: 'SKU-B',
         status: 'removed',
       }),
+    ]))
+  })
+
+  it('treats an empty full snapshot as no active inventory in every warehouse', () => {
+    const result = preview([], [
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
+      inventory({
+        id: 'bulk-warehouse',
+        warehouseCode: '대량',
+        sku: 'SKU-B',
+        productName: '대량 창고 재고',
+        onHandQuantity: 5,
+        reservedQuantity: 0,
+        availableQuantity: 5,
+      }),
+    ], new Map(), { fullSnapshot: true })
+
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 0, removedCount: 2, invalidCount: 0, rowCount: 2 })
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ inventoryId, status: 'removed' }),
+      expect.objectContaining({ inventoryId: 'bulk-warehouse', status: 'removed' }),
     ]))
   })
 
@@ -247,7 +291,7 @@ describe('SaaS China inventory Excel planner', () => {
     ]))
   })
 
-  it('blocks malformed report identities without also classifying them as omitted removals', () => {
+  it('reports malformed full-snapshot rows before the replacement can be applied', () => {
     const result = preview([
       row({
         productName: null,
@@ -258,19 +302,19 @@ describe('SaaS China inventory Excel planner', () => {
       snapshotWarehouseCodes: ['중국창고'],
     })
 
-    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 0, removedCount: 0, invalidCount: 1, rowCount: 1 })
-    expect(result.rows).toEqual([expect.objectContaining({
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 0, unchangedCount: 0, removedCount: 1, invalidCount: 1, rowCount: 2 })
+    expect(result.rows).toEqual(expect.arrayContaining([expect.objectContaining({
       sku: 'SKU-A',
       status: 'invalid',
       message: '재고현황의 품목명을 입력해주세요.',
-    })])
+    })]))
   })
 
-  it('does not remove an omitted identity in another warehouse from a default-China snapshot', () => {
+  it('retires the in-scope generation while leaving another warehouse outside a scoped snapshot untouched', () => {
     const result = preview([
       row({ onHandQuantity: 10, productName: '기존 상품명' }),
     ], [
-      inventory(),
+      inventory({ reservedQuantity: 0, availableQuantity: 10 }),
       inventory({
         id: 'other-warehouse',
         warehouseCode: '광저우창고',
@@ -285,41 +329,47 @@ describe('SaaS China inventory Excel planner', () => {
       snapshotWarehouseCodes: ['중국창고'],
     })
 
-    expect(result.summary.removedCount).toBe(0)
-    expect(result.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ sku: 'SKU-B' })]))
+    expect(result.summary).toEqual({ newCount: 1, changedCount: 0, unchangedCount: 0, removedCount: 1, invalidCount: 0, rowCount: 2 })
+    expect(result.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ row: 2, sku: 'SKU-A', status: 'new' }),
+      expect.objectContaining({ row: null, inventoryId, sku: 'SKU-A', status: 'removed' }),
+    ]))
+    expect(result.rows).not.toEqual(expect.arrayContaining([expect.objectContaining({ inventoryId: 'other-warehouse' })]))
   })
 
   it.each([
-    ['reservation', inventory({ id: 'reserved-row', sku: 'SKU-B', onHandQuantity: 5, reservedQuantity: 2, availableQuantity: 3 }), new Map<string, number>(), '출고 예약 2개를 먼저 처리해주세요.'],
-    ['linked purchase', inventory({ id: 'linked-row', sku: 'SKU-B', onHandQuantity: 5, reservedQuantity: 0, availableQuantity: 5 }), new Map<string, number>([['linked-row', 3]]), '발주 연동 재고 3개를 먼저 처리해주세요.'],
-  ])('blocks the complete snapshot when an omitted identity has an active %s obligation', (_kind, omitted, linked, expectedMessage) => {
+    ['reservation', inventory({ id: 'reserved-row', onHandQuantity: 5, reservedQuantity: 2, availableQuantity: 3 }), new Map<string, number>(), '출고 예약 2개를 먼저 처리해주세요.'],
+    ['linked purchase', inventory({ id: 'linked-row', onHandQuantity: 5, reservedQuantity: 0, availableQuantity: 5 }), new Map<string, number>([['linked-row', 3]]), '발주 연동 재고 3개를 먼저 처리해주세요.'],
+  ])('blocks the complete snapshot when a listed existing identity has an active %s obligation', (_kind, protectedInventory, linked, expectedMessage) => {
     const result = preview([
-      row({ onHandQuantity: 10, productName: '기존 상품명' }),
-    ], [inventory(), omitted], linked, {
+      row({ onHandQuantity: 5, productName: '기존 상품명' }),
+    ], [protectedInventory], linked, {
       fullSnapshot: true,
       snapshotWarehouseCodes: ['중국창고'],
     })
 
     expect(result.summary.invalidCount).toBe(1)
     expect(result.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ row: null, sku: 'SKU-B', status: 'protected', message: expect.stringContaining(expectedMessage) }),
+      expect.objectContaining({ row: 2, sku: 'SKU-A', status: 'new' }),
+      expect.objectContaining({ row: null, inventoryId: protectedInventory.id, sku: 'SKU-A', status: 'protected', message: expect.stringContaining(expectedMessage) }),
     ]))
   })
 
-  it('keeps an explicit zero row active in a full snapshot and restores an archived identity', () => {
+  it('creates a new generation instead of restoring an archived identity in a full snapshot', () => {
     const result = preview([
-      row({ onHandQuantity: 0, reportBlankQuantity: true }),
-      row({ rowNumber: 3, sku: 'NEW-ZERO', productName: '신규 0 재고', onHandQuantity: 0, reportBlankQuantity: true }),
+      row({ onHandQuantity: 8, productName: '기존 상품명' }),
     ], [inventory({ reservedQuantity: 0, availableQuantity: 10, archivedAt: new Date('2026-10-20T00:00:00.000Z') })], new Map(), {
       fullSnapshot: true,
       snapshotWarehouseCodes: ['중국창고'],
     })
 
-    expect(result.summary).toEqual({ newCount: 1, changedCount: 1, unchangedCount: 0, removedCount: 0, invalidCount: 0, rowCount: 2 })
-    expect(result.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ row: 2, status: 'changed', afterQuantity: 0, message: '재고현황 파일에 포함되어 목록에 다시 표시합니다.' }),
-      expect.objectContaining({ row: 3, status: 'new', afterQuantity: 0 }),
-    ]))
+    expect(result.summary).toEqual({ newCount: 1, changedCount: 0, unchangedCount: 0, removedCount: 0, invalidCount: 0, rowCount: 1 })
+    expect(result.rows).toEqual([expect.objectContaining({
+      row: 2,
+      beforeQuantity: null,
+      afterQuantity: 8,
+      status: 'new',
+    })])
   })
 
   it('rejects duplicate identities even when an API caller bypasses workbook parsing', () => {

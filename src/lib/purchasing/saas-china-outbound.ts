@@ -107,6 +107,7 @@ export type SaasChinaInventoryWorkbookPreviewRow = {
   sku: string
   productName: string | null
   optionName: string | null
+  itemCategory?: string | null
   beforeQuantity: number | null
   afterQuantity: number | null
   status: 'new' | 'changed' | 'unchanged' | 'removed' | 'invalid' | 'protected'
@@ -280,6 +281,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     warehouse_code varchar(100) NOT NULL DEFAULT 'default',
     sku varchar(100) NOT NULL,
     product_name text NOT NULL,
+    item_category varchar(100),
     option_key varchar(200) NOT NULL DEFAULT '',
     option_name varchar(200),
     on_hand_quantity integer NOT NULL DEFAULT 0,
@@ -303,6 +305,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ON saas_china_inventory(user_id, warehouse_code, sku, option_key);
   ALTER TABLE saas_china_inventory
     ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+  ALTER TABLE saas_china_inventory
+    ADD COLUMN IF NOT EXISTS item_category varchar(100);
   CREATE INDEX IF NOT EXISTS saas_china_inventory_user_sku
     ON saas_china_inventory(user_id, sku);
   CREATE INDEX IF NOT EXISTS saas_china_inventory_user_warehouse_available
@@ -1143,6 +1147,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
             warehouseCode: row.warehouseCode,
             sku: row.sku,
             productName,
+            itemCategory: row.itemCategory,
             optionKey: row.optionKey,
             optionName: row.optionName,
             onHandQuantity: targetOnHand,
@@ -1174,12 +1179,14 @@ export async function applySaasChinaInventoryWorkbook(input: {
       }
 
       const nextProductName = row.productName ?? existing.productName
+      const nextItemCategory = row.itemCategory ?? existing.itemCategory
       const delta = targetOnHand - existing.onHandQuantity
       const afterAvailable = targetOnHand - existing.reservedQuantity
       const [updated] = await tx
         .update(saasChinaInventory)
         .set({
           productName: nextProductName,
+          itemCategory: nextItemCategory,
           onHandQuantity: targetOnHand,
           availableQuantity: afterAvailable,
           archivedAt: null,
@@ -2973,11 +2980,12 @@ async function markChinaOutboundBoxesChanged(tx: DbTransaction, userId: string, 
   await markChinaOutboundPalletsChanged(tx, userId, shipmentId, updated.flatMap((box) => box.palletId ? [box.palletId] : []))
 }
 
-type NormalizedSaasChinaInventoryWorkbookRow = Omit<SaasChinaInventoryExcelRow, 'warehouseCode' | 'sku' | 'productName' | 'optionName' | 'optionKey' | 'note' | 'errors'> & {
+type NormalizedSaasChinaInventoryWorkbookRow = Omit<SaasChinaInventoryExcelRow, 'warehouseCode' | 'sku' | 'productName' | 'optionName' | 'itemCategory' | 'optionKey' | 'note' | 'errors'> & {
   warehouseCode: string
   sku: string
   productName: string | null
   optionName: string | null
+  itemCategory: string | null
   optionKey: string
   note: string | null
   errors: string[]
@@ -3166,6 +3174,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
 
     const productName = row.productName ?? existing.productName
+    const itemCategory = row.itemCategory ?? existing.itemCategory
     const restoresArchivedInventory = existing.archivedAt != null
     const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
       ? afterQuantity === existing.onHandQuantity
@@ -3178,10 +3187,12 @@ export function buildSaasChinaInventoryWorkbookPreview(
       sku: row.sku,
       productName,
       optionName: row.optionName,
+      itemCategory,
       beforeQuantity: existing.onHandQuantity,
       afterQuantity,
       status: afterQuantity === existing.onHandQuantity
         && productName === existing.productName
+        && itemCategory === existing.itemCategory
         && !restoresArchivedInventory
         ? 'unchanged'
         : 'changed',
@@ -3263,6 +3274,7 @@ function normalizeSaasChinaInventoryWorkbookRow(
   const inventoryId = optionalText(row.inventoryId)
   const productName = optionalText(row.productName)
   const optionName = optionalText(row.optionName)
+  const itemCategory = optionalText(row.itemCategory)
   const note = optionalText(row.note)
   return {
     ...row,
@@ -3271,6 +3283,7 @@ function normalizeSaasChinaInventoryWorkbookRow(
     sku,
     productName,
     optionName,
+    itemCategory,
     optionKey: optionName ?? '',
     note,
     errors: [...(row.errors ?? [])],
@@ -3286,6 +3299,7 @@ function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventory
   if (row.sku.length > 100) errors.push('품목코드는 100자 이하로 입력해주세요.')
   if (row.productName && row.productName.length > 1_000) errors.push('상품명은 1,000자 이하로 입력해주세요.')
   if (row.optionName && row.optionName.length > 200) errors.push('옵션명은 200자 이하로 입력해주세요.')
+  if (row.itemCategory && row.itemCategory.length > 100) errors.push('품목구분은 100자 이하로 입력해주세요.')
   if (row.note && row.note.length > 2_000) errors.push('메모는 2,000자 이하로 입력해주세요.')
   if (row.onHandQuantity != null && (!Number.isSafeInteger(row.onHandQuantity) || row.onHandQuantity < 0)) {
     errors.push('현재고는 0 이상의 정수로 입력해주세요.')

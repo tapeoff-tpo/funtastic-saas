@@ -19,6 +19,7 @@ function inventory(overrides: Partial<Inventory> = {}): Inventory {
     warehouseCode: '중국창고',
     sku: 'SKU-A',
     productName: '기존 상품명',
+    itemCategory: null,
     optionKey: '',
     optionName: null,
     onHandQuantity: 10,
@@ -42,6 +43,7 @@ function row(overrides: Partial<SaasChinaInventoryExcelRow> = {}): SaasChinaInve
     sku: 'SKU-A',
     productName: null,
     optionName: null,
+    itemCategory: null,
     optionKey: '',
     onHandQuantity: 7,
     note: null,
@@ -76,6 +78,20 @@ describe('SaaS China inventory Excel planner', () => {
       productName: '기존 상품명',
       status: 'changed',
     })])
+  })
+
+  it('treats an inventory-status item-category backfill as a change without changing its quantity', () => {
+    const result = preview([
+      row({ onHandQuantity: 10, itemCategory: '[상품]' }),
+    ], [inventory({ reservedQuantity: 0, availableQuantity: 10, itemCategory: null })])
+
+    expect(result.summary).toEqual({ newCount: 0, changedCount: 1, unchangedCount: 0, removedCount: 0, invalidCount: 0, rowCount: 1 })
+    expect(result.rows[0]).toEqual(expect.objectContaining({
+      itemCategory: '[상품]',
+      beforeQuantity: 10,
+      afterQuantity: 10,
+      status: 'changed',
+    }))
   })
 
   it('keeps blank quantities unchanged and does not infer deletes from absent workbook identities in the partial-update template', () => {

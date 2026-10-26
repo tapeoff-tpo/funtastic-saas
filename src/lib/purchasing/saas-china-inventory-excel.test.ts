@@ -7,6 +7,8 @@ import {
   parseSaasChinaInventoryWorkbook,
   saasChinaInventoryExportFilename,
   SAAS_CHINA_INVENTORY_EXCEL_HEADERS,
+  SAAS_CHINA_INVENTORY_STATUS_HEADERS,
+  SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
 } from './saas-china-inventory-excel'
 
 async function workbookBuffer(rows: Array<Array<string | number | null | undefined>>, headers = [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]) {
@@ -96,6 +98,7 @@ describe('SaaS China inventory Excel workbook', () => {
         sku: 'SKU-CHINA',
         productName: '중국창고 상품',
         optionName: '레드',
+        itemCategory: '[상품]',
         onHandQuantity: 2,
       }),
       expect.objectContaining({
@@ -104,12 +107,14 @@ describe('SaaS China inventory Excel workbook', () => {
         sku: 'SKU-CHINA',
         productName: '중국창고 상품',
         optionName: '레드',
+        itemCategory: '[상품]',
         onHandQuantity: 12,
       }),
       expect.objectContaining({
         rowNumber: 4,
         warehouseCode: '스마일배송(개인个人1688)',
         sku: 'SKU-NO-CHANGE',
+        itemCategory: '[상품]',
         onHandQuantity: 5,
       }),
     ])
@@ -163,7 +168,7 @@ describe('SaaS China inventory Excel workbook', () => {
       .rejects.toThrow('엑셀에서 품목코드와 현재고 헤더를 찾을 수 없습니다.')
   })
 
-  it('creates an uploadable empty template and exports the current list using the editable headers', async () => {
+  it('creates an uploadable empty template and exports the current list as a warehouse-column snapshot', async () => {
     const template = await exportSaasChinaInventoryTemplateWorkbook()
     const templateWorkbook = new ExcelJS.Workbook()
     await templateWorkbook.xlsx.load(template as unknown as ExcelJS.Buffer)
@@ -171,30 +176,70 @@ describe('SaaS China inventory Excel workbook', () => {
     expect(templateWorkbook.getWorksheet('작성안내')?.getCell('B5').text).toContain('재고 식별키')
     expect(await parseSaasChinaInventoryWorkbook(template)).toMatchObject({ rows: [], errors: [] })
 
-    const current = await exportSaasChinaInventoryWorkbook([{
-      id: '11111111-1111-4111-8111-111111111111',
-      warehouseCode: '중국창고',
-      sku: 'SKU-3',
-      productName: '상품 C',
-      optionName: null,
-      onHandQuantity: 12,
-      reservedQuantity: 2,
-      availableQuantity: 10,
-      lastReceivedAt: new Date('2026-10-23T01:02:03.000Z'),
-    }])
+    const current = await exportSaasChinaInventoryWorkbook([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        warehouseCode: '중국창고',
+        sku: 'SKU-3',
+        productName: '상품 C',
+        optionName: null,
+        itemCategory: '[상품]',
+        onHandQuantity: 12,
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        warehouseCode: '스마일배송(개인个人1688)',
+        sku: 'SKU-3',
+        productName: '상품 C',
+        optionName: null,
+        itemCategory: '[상품]',
+        onHandQuantity: 3,
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        warehouseCode: '테스트창고',
+        sku: 'SKU-4',
+        productName: '원재료 D',
+        optionName: '소',
+        itemCategory: '[원재료]',
+        onHandQuantity: 4,
+      },
+    ])
     const currentWorkbook = new ExcelJS.Workbook()
     await currentWorkbook.xlsx.load(current as unknown as ExcelJS.Buffer)
-    const sheet = currentWorkbook.getWorksheet('SaaS 중국재고')
-    expect(sheet?.getRow(1).values).toEqual(expect.arrayContaining([...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
-    expect(sheet?.getColumn(1).hidden).toBe(true)
-    expect(sheet?.getCell('B2').fill).toMatchObject({ type: 'pattern', fgColor: { argb: 'F2F2F2' } })
-    expect(sheet?.getCell('D2').fill).toMatchObject({ type: 'pattern', fgColor: { argb: 'FFF2CC' } })
+    const sheet = currentWorkbook.getWorksheet('재고현황')
+    expect(sheet?.getRow(1).values.slice(1)).toEqual([
+      ...SAAS_CHINA_INVENTORY_STATUS_HEADERS,
+      ...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
+      '테스트창고',
+    ])
+    expect(sheet?.getCell('E2').value).toBe(4)
+    expect(sheet?.getCell('M2').value).toBe(4)
+    expect(sheet?.getCell('E3').value).toBe(15)
+    expect(sheet?.getCell('H3').value).toBe(3)
+    expect(sheet?.getCell('K3').value).toBe(12)
     const parsed = await parseSaasChinaInventoryWorkbook(current)
-    expect(parsed.rows).toEqual([expect.objectContaining({
-      inventoryId: '11111111-1111-4111-8111-111111111111',
-      sku: 'SKU-3',
-      onHandQuantity: 12,
-    })])
+    expect(parsed.source).toBe('inventory_status_report')
+    expect(parsed.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        warehouseCode: '스마일배송(개인个人1688)',
+        sku: 'SKU-3',
+        itemCategory: '[상품]',
+        onHandQuantity: 3,
+      }),
+      expect.objectContaining({
+        warehouseCode: '중국창고',
+        sku: 'SKU-3',
+        itemCategory: '[상품]',
+        onHandQuantity: 12,
+      }),
+      expect.objectContaining({
+        warehouseCode: '테스트창고',
+        sku: 'SKU-4',
+        itemCategory: '[원재료]',
+        onHandQuantity: 4,
+      }),
+    ]))
     expect(saasChinaInventoryExportFilename(new Date('2026-10-22T15:30:00.000Z'))).toBe('SaaS_중국재고_현재목록_20261023.xlsx')
   })
 

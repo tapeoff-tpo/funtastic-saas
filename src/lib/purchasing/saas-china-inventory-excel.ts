@@ -12,6 +12,28 @@ export const SAAS_CHINA_INVENTORY_EXCEL_HEADERS = [
 
 export const SAAS_CHINA_INVENTORY_ID_HEADER = 'SaaS재고ID'
 
+export const SAAS_CHINA_INVENTORY_STATUS_SHEET = '재고현황'
+export const SAAS_CHINA_INVENTORY_STATUS_HEADERS = [
+  '품목코드',
+  '품목명',
+  '규격',
+  '품목구분',
+  '합계',
+] as const
+
+// Keep the standard Ecount inventory-status order. Extra warehouses are
+// appended by the exporter, so a new warehouse is never omitted from a
+// downloadable full snapshot.
+export const SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES = [
+  '부품관리',
+  '브랜드',
+  '스마일배송(개인个人1688)',
+  '원재료 창고',
+  '중국발생비용 (中国产生费用)',
+  '중국창고',
+  '쿠팡',
+] as const
+
 export const DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE = '중국창고'
 
 export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
@@ -23,6 +45,7 @@ export type SaasChinaInventoryExcelRow = {
   sku: string
   productName: string | null
   optionName: string | null
+  itemCategory: string | null
   optionKey: string
   onHandQuantity: number | null
   /** Kept for compatibility with legacy single-warehouse report rows. */
@@ -52,6 +75,7 @@ export type SaasChinaInventoryExcelExportRow = {
   sku: string
   productName: string
   optionName: string | null
+  itemCategory: string | null
   onHandQuantity: number
   reservedQuantity?: number
   availableQuantity?: number
@@ -64,6 +88,7 @@ const HEADER_ALIASES = {
   sku: ['품목코드', '상품코드', 'sku'],
   productName: ['상품명', '품목명', 'productname'],
   optionName: ['옵션명', '옵션', '규격', 'optionname'],
+  itemCategory: ['품목구분', '품목 분류', 'itemcategory'],
   onHandQuantity: ['현재고', '재고수량', '재고', '수량', 'onhandquantity'],
   note: ['메모', '비고', 'note'],
 } as const
@@ -134,6 +159,7 @@ export async function parseSaasChinaInventoryWorkbook(
       sku: '',
       productName: null,
       optionName: null,
+      itemCategory: null,
       optionKey: '',
       onHandQuantity: null,
       note: null,
@@ -150,6 +176,7 @@ export async function parseSaasChinaInventoryWorkbook(
       sku: '',
       productName: null,
       optionName: null,
+      itemCategory: null,
       optionKey: '',
       onHandQuantity: null,
       note: null,
@@ -207,33 +234,108 @@ export async function exportSaasChinaInventoryTemplateWorkbook() {
   return toBuffer(workbook)
 }
 
-/** Exports the current editable list. Extra read-only columns are ignored on re-upload. */
+/**
+ * Exports the active ledger as an Ecount-shaped inventory-status snapshot.
+ * A logical item becomes one row, with its on-hand stock split across
+ * warehouse columns. The result can be uploaded again as a full snapshot.
+ */
 export async function exportSaasChinaInventoryWorkbook(rows: readonly SaasChinaInventoryExcelExportRow[]) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
-  const headers = [SAAS_CHINA_INVENTORY_ID_HEADER, ...SAAS_CHINA_INVENTORY_EXCEL_HEADERS, '출고 예약', '작업 가능', '최근 입고']
-  const sheet = createSheet(workbook, SAAS_CHINA_INVENTORY_EXCEL_SHEET, headers, [38, 18, 20, 38, 28, 14, 36, 14, 14, 21])
-  sheet.getColumn(1).hidden = true
+  const warehouseCodes = inventoryStatusWarehouseCodes(rows)
+  const headers = [...SAAS_CHINA_INVENTORY_STATUS_HEADERS, ...warehouseCodes]
+  const sheet = createSheet(
+    workbook,
+    SAAS_CHINA_INVENTORY_STATUS_SHEET,
+    headers,
+    [20, 38, 28, 16, 14, ...warehouseCodes.map(() => 22)],
+  )
 
+  const grouped = new Map<string, InventoryStatusExportRow>()
   for (const value of rows) {
+    const sku = value.sku.trim()
+    const productName = value.productName.trim()
+    const optionName = value.optionName?.trim() || null
+    const itemCategory = value.itemCategory?.trim() || null
+    const warehouseCode = value.warehouseCode.trim()
+    // Product names and categories should be consistent for a SKU/option. If
+    // a historical row differs, retain it as a separate report row instead of
+    // silently changing an item during a round trip.
+    const key = [sku, productName, optionName ?? '', itemCategory ?? ''].join('\u0000')
+    const group = grouped.get(key) ?? {
+      sku,
+      productName,
+      optionName,
+      itemCategory,
+      totalQuantity: 0,
+      quantitiesByWarehouse: new Map<string, number>(),
+    }
+    group.totalQuantity += value.onHandQuantity
+    group.quantitiesByWarehouse.set(
+      warehouseCode,
+      (group.quantitiesByWarehouse.get(warehouseCode) ?? 0) + value.onHandQuantity,
+    )
+    grouped.set(key, group)
+  }
+
+  const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
+  const reportRows = [...grouped.values()].sort((left, right) => (
+    inventoryStatusItemCategoryRank(left.itemCategory) - inventoryStatusItemCategoryRank(right.itemCategory)
+    || collator.compare(left.sku, right.sku)
+    || collator.compare(left.optionName ?? '', right.optionName ?? '')
+    || collator.compare(left.productName, right.productName)
+    || collator.compare(left.itemCategory ?? '', right.itemCategory ?? '')
+  ))
+  for (const value of reportRows) {
     const row = sheet.addRow([
-      value.id,
-      value.warehouseCode,
       value.sku,
       value.productName,
       value.optionName ?? '',
-      value.onHandQuantity,
-      '',
-      value.reservedQuantity ?? 0,
-      value.availableQuantity ?? value.onHandQuantity,
-      normalizeDate(value.lastReceivedAt),
+      value.itemCategory ?? '',
+      value.totalQuantity,
+      ...warehouseCodes.map((warehouseCode) => value.quantitiesByWarehouse.get(warehouseCode) || ''),
     ])
-    styleDataRow(row, new Set([4, 6, 7]), new Set([1, 2, 3, 5, 8, 9, 10]))
-    for (const column of [6, 8, 9]) row.getCell(column).numFmt = '#,##0'
-    row.getCell(10).numFmt = 'yyyy-mm-dd hh:mm'
+    styleDataRow(row, new Set<number>())
+    for (let column = 5; column <= headers.length; column += 1) row.getCell(column).numFmt = '#,##0'
   }
   return toBuffer(workbook)
+}
+
+type InventoryStatusExportRow = {
+  sku: string
+  productName: string
+  optionName: string | null
+  itemCategory: string | null
+  totalQuantity: number
+  quantitiesByWarehouse: Map<string, number>
+}
+
+function inventoryStatusWarehouseCodes(rows: readonly SaasChinaInventoryExcelExportRow[]) {
+  const standardCodes = [...SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES]
+  const standardSet = new Set(standardCodes)
+  const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
+  const extraCodes = [...new Set(rows
+    .map((row) => row.warehouseCode.trim())
+    .filter((warehouseCode) => warehouseCode && !standardSet.has(warehouseCode)))]
+    .sort(collator.compare)
+  return [...standardCodes, ...extraCodes]
+}
+
+function inventoryStatusItemCategoryRank(itemCategory: string | null) {
+  switch (itemCategory?.trim()) {
+    case '[부재료]':
+    case '부재료':
+      return 0
+    case '[원재료]':
+    case '원재료':
+      return 1
+    case '[상품]':
+    case '상품':
+      return 2
+    default:
+      return 3
+  }
 }
 
 export function saasChinaInventoryTemplateFilename() {
@@ -270,13 +372,11 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
   const columns: HeaderColumns = { source: 'saas_china_inventory' }
   let chinaWarehouseColumn: number | undefined
   let hasTotalHeader = false
-  let itemCategoryColumn: number | undefined
   row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
     const normalized = normalizeHeader(cellText(cell.value))
     if (!normalized) return
     if (normalized === normalizeHeader('중국창고')) chinaWarehouseColumn = columnNumber
     if (normalized === normalizeHeader('합계')) hasTotalHeader = true
-    if (normalized === normalizeHeader('품목구분')) itemCategoryColumn = columnNumber
     for (const [field, aliases] of Object.entries(HEADER_ALIASES) as Array<[keyof typeof HEADER_ALIASES, readonly string[]]>) {
       if (!columns[field] && aliases.some((alias) => normalizeHeader(alias) === normalized)) {
         columns[field] = columnNumber
@@ -290,6 +390,7 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
   // China-warehouse quantity column are all present. This strict signature
   // prevents a similarly shaped partial-update workbook from becoming a
   // destructive full snapshot.
+  const itemCategoryColumn = columns.itemCategory
   if (
     !columns.onHandQuantity
     && columns.sku
@@ -328,6 +429,7 @@ function parseInventoryStatusReportRow(
   const sku = valueAt('sku')
   const productName = valueAt('productName') || null
   const optionName = valueAt('optionName') || null
+  const itemCategory = valueAt('itemCategory') || null
   const optionKey = optionName ?? ''
   const note = valueAt('note') || null
   const commonErrors: string[] = []
@@ -338,6 +440,7 @@ function parseInventoryStatusReportRow(
   if (sku.length > 100) commonErrors.push('품목코드는 100자 이하로 입력해주세요.')
   if (productName && productName.length > 1_000) commonErrors.push('상품명은 1,000자 이하로 입력해주세요.')
   if (optionName && optionName.length > 200) commonErrors.push('옵션명은 200자 이하로 입력해주세요.')
+  if (itemCategory && itemCategory.length > 100) commonErrors.push('품목구분은 100자 이하로 입력해주세요.')
   if (note && note.length > 2_000) commonErrors.push('메모는 2,000자 이하로 입력해주세요.')
 
   const reportWarehouseColumns = columns.reportWarehouseColumns ?? []
@@ -362,6 +465,7 @@ function parseInventoryStatusReportRow(
       sku,
       productName,
       optionName,
+      itemCategory,
       optionKey,
       onHandQuantity: quantity,
       note,
@@ -380,6 +484,7 @@ function parseInventoryStatusReportRow(
       sku,
       productName,
       optionName,
+      itemCategory,
       optionKey,
       onHandQuantity: null,
       note,
@@ -407,6 +512,7 @@ function parseRow(
   const sku = valueAt('sku')
   const productName = valueAt('productName') || null
   const optionName = valueAt('optionName') || null
+  const itemCategory = valueAt('itemCategory') || null
   const optionKey = optionName ?? ''
   const quantityText = valueAt('onHandQuantity')
   const note = valueAt('note') || null
@@ -425,6 +531,7 @@ function parseRow(
   if (sku.length > 100) errors.push('품목코드는 100자 이하로 입력해주세요.')
   if (productName && productName.length > 1_000) errors.push('상품명은 1,000자 이하로 입력해주세요.')
   if (optionName && optionName.length > 200) errors.push('옵션명은 200자 이하로 입력해주세요.')
+  if (itemCategory && itemCategory.length > 100) errors.push('품목구분은 100자 이하로 입력해주세요.')
   if (note && note.length > 2_000) errors.push('메모는 2,000자 이하로 입력해주세요.')
   if (quantityText && onHandQuantity == null) errors.push('현재고는 0 이상의 정수로 입력해주세요.')
 
@@ -435,6 +542,7 @@ function parseRow(
     sku,
     productName,
     optionName,
+    itemCategory,
     optionKey,
     onHandQuantity,
     ...(reportBlankQuantity ? { reportBlankQuantity: true } : {}),
@@ -542,12 +650,6 @@ function styleDataRow(
     if (editableColumns.has(columnNumber)) cell.fill = INPUT_FILL
     if (referenceColumns.has(columnNumber)) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F2F2F2' } }
   })
-}
-
-function normalizeDate(value: Date | string | null | undefined) {
-  if (!value) return ''
-  const date = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(date.getTime()) ? '' : date
 }
 
 async function toBuffer(workbook: ExcelJS.Workbook) {

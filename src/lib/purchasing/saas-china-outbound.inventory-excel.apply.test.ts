@@ -23,6 +23,7 @@ function excelRow(overrides: Partial<SaasChinaInventoryExcelRow> = {}): SaasChin
     sku: 'SKU-A',
     productName: null,
     optionName: null,
+    itemCategory: null,
     optionKey: '',
     onHandQuantity: 12,
     note: null,
@@ -38,6 +39,7 @@ function inventory(): Row {
     warehouseCode: '중국창고',
     sku: 'SKU-A',
     productName: '상품 A',
+    itemCategory: null,
     optionKey: '',
     optionName: null,
     onHandQuantity: 10,
@@ -142,16 +144,16 @@ describe('applySaasChinaInventoryWorkbook', () => {
       userId: workspaceUserId,
       createdBy: 'operator-a',
       rows: [
-        excelRow({ rowNumber: 2, warehouseCode: '중국창고', onHandQuantity: 12 }),
-        excelRow({ rowNumber: 2, warehouseCode: '대량', onHandQuantity: 4 }),
+        excelRow({ rowNumber: 2, warehouseCode: '중국창고', itemCategory: '[상품]', onHandQuantity: 12 }),
+        excelRow({ rowNumber: 2, warehouseCode: '대량', itemCategory: '[상품]', onHandQuantity: 4 }),
       ],
       sourceLabel: '재고현황.xlsx',
       fullSnapshot: true,
     })).resolves.toEqual({ createdCount: 0, updatedCount: 2, archivedCount: 0, unchangedCount: 0 })
 
     expect(updateValues).toEqual([
-      expect.objectContaining({ onHandQuantity: 12, availableQuantity: 12 }),
-      expect.objectContaining({ onHandQuantity: 4, availableQuantity: 4 }),
+      expect.objectContaining({ onHandQuantity: 12, availableQuantity: 12, itemCategory: '[상품]' }),
+      expect.objectContaining({ onHandQuantity: 4, availableQuantity: 4, itemCategory: '[상품]' }),
     ])
     expect(movementValues).toHaveBeenCalledTimes(2)
     expect(movementValues.mock.calls.map(([movement]) => movement.inventoryId)).toEqual([inventoryId, 'inventory-b'])

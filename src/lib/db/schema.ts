@@ -921,6 +921,9 @@ export const saasChinaInventory = pgTable(
     warehouseCode: varchar('warehouse_code', { length: 100 }).notNull().default('default'),
     sku: varchar('sku', { length: 100 }).notNull(),
     productName: text('product_name').notNull(),
+    // Kept from the inventory-status source report so exported snapshots can
+    // retain the Ecount item classification (for example [상품]).
+    itemCategory: varchar('item_category', { length: 100 }),
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
     onHandQuantity: integer('on_hand_quantity').notNull().default(0),

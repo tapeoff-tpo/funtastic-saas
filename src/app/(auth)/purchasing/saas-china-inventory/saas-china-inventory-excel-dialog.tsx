@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AlertCircle, Check, Download, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 
-type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'invalid'
+type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'removed' | 'protected' | 'invalid'
 
 type ImportPreviewRow = {
   row: number | null
@@ -45,7 +45,11 @@ export function SaasChinaInventoryExcelDialog() {
   const [reportBlankQuantityRowCount, setReportBlankQuantityRowCount] = useState(0)
   const [isWorking, setIsWorking] = useState(false)
 
-  const hasErrors = Boolean(preview && (preview.errors.length > 0 || preview.counts.invalid > 0))
+  const hasErrors = Boolean(preview && (
+    preview.errors.length > 0
+    || preview.counts.invalid > 0
+    || preview.counts.protected > 0
+  ))
 
   function resetSelection() {
     setFile(null)
@@ -112,7 +116,10 @@ export function SaasChinaInventoryExcelDialog() {
       const changedCount = nextPreview?.counts.new ?? 0
       const updateCount = nextPreview?.counts.changed ?? 0
       const appliedCount = changedCount + updateCount
-      toast.success(appliedCount > 0 ? `${appliedCount.toLocaleString('ko-KR')}개 재고 항목을 엑셀로 반영했습니다.` : '엑셀 재고 변경을 반영했습니다.')
+      const removedCount = nextPreview?.counts.removed ?? 0
+      toast.success(removedCount > 0
+        ? `${appliedCount.toLocaleString('ko-KR')}개 재고 항목을 반영하고 ${removedCount.toLocaleString('ko-KR')}개 항목을 목록에서 제거했습니다.`
+        : appliedCount > 0 ? `${appliedCount.toLocaleString('ko-KR')}개 재고 항목을 엑셀로 반영했습니다.` : '엑셀 재고 변경을 반영했습니다.')
       setOpen(false)
       resetSelection()
       router.refresh()
@@ -148,7 +155,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 id="saas-inventory-excel-title" className="text-lg font-semibold">SaaS 중국재고 엑셀 변경</h3>
-                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">현재고를 입력한 수량으로 변경합니다. 업로드에 없는 기존 재고는 삭제하지 않으며, 기존 행의 빈 셀은 현재 값을 유지합니다.</p>
+                <p id="saas-inventory-excel-description" className="mt-1 text-sm text-muted-foreground">일반 SaaS 양식은 입력한 행만 수정합니다. 재고현황 양식은 중국창고 전체 최신 목록으로 반영합니다.</p>
                 <p className="mt-1 text-xs text-muted-foreground">엑셀 검토만으로는 재고가 변경되지 않습니다. 검토 결과 반영을 눌러야 실제 재고에 적용됩니다.</p>
               </div>
               <button type="button" onClick={closeDialog} disabled={isWorking} aria-label="엑셀 재고 변경 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
@@ -170,7 +177,7 @@ export function SaasChinaInventoryExcelDialog() {
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
               <p className="text-sm font-medium">엑셀 파일 선택</p>
               <p className="mt-1 text-xs text-muted-foreground">현재 목록에서는 상품명과 현재고를 수정하세요. 메모는 현재고 변경 또는 신규 등록 사유로 기록됩니다. 중국창고·품목코드·옵션명은 변경할 수 없습니다.</p>
-              <p className="mt-1 text-xs text-muted-foreground">재고현황 양식도 업로드할 수 있습니다. 품목코드·품목명·규격·중국창고 열을 사용하며, 중국창고가 빈 칸이면 0으로 읽습니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">재고현황 양식도 업로드할 수 있습니다. 품목코드·품목명·규격·중국창고 열을 사용하며, 중국창고가 빈 칸이면 0으로 읽습니다. 이 양식은 중국창고 전체 최신 목록이므로 파일에 없는 기존 중국창고 재고는 목록에서 제거합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />
@@ -190,9 +197,14 @@ export function SaasChinaInventoryExcelDialog() {
                   엑셀 검토
                 </button>
               </div>
-              {isInventoryStatusReport && reportBlankQuantityRowCount > 0 ? (
+              {isInventoryStatusReport ? (
                 <div className="mt-4 rounded-md border border-amber-200 bg-amber-50/60 p-3">
-                  <p className="text-sm font-medium text-foreground">재고현황 양식의 빈 중국창고 수량 {reportBlankQuantityRowCount.toLocaleString('ko-KR')}행은 0으로 읽습니다.</p>
+                  <p className="text-sm font-medium text-foreground">재고현황 양식은 중국창고 전체 최신 재고로 반영합니다.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {reportBlankQuantityRowCount > 0 ? <span>빈 중국창고 수량 {reportBlankQuantityRowCount.toLocaleString('ko-KR')}행은 0으로 읽습니다. </span> : null}
+                    <span>파일에 없는 기존 중국창고 항목은 목록에서 제거합니다. </span>
+                    <span>출고 예약 또는 발주 연동 재고가 있으면 전체 반영이 차단됩니다.</span>
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -202,7 +214,7 @@ export function SaasChinaInventoryExcelDialog() {
                 <PreviewSummary preview={preview} />
                 {preview.rows.length > 0 ? <PreviewTable rows={preview.rows} /> : null}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <p className="text-xs text-muted-foreground">검토 후에도 예약 수량이나 발주 연동 수량보다 적게 변경할 수는 없습니다.</p>
+                  <p className="text-xs text-muted-foreground">검토 후에도 예약 수량이나 발주 연동 수량보다 적게 변경하거나 목록에서 제거할 수는 없습니다.</p>
                   <button type="button" onClick={() => void upload('apply')} disabled={isWorking || hasErrors} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                     {isWorking ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
                     검토 결과 반영
@@ -225,13 +237,14 @@ function PreviewSummary({ preview }: { preview: ImportPreview }) {
         <span>신규 <strong>{preview.counts.new.toLocaleString('ko-KR')}개</strong></span>
         <span>변경 <strong>{preview.counts.changed.toLocaleString('ko-KR')}개</strong></span>
         <span>변경 없음 <strong>{preview.counts.unchanged.toLocaleString('ko-KR')}개</strong></span>
+        {preview.counts.removed > 0 ? <span className="font-medium text-amber-800">목록 제거 <strong>{preview.counts.removed.toLocaleString('ko-KR')}개</strong></span> : null}
         {preview.counts.invalid > 0 ? <span className="font-medium text-red-800">확인 필요 {preview.counts.invalid.toLocaleString('ko-KR')}개</span> : null}
       </div>
       {hasErrors ? (
         <div className="mt-3 flex gap-2 text-sm text-red-900">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <div>
-            <p className="font-medium">오류가 있는 행은 반영할 수 없습니다.</p>
+            <p className="font-medium">확인 필요 항목이 있어 전체 반영할 수 없습니다.</p>
             {preview.errors.length > 0 ? (
               <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
                 {preview.errors.slice(0, 10).map((error, index) => (
@@ -268,7 +281,7 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={`${row.row ?? 'row'}:${index}`} className={`border-t ${row.status === 'invalid' ? 'bg-red-50/60' : ''}`}>
+              <tr key={`${row.row ?? 'row'}:${index}`} className={`border-t ${row.status === 'invalid' || row.status === 'protected' ? 'bg-red-50/60' : row.status === 'removed' ? 'bg-amber-50/60' : ''}`}>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{row.row ?? '-'}</td>
                 <td className="px-3 py-2"><StatusBadge status={row.status} /></td>
                 <td data-no-translate className="px-3 py-2 text-xs">{row.warehouseCode || '-'}</td>
@@ -293,12 +306,16 @@ function StatusBadge({ status }: { status: PreviewStatus }) {
     new: '신규 추가',
     changed: '변경',
     unchanged: '변경 없음',
+    removed: '목록 제거',
+    protected: '처리 불가',
     invalid: '확인 필요',
   }
   const className: Record<PreviewStatus, string> = {
     new: 'bg-sky-100 text-sky-800',
     changed: 'bg-amber-100 text-amber-800',
     unchanged: 'bg-muted text-muted-foreground',
+    removed: 'bg-orange-100 text-orange-800',
+    protected: 'bg-red-100 text-red-800',
     invalid: 'bg-red-100 text-red-800',
   }
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${className[status]}`}>{label[status]}</span>
@@ -314,6 +331,8 @@ function normalizePreview(value: unknown): ImportPreview | null {
     new: countValue(summary, ['newCount', 'createdCount', 'newRows'], rows, 'new'),
     changed: countValue(summary, ['changedCount', 'updatedCount', 'changeCount'], rows, 'changed'),
     unchanged: countValue(summary, ['unchangedCount', 'sameCount', 'skippedCount'], rows, 'unchanged'),
+    removed: countValue(summary, ['removedCount', 'archivedCount', 'removedRows'], rows, 'removed'),
+    protected: countValue(summary, ['protectedCount'], rows, 'protected'),
     invalid: countValue(summary, ['invalidCount', 'errorCount'], rows, 'invalid'),
   }
   counts.invalid = Math.max(counts.invalid, errors.length)
@@ -352,6 +371,8 @@ function readStatus(value: unknown, message: string): PreviewStatus {
   if (['new', 'create', 'created', 'add', 'added'].includes(normalized)) return 'new'
   if (['changed', 'change', 'update', 'updated', 'modify', 'modified'].includes(normalized)) return 'changed'
   if (['unchanged', 'same', 'skip', 'skipped', 'no_change'].includes(normalized)) return 'unchanged'
+  if (['removed', 'remove', 'removed_from_list', 'archive', 'archived'].includes(normalized)) return 'removed'
+  if (['protected', 'protection'].includes(normalized)) return 'protected'
   if (['invalid', 'error', 'blocked', 'failed'].includes(normalized) || message) return 'invalid'
   return 'unchanged'
 }

@@ -52,7 +52,7 @@ describe('SaasChinaInventoryExcelDialog', () => {
 
     const apply = await screen.findByRole('button', { name: '검토 결과 반영' })
     expect(apply).toBeDisabled()
-    expect(screen.getByText('오류가 있는 행은 반영할 수 없습니다.')).toBeInTheDocument()
+    expect(screen.getByText('확인 필요 항목이 있어 전체 반영할 수 없습니다.')).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(
       '/api/purchasing/saas-china-inventory/excel-import/preview',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
@@ -111,7 +111,8 @@ describe('SaasChinaInventoryExcelDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
 
     const apply = await screen.findByRole('button', { name: '검토 결과 반영' })
-    expect(screen.getByText('재고현황 양식의 빈 중국창고 수량 2행은 0으로 읽습니다.')).toBeInTheDocument()
+    expect(screen.getByText('재고현황 양식은 중국창고 전체 최신 재고로 반영합니다.')).toBeInTheDocument()
+    expect(screen.getByText('빈 중국창고 수량 2행은 0으로 읽습니다.', { exact: false })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     const previewBody = (fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData
     expect(previewBody.get('inventoryStatusBlankQuantity')).toBeNull()
@@ -120,5 +121,30 @@ describe('SaasChinaInventoryExcelDialog', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     const applyBody = (fetch.mock.calls[1]?.[1] as RequestInit | undefined)?.body as FormData
     expect(applyBody.get('inventoryStatusBlankQuantity')).toBeNull()
+  })
+
+  it('shows rows omitted from an inventory-status report as list removals before applying the full snapshot', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
+      source: 'inventory_status_report',
+      reportBlankQuantityRowCount: 0,
+      preview: {
+        summary: { newCount: 0, changedCount: 0, unchangedCount: 1, removedCount: 1, invalidCount: 0 },
+        rows: [
+          { row: 2, status: 'unchanged', warehouseCode: '중국창고', sku: 'SKU-01', productName: '상품', optionName: '', beforeQuantity: 10, afterQuantity: 10, message: '' },
+          { row: null, status: 'removed', warehouseCode: '중국창고', sku: 'STALE-01', productName: '기존 재고', optionName: '', beforeQuantity: 5, afterQuantity: 0, message: '재고현황 파일에 없어 SaaS 중국재고 목록에서 제거합니다.' },
+        ],
+        errors: [],
+      },
+    }))
+
+    render(<SaasChinaInventoryExcelDialog />)
+    fireEvent.click(screen.getByRole('button', { name: '엑셀로 재고 변경' }))
+    selectWorkbook('재고현황.xlsx')
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
+
+    expect((await screen.findAllByText('목록 제거')).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('재고현황 파일에 없어 SaaS 중국재고 목록에서 제거합니다.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeEnabled()
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { saasChinaInventory, saasChinaPurchaseLinks } from '@/lib/db/schema'
+import { saasChinaInventory, saasChinaInventoryMovements, saasChinaPurchaseLinks } from '@/lib/db/schema'
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -104,5 +104,80 @@ describe('applySaasChinaInventoryWorkbook', () => {
 
     expect(tx.update).not.toHaveBeenCalled()
     expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('does not mutate listed rows when an omitted snapshot identity is protected', async () => {
+    const tx = transaction([
+      { ...inventory(), reservedQuantity: 0, availableQuantity: 10 },
+      { ...inventory(), id: 'inventory-b', sku: 'SKU-B', productName: '상품 B', onHandQuantity: 5, reservedQuantity: 2, availableQuantity: 3 },
+    ])
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId,
+      createdBy: 'operator-a',
+      rows: [excelRow({ onHandQuantity: 12 })],
+      sourceLabel: '재고현황.xlsx',
+      fullSnapshot: true,
+      snapshotWarehouseCodes: ['중국창고'],
+    })).rejects.toThrow('재고현황 파일에 없어 제거할 수 없습니다. 출고 예약 2개를 먼저 처리해주세요.')
+
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('archives a safe omitted snapshot identity and writes its quantity adjustment to the ledger', async () => {
+    const omitted = {
+      ...inventory(),
+      id: 'inventory-b',
+      sku: 'SKU-B',
+      productName: '상품 B',
+      onHandQuantity: 5,
+      reservedQuantity: 0,
+      availableQuantity: 5,
+    }
+    const tx = transaction([
+      { ...inventory(), reservedQuantity: 0, availableQuantity: 10 },
+      omitted,
+    ])
+    const updateValues: Array<Record<string, unknown>> = []
+    const movementValues = vi.fn().mockResolvedValue(undefined)
+    tx.update.mockImplementation(() => ({
+      set: (values: Record<string, unknown>) => {
+        updateValues.push(values)
+        return {
+          where: () => ({
+            returning: async () => [{ ...omitted, ...values }],
+          }),
+        }
+      },
+    }))
+    tx.insert.mockImplementation((table: unknown) => {
+      if (table === saasChinaInventoryMovements) return { values: movementValues }
+      throw new Error('unexpected insert')
+    })
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId,
+      createdBy: 'operator-a',
+      rows: [excelRow({ onHandQuantity: 10 })],
+      sourceLabel: '재고현황.xlsx',
+      fullSnapshot: true,
+      snapshotWarehouseCodes: ['중국창고'],
+    })).resolves.toEqual({ createdCount: 0, updatedCount: 0, archivedCount: 1, unchangedCount: 1 })
+
+    expect(updateValues).toEqual([expect.objectContaining({
+      onHandQuantity: 0,
+      availableQuantity: 0,
+      archivedAt: expect.any(Date),
+    })])
+    expect(movementValues).toHaveBeenCalledWith(expect.objectContaining({
+      inventoryId: 'inventory-b',
+      movementType: 'manual_adjustment',
+      onHandDelta: -5,
+      onHandAfter: 0,
+      reservedAfter: 0,
+    }))
   })
 })

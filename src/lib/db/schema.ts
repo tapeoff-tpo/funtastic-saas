@@ -928,6 +928,10 @@ export const saasChinaInventory = pgTable(
     availableQuantity: integer('available_quantity').notNull().default(0),
     lastReceivedAt: timestamp('last_received_at', { withTimezone: true }),
     lastOutboundAt: timestamp('last_outbound_at', { withTimezone: true }),
+    // An inventory-status report is an authoritative list for the default
+    // China warehouse. Rows omitted from that report are retained for audit
+    // and relationship integrity, but no longer appear in the active list.
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdBy: uuid('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -947,6 +951,7 @@ export const saasChinaInventory = pgTable(
       table.warehouseCode,
       table.sku,
     ).where(sql`${table.availableQuantity} > 0`),
+    index('saas_china_inventory_user_active').on(table.userId).where(sql`${table.archivedAt} IS NULL`),
     check('saas_china_inventory_on_hand_nonnegative', sql`${table.onHandQuantity} >= 0`),
     check('saas_china_inventory_reserved_nonnegative', sql`${table.reservedQuantity} >= 0`),
     check('saas_china_inventory_available_nonnegative', sql`${table.availableQuantity} >= 0`),

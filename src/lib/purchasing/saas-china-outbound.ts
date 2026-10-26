@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import type { SaasChinaInventoryExcelRow } from './saas-china-inventory-excel'
 import {
@@ -100,14 +100,16 @@ export type SaasChinaInventoryAdjustmentInput = {
 }
 
 export type SaasChinaInventoryWorkbookPreviewRow = {
-  row: number
+  /** Workbook row, or null when a currently listed row is omitted by a full snapshot. */
+  row: number | null
+  inventoryId?: string | null
   warehouseCode: string
   sku: string
   productName: string | null
   optionName: string | null
   beforeQuantity: number | null
   afterQuantity: number | null
-  status: 'new' | 'changed' | 'unchanged' | 'invalid' | 'protected'
+  status: 'new' | 'changed' | 'unchanged' | 'removed' | 'invalid' | 'protected'
   message?: string
 }
 
@@ -116,6 +118,7 @@ export type SaasChinaInventoryWorkbookPreview = {
     newCount: number
     changedCount: number
     unchangedCount: number
+    removedCount: number
     invalidCount: number
     rowCount: number
   }
@@ -126,6 +129,7 @@ export type SaasChinaInventoryWorkbookPreview = {
 export type SaasChinaInventoryWorkbookApplyResult = {
   createdCount: number
   updatedCount: number
+  archivedCount: number
   unchangedCount: number
 }
 
@@ -283,6 +287,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     available_quantity integer NOT NULL DEFAULT 0,
     last_received_at timestamptz,
     last_outbound_at timestamptz,
+    archived_at timestamptz,
     created_by uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -296,11 +301,16 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
 
   CREATE UNIQUE INDEX IF NOT EXISTS saas_china_inventory_user_warehouse_sku_option
     ON saas_china_inventory(user_id, warehouse_code, sku, option_key);
+  ALTER TABLE saas_china_inventory
+    ADD COLUMN IF NOT EXISTS archived_at timestamptz;
   CREATE INDEX IF NOT EXISTS saas_china_inventory_user_sku
     ON saas_china_inventory(user_id, sku);
   CREATE INDEX IF NOT EXISTS saas_china_inventory_user_warehouse_available
     ON saas_china_inventory(user_id, warehouse_code, sku)
     WHERE available_quantity > 0;
+  CREATE INDEX IF NOT EXISTS saas_china_inventory_user_active
+    ON saas_china_inventory(user_id)
+    WHERE archived_at IS NULL;
 
   -- This composite candidate key lets a bridge lot prove that its purchase
   -- row belongs to the same workspace as the isolated SaaS inventory record.
@@ -737,7 +747,10 @@ export async function getSaasChinaInventory(userId: string) {
     db
       .select()
       .from(saasChinaInventory)
-      .where(eq(saasChinaInventory.userId, userId))
+      .where(and(
+        eq(saasChinaInventory.userId, userId),
+        isNull(saasChinaInventory.archivedAt),
+      ))
       .orderBy(
         asc(saasChinaInventory.warehouseCode),
         asc(saasChinaInventory.sku),
@@ -750,7 +763,10 @@ export async function getSaasChinaInventory(userId: string) {
         availableQuantity: sql<number>`COALESCE(SUM(${saasChinaInventory.availableQuantity}), 0)::int`,
       })
       .from(saasChinaInventory)
-      .where(eq(saasChinaInventory.userId, userId)),
+      .where(and(
+        eq(saasChinaInventory.userId, userId),
+        isNull(saasChinaInventory.archivedAt),
+      )),
   ])
 
   return {
@@ -908,6 +924,7 @@ export async function receiveSaasChinaInventory(input: SaasChinaInventoryInput) 
           onHandQuantity: afterOnHand,
           availableQuantity: afterAvailable,
           lastReceivedAt: new Date(),
+          archivedAt: null,
           updatedAt: new Date(),
         })
         .where(eq(saasChinaInventory.id, existing.id))
@@ -974,6 +991,7 @@ export async function adjustSaasChinaInventory(input: SaasChinaInventoryAdjustme
       .set({
         onHandQuantity: afterOnHand,
         availableQuantity: afterAvailable,
+        archivedAt: delta > 0 ? null : inventory.archivedAt,
         updatedAt: new Date(),
       })
       .where(eq(saasChinaInventory.id, inventory.id))
@@ -1000,13 +1018,14 @@ export async function adjustSaasChinaInventory(input: SaasChinaInventoryAdjustme
 }
 
 /**
- * Builds a non-destructive inventory-list import preview. Rows absent from the
- * workbook deliberately never appear in the plan, so an upload cannot remove
- * stock merely because a user filtered the exported list before editing it.
+ * Generic SaaS templates are non-destructive patches. A recognized inventory
+ * status report may instead be treated as an authoritative warehouse snapshot.
  */
 export async function previewSaasChinaInventoryWorkbook(input: {
   userId: string
   rows: readonly SaasChinaInventoryExcelRow[]
+  fullSnapshot?: boolean
+  snapshotWarehouseCodes?: readonly string[]
 }): Promise<SaasChinaInventoryWorkbookPreview> {
   await ensureSaasChinaOutboundSchema()
   const [inventories, linkedBalances] = await Promise.all([
@@ -1028,20 +1047,24 @@ export async function previewSaasChinaInventoryWorkbook(input: {
     rows: input.rows,
     inventories,
     linkedOnHandByInventoryId: new Map(linkedBalances.map((row) => [row.inventoryId, row.linkedOnHand ?? 0])),
+    fullSnapshot: input.fullSnapshot,
+    snapshotWarehouseCodes: input.snapshotWarehouseCodes,
   })
 }
 
 /**
  * Applies a reviewed workbook as one transaction. `현재고` is an absolute
- * on-hand target for each listed identity, while blank quantities preserve the
- * current amount. It never deletes rows, releases reservations, or lowers an
- * aggregate row below stock that is still traceable to a purchase arrival.
+ * on-hand target for each listed identity. A full snapshot additionally
+ * archives omitted zeroable rows so the active list matches the report while
+ * keeping immutable shipment/purchase history intact.
  */
 export async function applySaasChinaInventoryWorkbook(input: {
   userId: string
   createdBy: string
   rows: readonly SaasChinaInventoryExcelRow[]
   sourceLabel?: string | null
+  fullSnapshot?: boolean
+  snapshotWarehouseCodes?: readonly string[]
 }): Promise<SaasChinaInventoryWorkbookApplyResult> {
   await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
@@ -1065,6 +1088,8 @@ export async function applySaasChinaInventoryWorkbook(input: {
       rows: input.rows,
       inventories,
       linkedOnHandByInventoryId: new Map(linkedBalances.map((row) => [row.inventoryId, row.linkedOnHand ?? 0])),
+      fullSnapshot: input.fullSnapshot,
+      snapshotWarehouseCodes: input.snapshotWarehouseCodes,
     })
     if (preview.summary.invalidCount > 0) {
       throw new Error(preview.errors?.[0] ?? '엑셀 오류를 먼저 수정해주세요.')
@@ -1075,10 +1100,11 @@ export async function applySaasChinaInventoryWorkbook(input: {
       inventory,
     ]))
     const inventoriesById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
-    const plansByRow = new Map(preview.rows.map((row) => [row.row, row]))
+    const plansByRow = new Map(preview.rows.flatMap((row) => row.row == null ? [] : [[row.row, row] as const]))
     const batchId = randomUUID()
     let createdCount = 0
     let updatedCount = 0
+    let archivedCount = 0
 
     for (const rawRow of input.rows) {
       const row = normalizeSaasChinaInventoryWorkbookRow(rawRow)
@@ -1099,7 +1125,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
 
       if (!existing) {
         const productName = row.productName
-        if (!productName || targetOnHand <= 0) {
+        if (!productName || targetOnHand < 0 || (targetOnHand === 0 && !input.fullSnapshot)) {
           throw new Error(`${row.rowNumber}행의 새 SaaS 중국재고 정보를 확인해주세요.`)
         }
         const [created] = await tx
@@ -1114,7 +1140,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
             onHandQuantity: targetOnHand,
             reservedQuantity: 0,
             availableQuantity: targetOnHand,
-            lastReceivedAt: new Date(),
+            lastReceivedAt: targetOnHand > 0 ? new Date() : null,
             createdBy: input.createdBy,
           })
           .returning()
@@ -1148,6 +1174,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
           productName: nextProductName,
           onHandQuantity: targetOnHand,
           availableQuantity: afterAvailable,
+          archivedAt: null,
           updatedAt: new Date(),
         })
         .where(eq(saasChinaInventory.id, existing.id))
@@ -1174,9 +1201,51 @@ export async function applySaasChinaInventoryWorkbook(input: {
       updatedCount += 1
     }
 
+    for (const plan of preview.rows) {
+      if (plan.status !== 'removed' || !plan.inventoryId) continue
+      const existing = inventoriesById.get(plan.inventoryId)
+      if (!existing) throw new Error('목록에서 제거할 SaaS 중국재고를 찾을 수 없습니다.')
+
+      const delta = -existing.onHandQuantity
+      const [archived] = await tx
+        .update(saasChinaInventory)
+        .set({
+          onHandQuantity: 0,
+          availableQuantity: 0,
+          archivedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(saasChinaInventory.id, existing.id),
+          eq(saasChinaInventory.userId, input.userId),
+        ))
+        .returning()
+      if (!archived) throw new Error('SaaS 중국재고를 목록에서 제거하지 못했습니다.')
+      if (delta !== 0) {
+        await insertSaasChinaInventoryMovement(tx, {
+          inventoryId: existing.id,
+          userId: input.userId,
+          movementType: 'manual_adjustment',
+          onHandDelta: delta,
+          reservedDelta: 0,
+          onHandBefore: existing.onHandQuantity,
+          reservedBefore: existing.reservedQuantity,
+          onHandAfter: 0,
+          reservedAfter: existing.reservedQuantity,
+          sourceKey: `saas-china-excel-snapshot-remove:${batchId}:${existing.id}`,
+          note: `${excelInventoryNote(input.sourceLabel)} (재고현황 파일에 없음)`,
+          createdBy: input.createdBy,
+        })
+      }
+      inventoriesById.set(archived.id, archived)
+      inventoriesByIdentity.set(saasChinaInventoryIdentityKey(archived.warehouseCode, archived.sku, archived.optionKey), archived)
+      archivedCount += 1
+    }
+
     return {
       createdCount,
       updatedCount,
+      archivedCount,
       unchangedCount: preview.summary.unchangedCount,
     }
   })
@@ -1237,6 +1306,7 @@ export async function receiveSaasChinaPurchaseArrivalInTransaction(
         onHandQuantity: afterOnHand,
         availableQuantity: afterAvailable,
         lastReceivedAt: new Date(),
+        archivedAt: null,
         updatedAt: new Date(),
       })
       .where(eq(saasChinaInventory.id, existingInventory.id))
@@ -1327,6 +1397,7 @@ export async function adjustSaasChinaPurchaseArrivalQuantityInTransaction(input:
       onHandQuantity: afterOnHand,
       availableQuantity: afterAvailable,
       lastReceivedAt: difference > 0 ? new Date() : inventory.lastReceivedAt,
+      archivedAt: difference > 0 ? null : inventory.archivedAt,
       updatedAt: new Date(),
     })
     .where(eq(saasChinaInventory.id, inventory.id))
@@ -1385,6 +1456,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
       .from(saasChinaInventory)
       .where(and(
         eq(saasChinaInventory.userId, input.userId),
+        isNull(saasChinaInventory.archivedAt),
         inArray(saasChinaInventory.id, inventoryIds),
       ))
     if (inventories.length !== inventoryIds.length) {
@@ -1510,6 +1582,7 @@ export async function addChinaOutboundShipmentItems(input: {
       .from(saasChinaInventory)
       .where(and(
         eq(saasChinaInventory.userId, input.userId),
+        isNull(saasChinaInventory.archivedAt),
         inArray(saasChinaInventory.id, allInventoryIds),
       ))
     if (inventories.length !== allInventoryIds.length) {
@@ -2907,6 +2980,10 @@ type SaasChinaInventoryWorkbookPlanInput = {
   rows: readonly SaasChinaInventoryExcelRow[]
   inventories: ReadonlyArray<typeof saasChinaInventory.$inferSelect>
   linkedOnHandByInventoryId: ReadonlyMap<string, number>
+  /** A recognized inventory-status report is an authoritative list, unlike the editable template. */
+  fullSnapshot?: boolean
+  /** The report only represents these warehouse codes. Other warehouses are never omitted by it. */
+  snapshotWarehouseCodes?: readonly string[]
 }
 
 /**
@@ -2927,8 +3004,16 @@ export function buildSaasChinaInventoryWorkbookPreview(
   ]))
   const inventoriesById = new Map(workspaceInventories.map((inventory) => [inventory.id, inventory]))
   const rows = input.rows.map(normalizeSaasChinaInventoryWorkbookRow)
+  const snapshotWarehouseCodes = input.fullSnapshot
+    ? new Set((input.snapshotWarehouseCodes?.length
+      ? input.snapshotWarehouseCodes
+      : rows.map((row) => row.warehouseCode))
+      .map((warehouseCode) => warehouseCode.trim())
+      .filter(Boolean))
+    : new Set<string>()
   const duplicateRowNumbers = duplicateSaasChinaInventoryWorkbookRowNumbers(rows)
   const previewRows: SaasChinaInventoryWorkbookPreviewRow[] = []
+  const snapshotIdentityKeys = new Set<string>()
 
   for (const row of rows) {
     const rowErrors = [...row.errors, ...validateSaasChinaInventoryWorkbookRow(row)]
@@ -2951,6 +3036,8 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
 
     const identity = saasChinaInventoryIdentityKey(row.warehouseCode, row.sku, row.optionKey)
+    const isSnapshotRow = input.fullSnapshot && snapshotWarehouseCodes.has(row.warehouseCode)
+    if (isSnapshotRow) snapshotIdentityKeys.add(identity)
     const inventoryById = row.inventoryId ? inventoriesById.get(row.inventoryId) : null
     if (row.inventoryId && !inventoryById) {
       previewRows.push({
@@ -2986,11 +3073,10 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
     const existing = inventoryById ?? inventoriesByIdentity.get(identity)
     if (!existing) {
-      // A blank `중국창고` cell in an inventory-status report is automatically
-      // read as a zero target only for an existing SaaS identity. It must not
-      // create an empty stock record for an item that has never been tracked
-      // in SaaS inventory.
-      if (row.reportBlankQuantity && row.onHandQuantity === 0) {
+      // A blank `중국창고` cell in an inventory-status report is a zero target.
+      // In the report's full-snapshot mode, retain that zero-stock identity in
+      // the active list; in a partial template it remains a no-op.
+      if (row.reportBlankQuantity && row.onHandQuantity === 0 && !isSnapshotRow) {
         previewRows.push({
           row: row.rowNumber,
           warehouseCode: row.warehouseCode,
@@ -3018,7 +3104,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
         })
         continue
       }
-      if (row.onHandQuantity == null || row.onHandQuantity <= 0) {
+      if (row.onHandQuantity == null || row.onHandQuantity < 0 || (row.onHandQuantity === 0 && !isSnapshotRow)) {
         previewRows.push({
           row: row.rowNumber,
           warehouseCode: row.warehouseCode,
@@ -3067,6 +3153,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
     }
 
     const productName = row.productName ?? existing.productName
+    const restoresArchivedInventory = existing.archivedAt != null
     const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
       ? afterQuantity === existing.onHandQuantity
         ? '재고현황의 빈 중국창고 수량이 0으로 확인되었습니다.'
@@ -3080,23 +3167,73 @@ export function buildSaasChinaInventoryWorkbookPreview(
       optionName: row.optionName,
       beforeQuantity: existing.onHandQuantity,
       afterQuantity,
-      status: afterQuantity === existing.onHandQuantity && productName === existing.productName
+      status: afterQuantity === existing.onHandQuantity
+        && productName === existing.productName
+        && !restoresArchivedInventory
         ? 'unchanged'
         : 'changed',
-      ...(reportBlankQuantityMessage ? { message: reportBlankQuantityMessage } : {}),
+      ...(restoresArchivedInventory
+        ? { message: '재고현황 파일에 포함되어 목록에 다시 표시합니다.' }
+        : reportBlankQuantityMessage ? { message: reportBlankQuantityMessage } : {}),
     })
+  }
+
+  if (input.fullSnapshot) {
+    for (const existing of workspaceInventories) {
+      if (existing.archivedAt || !snapshotWarehouseCodes.has(existing.warehouseCode)) continue
+      const identity = saasChinaInventoryIdentityKey(existing.warehouseCode, existing.sku, existing.optionKey)
+      if (snapshotIdentityKeys.has(identity)) continue
+
+      const linkedOnHand = input.linkedOnHandByInventoryId.get(existing.id) ?? 0
+      const requiredMinimum = Math.max(existing.reservedQuantity, linkedOnHand)
+      if (requiredMinimum > 0) {
+        const protection = existing.reservedQuantity > 0
+          ? `재고현황 파일에 없어 제거할 수 없습니다. 출고 예약 ${existing.reservedQuantity.toLocaleString('ko-KR')}개를 먼저 처리해주세요.`
+          : `재고현황 파일에 없어 제거할 수 없습니다. 발주 연동 재고 ${linkedOnHand.toLocaleString('ko-KR')}개를 먼저 처리해주세요.`
+        previewRows.push({
+          row: null,
+          inventoryId: existing.id,
+          warehouseCode: existing.warehouseCode,
+          sku: existing.sku,
+          productName: existing.productName,
+          optionName: existing.optionName,
+          beforeQuantity: existing.onHandQuantity,
+          afterQuantity: 0,
+          status: 'protected',
+          message: protection,
+        })
+        continue
+      }
+
+      previewRows.push({
+        row: null,
+        inventoryId: existing.id,
+        warehouseCode: existing.warehouseCode,
+        sku: existing.sku,
+        productName: existing.productName,
+        optionName: existing.optionName,
+        beforeQuantity: existing.onHandQuantity,
+        afterQuantity: 0,
+        status: 'removed',
+        message: '재고현황 파일에 없어 SaaS 중국재고 목록에서 제거합니다.',
+      })
+    }
   }
 
   const newCount = previewRows.filter((row) => row.status === 'new').length
   const changedCount = previewRows.filter((row) => row.status === 'changed').length
   const unchangedCount = previewRows.filter((row) => row.status === 'unchanged').length
+  const removedCount = previewRows.filter((row) => row.status === 'removed').length
   const invalidRows = previewRows.filter((row) => row.status === 'invalid' || row.status === 'protected')
-  const errors = invalidRows.map((row) => `${row.row}행: ${row.message ?? '입력값을 확인해주세요.'}`)
+  const errors = invalidRows.map((row) => row.row == null
+    ? `${[row.sku, row.optionName].filter(Boolean).join(' · ') || '엑셀에 없는 재고'}: ${row.message ?? '입력값을 확인해주세요.'}`
+    : `${row.row}행: ${row.message ?? '입력값을 확인해주세요.'}`)
   return {
     summary: {
       newCount,
       changedCount,
       unchangedCount,
+      removedCount,
       invalidCount: invalidRows.length,
       rowCount: previewRows.length,
     },

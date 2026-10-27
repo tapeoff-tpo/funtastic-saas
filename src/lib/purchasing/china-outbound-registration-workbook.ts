@@ -12,6 +12,7 @@ export const CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS = {
   shipment: '출고정보',
   items: '출고상품',
   boxes: '박스 쉽먼트',
+  inventory: '현재 중국재고(当前中国库存)',
 } as const
 
 // This sheet is deliberately hidden from the operator-facing template. Excel
@@ -46,6 +47,19 @@ export const CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS = [
   '세로(cm)',
   '높이(cm)',
   '파렛트번호',
+] as const
+
+export const CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS = [
+  '출고창고 / 出库仓库',
+  '품목코드 / 商品编码',
+  '상품명(한국어) / 商品名称（韩文）',
+  '옵션명(한국어) / 规格（韩文）',
+  '품목구분 / 品目分类',
+  '현재고 / 当前库存',
+  '예약수량 / 已预留',
+  '출고가능수량 / 可出库数量',
+  '최종 입고일 / 最近入库日',
+  '최종 출고일 / 最近出库日',
 ] as const
 
 export type ChinaOutboundRegistrationWorkbookError = {
@@ -85,6 +99,19 @@ export type ChinaOutboundRegistrationWorkbook = {
   items: ChinaOutboundRegistrationWorkbookItem[]
   boxAllocations: ChinaOutboundRegistrationWorkbookBoxAllocation[]
   errors: ChinaOutboundRegistrationWorkbookError[]
+}
+
+export type ChinaOutboundRegistrationCurrentInventoryRow = {
+  warehouseCode: string
+  sku: string
+  productName: string
+  optionName: string | null
+  itemCategory: string | null
+  onHandQuantity: number
+  reservedQuantity: number
+  availableQuantity: number
+  lastReceivedAt: Date | string | null
+  lastOutboundAt: Date | string | null
 }
 
 const MAX_ITEM_ROWS = 1_000
@@ -155,6 +182,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   importKey?: string
   defaultWarehouseCode?: string | null
   warehouseCodes?: readonly string[]
+  currentInventory?: readonly ChinaOutboundRegistrationCurrentInventoryRow[]
 } = {}) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
@@ -193,6 +221,8 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     [22, 22, 28, 18, 18, 13, 13, 13, 18],
   )
   addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
+
+  addCurrentInventorySheet(workbook, input.currentInventory ?? [])
 
   if (warehouseCodes.length > 0) {
     addWarehouseOptionsSheet(workbook, warehouseCodes)
@@ -245,6 +275,7 @@ function addGuideSheet(workbook: ExcelJS.Workbook) {
     ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 다른 창고에서 출고하는 행은 출고창고 드롭다운에서 선택하세요. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
     ['박스 규격', '가로·세로·높이는 모두 입력하거나 모두 비워주세요. 같은 박스번호는 동일한 규격과 파렛트번호를 사용합니다.'],
     ['파렛트번호', '선택입니다. 박스에 파렛트를 배정하려면 입력하세요. 같은 박스번호에는 하나의 파렛트번호만 입력할 수 있습니다.'],
+    ['현재 중국재고', '현재 중국재고(当前中国库存) 시트는 다운로드 시점의 조회용 재고입니다. 수정해도 출고 등록이나 재고에 반영되지 않습니다. / 此工作表为下载时点的库存参考。修改不会登记出库或变更库存。'],
     ['주의', '검토에서 오류가 하나라도 나오면 반영할 수 없으며, 반영 중 오류가 생겨도 출고·재고예약·박스·파렛트가 일부만 등록되지 않습니다.'],
   ]
   for (const values of rows) sheet.addRow(values)
@@ -289,6 +320,63 @@ function addInputRow(sheet: ExcelJS.Worksheet, values: Array<string | number>) {
   })
 }
 
+function addCurrentInventorySheet(
+  workbook: ExcelJS.Workbook,
+  inventory: readonly ChinaOutboundRegistrationCurrentInventoryRow[],
+) {
+  const sheet = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.inventory)
+  sheet.columns = [22, 22, 42, 30, 18, 14, 14, 18, 18, 18].map((width) => ({ width }))
+  sheet.mergeCells(`A1:${excelColumnName(CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length)}1`)
+  sheet.getCell('A1').value = '현재 중국재고 / 当前中国库存'
+  sheet.getCell('A1').font = { bold: true, size: 14 }
+  sheet.getCell('A1').alignment = { vertical: 'middle' }
+  sheet.getRow(1).height = 26
+
+  sheet.mergeCells(`A2:${excelColumnName(CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length)}2`)
+  sheet.getCell('A2').value = '다운로드 시점의 조회용 재고입니다. 수정해도 출고 등록이나 재고에 반영되지 않습니다. / 此工作表为下载时点的库存参考。修改不会登记出库或变更库存。'
+  sheet.getCell('A2').font = { size: 9, color: { argb: 'FF4B5563' } }
+  sheet.getCell('A2').alignment = { vertical: 'middle', wrapText: true }
+  sheet.getRow(2).height = 30
+
+  const header = sheet.addRow([...CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS])
+  header.height = 32
+  header.eachCell({ includeEmpty: true }, (cell) => {
+    cell.fill = HEADER_FILL
+    cell.font = { bold: true, size: 10 }
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    cell.border = THIN_BORDER
+  })
+  sheet.views = [{ state: 'frozen', ySplit: 3 }]
+  sheet.autoFilter = {
+    from: 'A3',
+    to: { row: 3, column: CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length },
+  }
+
+  for (const item of inventory) {
+    const row = sheet.addRow([
+      item.warehouseCode,
+      item.sku,
+      item.productName,
+      item.optionName ?? '',
+      bilingualItemCategory(item.itemCategory),
+      item.onHandQuantity,
+      item.reservedQuantity,
+      item.availableQuantity,
+      formatSeoulDate(item.lastReceivedAt),
+      formatSeoulDate(item.lastOutboundAt),
+    ])
+    row.height = 20
+    row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      cell.border = THIN_BORDER
+      cell.alignment = {
+        vertical: 'middle',
+        wrapText: columnNumber === 3 || columnNumber === 4 || columnNumber === 5,
+      }
+      if (columnNumber >= 6 && columnNumber <= 8) cell.numFmt = '#,##0'
+    })
+  }
+}
+
 function normalizeWarehouseCodes(defaultWarehouseCode: string, warehouseCodes: readonly string[]) {
   const seen = new Set<string>()
   return [defaultWarehouseCode, ...warehouseCodes].flatMap((warehouseCode) => {
@@ -323,6 +411,43 @@ function addWarehouseDropdown(sheet: ExcelJS.Worksheet, range: string) {
     promptTitle: '출고창고',
     prompt: '등록된 출고창고 목록에서 선택하세요. 빈칸은 출고정보의 기본 창고를 사용합니다.',
   })
+}
+
+function bilingualItemCategory(value: string | null) {
+  const normalized = value?.trim() ?? ''
+  const category = normalized.replaceAll(/^[\[]|[\]]$/g, '').trim()
+  const chineseByCategory: Record<string, string> = {
+    '부재료': '辅料',
+    '원재료': '原材料',
+    '상품': '商品',
+  }
+  const chinese = chineseByCategory[category]
+  return chinese ? `${category} / ${chinese}` : normalized
+}
+
+function formatSeoulDate(value: Date | string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function excelColumnName(columnNumber: number) {
+  let remaining = columnNumber
+  let result = ''
+  while (remaining > 0) {
+    const remainder = (remaining - 1) % 26
+    result = String.fromCharCode(65 + remainder) + result
+    remaining = Math.floor((remaining - 1) / 26)
+  }
+  return result
 }
 
 function parseShipmentSheet(

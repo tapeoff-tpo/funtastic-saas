@@ -165,6 +165,7 @@ export function ChinaShipmentExcelDialog({
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
               <p className="text-sm font-medium">엑셀 파일 선택</p>
               <p className="mt-1 text-xs text-muted-foreground">출고창고 칸은 등록된 창고 목록에서 선택할 수 있습니다. 출고상품·박스 쉽먼트의 창고를 비우면 출고정보의 기본 창고가 자동 적용됩니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">새 양식에는 다운로드 시점의 현재 중국재고를 한·중 병기한 조회 시트가 함께 들어갑니다.</p>
               <p className="mt-1 text-xs text-muted-foreground">출고정보와 출고상품은 필수입니다. 박스 쉽먼트와 파렛트 번호는 필요한 경우 함께 입력하세요.</p>
               <p className="mt-1 text-xs text-muted-foreground">출고창고·품목코드·옵션명은 현재 SaaS 중국재고와 대조하며, 수량이 작업 가능 재고를 넘으면 반영할 수 없습니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">

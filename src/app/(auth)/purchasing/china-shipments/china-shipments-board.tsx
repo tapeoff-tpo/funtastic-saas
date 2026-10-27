@@ -8,6 +8,7 @@ import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatC
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import { navigateChinaWork } from './china-work-navigation'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
+import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
   addChinaOutboundShipmentItemsAction,
@@ -128,6 +129,7 @@ export function ChinaShipmentsBoard(props: {
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
   showCreate: boolean
+  outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
   return <ChinaWorkGuardProvider><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
 }
@@ -138,12 +140,14 @@ function ChinaShipmentsBoardContent({
   selectedShipment,
   selectedStep,
   showCreate,
+  outboundWarehouses = [],
 }: {
   inventoryItems: ChinaShipmentStockItem[]
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
   showCreate: boolean
+  outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
   const guard = useChinaWorkGuard()
   const [isPending, startTransition] = useTransition()
@@ -267,6 +271,7 @@ function ChinaShipmentsBoardContent({
           shipments={shipments}
           selectedShipment={showCreate ? null : selectedShipment?.shipment ?? null}
           showCreate={showCreate}
+          outboundWarehouses={outboundWarehouses}
           onToggleCreate={() => guard.requestNavigation(() => navigateChinaWork(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1'))}
           onSelect={(id) => {
             if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => navigateChinaWork(shipmentHref(id, 'items')))
@@ -353,10 +358,11 @@ function ChinaShipmentsBoardContent({
   )
 }
 
-function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCreate, onSelect }: {
+function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWarehouses, onToggleCreate, onSelect }: {
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView['shipment'] | null
   showCreate: boolean
+  outboundWarehouses: ChinaOutboundWarehouseView[]
   onToggleCreate: () => void
   onSelect: (id: string) => void
 }) {
@@ -437,6 +443,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, onToggleCre
           <ChinaShipmentExcelDialog onApplied={(shipmentId) => {
             if (shipmentId) guard.requestNavigation(() => navigateChinaWork(shipmentHref(shipmentId, 'items')))
           }} />
+          <ChinaShipmentWarehouseDialog warehouses={outboundWarehouses} />
           <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> {showCreate ? '요청 닫기' : '새 중국출고요청'}</button>
         </div>
         {selectedShipment ? <div className="flex shrink-0 gap-2">

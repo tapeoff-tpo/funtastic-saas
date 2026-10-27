@@ -20,6 +20,7 @@ import {
   purchaseRequestItems,
   saasChinaInventory,
   saasChinaInventoryMovements,
+  saasChinaOutboundWarehouses,
   saasChinaPurchaseLinks,
   saasChinaShipmentPurchaseAllocations,
 } from '@/lib/db/schema'
@@ -72,9 +73,9 @@ export function isChinaOutboundShipmentDeletable(status: ChinaOutboundShipmentSt
   return status === 'draft' || status === 'packing' || status === 'ready' || status === 'cancelled'
 }
 
-// Automatic purchase arrivals use one stable warehouse label so they join the
-// same isolated SaaS stock ledger as manually entered stock. This is never the
-// replaceable Ecount/raw China-inventory table.
+// Automatic purchase arrivals resolve the workspace's configured default
+// warehouse so a user-managed rename is honored. This is never the replaceable
+// Ecount/raw China-inventory table.
 export const SAAS_CHINA_DEFAULT_WAREHOUSE_CODE = '중국창고'
 export const SAAS_CHINA_MULTI_WAREHOUSE_CODE = '복수 창고'
 
@@ -106,6 +107,12 @@ export type SaasChinaInventoryAdjustmentInput = {
   inventoryId: string
   delta: number
   note?: string | null
+}
+
+export type SaasChinaOutboundWarehouse = {
+  warehouseCode: string
+  isDefault: boolean
+  hasActiveInventory: boolean
 }
 
 export type SaasChinaInventoryWorkbookPreviewRow = {
@@ -364,6 +371,25 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ON saas_china_inventory(user_id)
     WHERE archived_at IS NULL;
 
+  -- This list is intentionally separate from inventory rows so an operator
+  -- can prepare a warehouse name before the first stock is received there.
+  CREATE TABLE IF NOT EXISTS saas_china_outbound_warehouses (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL,
+    warehouse_code varchar(100) NOT NULL,
+    is_default boolean NOT NULL DEFAULT false,
+    created_by uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT saas_china_outbound_warehouses_user_code_key
+      UNIQUE (user_id, warehouse_code)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS saas_china_outbound_warehouses_user_default
+    ON saas_china_outbound_warehouses(user_id)
+    WHERE is_default;
+  CREATE INDEX IF NOT EXISTS saas_china_outbound_warehouses_user_updated
+    ON saas_china_outbound_warehouses(user_id, updated_at);
+
   -- This composite candidate key lets a bridge lot prove that its purchase
   -- row belongs to the same workspace as the isolated SaaS inventory record.
   CREATE UNIQUE INDEX IF NOT EXISTS purchase_request_items_id_user
@@ -470,6 +496,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     product_name text NOT NULL,
     option_key varchar(200) NOT NULL DEFAULT '',
     option_name varchar(200),
+    origin_warehouse_code varchar(100) NOT NULL DEFAULT 'default',
     reserved_quantity integer NOT NULL,
     packed_quantity integer NOT NULL DEFAULT 0,
     dispatched_quantity integer NOT NULL DEFAULT 0,
@@ -503,6 +530,30 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
 
   ALTER TABLE china_outbound_shipment_items
     ADD COLUMN IF NOT EXISTS box_split_status varchar(20);
+  ALTER TABLE china_outbound_shipment_items
+    ADD COLUMN IF NOT EXISTS origin_warehouse_code varchar(100);
+
+  -- A warehouse can be renamed for current stock. Keep a per-shipment-line
+  -- snapshot so historic outbound documents retain the warehouse used then.
+  UPDATE china_outbound_shipment_items AS shipment_item
+  SET origin_warehouse_code = inventory.warehouse_code
+  FROM saas_china_inventory AS inventory
+  WHERE shipment_item.origin_warehouse_code IS NULL
+    AND inventory.id = shipment_item.inventory_id
+    AND inventory.user_id = shipment_item.user_id;
+  UPDATE china_outbound_shipment_items AS shipment_item
+  SET origin_warehouse_code = shipment.origin_warehouse_code
+  FROM china_outbound_shipments AS shipment
+  WHERE shipment_item.origin_warehouse_code IS NULL
+    AND shipment.id = shipment_item.shipment_id
+    AND shipment.user_id = shipment_item.user_id;
+  UPDATE china_outbound_shipment_items
+  SET origin_warehouse_code = 'default'
+  WHERE origin_warehouse_code IS NULL;
+  ALTER TABLE china_outbound_shipment_items
+    ALTER COLUMN origin_warehouse_code SET DEFAULT 'default';
+  ALTER TABLE china_outbound_shipment_items
+    ALTER COLUMN origin_warehouse_code SET NOT NULL;
 
   DO $$
   BEGIN
@@ -759,6 +810,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ON saas_china_shipment_purchase_allocations(purchase_link_id);
 
   ALTER TABLE saas_china_inventory ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE saas_china_outbound_warehouses ENABLE ROW LEVEL SECURITY;
   ALTER TABLE saas_china_inventory_movements ENABLE ROW LEVEL SECURITY;
   ALTER TABLE china_outbound_shipments ENABLE ROW LEVEL SECURITY;
   ALTER TABLE china_outbound_shipment_items ENABLE ROW LEVEL SECURITY;
@@ -769,6 +821,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE saas_china_shipment_purchase_allocations ENABLE ROW LEVEL SECURITY;
 
   REVOKE ALL ON TABLE saas_china_inventory FROM anon, authenticated;
+  REVOKE ALL ON TABLE saas_china_outbound_warehouses FROM anon, authenticated;
   REVOKE ALL ON TABLE saas_china_inventory_movements FROM anon, authenticated;
   REVOKE ALL ON TABLE china_outbound_shipments FROM anon, authenticated;
   REVOKE ALL ON TABLE china_outbound_shipment_items FROM anon, authenticated;
@@ -825,6 +878,115 @@ export async function getSaasChinaInventory(userId: string) {
     items,
     summary: summary ?? { onHandQuantity: 0, reservedQuantity: 0, availableQuantity: 0 },
   }
+}
+
+/**
+ * Lists configured outbound warehouses together with every active SaaS China
+ * inventory warehouse. The catalog is seeded lazily so existing workspaces
+ * immediately gain editable names without altering any stock records.
+ */
+export async function listSaasChinaOutboundWarehouses(userId: string): Promise<SaasChinaOutboundWarehouse[]> {
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, userId)
+    const catalog = await ensureSaasChinaOutboundWarehouseCatalog(tx, { userId })
+    return catalog.warehouses
+  })
+}
+
+/** Returns the workspace's default outbound warehouse name. */
+export async function getSaasChinaDefaultWarehouseCode(userId: string) {
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, userId)
+    const catalog = await ensureSaasChinaOutboundWarehouseCatalog(tx, { userId })
+    return catalog.defaultWarehouseCode
+  })
+}
+
+export async function createSaasChinaOutboundWarehouse(input: {
+  userId: string
+  createdBy: string
+  warehouseCode: string
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const warehouseCode = requiredWarehouseCode(input.warehouseCode, '새 출고창고명')
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const catalog = await ensureSaasChinaOutboundWarehouseCatalog(tx, input)
+    if (catalog.warehouses.some((warehouse) => warehouse.warehouseCode === warehouseCode)) {
+      throw new Error('이미 등록된 출고창고명입니다.')
+    }
+    const [warehouse] = await tx
+      .insert(saasChinaOutboundWarehouses)
+      .values({
+        userId: input.userId,
+        warehouseCode,
+        isDefault: false,
+        createdBy: input.createdBy,
+      })
+      .returning()
+    if (!warehouse) throw new Error('출고창고를 추가하지 못했습니다.')
+    return warehouse
+  })
+}
+
+/**
+ * Renames only the current active SaaS China stock location. Movement and
+ * outbound history deliberately retain their original snapshots.
+ */
+export async function renameSaasChinaOutboundWarehouse(input: {
+  userId: string
+  createdBy: string
+  warehouseCode: string
+  nextWarehouseCode: string
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const warehouseCode = requiredWarehouseCode(input.warehouseCode, '현재 출고창고명')
+  const nextWarehouseCode = requiredWarehouseCode(input.nextWarehouseCode, '새 출고창고명')
+  if (warehouseCode === nextWarehouseCode) throw new Error('변경할 출고창고명이 같습니다.')
+
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const catalog = await ensureSaasChinaOutboundWarehouseCatalog(tx, input)
+    const current = catalog.warehouses.find((warehouse) => warehouse.warehouseCode === warehouseCode)
+    if (!current) throw new Error('수정할 출고창고를 찾을 수 없습니다.')
+    if (catalog.warehouses.some((warehouse) => warehouse.warehouseCode === nextWarehouseCode)) {
+      throw new Error('이미 등록된 출고창고명입니다.')
+    }
+
+    const [currentWarehouse] = await tx
+      .select()
+      .from(saasChinaOutboundWarehouses)
+      .where(and(
+        eq(saasChinaOutboundWarehouses.userId, input.userId),
+        eq(saasChinaOutboundWarehouses.warehouseCode, warehouseCode),
+      ))
+      .limit(1)
+    if (!currentWarehouse) throw new Error('수정할 출고창고를 찾을 수 없습니다.')
+
+    const updatedAt = new Date()
+    const updatedInventories = await tx
+      .update(saasChinaInventory)
+      .set({ warehouseCode: nextWarehouseCode, updatedAt })
+      .where(and(
+        eq(saasChinaInventory.userId, input.userId),
+        isNull(saasChinaInventory.archivedAt),
+        eq(saasChinaInventory.warehouseCode, warehouseCode),
+      ))
+      .returning({ id: saasChinaInventory.id })
+    const [warehouse] = await tx
+      .update(saasChinaOutboundWarehouses)
+      .set({ warehouseCode: nextWarehouseCode, updatedAt })
+      .where(eq(saasChinaOutboundWarehouses.id, currentWarehouse.id))
+      .returning()
+    if (!warehouse) throw new Error('출고창고명을 수정하지 못했습니다.')
+
+    return {
+      warehouse,
+      renamedActiveInventoryCount: updatedInventories.length,
+    }
+  })
 }
 
 export async function listChinaOutboundShipments(
@@ -901,7 +1063,12 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
   ])
 
-  const inventoryIds = [...new Set(items.map((item) => item.inventoryId))]
+  // New shipment rows carry their warehouse snapshot. Keep the inventory
+  // lookup only as a compatibility fallback for rows created before that
+  // column was introduced.
+  const inventoryIds = [...new Set(items
+    .filter((item) => !item.originWarehouseCode)
+    .map((item) => item.inventoryId))]
   const inventoryRows = inventoryIds.length === 0
     ? []
     : await db
@@ -931,7 +1098,9 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
     shipment,
     items: items.map((item) => ({
       ...item,
-      warehouseCode: warehouseCodeByInventoryId.get(item.inventoryId) ?? shipment.originWarehouseCode,
+      warehouseCode: item.originWarehouseCode
+        || warehouseCodeByInventoryId.get(item.inventoryId)
+        || shipment.originWarehouseCode,
     })),
     pallets,
     boxes,
@@ -1419,8 +1588,9 @@ export async function receiveSaasChinaPurchaseArrivalInTransaction(
   const quantity = positiveInteger(input.quantity, '중국도착 수량')
   const sku = requiredText(input.sku, '품목코드')
   const productName = requiredText(input.productName, '상품명')
-  const warehouseCode = requiredText(input.warehouseCode ?? SAAS_CHINA_DEFAULT_WAREHOUSE_CODE, '중국창고')
-  assertSaasChinaInventoryWarehouseAllowed(warehouseCode)
+  const requestedWarehouseCode = input.warehouseCode == null
+    ? null
+    : requiredWarehouseCode(input.warehouseCode, '중국창고')
   const optionName = optionalText(input.optionName)
   const optionKey = optionName ?? ''
 
@@ -1438,6 +1608,10 @@ export async function receiveSaasChinaPurchaseArrivalInTransaction(
     const inventory = await getSaasChinaInventoryForUpdate(tx, input.userId, existingLink.inventoryId)
     return { inventory, link: existingLink, created: false }
   }
+
+  const warehouseCode = requestedWarehouseCode
+    ? requestedWarehouseCode
+    : (await ensureSaasChinaOutboundWarehouseCatalog(tx, input)).defaultWarehouseCode
 
   const [existingInventory] = await tx
     .select()
@@ -1681,6 +1855,7 @@ export async function createChinaOutboundShipment(
           productName: inventory.productName,
           optionKey: inventory.optionKey,
           optionName: inventory.optionName,
+          originWarehouseCode: inventory.warehouseCode,
           reservedQuantity: line.quantity,
           sortOrder: index,
         })
@@ -2039,6 +2214,9 @@ export async function addChinaOutboundShipmentItems(input: {
 
     const inventoriesById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
     const existingItemsByInventoryId = new Map(existingItems.map((item) => [item.inventoryId, item]))
+    const shipmentWarehouseCodes = new Set(existingItems
+      .map((item) => item.originWarehouseCode || inventoriesById.get(item.inventoryId)?.warehouseCode)
+      .filter((warehouseCode): warehouseCode is string => Boolean(warehouseCode)))
     for (const line of normalizedLines) {
       const inventory = inventoriesById.get(line.inventoryId)
       if (!inventory) throw new Error('SaaS 중국재고를 찾을 수 없습니다.')
@@ -2052,6 +2230,7 @@ export async function addChinaOutboundShipmentItems(input: {
     for (const line of normalizedLines) {
       const inventory = inventoriesById.get(line.inventoryId)!
       const existingItem = existingItemsByInventoryId.get(inventory.id)
+      shipmentWarehouseCodes.add(existingItem?.originWarehouseCode || inventory.warehouseCode)
       const [shipmentItem] = existingItem
         ? await tx
           .update(chinaOutboundShipmentItems)
@@ -2078,6 +2257,7 @@ export async function addChinaOutboundShipmentItems(input: {
             productName: inventory.productName,
             optionKey: inventory.optionKey,
             optionName: inventory.optionName,
+            originWarehouseCode: inventory.warehouseCode,
             reservedQuantity: line.quantity,
             sortOrder: nextSortOrder++,
           })
@@ -2122,7 +2302,7 @@ export async function addChinaOutboundShipmentItems(input: {
     await tx
       .update(chinaOutboundShipments)
       .set({
-        originWarehouseCode: getChinaOutboundOriginWarehouseCode(inventories.map((inventory) => inventory.warehouseCode)),
+        originWarehouseCode: getChinaOutboundOriginWarehouseCode(shipmentWarehouseCodes),
         updatedAt: new Date(),
       })
       .where(and(
@@ -3797,6 +3977,13 @@ function assertSaasChinaInventoryWarehouseAllowed(warehouseCode: string) {
   }
 }
 
+function requiredWarehouseCode(value: string | null | undefined, label: string) {
+  const warehouseCode = requiredText(value, label)
+  if (warehouseCode.length > 100) throw new Error(`${label}은(는) 100자 이하로 입력해주세요.`)
+  assertSaasChinaInventoryWarehouseAllowed(warehouseCode)
+  return warehouseCode
+}
+
 function duplicateSaasChinaInventoryWorkbookRowNumbers(rows: readonly NormalizedSaasChinaInventoryWorkbookRow[]) {
   const rowsByIdentity = new Map<string, number[]>()
   for (const row of rows) {
@@ -3965,6 +4152,92 @@ async function insertSaasChinaInventoryMovement(
 
 async function lockSaasChinaOutboundWorkspace(tx: DbTransaction, userId: string) {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`saas-china-outbound:${userId}`}))`)
+}
+
+async function ensureSaasChinaOutboundWarehouseCatalog(
+  tx: DbTransaction,
+  input: { userId: string; createdBy?: string },
+) {
+  const [configuredWarehouses, activeInventoryRows] = await Promise.all([
+    tx
+      .select()
+      .from(saasChinaOutboundWarehouses)
+      .where(eq(saasChinaOutboundWarehouses.userId, input.userId)),
+    tx
+      .select({ warehouseCode: saasChinaInventory.warehouseCode })
+      .from(saasChinaInventory)
+      .where(and(
+        eq(saasChinaInventory.userId, input.userId),
+        isNull(saasChinaInventory.archivedAt),
+      )),
+  ])
+
+  const activeWarehouseCodes = new Set(
+    activeInventoryRows
+      .map((inventory) => inventory.warehouseCode.trim())
+      .filter((warehouseCode) => Boolean(warehouseCode) && !isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)),
+  )
+  const configuredByCode = new Map(
+    configuredWarehouses.map((warehouse) => [warehouse.warehouseCode, warehouse]),
+  )
+  let defaultWarehouse = configuredWarehouses.find((warehouse) => warehouse.isDefault) ?? null
+
+  if (!defaultWarehouse) {
+    const legacyDefault = configuredByCode.get(SAAS_CHINA_DEFAULT_WAREHOUSE_CODE)
+    if (legacyDefault) {
+      const [updated] = await tx
+        .update(saasChinaOutboundWarehouses)
+        .set({ isDefault: true, updatedAt: new Date() })
+        .where(eq(saasChinaOutboundWarehouses.id, legacyDefault.id))
+        .returning()
+      defaultWarehouse = updated ?? null
+      if (defaultWarehouse) configuredByCode.set(defaultWarehouse.warehouseCode, defaultWarehouse)
+    } else {
+      const [created] = await tx
+        .insert(saasChinaOutboundWarehouses)
+        .values({
+          userId: input.userId,
+          warehouseCode: SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
+          isDefault: true,
+          createdBy: input.createdBy ?? null,
+        })
+        .returning()
+      if (!created) throw new Error('기본 출고창고를 준비하지 못했습니다.')
+      defaultWarehouse = created
+      configuredByCode.set(created.warehouseCode, created)
+    }
+  }
+
+  const missingWarehouseCodes = [...activeWarehouseCodes]
+    .filter((warehouseCode) => !configuredByCode.has(warehouseCode))
+  if (missingWarehouseCodes.length > 0) {
+    const inserted = await tx
+      .insert(saasChinaOutboundWarehouses)
+      .values(missingWarehouseCodes.map((warehouseCode) => ({
+        userId: input.userId,
+        warehouseCode,
+        isDefault: false,
+        createdBy: input.createdBy ?? null,
+      })))
+      .returning()
+    inserted.forEach((warehouse) => configuredByCode.set(warehouse.warehouseCode, warehouse))
+  }
+
+  const warehouses = [...configuredByCode.values()]
+    .map((warehouse) => ({
+      warehouseCode: warehouse.warehouseCode,
+      isDefault: warehouse.isDefault,
+      hasActiveInventory: activeWarehouseCodes.has(warehouse.warehouseCode),
+    }))
+    .sort((left, right) => left.warehouseCode.localeCompare(right.warehouseCode, 'ko-KR', { numeric: true }))
+  const resolvedDefault = warehouses.find((warehouse) => warehouse.isDefault)
+  if (!resolvedDefault) throw new Error('기본 출고창고를 찾을 수 없습니다.')
+
+  return {
+    warehouses,
+    activeWarehouseCodes,
+    defaultWarehouseCode: resolvedDefault.warehouseCode,
+  }
 }
 
 function normalizeShipmentLines(lines: ChinaOutboundShipmentLineInput[]) {

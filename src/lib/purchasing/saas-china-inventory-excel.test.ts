@@ -46,6 +46,25 @@ describe('SaaS China inventory Excel workbook', () => {
     ])
   })
 
+  it('uses the managed default warehouse for blank generic-template cells and new templates', async () => {
+    const defaultWarehouseCode = '중국 2창고'
+    const parsed = await parseSaasChinaInventoryWorkbook(
+      await workbookBuffer([['', 'SKU-DEFAULT', '기본 창고 상품', '', 10, '']]),
+      { defaultWarehouseCode },
+    )
+
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows).toEqual([
+      expect.objectContaining({ warehouseCode: defaultWarehouseCode, sku: 'SKU-DEFAULT', onHandQuantity: 10 }),
+    ])
+
+    const template = await exportSaasChinaInventoryTemplateWorkbook({ defaultWarehouseCode })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(template as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('SaaS 중국재고')?.getCell('A2').value).toBe(defaultWarehouseCode)
+    expect(workbook.getWorksheet('작성안내')?.getCell('B2').text).toContain(defaultWarehouseCode)
+  })
+
   it('flags invalid quantities and duplicate warehouse/SKU/option identities before preview', async () => {
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
       ['중국창고', 'SKU-1', '상품 A', '', '수량없음'],

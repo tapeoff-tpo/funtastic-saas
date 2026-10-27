@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { parseSaasChinaInventoryWorkbook } from '@/lib/purchasing/saas-china-inventory-excel'
 import {
   applySaasChinaInventoryWorkbook,
+  getSaasChinaDefaultWarehouseCode,
   previewSaasChinaInventoryWorkbook,
 } from '@/lib/purchasing/saas-china-outbound'
 
@@ -22,7 +23,8 @@ export async function POST(request: NextRequest) {
     if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: '엑셀 파일은 10MB 이하만 업로드할 수 있습니다.' }, { status: 400 })
 
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer())
+    const defaultWarehouseCode = await getSaasChinaDefaultWarehouseCode(workspaceUserId)
+    const parsed = await parseSaasChinaInventoryWorkbook(await file.arrayBuffer(), { defaultWarehouseCode })
     // Every upload is the newest complete SaaS China inventory list. Never
     // patch a prior active snapshot with the rows from a new workbook.
     const fullSnapshot = true

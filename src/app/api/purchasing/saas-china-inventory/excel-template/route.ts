@@ -5,6 +5,7 @@ import {
   exportSaasChinaInventoryTemplateWorkbook,
   saasChinaInventoryTemplateFilename,
 } from '@/lib/purchasing/saas-china-inventory-excel'
+import { getSaasChinaDefaultWarehouseCode } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
 
@@ -15,8 +16,9 @@ export async function GET() {
   try {
     // Resolve the workspace before returning the shared template so this route
     // follows the same authentication/ownership boundary as import and export.
-    await getWorkspaceUserId(user.id)
-    const buffer = await exportSaasChinaInventoryTemplateWorkbook()
+    const workspaceUserId = await getWorkspaceUserId(user.id)
+    const defaultWarehouseCode = await getSaasChinaDefaultWarehouseCode(workspaceUserId)
+    const buffer = await exportSaasChinaInventoryTemplateWorkbook({ defaultWarehouseCode })
     return excelResponse(buffer, saasChinaInventoryTemplateFilename())
   } catch (error) {
     console.error('SaaS China inventory template export error:', error)

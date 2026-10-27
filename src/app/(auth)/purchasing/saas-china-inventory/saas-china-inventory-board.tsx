@@ -29,22 +29,39 @@ type Summary = {
   availableQuantity: number
 }
 
-const emptyReceiveForm = {
-  warehouseCode: '중국창고',
-  sku: '',
-  productName: '',
-  optionName: '',
-  quantity: '',
-  note: '',
+function emptyReceiveForm(warehouseCode: string) {
+  return {
+    warehouseCode,
+    sku: '',
+    productName: '',
+    optionName: '',
+    quantity: '',
+    note: '',
+  }
 }
 
 const exportUrl = '/api/purchasing/saas-china-inventory/excel-export'
 
-export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaInventoryViewItem[]; summary: Summary }) {
+export function SaasChinaInventoryBoard({
+  items,
+  summary,
+  defaultWarehouseCode = '중국창고',
+  warehouseCodes = [],
+}: {
+  items: SaasChinaInventoryViewItem[]
+  summary: Summary
+  defaultWarehouseCode?: string
+  warehouseCodes?: string[]
+}) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [showReceive, setShowReceive] = useState(items.length === 0)
-  const [receiveForm, setReceiveForm] = useState(emptyReceiveForm)
+  const resolvedDefaultWarehouseCode = defaultWarehouseCode.trim() || '중국창고'
+  const receiveWarehouseCodes = [...new Set([
+    resolvedDefaultWarehouseCode,
+    ...warehouseCodes.map((warehouseCode) => warehouseCode.trim()).filter(Boolean),
+  ])]
+  const [receiveForm, setReceiveForm] = useState(() => emptyReceiveForm(resolvedDefaultWarehouseCode))
   const [adjusting, setAdjusting] = useState<SaasChinaInventoryViewItem | null>(null)
   const [adjustDelta, setAdjustDelta] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
@@ -71,7 +88,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
         return
       }
       toast.success('SaaS 중국재고에 입고를 반영했습니다.')
-      setReceiveForm(emptyReceiveForm)
+      setReceiveForm(emptyReceiveForm(resolvedDefaultWarehouseCode))
       setShowReceive(false)
       router.refresh()
     })
@@ -122,7 +139,12 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
           </button>
         </div>
         {showReceive ? (
-          <form onSubmit={receiveStock} className="grid gap-3 p-4 md:grid-cols-5">
+          <form onSubmit={receiveStock} className="grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
+            <Field label="창고">
+              <select value={receiveForm.warehouseCode} onChange={(event) => setReceiveForm((form) => ({ ...form, warehouseCode: event.target.value }))} required data-no-translate className={inputClass}>
+                {receiveWarehouseCodes.map((warehouseCode) => <option key={warehouseCode} value={warehouseCode}>{warehouseCode}</option>)}
+              </select>
+            </Field>
             <Field label="품목코드">
               <input value={receiveForm.sku} onChange={(event) => setReceiveForm((form) => ({ ...form, sku: event.target.value }))} required className={inputClass} placeholder="SKU" />
             </Field>
@@ -141,7 +163,7 @@ export function SaasChinaInventoryBoard({ items, summary }: { items: SaasChinaIn
                 입고 반영
               </button>
             </div>
-            <label className="md:col-span-5">
+            <label className="md:col-span-3 xl:col-span-6">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">메모</span>
               <input value={receiveForm.note} onChange={(event) => setReceiveForm((form) => ({ ...form, note: event.target.value }))} className={inputClass} placeholder="테스트 목적, 도착일 등" />
             </label>

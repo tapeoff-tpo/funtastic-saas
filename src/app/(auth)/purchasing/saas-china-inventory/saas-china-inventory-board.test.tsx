@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { SaasChinaInventoryBoard, type SaasChinaInventoryViewItem } from './saas-china-inventory-board'
 
-const { refresh } = vi.hoisted(() => ({
+const { refresh, receive } = vi.hoisted(() => ({
   refresh: vi.fn(),
+  receive: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -17,7 +18,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('../saas-china-actions', () => ({
   adjustSaasChinaInventoryAction: vi.fn(),
-  receiveSaasChinaInventoryAction: vi.fn(),
+  receiveSaasChinaInventoryAction: receive,
 }))
 
 const items: SaasChinaInventoryViewItem[] = [{
@@ -36,6 +37,7 @@ const items: SaasChinaInventoryViewItem[] = [{
 describe('SaasChinaInventoryBoard', () => {
   beforeEach(() => {
     refresh.mockReset()
+    receive.mockReset()
     window.localStorage.clear()
     document.documentElement.lang = 'ko'
   })
@@ -70,6 +72,38 @@ describe('SaasChinaInventoryBoard', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('link', { name: '下载当前列表' })).toHaveAttribute('href', '/api/purchasing/saas-china-inventory/excel-export')
+    })
+  })
+
+  it('uses the managed default warehouse and lets the operator select another registered warehouse for a manual receipt', async () => {
+    receive.mockResolvedValue({ ok: true })
+    render(
+      <SaasChinaInventoryBoard
+        items={items}
+        summary={{ onHandQuantity: 20, reservedQuantity: 3, availableQuantity: 17 }}
+        defaultWarehouseCode="중국 2창고"
+        warehouseCodes={['중국 2창고', '쿠팡']}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '재고 추가' }))
+    const warehouse = screen.getByLabelText('창고')
+    expect(warehouse).toHaveValue('중국 2창고')
+    expect(within(warehouse).getByRole('option', { name: '쿠팡' })).toBeInTheDocument()
+
+    fireEvent.change(warehouse, { target: { value: '쿠팡' } })
+    fireEvent.change(screen.getByLabelText('품목코드'), { target: { value: 'SKU-NEW' } })
+    fireEvent.change(screen.getByLabelText('상품명'), { target: { value: '새 상품' } })
+    fireEvent.change(screen.getByLabelText('입고 수량'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: '입고 반영' }))
+
+    await waitFor(() => {
+      expect(receive).toHaveBeenCalledWith(expect.objectContaining({
+        warehouseCode: '쿠팡',
+        sku: 'SKU-NEW',
+        productName: '새 상품',
+        quantity: 10,
+      }))
     })
   })
 })

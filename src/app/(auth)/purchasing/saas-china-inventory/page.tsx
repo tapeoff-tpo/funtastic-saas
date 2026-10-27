@@ -2,7 +2,11 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { getSaasChinaInventory } from '@/lib/purchasing/saas-china-outbound'
+import {
+  getSaasChinaInventory,
+  listSaasChinaOutboundWarehouses,
+  SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
+} from '@/lib/purchasing/saas-china-outbound'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { SaasChinaInventoryBoard, type SaasChinaInventoryViewItem } from './saas-china-inventory-board'
 
@@ -15,7 +19,12 @@ export default async function SaasChinaInventoryPage() {
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const { items, summary } = await getSaasChinaInventory(workspaceUserId)
+  const [{ items, summary }, outboundWarehouses] = await Promise.all([
+    getSaasChinaInventory(workspaceUserId),
+    listSaasChinaOutboundWarehouses(workspaceUserId),
+  ])
+  const defaultWarehouseCode = outboundWarehouses.find((warehouse) => warehouse.isDefault)?.warehouseCode
+    ?? SAAS_CHINA_DEFAULT_WAREHOUSE_CODE
   const viewItems: SaasChinaInventoryViewItem[] = items.map((item) => ({
     id: item.id,
     warehouseCode: item.warehouseCode,
@@ -50,7 +59,12 @@ export default async function SaasChinaInventoryPage() {
         </Link>
       </header>
 
-      <SaasChinaInventoryBoard items={viewItems} summary={summary} />
+      <SaasChinaInventoryBoard
+        items={viewItems}
+        summary={summary}
+        defaultWarehouseCode={defaultWarehouseCode}
+        warehouseCodes={outboundWarehouses.map((warehouse) => warehouse.warehouseCode)}
+      />
     </div>
   )
 }

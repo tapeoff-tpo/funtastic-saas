@@ -18,6 +18,7 @@ export const CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS = [
   '엑셀등록번호',
   '출고작업명',
   '도착지',
+  '출고창고',
   '출고예정일',
   '메모',
 ] as const
@@ -72,6 +73,7 @@ export type ChinaOutboundRegistrationWorkbook = {
   importKey: string
   displayName: string | null
   destinationName: string | null
+  defaultWarehouseCode: string | null
   plannedOutboundDate: string | null
   memo: string | null
   items: ChinaOutboundRegistrationWorkbookItem[]
@@ -138,7 +140,10 @@ export function createChinaOutboundRegistrationWorkbookFingerprint(workbook: Chi
   return `excel-registration:v1:${createHash('sha256').update(content).digest('hex')}`
 }
 
-export async function exportChinaOutboundRegistrationTemplateWorkbook(input: { importKey?: string } = {}) {
+export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
+  importKey?: string
+  defaultWarehouseCode?: string | null
+} = {}) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
@@ -148,9 +153,16 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: { i
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment,
     CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS,
-    [28, 32, 16, 16, 48],
+    [28, 32, 16, 22, 16, 48],
   )
-  addInputRow(shipment, [input.importKey ?? createChinaOutboundRegistrationImportKey(), '', '', '', ''])
+  addInputRow(shipment, [
+    input.importKey ?? createChinaOutboundRegistrationImportKey(),
+    '',
+    '',
+    input.defaultWarehouseCode?.trim() ?? '',
+    '',
+    '',
+  ])
 
   const items = createSheet(
     workbook,
@@ -179,8 +191,16 @@ export async function parseChinaOutboundRegistrationWorkbook(
   const errors: ChinaOutboundRegistrationWorkbookError[] = []
 
   const shipment = parseShipmentSheet(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment), errors)
-  const items = parseItemsSheet(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items), errors)
-  const boxAllocations = parseBoxesSheet(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes), errors)
+  const items = parseItemsSheet(
+    workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items),
+    shipment.defaultWarehouseCode,
+    errors,
+  )
+  const boxAllocations = parseBoxesSheet(
+    workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes),
+    shipment.defaultWarehouseCode,
+    errors,
+  )
   const normalizedBoxAllocations = validateRelationships(items, boxAllocations, errors)
 
   return {
@@ -199,8 +219,9 @@ function addGuideSheet(workbook: ExcelJS.Workbook) {
     ['등록 순서', '출고정보와 출고상품을 입력한 뒤, 박스 쉽먼트가 있으면 같은 파일에서 함께 입력합니다. 업로드 후 검토 결과 반영을 눌러야 실제 재고 예약·출고·박스·파렛트가 등록됩니다.'],
     ['엑셀등록번호', '양식에 자동으로 들어간 번호입니다. 같은 파일을 다시 반영해도 중복 출고가 생기지 않도록 수정하지 마세요.'],
     ['도착지', `필수입니다. ${CHINA_OUTBOUND_DESTINATIONS.join(', ')} 중 하나를 입력하세요.`],
-    ['출고상품', '출고창고·품목코드·옵션명·출고수량을 입력합니다. 상품명은 현재 SaaS 중국재고 기준으로 가져오며 엑셀에서 변경하지 않습니다.'],
-    ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
+    ['출고창고', '출고정보의 출고창고는 기본값입니다. 출고상품과 박스 쉽먼트에서 출고창고를 비우면 이 창고가 자동 적용됩니다. 여러 창고로 출고할 때만 행별 출고창고를 입력하세요.'],
+    ['출고상품', '품목코드·옵션명·출고수량을 입력합니다. 출고창고는 출고정보의 기본값을 사용하며, 다른 창고에서 출고하는 행만 직접 입력하세요. 상품명은 현재 SaaS 중국재고 기준으로 가져오며 엑셀에서 변경하지 않습니다.'],
+    ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 출고창고는 출고정보의 기본값을 사용하며, 다른 창고에서 출고하는 행만 직접 입력하세요. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
     ['박스 규격', '가로·세로·높이는 모두 입력하거나 모두 비워주세요. 같은 박스번호는 동일한 규격과 파렛트번호를 사용합니다.'],
     ['파렛트번호', '선택입니다. 박스에 파렛트를 배정하려면 입력하세요. 같은 박스번호에는 하나의 파렛트번호만 입력할 수 있습니다.'],
     ['주의', '검토에서 오류가 하나라도 나오면 반영할 수 없으며, 반영 중 오류가 생겨도 출고·재고예약·박스·파렛트가 일부만 등록되지 않습니다.'],
@@ -250,13 +271,24 @@ function addInputRow(sheet: ExcelJS.Worksheet, values: Array<string | number>) {
 function parseShipmentSheet(
   sheet: ExcelJS.Worksheet | undefined,
   errors: ChinaOutboundRegistrationWorkbookError[],
-): Pick<ChinaOutboundRegistrationWorkbook, 'importKey' | 'displayName' | 'destinationName' | 'plannedOutboundDate' | 'memo'> {
-  const blank = { importKey: '', displayName: null, destinationName: null, plannedOutboundDate: null, memo: null }
+): Pick<ChinaOutboundRegistrationWorkbook, 'importKey' | 'displayName' | 'destinationName' | 'defaultWarehouseCode' | 'plannedOutboundDate' | 'memo'> {
+  const blank = {
+    importKey: '',
+    displayName: null,
+    destinationName: null,
+    defaultWarehouseCode: null,
+    plannedOutboundDate: null,
+    memo: null,
+  }
   if (!sheet) {
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment, row: null, message: '출고정보 시트를 찾을 수 없습니다.' })
     return blank
   }
-  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS, errors)
+  const columns = headerColumns(
+    sheet,
+    CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS.filter((header) => header !== '출고창고'),
+    errors,
+  )
   if (!columns) return blank
   const nonEmptyRows: Array<{ row: ExcelJS.Row; rowNumber: number }> = []
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
@@ -276,20 +308,28 @@ function parseShipmentSheet(
   const importKey = cellText(first.row.getCell(columns.get('엑셀등록번호')!)).trim()
   const displayName = nullableText(first.row.getCell(columns.get('출고작업명')!))
   const destinationName = nullableText(first.row.getCell(columns.get('도착지')!))
+  const defaultWarehouseCode = columns.has('출고창고')
+    ? nullableText(first.row.getCell(columns.get('출고창고')!))
+    : null
   const plannedOutboundDate = parseDate(first.row.getCell(columns.get('출고예정일')!), sheet.name, first.rowNumber, errors)
   const memo = nullableText(first.row.getCell(columns.get('메모')!))
   validateText(importKey, '엑셀등록번호', 100, sheet.name, first.rowNumber, errors, true)
   validateText(displayName, '출고작업명', 200, sheet.name, first.rowNumber, errors)
+  validateText(defaultWarehouseCode, '출고창고', 100, sheet.name, first.rowNumber, errors)
   validateText(memo, '메모', 2_000, sheet.name, first.rowNumber, errors)
   if (!destinationName) {
     errors.push({ sheet: sheet.name, row: first.rowNumber, message: '도착지를 입력해주세요.' })
   } else if (!CHINA_OUTBOUND_DESTINATIONS.includes(destinationName as (typeof CHINA_OUTBOUND_DESTINATIONS)[number])) {
     errors.push({ sheet: sheet.name, row: first.rowNumber, message: `도착지는 ${CHINA_OUTBOUND_DESTINATIONS.join(', ')} 중 하나여야 합니다.` })
   }
-  return { importKey, displayName, destinationName, plannedOutboundDate, memo }
+  return { importKey, displayName, destinationName, defaultWarehouseCode, plannedOutboundDate, memo }
 }
 
-function parseItemsSheet(sheet: ExcelJS.Worksheet | undefined, errors: ChinaOutboundRegistrationWorkbookError[]) {
+function parseItemsSheet(
+  sheet: ExcelJS.Worksheet | undefined,
+  defaultWarehouseCode: string | null,
+  errors: ChinaOutboundRegistrationWorkbookError[],
+) {
   const items: ChinaOutboundRegistrationWorkbookItem[] = []
   if (!sheet) {
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items, row: null, message: '출고상품 시트를 찾을 수 없습니다.' })
@@ -301,7 +341,7 @@ function parseItemsSheet(sheet: ExcelJS.Worksheet | undefined, errors: ChinaOutb
   for (let rowNumber = 2; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
     if (isEmptyRow(row)) continue
-    const warehouseCode = cellText(row.getCell(columns.get('출고창고')!)).trim()
+    const warehouseCode = cellText(row.getCell(columns.get('출고창고')!)).trim() || defaultWarehouseCode || ''
     const sku = cellText(row.getCell(columns.get('품목코드')!)).trim()
     const optionName = nullableText(row.getCell(columns.get('옵션명')!))
     const quantity = positiveInteger(cellText(row.getCell(columns.get('출고수량')!)))
@@ -318,7 +358,11 @@ function parseItemsSheet(sheet: ExcelJS.Worksheet | undefined, errors: ChinaOutb
   return items
 }
 
-function parseBoxesSheet(sheet: ExcelJS.Worksheet | undefined, errors: ChinaOutboundRegistrationWorkbookError[]) {
+function parseBoxesSheet(
+  sheet: ExcelJS.Worksheet | undefined,
+  defaultWarehouseCode: string | null,
+  errors: ChinaOutboundRegistrationWorkbookError[],
+) {
   const allocations: ChinaOutboundRegistrationWorkbookBoxAllocation[] = []
   if (!sheet) {
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes, row: null, message: '박스 쉽먼트 시트를 찾을 수 없습니다.' })
@@ -330,7 +374,7 @@ function parseBoxesSheet(sheet: ExcelJS.Worksheet | undefined, errors: ChinaOutb
   for (let rowNumber = 2; rowNumber <= lastRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber)
     if (isEmptyRow(row)) continue
-    const warehouseCode = cellText(row.getCell(columns.get('출고창고')!)).trim()
+    const warehouseCode = cellText(row.getCell(columns.get('출고창고')!)).trim() || defaultWarehouseCode || ''
     const sku = cellText(row.getCell(columns.get('품목코드')!)).trim()
     const optionName = nullableText(row.getCell(columns.get('옵션명')!))
     const boxNo = cellText(row.getCell(columns.get('박스번호')!)).trim()

@@ -14,11 +14,13 @@ import {
   assignChinaOutboundBoxesToPallets,
   cancelChinaOutboundShipment,
   configureChinaOutboundPackaging,
+  createSaasChinaOutboundWarehouse,
   createChinaOutboundShipment,
   deleteChinaOutboundShipment,
   dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
   receiveSaasChinaInventory,
+  renameSaasChinaOutboundWarehouse,
   removeChinaOutboundBoxItem,
   saveChinaOutboundBoxDimensions,
   saveChinaOutboundBoxCompletionStatuses,
@@ -48,6 +50,15 @@ const adjustSchema = z.object({
   inventoryId,
   delta: z.coerce.number().int().refine((value) => value !== 0, '조정 수량은 0이 아니어야 합니다.'),
   note: optionalText(),
+})
+
+const createOutboundWarehouseSchema = z.object({
+  warehouseCode: text('새 출고창고명', 100),
+})
+
+const renameOutboundWarehouseSchema = z.object({
+  warehouseCode: text('현재 출고창고명', 100),
+  nextWarehouseCode: text('새 출고창고명', 100),
 })
 
 const createShipmentSchema = z.object({
@@ -199,6 +210,24 @@ export async function adjustSaasChinaInventoryAction(input: unknown): Promise<Ac
     const value = adjustSchema.parse(input)
     const actor = await getActor()
     await adjustSaasChinaInventory({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function createSaasChinaOutboundWarehouseAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = createOutboundWarehouseSchema.parse(input)
+    const actor = await getActor()
+    await createSaasChinaOutboundWarehouse({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function renameSaasChinaOutboundWarehouseAction(input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const value = renameOutboundWarehouseSchema.parse(input)
+    const actor = await getActor()
+    await renameSaasChinaOutboundWarehouse({ ...value, ...actor })
     revalidateSaasChinaPaths()
   })
 }

@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import {
   getChinaOutboundShipmentDetail,
   getSaasChinaInventory,
+  listSaasChinaOutboundWarehouses,
   listChinaOutboundShipments,
 } from '@/lib/purchasing/saas-china-outbound'
 import { ProductFlowNav } from '@/components/product-flow-nav'
@@ -27,12 +28,13 @@ export default async function ChinaShipmentsPage({
   const selectedShipmentId = showCreate ? undefined : parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [{ items: inventoryItems }, shipments, detail] = await Promise.all([
+  const [{ items: inventoryItems }, shipments, detail, outboundWarehouses] = await Promise.all([
     // The full inventory list is only needed while creating a new outbound request.
     // Avoid sending every China inventory row when opening an existing shipment or the list.
     showCreate ? getSaasChinaInventory(workspaceUserId) : Promise.resolve({ items: [] }),
     listChinaOutboundShipments(workspaceUserId),
     selectedShipmentId ? getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId: selectedShipmentId }) : Promise.resolve(null),
+    listSaasChinaOutboundWarehouses(workspaceUserId),
   ])
 
   const stockItems: ChinaShipmentStockItem[] = inventoryItems.map((item) => ({
@@ -75,6 +77,7 @@ export default async function ChinaShipmentsPage({
         selectedShipment={detail ? toShipmentDetailView(detail) : null}
         selectedStep={selectedStep}
         showCreate={showCreate}
+        outboundWarehouses={outboundWarehouses}
       />
     </div>
   )

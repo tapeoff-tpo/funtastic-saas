@@ -52,6 +52,10 @@ export const SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES = [
 
 export const DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE = '중국창고'
 
+function resolveDefaultWarehouseCode(value: string | null | undefined) {
+  return value?.trim() || DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE
+}
+
 export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
 
 export type SaasChinaInventoryExcelRow = {
@@ -130,7 +134,9 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
  */
 export async function parseSaasChinaInventoryWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
+  input: { defaultWarehouseCode?: string | null } = {},
 ): Promise<SaasChinaInventoryWorkbookParseResult> {
+  const defaultWarehouseCode = resolveDefaultWarehouseCode(input.defaultWarehouseCode)
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
@@ -158,12 +164,12 @@ export async function parseSaasChinaInventoryWorkbook(
     }
     totalRows += 1
     if (columns.source === 'inventory_status_report') {
-      const parsed = parseInventoryStatusReportRow(row, rowNumber, columns)
+      const parsed = parseInventoryStatusReportRow(row, rowNumber, columns, defaultWarehouseCode)
       rows.push(...parsed.rows)
       reportEmptyQuantityCellCount += parsed.emptyQuantityCellCount
       continue
     }
-    const parsed = parseRow(row, rowNumber, columns)
+    const parsed = parseRow(row, rowNumber, columns, defaultWarehouseCode)
     // Every upload now creates a complete replacement snapshot. A blank or
     // literal zero quantity therefore means that this identity has no active
     // stock in the new snapshot, just like a blank/zero warehouse cell in an
@@ -187,7 +193,7 @@ export async function parseSaasChinaInventoryWorkbook(
     rows.push({
       rowNumber: lastRow + 1,
       inventoryId: null,
-      warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
+      warehouseCode: defaultWarehouseCode,
       sku: '',
       productName: null,
       optionName: null,
@@ -204,7 +210,7 @@ export async function parseSaasChinaInventoryWorkbook(
     rows.push({
       rowNumber: headerRowNumber + 1,
       inventoryId: null,
-      warehouseCode: DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE,
+      warehouseCode: defaultWarehouseCode,
       sku: '',
       productName: null,
       optionName: null,
@@ -227,7 +233,8 @@ export async function parseSaasChinaInventoryWorkbook(
   }
 }
 
-export async function exportSaasChinaInventoryTemplateWorkbook() {
+export async function exportSaasChinaInventoryTemplateWorkbook(options: { defaultWarehouseCode?: string | null } = {}) {
+  const defaultWarehouseCode = resolveDefaultWarehouseCode(options.defaultWarehouseCode)
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
@@ -239,12 +246,13 @@ export async function exportSaasChinaInventoryTemplateWorkbook() {
     cell.border = THIN_BORDER
     cell.fill = INPUT_FILL
   }
+  input.getCell(1).value = defaultWarehouseCode
   input.getCell(5).numFmt = '#,##0'
 
   const guide = workbook.addWorksheet('작성안내')
   guide.columns = [{ width: 22 }, { width: 90 }]
   guide.addRow(['항목', '입력 방법'])
-  guide.addRow(['중국창고', `비우면 ${DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE}로 처리합니다.`])
+  guide.addRow(['중국창고', `비우면 ${defaultWarehouseCode}로 처리합니다.`])
   guide.addRow(['품목코드', '필수입니다. 중국창고·품목코드·옵션명 조합으로 새 활성 재고를 만듭니다.'])
   guide.addRow(['상품명', '필수입니다. 새 파일에 있는 모든 재고 행을 새로 생성합니다.'])
   guide.addRow(['옵션명', '중국창고·품목코드·옵션명은 재고 식별키입니다. 새 목록에 필요한 행을 모두 입력하세요.'])
@@ -462,6 +470,7 @@ function parseInventoryStatusReportRow(
   row: ExcelJS.Row,
   rowNumber: number,
   columns: HeaderColumns,
+  defaultWarehouseCode: string,
 ): { rows: SaasChinaInventoryExcelRow[]; emptyQuantityCellCount: number } {
   const valueAt = (field: keyof typeof HEADER_ALIASES) => (
     columns[field] ? cellText(row.getCell(columns[field]!).value).trim() : ''
@@ -517,7 +526,7 @@ function parseInventoryStatusReportRow(
   // A malformed all-zero report row still has to block the full snapshot.
   // Otherwise it could silently omit a source identity and archive live stock.
   if (parsedRows.length === 0 && commonErrors.length > 0) {
-    const warehouseCode = reportWarehouseColumns[0]?.warehouseCode ?? DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE
+    const warehouseCode = reportWarehouseColumns[0]?.warehouseCode ?? defaultWarehouseCode
     parsedRows.push({
       rowNumber,
       inventoryId,
@@ -542,13 +551,14 @@ function parseRow(
   row: ExcelJS.Row,
   rowNumber: number,
   columns: HeaderColumns,
+  defaultWarehouseCode: string,
   reportBlankQuantity = false,
 ): SaasChinaInventoryExcelRow {
   const errors: string[] = []
   const valueAt = (field: keyof typeof HEADER_ALIASES) => (
     columns[field] ? cellText(row.getCell(columns[field]!).value).trim() : ''
   )
-  const warehouseCode = valueAt('warehouseCode') || DEFAULT_SAAS_CHINA_INVENTORY_WAREHOUSE_CODE
+  const warehouseCode = valueAt('warehouseCode') || defaultWarehouseCode
   const inventoryId = valueAt('inventoryId') || null
   const sku = valueAt('sku')
   const productName = valueAt('productName') || null

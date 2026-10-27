@@ -968,6 +968,32 @@ export const saasChinaInventory = pgTable(
   ],
 )
 
+// User-managed list of outbound warehouse names. It remains isolated from
+// the replaceable Ecount/raw-data China warehouse tables, while letting an
+// operator prepare a new warehouse name before its first SaaS stock row exists.
+export const saasChinaOutboundWarehouses = pgTable(
+  'saas_china_outbound_warehouses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    warehouseCode: varchar('warehouse_code', { length: 100 }).notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('saas_china_outbound_warehouses_user_code').on(
+      table.userId,
+      table.warehouseCode,
+    ),
+    uniqueIndex('saas_china_outbound_warehouses_user_default')
+      .on(table.userId)
+      .where(sql`${table.isDefault}`),
+    index('saas_china_outbound_warehouses_user_updated').on(table.userId, table.updatedAt),
+  ],
+)
+
 export const saasChinaInventoryMovements = pgTable(
   'saas_china_inventory_movements',
   {
@@ -1096,6 +1122,10 @@ export const chinaOutboundShipmentItems = pgTable(
     productName: text('product_name').notNull(),
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
+    // Preserve the warehouse name selected when this reservation was made.
+    // Current inventory warehouses may later be renamed without rewriting
+    // historical outbound documents.
+    originWarehouseCode: varchar('origin_warehouse_code', { length: 100 }).notNull().default('default'),
     reservedQuantity: integer('reserved_quantity').notNull(),
     packedQuantity: integer('packed_quantity').notNull().default(0),
     dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),

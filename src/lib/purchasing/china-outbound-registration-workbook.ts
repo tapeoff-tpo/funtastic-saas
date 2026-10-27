@@ -8,7 +8,6 @@ import { CHINA_OUTBOUND_DESTINATIONS } from './china-outbound-destinations'
  * for a shipment that already exists.
  */
 export const CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS = {
-  guide: '작성안내',
   shipment: '출고정보',
   items: '출고상품',
   boxes: '박스 쉽먼트',
@@ -47,6 +46,38 @@ export const CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS = [
   '세로(cm)',
   '높이(cm)',
   '파렛트번호',
+] as const
+
+// Keep the Korean-only headers above as the canonical import keys. New files
+// show both languages so Korean and Chinese operators can use the same sheet.
+// headerColumns() maps these display labels back to their Korean counterparts
+// and also continues to accept templates downloaded before this change.
+export const CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS = [
+  '엑셀등록번호 / Excel登记编号',
+  '출고작업명 / 出库作业名称',
+  '도착지 / 目的地',
+  '출고창고 / 出库仓库',
+  '출고예정일 / 预计出库日期',
+  '메모 / 备注',
+] as const
+
+export const CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS = [
+  '출고창고 / 出库仓库',
+  '품목코드 / 商品编码',
+  '옵션명 / 规格',
+  '출고수량 / 出库数量',
+] as const
+
+export const CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS = [
+  '출고창고 / 出库仓库',
+  '품목코드 / 商品编码',
+  '옵션명 / 规格',
+  '박스번호 / 箱号',
+  '박스 적재수량 / 装箱数量',
+  '가로(cm) / 长(cm)',
+  '세로(cm) / 宽(cm)',
+  '높이(cm) / 高(cm)',
+  '파렛트번호 / 托盘号',
 ] as const
 
 export const CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS = [
@@ -129,6 +160,11 @@ const INPUT_FILL: ExcelJS.FillPattern = {
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } },
 }
+const CHINA_OUTBOUND_REGISTRATION_HEADER_ALIASES = createHeaderAliases([
+  [CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS, CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS],
+  [CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS, CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS],
+  [CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS, CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS],
+])
 type WorksheetWithDataValidations = ExcelJS.Worksheet & {
   dataValidations: {
     add(range: string, validation: ExcelJS.DataValidation): void
@@ -190,11 +226,10 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   const defaultWarehouseCode = input.defaultWarehouseCode?.trim() ?? ''
   const warehouseCodes = normalizeWarehouseCodes(defaultWarehouseCode, input.warehouseCodes ?? [])
 
-  addGuideSheet(workbook)
   const shipment = createSheet(
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment,
-    CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS,
+    CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS,
     [28, 32, 16, 22, 16, 48],
   )
   addInputRow(shipment, [
@@ -209,7 +244,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   const items = createSheet(
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
-    CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS,
+    CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
     [22, 22, 28, 16],
   )
   addInputRow(items, ['', '', '', ''])
@@ -217,8 +252,8 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   const boxes = createSheet(
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
-    CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS,
-    [22, 22, 28, 18, 18, 13, 13, 13, 18],
+    CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
+    [22, 22, 28, 18, 18, 16, 16, 16, 18],
   )
   addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
 
@@ -262,43 +297,11 @@ export async function parseChinaOutboundRegistrationWorkbook(
   }
 }
 
-function addGuideSheet(workbook: ExcelJS.Workbook) {
-  const sheet = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.guide)
-  sheet.columns = [{ width: 22 }, { width: 98 }]
-  sheet.addRow(['항목', '입력 방법'])
-  const rows: Array<[string, string]> = [
-    ['등록 순서', '출고정보와 출고상품을 입력한 뒤, 박스 쉽먼트가 있으면 같은 파일에서 함께 입력합니다. 업로드 후 검토 결과 반영을 눌러야 실제 재고 예약·출고·박스·파렛트가 등록됩니다.'],
-    ['엑셀등록번호', '양식에 자동으로 들어간 번호입니다. 같은 파일을 다시 반영해도 중복 출고가 생기지 않도록 수정하지 마세요.'],
-    ['도착지', `필수입니다. ${CHINA_OUTBOUND_DESTINATIONS.join(', ')} 중 하나를 입력하세요.`],
-    ['출고창고', '등록된 출고창고 목록에서 드롭다운으로 선택할 수 있습니다. 출고정보의 출고창고는 기본값이며, 출고상품과 박스 쉽먼트에서 출고창고를 비우면 이 창고가 자동 적용됩니다.'],
-    ['출고상품', '품목코드·옵션명·출고수량을 입력합니다. 다른 창고에서 출고하는 행은 출고창고 드롭다운에서 선택하세요. 상품명은 현재 SaaS 중국재고 기준으로 가져오며 엑셀에서 변경하지 않습니다.'],
-    ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 다른 창고에서 출고하는 행은 출고창고 드롭다운에서 선택하세요. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
-    ['박스 규격', '가로·세로·높이는 모두 입력하거나 모두 비워주세요. 같은 박스번호는 동일한 규격과 파렛트번호를 사용합니다.'],
-    ['파렛트번호', '선택입니다. 박스에 파렛트를 배정하려면 입력하세요. 같은 박스번호에는 하나의 파렛트번호만 입력할 수 있습니다.'],
-    ['현재 중국재고', '현재 중국재고(当前中国库存) 시트는 다운로드 시점의 조회용 재고입니다. 수정해도 출고 등록이나 재고에 반영되지 않습니다. / 此工作表为下载时点的库存参考。修改不会登记出库或变更库存。'],
-    ['주의', '검토에서 오류가 하나라도 나오면 반영할 수 없으며, 반영 중 오류가 생겨도 출고·재고예약·박스·파렛트가 일부만 등록되지 않습니다.'],
-  ]
-  for (const values of rows) sheet.addRow(values)
-  sheet.getRow(1).eachCell((cell) => {
-    cell.fill = HEADER_FILL
-    cell.font = { bold: true }
-    cell.border = THIN_BORDER
-  })
-  sheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.border = THIN_BORDER
-      cell.alignment = { vertical: 'middle', wrapText: true }
-    })
-  })
-  sheet.getRow(2).height = 48
-}
-
 function createSheet(workbook: ExcelJS.Workbook, name: string, headers: readonly string[], widths: number[]) {
   const sheet = workbook.addWorksheet(name)
   sheet.columns = widths.map((width) => ({ width }))
   const header = sheet.addRow([...headers])
-  header.height = 28
+  header.height = 36
   header.eachCell({ includeEmpty: true }, (cell) => {
     cell.fill = HEADER_FILL
     cell.font = { bold: true, size: 10 }
@@ -326,30 +329,18 @@ function addCurrentInventorySheet(
 ) {
   const sheet = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.inventory)
   sheet.columns = [22, 22, 42, 30, 18, 14, 14, 18, 18, 18].map((width) => ({ width }))
-  sheet.mergeCells(`A1:${excelColumnName(CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length)}1`)
-  sheet.getCell('A1').value = '현재 중국재고 / 当前中国库存'
-  sheet.getCell('A1').font = { bold: true, size: 14 }
-  sheet.getCell('A1').alignment = { vertical: 'middle' }
-  sheet.getRow(1).height = 26
-
-  sheet.mergeCells(`A2:${excelColumnName(CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length)}2`)
-  sheet.getCell('A2').value = '다운로드 시점의 조회용 재고입니다. 수정해도 출고 등록이나 재고에 반영되지 않습니다. / 此工作表为下载时点的库存参考。修改不会登记出库或变更库存。'
-  sheet.getCell('A2').font = { size: 9, color: { argb: 'FF4B5563' } }
-  sheet.getCell('A2').alignment = { vertical: 'middle', wrapText: true }
-  sheet.getRow(2).height = 30
-
   const header = sheet.addRow([...CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS])
-  header.height = 32
+  header.height = 36
   header.eachCell({ includeEmpty: true }, (cell) => {
     cell.fill = HEADER_FILL
     cell.font = { bold: true, size: 10 }
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
     cell.border = THIN_BORDER
   })
-  sheet.views = [{ state: 'frozen', ySplit: 3 }]
+  sheet.views = [{ state: 'frozen', ySplit: 1 }]
   sheet.autoFilter = {
-    from: 'A3',
-    to: { row: 3, column: CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length },
+    from: 'A1',
+    to: { row: 1, column: CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS.length },
   }
 
   for (const item of inventory) {
@@ -437,17 +428,6 @@ function formatSeoulDate(value: Date | string | null) {
   }).formatToParts(date)
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value
   return `${part('year')}-${part('month')}-${part('day')}`
-}
-
-function excelColumnName(columnNumber: number) {
-  let remaining = columnNumber
-  let result = ''
-  while (remaining > 0) {
-    const remainder = (remaining - 1) % 26
-    result = String.fromCharCode(65 + remainder) + result
-    remaining = Math.floor((remaining - 1) / 26)
-  }
-  return result
 }
 
 function parseShipmentSheet(
@@ -696,7 +676,7 @@ function parseDimensions(
 function headerColumns(sheet: ExcelJS.Worksheet, expected: readonly string[], errors: ChinaOutboundRegistrationWorkbookError[]) {
   const columns = new Map<string, number>()
   sheet.getRow(1).eachCell((cell, column) => {
-    const text = cellText(cell).trim()
+    const text = CHINA_OUTBOUND_REGISTRATION_HEADER_ALIASES.get(cellText(cell).trim()) ?? cellText(cell).trim()
     if (text && !columns.has(text)) columns.set(text, column)
   })
   const missing = expected.filter((header) => !columns.has(header))
@@ -705,6 +685,18 @@ function headerColumns(sheet: ExcelJS.Worksheet, expected: readonly string[], er
     return null
   }
   return columns
+}
+
+function createHeaderAliases(headerSets: ReadonlyArray<readonly [readonly string[], readonly string[]]>) {
+  const aliases = new Map<string, string>()
+  for (const [canonicalHeaders, displayHeaders] of headerSets) {
+    canonicalHeaders.forEach((header, index) => {
+      aliases.set(header, header)
+      const displayHeader = displayHeaders[index]
+      if (displayHeader) aliases.set(displayHeader, header)
+    })
+  }
+  return aliases
 }
 
 function validateText(

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { exportChinaOutboundRegistrationTemplateWorkbook } from '@/lib/purchasing/china-outbound-registration-workbook'
-import { getSaasChinaDefaultWarehouseCode } from '@/lib/purchasing/saas-china-outbound'
+import { listSaasChinaOutboundWarehouses } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
 
@@ -14,8 +14,12 @@ export async function GET() {
     // Resolve the canonical workspace before returning a shared operational
     // template, matching the import routes' ownership boundary.
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const defaultWarehouseCode = await getSaasChinaDefaultWarehouseCode(workspaceUserId)
-    const buffer = await exportChinaOutboundRegistrationTemplateWorkbook({ defaultWarehouseCode })
+    const warehouses = await listSaasChinaOutboundWarehouses(workspaceUserId)
+    const defaultWarehouseCode = warehouses.find((warehouse) => warehouse.isDefault)?.warehouseCode ?? null
+    const buffer = await exportChinaOutboundRegistrationTemplateWorkbook({
+      defaultWarehouseCode,
+      warehouseCodes: warehouses.map((warehouse) => warehouse.warehouseCode),
+    })
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

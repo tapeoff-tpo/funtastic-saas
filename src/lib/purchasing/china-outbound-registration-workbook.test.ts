@@ -4,6 +4,8 @@ import {
   CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS,
+  CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME,
+  CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET,
   CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS,
   createChinaOutboundRegistrationWorkbookFingerprint,
   exportChinaOutboundRegistrationTemplateWorkbook,
@@ -11,10 +13,11 @@ import {
 } from './china-outbound-registration-workbook'
 
 describe('China outbound registration workbook', () => {
-  it('exports the new-shipment template with a stable import key', async () => {
+  it('exports the new-shipment template with a stable import key and warehouse dropdowns', async () => {
     const buffer = await exportChinaOutboundRegistrationTemplateWorkbook({
       importKey: 'CN-20261027-XLSX-TEST0001',
       defaultWarehouseCode: '중국창고',
+      warehouseCodes: [' 쿠팡 ', '중국창고', '스마일배송', '쿠팡', ''],
     })
     const workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
@@ -24,13 +27,41 @@ describe('China outbound registration workbook', () => {
       CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment,
       CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
       CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
+      CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET,
     ])
-    expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)?.getCell('A2').value)
+    const shipment = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)
+    const items = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)
+    const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
+    const warehouseOptions = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET)
+
+    expect(shipment?.getCell('A2').value)
       .toBe('CN-20261027-XLSX-TEST0001')
-    expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)?.getCell('D2').value)
+    expect(shipment?.getCell('D2').value)
       .toBe('중국창고')
-    expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)?.getRow(1).values)
+    expect(shipment?.getRow(1).values)
       .toEqual([undefined, ...CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS])
+    expect(warehouseOptions?.state).toBe('veryHidden')
+    expect(warehouseOptions?.getColumn(1).values).toEqual([
+      undefined,
+      '중국창고',
+      '쿠팡',
+      '스마일배송',
+    ])
+    expect(workbook.definedNames.getRanges(CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME)).toEqual({
+      name: CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME,
+      ranges: [`'${CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET}'!$A$1:$A$3`],
+    })
+
+    const warehouseDropdown = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [`=${CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME}`],
+    }
+    expect(shipment?.getCell('D2').dataValidation).toMatchObject(warehouseDropdown)
+    expect(items?.getCell('A2').dataValidation).toMatchObject(warehouseDropdown)
+    expect(items?.getCell('A1001').dataValidation).toMatchObject(warehouseDropdown)
+    expect(boxes?.getCell('A2').dataValidation).toMatchObject(warehouseDropdown)
+    expect(boxes?.getCell('A5001').dataValidation).toMatchObject(warehouseDropdown)
   })
 
   it('parses a new shipment and its box/pallet allocation together', async () => {

@@ -14,6 +14,12 @@ export const CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS = {
   boxes: '박스 쉽먼트',
 } as const
 
+// This sheet is deliberately hidden from the operator-facing template. Excel
+// data validation cannot reliably point at another sheet directly, so it owns
+// the named range used by the three 출고창고 dropdowns.
+export const CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET = '출고창고목록'
+export const CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME = 'ChinaOutboundWarehouseOptions'
+
 export const CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS = [
   '엑셀등록번호',
   '출고작업명',
@@ -96,6 +102,11 @@ const INPUT_FILL: ExcelJS.FillPattern = {
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } },
 }
+type WorksheetWithDataValidations = ExcelJS.Worksheet & {
+  dataValidations: {
+    add(range: string, validation: ExcelJS.DataValidation): void
+  }
+}
 
 /**
  * The import key doubles as the immutable shipment number. Retrying the same
@@ -143,10 +154,13 @@ export function createChinaOutboundRegistrationWorkbookFingerprint(workbook: Chi
 export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   importKey?: string
   defaultWarehouseCode?: string | null
+  warehouseCodes?: readonly string[]
 } = {}) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
+  const defaultWarehouseCode = input.defaultWarehouseCode?.trim() ?? ''
+  const warehouseCodes = normalizeWarehouseCodes(defaultWarehouseCode, input.warehouseCodes ?? [])
 
   addGuideSheet(workbook)
   const shipment = createSheet(
@@ -159,7 +173,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     input.importKey ?? createChinaOutboundRegistrationImportKey(),
     '',
     '',
-    input.defaultWarehouseCode?.trim() ?? '',
+    defaultWarehouseCode,
     '',
     '',
   ])
@@ -179,6 +193,13 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     [22, 22, 28, 18, 18, 13, 13, 13, 18],
   )
   addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
+
+  if (warehouseCodes.length > 0) {
+    addWarehouseOptionsSheet(workbook, warehouseCodes)
+    addWarehouseDropdown(shipment, 'D2')
+    addWarehouseDropdown(items, `A2:A${MAX_ITEM_ROWS + 1}`)
+    addWarehouseDropdown(boxes, `A2:A${MAX_BOX_ROWS + 1}`)
+  }
 
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
@@ -219,9 +240,9 @@ function addGuideSheet(workbook: ExcelJS.Workbook) {
     ['등록 순서', '출고정보와 출고상품을 입력한 뒤, 박스 쉽먼트가 있으면 같은 파일에서 함께 입력합니다. 업로드 후 검토 결과 반영을 눌러야 실제 재고 예약·출고·박스·파렛트가 등록됩니다.'],
     ['엑셀등록번호', '양식에 자동으로 들어간 번호입니다. 같은 파일을 다시 반영해도 중복 출고가 생기지 않도록 수정하지 마세요.'],
     ['도착지', `필수입니다. ${CHINA_OUTBOUND_DESTINATIONS.join(', ')} 중 하나를 입력하세요.`],
-    ['출고창고', '출고정보의 출고창고는 기본값입니다. 출고상품과 박스 쉽먼트에서 출고창고를 비우면 이 창고가 자동 적용됩니다. 여러 창고로 출고할 때만 행별 출고창고를 입력하세요.'],
-    ['출고상품', '품목코드·옵션명·출고수량을 입력합니다. 출고창고는 출고정보의 기본값을 사용하며, 다른 창고에서 출고하는 행만 직접 입력하세요. 상품명은 현재 SaaS 중국재고 기준으로 가져오며 엑셀에서 변경하지 않습니다.'],
-    ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 출고창고는 출고정보의 기본값을 사용하며, 다른 창고에서 출고하는 행만 직접 입력하세요. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
+    ['출고창고', '등록된 출고창고 목록에서 드롭다운으로 선택할 수 있습니다. 출고정보의 출고창고는 기본값이며, 출고상품과 박스 쉽먼트에서 출고창고를 비우면 이 창고가 자동 적용됩니다.'],
+    ['출고상품', '품목코드·옵션명·출고수량을 입력합니다. 다른 창고에서 출고하는 행은 출고창고 드롭다운에서 선택하세요. 상품명은 현재 SaaS 중국재고 기준으로 가져오며 엑셀에서 변경하지 않습니다.'],
+    ['박스 쉽먼트', '박스번호와 박스 적재수량을 입력합니다. 다른 창고에서 출고하는 행은 출고창고 드롭다운에서 선택하세요. 이 시트에 한 행이라도 입력하면 모든 출고상품의 박스 적재 합계가 출고수량과 같아야 합니다.'],
     ['박스 규격', '가로·세로·높이는 모두 입력하거나 모두 비워주세요. 같은 박스번호는 동일한 규격과 파렛트번호를 사용합니다.'],
     ['파렛트번호', '선택입니다. 박스에 파렛트를 배정하려면 입력하세요. 같은 박스번호에는 하나의 파렛트번호만 입력할 수 있습니다.'],
     ['주의', '검토에서 오류가 하나라도 나오면 반영할 수 없으며, 반영 중 오류가 생겨도 출고·재고예약·박스·파렛트가 일부만 등록되지 않습니다.'],
@@ -265,6 +286,42 @@ function addInputRow(sheet: ExcelJS.Worksheet, values: Array<string | number>) {
     cell.border = THIN_BORDER
     cell.fill = INPUT_FILL
     cell.alignment = { vertical: 'middle', wrapText: true }
+  })
+}
+
+function normalizeWarehouseCodes(defaultWarehouseCode: string, warehouseCodes: readonly string[]) {
+  const seen = new Set<string>()
+  return [defaultWarehouseCode, ...warehouseCodes].flatMap((warehouseCode) => {
+    const normalized = warehouseCode.trim()
+    if (!normalized || seen.has(normalized)) return []
+    seen.add(normalized)
+    return [normalized]
+  })
+}
+
+function addWarehouseOptionsSheet(workbook: ExcelJS.Workbook, warehouseCodes: readonly string[]) {
+  const sheet = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET)
+  sheet.state = 'veryHidden'
+  warehouseCodes.forEach((warehouseCode) => sheet.addRow([warehouseCode]))
+  workbook.definedNames.add(
+    `${sheet.name}!$A$1:$A$${warehouseCodes.length}`,
+    CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME,
+  )
+}
+
+function addWarehouseDropdown(sheet: ExcelJS.Worksheet, range: string) {
+  const sheetWithDataValidations = sheet as WorksheetWithDataValidations
+  sheetWithDataValidations.dataValidations.add(range, {
+    type: 'list',
+    allowBlank: true,
+    formulae: [`=${CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME}`],
+    showErrorMessage: true,
+    errorStyle: 'stop',
+    errorTitle: '출고창고 선택',
+    error: '등록된 출고창고 목록에서 선택해주세요.',
+    showInputMessage: true,
+    promptTitle: '출고창고',
+    prompt: '등록된 출고창고 목록에서 선택하세요. 빈칸은 출고정보의 기본 창고를 사용합니다.',
   })
 }
 

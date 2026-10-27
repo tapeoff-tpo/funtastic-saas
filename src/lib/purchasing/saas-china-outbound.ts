@@ -7,6 +7,11 @@ import {
   type SaasChinaInventoryExcelRow,
 } from './saas-china-inventory-excel'
 import {
+  createChinaOutboundRegistrationWorkbookFingerprint,
+  type ChinaOutboundRegistrationWorkbook,
+  type ChinaOutboundRegistrationWorkbookError,
+} from './china-outbound-registration-workbook'
+import {
   chinaOutboundBoxItems,
   chinaOutboundBoxes,
   chinaOutboundPallets,
@@ -264,6 +269,26 @@ export type CreateChinaOutboundShipmentInput = {
   lines: ChinaOutboundShipmentLineInput[]
 }
 
+export type ChinaOutboundRegistrationWorkbookPreview = {
+  summary: {
+    itemCount: number
+    boxCount: number
+    palletCount: number
+    totalQuantity: number
+    invalidCount: number
+  }
+  errors: ChinaOutboundRegistrationWorkbookError[]
+  existingShipmentId: string | null
+  existingShipmentNo: string | null
+  alreadyRegistered: boolean
+}
+
+export type ChinaOutboundRegistrationWorkbookApplyResult = {
+  shipmentId: string
+  shipmentNo: string
+  created: boolean
+}
+
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type ChinaOutboundShipmentRow = typeof chinaOutboundShipments.$inferSelect
 type ChinaOutboundShipmentItemRow = typeof chinaOutboundShipmentItems.$inferSelect
@@ -271,6 +296,21 @@ type ChinaOutboundPalletRow = typeof chinaOutboundPallets.$inferSelect
 type ChinaOutboundBoxRow = typeof chinaOutboundBoxes.$inferSelect
 type ChinaOutboundBoxItemRow = typeof chinaOutboundBoxItems.$inferSelect
 type SaasChinaPurchaseLinkRow = typeof saasChinaPurchaseLinks.$inferSelect
+
+type ChinaOutboundShipmentCreationOptions = {
+  /**
+   * Workbook uploads have a stable import key. A retry must return the first
+   * created shipment instead of reserving the same stock again.
+   */
+  idempotentShipmentNo?: boolean
+  idempotencyFingerprint?: string
+  /** Runs inside the reservation transaction after its shipment lines exist. */
+  afterCreateInTransaction?: (input: {
+    tx: DbTransaction
+    shipment: ChinaOutboundShipmentRow
+    shipmentItems: ChinaOutboundShipmentItemRow[]
+  }) => Promise<void>
+}
 
 const EDITABLE_SHIPMENT_STATUSES: ChinaOutboundShipmentStatus[] = ['draft', 'packing']
 
@@ -1563,11 +1603,29 @@ export async function hasSaasChinaPurchaseLinkInTransaction(input: {
   return Boolean(link)
 }
 
-export async function createChinaOutboundShipment(input: CreateChinaOutboundShipmentInput) {
+export async function createChinaOutboundShipment(
+  input: CreateChinaOutboundShipmentInput,
+  options: ChinaOutboundShipmentCreationOptions = {},
+) {
   await ensureSaasChinaOutboundSchema()
   const normalizedLines = normalizeShipmentLines(input.lines)
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipmentNo = optionalText(input.shipmentNo) ?? createShipmentNo()
+    if (options.idempotentShipmentNo) {
+      const [existing] = await tx
+        .select()
+        .from(chinaOutboundShipments)
+        .where(and(
+          eq(chinaOutboundShipments.userId, input.userId),
+          eq(chinaOutboundShipments.shipmentNo, shipmentNo),
+        ))
+        .limit(1)
+      if (existing) {
+        if (!options.idempotencyFingerprint || existing.externalReference === options.idempotencyFingerprint) return existing
+        throw new Error('엑셀등록번호가 이미 다른 중국출고에 사용되었습니다. 새 양식을 내려받아 다시 등록해주세요.')
+      }
+    }
     const inventoryIds = normalizedLines.map((line) => line.inventoryId)
     const inventories = await tx
       .select()
@@ -1590,7 +1648,6 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
       }
     }
 
-    const shipmentNo = optionalText(input.shipmentNo) ?? createShipmentNo()
     const [shipment] = await tx
       .insert(chinaOutboundShipments)
       .values({
@@ -1611,6 +1668,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
     if (!shipment) throw new Error('중국출고 작업을 만들지 못했습니다.')
 
     const affectedPurchaseLinkIds = new Set<string>()
+    const shipmentItems: ChinaOutboundShipmentItemRow[] = []
     for (const [index, line] of normalizedLines.entries()) {
       const inventory = inventoriesById.get(line.inventoryId)!
       const [shipmentItem] = await tx
@@ -1628,6 +1686,7 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
         })
         .returning()
       if (!shipmentItem) throw new Error('중국출고 상품을 저장하지 못했습니다.')
+      shipmentItems.push(shipmentItem)
 
       const allocatedPurchaseLinkIds = await reserveSaasChinaPurchaseLotsForShipmentItem(tx, {
         userId: input.userId,
@@ -1665,9 +1724,280 @@ export async function createChinaOutboundShipment(input: CreateChinaOutboundShip
     }
 
     await reconcileSaasChinaPurchaseLinks(tx, input.userId, [...affectedPurchaseLinkIds])
+    await options.afterCreateInTransaction?.({ tx, shipment, shipmentItems })
 
     return shipment
   })
+}
+
+/**
+ * Reviews a new China-outbound workbook against the current SaaS China stock.
+ * Parsing errors are preserved here so the API can show one unified result.
+ */
+export async function previewChinaOutboundRegistrationWorkbook(input: {
+  userId: string
+  workbook: ChinaOutboundRegistrationWorkbook
+}): Promise<ChinaOutboundRegistrationWorkbookPreview> {
+  await ensureSaasChinaOutboundSchema()
+  const fingerprint = createChinaOutboundRegistrationWorkbookFingerprint(input.workbook)
+  const existing = (await findChinaOutboundShipmentByNumber(input.userId, input.workbook.importKey))[0] ?? null
+  if (existing) {
+    const isMatchingRetry = existing.externalReference === fingerprint
+    const errors = isMatchingRetry
+      ? input.workbook.errors
+      : [...input.workbook.errors, {
+        sheet: '출고정보',
+        row: 2,
+        message: '엑셀등록번호가 이미 다른 중국출고에 사용되었습니다. 새 양식을 내려받아 다시 등록해주세요.',
+      }]
+    return {
+      summary: chinaOutboundRegistrationWorkbookSummary(input.workbook, errors.length),
+      errors,
+      existingShipmentId: existing.id,
+      existingShipmentNo: existing.shipmentNo,
+      alreadyRegistered: isMatchingRetry,
+    }
+  }
+  const inventories = await listActiveSaasChinaInventoryForRegistration(input.userId)
+  const validation = validateChinaOutboundRegistrationWorkbook(input.workbook, inventories)
+  return {
+    summary: chinaOutboundRegistrationWorkbookSummary(input.workbook, validation.errors.length),
+    errors: validation.errors,
+    existingShipmentId: null,
+    existingShipmentNo: null,
+    alreadyRegistered: false,
+  }
+}
+
+/**
+ * Creates the reservation and (when entered) all box/pallet rows in the same
+ * transaction. An invalid box sheet can therefore never leave an orphaned
+ * stock reservation behind.
+ */
+export async function applyChinaOutboundRegistrationWorkbook(input: {
+  userId: string
+  createdBy: string
+  workbook: ChinaOutboundRegistrationWorkbook
+}): Promise<ChinaOutboundRegistrationWorkbookApplyResult> {
+  await ensureSaasChinaOutboundSchema()
+  if (input.workbook.errors.length > 0) {
+    throw new Error('엑셀 오류를 먼저 수정해주세요.')
+  }
+  const fingerprint = createChinaOutboundRegistrationWorkbookFingerprint(input.workbook)
+  const existingRows = await findChinaOutboundShipmentByNumber(input.userId, input.workbook.importKey)
+  const existing = existingRows[0]
+  if (existing) {
+    if (existing.externalReference === fingerprint) {
+      return { shipmentId: existing.id, shipmentNo: existing.shipmentNo, created: false }
+    }
+    throw new Error('엑셀등록번호가 이미 다른 중국출고에 사용되었습니다. 새 양식을 내려받아 다시 등록해주세요.')
+  }
+
+  const inventories = await listActiveSaasChinaInventoryForRegistration(input.userId)
+  const validation = validateChinaOutboundRegistrationWorkbook(input.workbook, inventories)
+  if (validation.errors.length > 0) {
+    throw new Error('엑셀 오류를 먼저 수정해주세요.')
+  }
+  if (!input.workbook.destinationName) {
+    throw new Error('도착지를 입력해주세요.')
+  }
+
+  let created = false
+  const shipment = await createChinaOutboundShipment({
+    userId: input.userId,
+    createdBy: input.createdBy,
+    shipmentNo: input.workbook.importKey,
+    externalReference: fingerprint,
+    displayName: input.workbook.displayName,
+    destinationName: input.workbook.destinationName,
+    plannedOutboundDate: input.workbook.plannedOutboundDate,
+    memo: input.workbook.memo,
+    lines: validation.resolvedLines.map(({ inventory, item }) => ({
+      inventoryId: inventory.id,
+      quantity: item.quantity,
+    })),
+  }, {
+    idempotentShipmentNo: true,
+    idempotencyFingerprint: fingerprint,
+    afterCreateInTransaction: async (context) => {
+      created = true
+      await saveChinaOutboundRegistrationPackingInTransaction({
+        tx: context.tx,
+        userId: input.userId,
+        shipment: context.shipment,
+        shipmentItems: context.shipmentItems,
+        workbook: input.workbook,
+        resolvedLines: validation.resolvedLines,
+      })
+    },
+  })
+
+  return { shipmentId: shipment.id, shipmentNo: shipment.shipmentNo, created }
+}
+
+type ChinaOutboundRegistrationResolvedLine = {
+  item: ChinaOutboundRegistrationWorkbook['items'][number]
+  inventory: typeof saasChinaInventory.$inferSelect
+}
+
+function chinaOutboundRegistrationWorkbookSummary(
+  workbook: ChinaOutboundRegistrationWorkbook,
+  invalidCount: number,
+) {
+  return {
+    itemCount: workbook.items.length,
+    boxCount: new Set(workbook.boxAllocations.map((allocation) => allocation.boxNo)).size,
+    palletCount: new Set(workbook.boxAllocations.flatMap((allocation) => allocation.palletNo ? [allocation.palletNo] : [])).size,
+    totalQuantity: workbook.items.reduce((total, item) => total + item.quantity, 0),
+    invalidCount,
+  }
+}
+
+async function listActiveSaasChinaInventoryForRegistration(userId: string) {
+  return db
+    .select()
+    .from(saasChinaInventory)
+    .where(and(
+      eq(saasChinaInventory.userId, userId),
+      isNull(saasChinaInventory.archivedAt),
+    ))
+}
+
+async function findChinaOutboundShipmentByNumber(userId: string, shipmentNo: string) {
+  const normalizedShipmentNo = optionalText(shipmentNo)
+  if (!normalizedShipmentNo) return []
+  return db
+    .select({
+      id: chinaOutboundShipments.id,
+      shipmentNo: chinaOutboundShipments.shipmentNo,
+      externalReference: chinaOutboundShipments.externalReference,
+    })
+    .from(chinaOutboundShipments)
+    .where(and(
+      eq(chinaOutboundShipments.userId, userId),
+      eq(chinaOutboundShipments.shipmentNo, normalizedShipmentNo),
+    ))
+    .limit(1)
+}
+
+function validateChinaOutboundRegistrationWorkbook(
+  workbook: ChinaOutboundRegistrationWorkbook,
+  inventories: readonly (typeof saasChinaInventory.$inferSelect)[],
+) {
+  const errors = [...workbook.errors]
+  const inventoriesByIdentity = new Map<string, Array<(typeof saasChinaInventory.$inferSelect)>>()
+  for (const inventory of inventories) {
+    const key = chinaOutboundRegistrationSourceKey(inventory.warehouseCode, inventory.sku, inventory.optionKey)
+    inventoriesByIdentity.set(key, [...(inventoriesByIdentity.get(key) ?? []), inventory])
+  }
+  const resolvedLines: ChinaOutboundRegistrationResolvedLine[] = []
+  for (const item of workbook.items) {
+    if (isSaasChinaInventoryExcludedWarehouseCode(item.warehouseCode)) {
+      errors.push({ sheet: '출고상품', row: item.rowNumber, message: SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR })
+      continue
+    }
+    const matches = inventoriesByIdentity.get(chinaOutboundRegistrationSourceKey(
+      item.warehouseCode,
+      item.sku,
+      item.optionName ?? '',
+    )) ?? []
+    if (matches.length === 0) {
+      errors.push({ sheet: '출고상품', row: item.rowNumber, message: '현재 SaaS 중국재고에서 일치하는 출고상품을 찾을 수 없습니다.' })
+      continue
+    }
+    if (matches.length > 1) {
+      errors.push({ sheet: '출고상품', row: item.rowNumber, message: '현재 SaaS 중국재고에 같은 출고상품이 여러 개 있습니다. 재고를 정리한 뒤 다시 시도해주세요.' })
+      continue
+    }
+    const inventory = matches[0]!
+    if (item.quantity > inventory.availableQuantity) {
+      errors.push({
+        sheet: '출고상품',
+        row: item.rowNumber,
+        message: `${item.sku}의 작업 가능 수량은 ${inventory.availableQuantity.toLocaleString('ko-KR')}개입니다.`,
+      })
+      continue
+    }
+    resolvedLines.push({ item, inventory })
+  }
+  return { errors, resolvedLines }
+}
+
+async function saveChinaOutboundRegistrationPackingInTransaction(input: {
+  tx: DbTransaction
+  userId: string
+  shipment: ChinaOutboundShipmentRow
+  shipmentItems: ChinaOutboundShipmentItemRow[]
+  workbook: ChinaOutboundRegistrationWorkbook
+  resolvedLines: ChinaOutboundRegistrationResolvedLine[]
+}) {
+  if (input.workbook.boxAllocations.length === 0) return
+
+  const inventoryIdBySource = new Map(input.resolvedLines.map(({ item, inventory }) => [
+    chinaOutboundRegistrationSourceKey(item.warehouseCode, item.sku, item.optionName ?? ''),
+    inventory.id,
+  ]))
+  const allocationsByInventoryId = new Map<string, ChinaOutboundBoxSplitInput[]>()
+  const palletAssignmentsByBox = new Map<string, string | null>()
+  for (const allocation of input.workbook.boxAllocations) {
+    const inventoryId = inventoryIdBySource.get(chinaOutboundRegistrationSourceKey(
+      allocation.warehouseCode,
+      allocation.sku,
+      allocation.optionName ?? '',
+    ))
+    if (!inventoryId) {
+      throw new Error('박스 쉽먼트의 출고상품을 현재 재고에서 찾을 수 없습니다.')
+    }
+    allocationsByInventoryId.set(inventoryId, [
+      ...(allocationsByInventoryId.get(inventoryId) ?? []),
+      {
+        boxNo: allocation.boxNo,
+        quantity: allocation.quantity,
+        lengthCm: allocation.lengthCm,
+        widthCm: allocation.widthCm,
+        heightCm: allocation.heightCm,
+      },
+    ])
+    palletAssignmentsByBox.set(allocation.boxNo, allocation.palletNo)
+  }
+
+  const shipmentItemsByInventoryId = new Map(input.shipmentItems.map((item) => [item.inventoryId, item]))
+  let boxes: ChinaOutboundBoxRow[] = []
+  let boxItems: ChinaOutboundBoxItemRow[] = []
+  for (const { inventory } of input.resolvedLines) {
+    const shipmentItem = shipmentItemsByInventoryId.get(inventory.id)
+    const allocations = allocationsByInventoryId.get(inventory.id)
+    if (!shipmentItem || !allocations || allocations.length === 0) {
+      throw new Error('박스 쉽먼트의 출고상품과 출고수량을 확인해주세요.')
+    }
+    const result = await replaceChinaOutboundItemBoxSplitsInTransaction({
+      tx: input.tx,
+      userId: input.userId,
+      shipment: input.shipment,
+      shipmentItem,
+      allocations,
+      boxSplitStatus: 'completed',
+      boxes,
+      boxItems,
+    })
+    boxes = result.boxes
+    boxItems = result.boxItems
+  }
+
+  await assignChinaOutboundBoxesToPalletsInTransaction({
+    tx: input.tx,
+    userId: input.userId,
+    shipment: input.shipment,
+    assignments: [...palletAssignmentsByBox.entries()]
+      .filter(([, palletNo]) => palletNo != null)
+      .map(([boxNo, palletNo]) => ({ boxNo, palletNo })),
+    pallets: [],
+    boxes,
+  })
+}
+
+function chinaOutboundRegistrationSourceKey(warehouseCode: string, sku: string, optionKey: string) {
+  return `${warehouseCode}\u0000${sku}\u0000${optionKey}`
 }
 
 /**

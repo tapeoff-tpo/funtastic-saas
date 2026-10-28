@@ -1,8 +1,11 @@
 import ExcelJS from 'exceljs'
+import { dimensionNumber } from './china-outbound-dimensions'
 import {
-  calculateChinaOutboundBoxCbm,
-  dimensionNumber,
-} from './china-outbound-dimensions'
+  CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS,
+  exportChinaOutboundRegistrationTemplateWorkbook,
+  parseChinaOutboundRegistrationWorkbook,
+  type ChinaOutboundRegistrationCurrentInventoryRow,
+} from './china-outbound-registration-workbook'
 
 export const CHINA_OUTBOUND_WORKBOOK_SHEETS = {
   guide: '작업안내',
@@ -73,6 +76,11 @@ export type ChinaOutboundWorkbookPreview = {
   errors: Array<{ sheet: string; row: number; message: string }>
 }
 
+export type ChinaOutboundWorkWorkbookExportOptions = {
+  warehouseCodes?: readonly string[]
+  currentInventory?: readonly ChinaOutboundRegistrationCurrentInventoryRow[]
+}
+
 const BOX_SPLIT_HEADERS = [
   '출고상품ID',
   '품목코드',
@@ -100,80 +108,66 @@ const PALLET_LOAD_HEADERS = [
   '적재상품',
 ] as const
 
-const HEADER_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFE8EEF5' },
-}
-
-const INPUT_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFFFF7D6' },
-}
-
-const THIN_BORDER: Partial<ExcelJS.Borders> = {
-  bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } },
-}
-
-export async function exportChinaOutboundWorkWorkbook(detail: ChinaOutboundWorkbookDetail): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'Funtastic SaaS'
-  workbook.created = new Date()
-
-  const itemById = new Map(detail.items.map((item) => [item.id, item]))
+/**
+ * A work workbook deliberately reuses the registration workbook layout. The
+ * selection is prefilled from an existing shipment; only its box/pallet work
+ * may be applied again on upload.
+ */
+export async function exportChinaOutboundWorkWorkbook(
+  detail: ChinaOutboundWorkbookDetail,
+  options: ChinaOutboundWorkWorkbookExportOptions = {},
+): Promise<Buffer> {
   const boxById = new Map(detail.boxes.map((box) => [box.id, box]))
   const palletById = new Map(detail.pallets.map((pallet) => [pallet.id, pallet]))
   const allocationsByItem = new Map(detail.items.map((item) => [
     item.id,
     detail.boxItems.filter((allocation) => allocation.shipmentItemId === item.id),
   ]))
-  const allocationsByBox = new Map(detail.boxes.map((box) => [
-    box.id,
-    detail.boxItems.filter((allocation) => allocation.boxId === box.id),
-  ]))
-
-  addGuideSheet(workbook, detail)
-  addItemsSheet(workbook, detail)
-
-  const boxSheet = createSheet(workbook, CHINA_OUTBOUND_WORKBOOK_SHEETS.boxSplits, BOX_SPLIT_HEADERS, [38, 18, 34, 20, 16, 14, 16, 18, 12, 12, 12, 14, 12])
   const sortedItems = [...detail.items].sort(compareShipmentItems)
-  for (const item of sortedItems) {
-    const allocations = allocationsByItem.get(item.id) ?? []
-    for (const allocation of allocations) {
-      const box = boxById.get(allocation.boxId)
-      addBoxSplitRow(boxSheet, item, box, allocation.quantity)
-    }
-    // A blank continuation line means an operator can add another box without
-    // having to copy identifiers from a different row.
-    addBoxSplitRow(boxSheet, item, undefined, undefined)
-  }
-
-  const palletSheet = createSheet(workbook, CHINA_OUTBOUND_WORKBOOK_SHEETS.palletLoads, PALLET_LOAD_HEADERS, [16, 16, 18, 12, 12, 12, 14, 52])
-  const boxesWithItems = detail.boxes.filter((box) => (allocationsByBox.get(box.id)?.length ?? 0) > 0)
-    .sort((left, right) => left.boxNo.localeCompare(right.boxNo, 'ko-KR', { numeric: true }))
-  for (const box of boxesWithItems) {
-    const allocations = allocationsByBox.get(box.id) ?? []
-    const packedQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
-    const products = allocations.map((allocation) => {
-      const item = itemById.get(allocation.shipmentItemId)
-      return item ? `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''} (${allocation.quantity.toLocaleString('ko-KR')}개)` : ''
-    }).filter(Boolean).join('\n')
+  const prefilledBoxAllocations = sortedItems.flatMap((item) => (allocationsByItem.get(item.id) ?? []).flatMap((allocation) => {
+    const box = boxById.get(allocation.boxId)
+    if (!box) return []
     const pallet = box.palletId ? palletById.get(box.palletId) : null
-    const cbm = calculateChinaOutboundBoxCbm(box)
-    addDataRow(palletSheet, [
-      box.boxNo,
-      pallet?.palletNo ?? '',
-      packedQuantity,
-      dimensionNumber(box.lengthCm) ?? '',
-      dimensionNumber(box.widthCm) ?? '',
-      dimensionNumber(box.heightCm) ?? '',
-      cbm ?? '',
-      products,
-    ], new Set([2]))
-  }
+    return [{
+      warehouseCode: item.warehouseCode,
+      sku: item.sku,
+      optionName: item.optionName,
+      boxNo: box.boxNo,
+      quantity: allocation.quantity,
+      lengthCm: dimensionNumber(box.lengthCm),
+      widthCm: dimensionNumber(box.widthCm),
+      heightCm: dimensionNumber(box.heightCm),
+      palletNo: pallet?.palletNo ?? null,
+    }]
+  }))
+  // A shipment preserves its warehouse snapshot. Keep an old selected name
+  // available in the dropdown even when the editable warehouse catalog was
+  // later renamed or cleaned up.
+  const warehouseCodes = [
+    ...(options.warehouseCodes ?? []),
+    ...sortedItems.map((item) => item.warehouseCode),
+  ]
+  const uniqueWarehouseCodes = [...new Set(sortedItems.map((item) => item.warehouseCode))]
 
-  return Buffer.from(await workbook.xlsx.writeBuffer())
+  return exportChinaOutboundRegistrationTemplateWorkbook({
+    importKey: detail.shipment.shipmentNo,
+    defaultWarehouseCode: uniqueWarehouseCodes.length === 1 ? uniqueWarehouseCodes[0] : null,
+    warehouseCodes,
+    currentInventory: options.currentInventory ?? [],
+    prefilledShipment: {
+      displayName: detail.shipment.displayName,
+      destinationName: detail.shipment.destinationName,
+      plannedOutboundDate: detail.shipment.plannedOutboundDate,
+    },
+    prefilledItems: sortedItems.map((item) => ({
+      warehouseCode: item.warehouseCode,
+      sku: item.sku,
+      optionName: item.optionName,
+      quantity: item.reservedQuantity,
+    })),
+    prefilledBoxAllocations,
+    includeBlankBoxPlaceholders: true,
+  })
 }
 
 export async function parseChinaOutboundWorkWorkbook(input: {
@@ -182,6 +176,160 @@ export async function parseChinaOutboundWorkWorkbook(input: {
 }): Promise<ChinaOutboundWorkbookPreview> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(input.fileBuffer as ExcelJS.Buffer)
+  if (workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)) {
+    return parseChinaOutboundRegistrationWorkWorkbook(input)
+  }
+
+  return parseLegacyChinaOutboundWorkWorkbook(input, workbook)
+}
+
+async function parseChinaOutboundRegistrationWorkWorkbook(input: {
+  fileBuffer: ArrayBuffer
+  detail: ChinaOutboundWorkbookDetail
+}): Promise<ChinaOutboundWorkbookPreview> {
+  const registration = await parseChinaOutboundRegistrationWorkbook(input.fileBuffer, {
+    requireCompleteBoxAllocations: false,
+    ignoreBlankBoxPlaceholders: true,
+    requireDestination: false,
+    validateDestination: false,
+  })
+  const errors: ChinaOutboundWorkbookPreview['errors'] = registration.errors.map((error) => ({
+    sheet: error.sheet,
+    row: error.row ?? 0,
+    message: error.message,
+  }))
+  const sourceItems = new Map<string, ChinaOutboundWorkbookDetail['items'][number]>()
+  for (const item of input.detail.items) {
+    const key = registrationItemSourceKey(item)
+    if (sourceItems.has(key)) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
+        row: 0,
+        message: `${item.sku}의 출고창고·품목코드·옵션 정보가 현재 출고상품에서 중복됩니다.`,
+      })
+      continue
+    }
+    sourceItems.set(key, item)
+  }
+
+  if (registration.importKey !== input.detail.shipment.shipmentNo) {
+    errors.push({
+      sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment,
+      row: 2,
+      message: '엑셀등록번호가 현재 중국출고 번호와 일치하지 않습니다.',
+    })
+  }
+
+  const selectedItemIds = new Set<string>()
+  for (const item of registration.items) {
+    const shipmentItem = sourceItems.get(registrationItemSourceKey(item))
+    if (!shipmentItem) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
+        row: item.rowNumber,
+        message: '출고창고·품목코드·옵션명이 현재 중국출고의 선택 상품과 일치하지 않습니다.',
+      })
+      continue
+    }
+    if (shipmentItem.reservedQuantity !== item.quantity) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
+        row: item.rowNumber,
+        message: `${item.sku}의 출고수량은 현재 선택된 ${shipmentItem.reservedQuantity.toLocaleString('ko-KR')}개와 같아야 합니다.`,
+      })
+      continue
+    }
+    if (selectedItemIds.has(shipmentItem.id)) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
+        row: item.rowNumber,
+        message: '같은 출고상품을 두 번 입력할 수 없습니다.',
+      })
+      continue
+    }
+    selectedItemIds.add(shipmentItem.id)
+  }
+  for (const item of input.detail.items) {
+    if (!selectedItemIds.has(item.id)) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
+        row: 0,
+        message: `${item.sku} 출고상품이 누락되었습니다. 선택 상품·출고수량은 수정할 수 없습니다.`,
+      })
+    }
+  }
+
+  const allocationsByItemId = new Map<string, ChinaOutboundWorkbookBoxSplit['allocations']>()
+  const palletAssignmentsByBoxNo = new Map<string, string | null>()
+  const knownBoxNos = new Set(input.detail.boxes.map((box) => box.boxNo))
+  for (const allocation of registration.boxAllocations) {
+    const shipmentItem = sourceItems.get(registrationItemSourceKey(allocation))
+    if (!shipmentItem) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
+        row: allocation.rowNumber,
+        message: '박스 쉽먼트의 출고창고·품목코드·옵션명이 현재 출고상품과 일치하지 않습니다.',
+      })
+      continue
+    }
+    knownBoxNos.add(allocation.boxNo)
+    allocationsByItemId.set(shipmentItem.id, [
+      ...(allocationsByItemId.get(shipmentItem.id) ?? []),
+      {
+        boxNo: allocation.boxNo,
+        quantity: allocation.quantity,
+        lengthCm: allocation.lengthCm,
+        widthCm: allocation.widthCm,
+        heightCm: allocation.heightCm,
+      },
+    ])
+    const previousPalletNo = palletAssignmentsByBoxNo.get(allocation.boxNo)
+    if (previousPalletNo !== undefined && previousPalletNo !== allocation.palletNo) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
+        row: allocation.rowNumber,
+        message: `${allocation.boxNo}에 서로 다른 파렛트번호가 입력되었습니다.`,
+      })
+      continue
+    }
+    palletAssignmentsByBoxNo.set(allocation.boxNo, allocation.palletNo)
+  }
+
+  // Include every original shipment item, even when not yet packed. This
+  // preserves the work workbook's snapshot behavior: clearing a box row
+  // intentionally clears that item's box allocation on apply.
+  const boxSplits = input.detail.items.map((item) => {
+    const allocations = allocationsByItemId.get(item.id) ?? []
+    const totalQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
+    if (totalQuantity > item.reservedQuantity) {
+      errors.push({
+        sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
+        row: 0,
+        message: `${item.sku}의 박스 분할수량 ${totalQuantity.toLocaleString('ko-KR')}개가 출고수량 ${item.reservedQuantity.toLocaleString('ko-KR')}개를 넘습니다.`,
+      })
+    }
+    return { shipmentItemId: item.id, allocations }
+  })
+
+  return {
+    boxSplits,
+    palletAssignments: [...palletAssignmentsByBoxNo.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, 'ko-KR', { numeric: true }))
+      .map(([boxNo, palletNo]) => ({ boxNo, palletNo })),
+    summary: {
+      boxSplitItemCount: boxSplits.length,
+      boxSplitRowCount: boxSplits.reduce((total, split) => total + split.allocations.length, 0),
+      palletAssignmentCount: palletAssignmentsByBoxNo.size,
+      boxCount: knownBoxNos.size,
+    },
+    errors,
+  }
+}
+
+async function parseLegacyChinaOutboundWorkWorkbook(
+  input: { fileBuffer: ArrayBuffer; detail: ChinaOutboundWorkbookDetail },
+  workbook: ExcelJS.Workbook,
+): Promise<ChinaOutboundWorkbookPreview> {
   const errors: ChinaOutboundWorkbookPreview['errors'] = []
   const boxSplitSheet = workbook.getWorksheet(CHINA_OUTBOUND_WORKBOOK_SHEETS.boxSplits)
   const palletSheet = workbook.getWorksheet(CHINA_OUTBOUND_WORKBOOK_SHEETS.palletLoads)
@@ -291,102 +439,6 @@ export function chinaOutboundWorkFilename(shipmentNo: string, now = new Date()) 
   return `${safeShipmentNo}_박스파렛트작업_${date}.xlsx`
 }
 
-function addGuideSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundWorkbookDetail) {
-  const sheet = workbook.addWorksheet(CHINA_OUTBOUND_WORKBOOK_SHEETS.guide)
-  sheet.columns = [{ width: 24 }, { width: 74 }]
-  sheet.mergeCells('A1:B1')
-  sheet.getCell('A1').value = '중국출고 박스·파렛트 작업용 엑셀'
-  sheet.getCell('A1').font = { bold: true, size: 14 }
-  sheet.getRow(1).height = 26
-  const rows: Array<[string, string]> = [
-    ['출고번호', detail.shipment.shipmentNo],
-    ['출고작업명', detail.shipment.displayName ?? ''],
-    ['도착지', detail.shipment.destinationName ?? ''],
-    ['출고예정일', detail.shipment.plannedOutboundDate ?? ''],
-    ['작업 순서', '1. 박스분할 시트에서 상품별 박스번호·수량·규격을 입력합니다.'],
-    ['작업 순서', '2. 박스분할 업로드 후 다시 다운로드하여 파렛트적재 시트에 파렛트번호를 입력합니다.'],
-    ['주의', '박스번호와 파렛트번호는 직접 입력합니다. 빈 규격은 기존 규격을 유지합니다.'],
-    ['주의', '출고상품ID·품목코드·출고수량은 수정하지 마세요.'],
-  ]
-  for (const [label, value] of rows) {
-    const row = sheet.addRow([label, value])
-    row.getCell(1).font = { bold: true, size: 10 }
-    row.getCell(1).fill = HEADER_FILL
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.border = THIN_BORDER
-      cell.alignment = { vertical: 'middle', wrapText: true }
-    })
-  }
-}
-
-function addItemsSheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundWorkbookDetail) {
-  const headers = ['출고상품ID', '품목코드', '상품명', '옵션명', '출고창고', '출고수량', '박스분할수량', '진행상태']
-  const sheet = createSheet(workbook, CHINA_OUTBOUND_WORKBOOK_SHEETS.items, headers, [38, 18, 34, 20, 16, 14, 16, 12])
-  for (const item of [...detail.items].sort(compareShipmentItems)) {
-    addDataRow(sheet, [
-      item.id,
-      item.sku,
-      item.productName,
-      item.optionName ?? '',
-      item.warehouseCode,
-      item.reservedQuantity,
-      item.packedQuantity,
-      item.packedQuantity === item.reservedQuantity ? '완료' : '진행',
-    ])
-  }
-}
-
-function addBoxSplitRow(
-  sheet: ExcelJS.Worksheet,
-  item: ChinaOutboundWorkbookDetail['items'][number],
-  box: ChinaOutboundWorkbookDetail['boxes'][number] | undefined,
-  quantity: number | undefined,
-) {
-  const cbm = box ? calculateChinaOutboundBoxCbm(box) : null
-  addDataRow(sheet, [
-    item.id,
-    item.sku,
-    item.productName,
-    item.optionName ?? '',
-    item.warehouseCode,
-    item.reservedQuantity,
-    box?.boxNo ?? '',
-    quantity ?? '',
-    box ? dimensionNumber(box.lengthCm) ?? '' : '',
-    box ? dimensionNumber(box.widthCm) ?? '' : '',
-    box ? dimensionNumber(box.heightCm) ?? '' : '',
-    cbm ?? '',
-    item.packedQuantity === item.reservedQuantity ? '완료' : '진행',
-  ], new Set([7, 8, 9, 10, 11]))
-}
-
-function createSheet(workbook: ExcelJS.Workbook, name: string, headers: readonly string[], widths: number[]) {
-  const sheet = workbook.addWorksheet(name)
-  sheet.columns = widths.map((width) => ({ width }))
-  const row = sheet.addRow([...headers])
-  row.height = 28
-  row.eachCell({ includeEmpty: true }, (cell) => {
-    cell.fill = HEADER_FILL
-    cell.font = { bold: true, size: 10 }
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-    cell.border = THIN_BORDER
-  })
-  sheet.views = [{ state: 'frozen', ySplit: 1 }]
-  sheet.autoFilter = { from: 'A1', to: { row: 1, column: headers.length } }
-  return sheet
-}
-
-function addDataRow(sheet: ExcelJS.Worksheet, values: Array<string | number>, editableColumns = new Set<number>()) {
-  const row = sheet.addRow(values)
-  row.height = 20
-  row.eachCell({ includeEmpty: true }, (cell, index) => {
-    cell.border = THIN_BORDER
-    cell.alignment = { vertical: 'middle', wrapText: index === 3 || index === 8 }
-    if (editableColumns.has(index)) cell.fill = INPUT_FILL
-    if (typeof cell.value === 'number') cell.numFmt = index === 12 || index === 7 ? '#,##0.0000' : '#,##0'
-  })
-}
-
 function headerColumns(sheet: ExcelJS.Worksheet, expected: readonly string[], errors: ChinaOutboundWorkbookPreview['errors']) {
   const header = sheet.getRow(1)
   const columns = new Map<string, number>()
@@ -439,6 +491,10 @@ function resolveItemBySource(
 
 function shipmentItemSourceKey(item: ChinaOutboundWorkbookDetail['items'][number]) {
   return `${item.sku}\u0000${item.warehouseCode}\u0000${item.optionName ?? ''}`
+}
+
+function registrationItemSourceKey(value: { warehouseCode: string; sku: string; optionName: string | null }) {
+  return `${value.warehouseCode}\u0000${value.sku}\u0000${value.optionName ?? ''}`
 }
 
 function parseDimensions(

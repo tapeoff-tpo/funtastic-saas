@@ -3,9 +3,9 @@ import ExcelJS from 'exceljs'
 import { CHINA_OUTBOUND_DESTINATIONS } from './china-outbound-destinations'
 
 /**
- * This workbook creates a new China-outbound task. It is intentionally
- * separate from china-outbound-workbook.ts, which updates box and pallet work
- * for a shipment that already exists.
+ * This is the shared China-outbound workbook layout. It creates new outbound
+ * tasks from Excel and is also used as the prefilled working workbook for an
+ * outbound task that already exists.
  */
 export const CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS = {
   shipment: '출고정보',
@@ -145,6 +145,36 @@ export type ChinaOutboundRegistrationCurrentInventoryRow = {
   lastOutboundAt: Date | string | null
 }
 
+export type ChinaOutboundRegistrationWorkbookPrefilledItem = {
+  warehouseCode: string
+  sku: string
+  optionName?: string | null
+  quantity: number
+}
+
+export type ChinaOutboundRegistrationWorkbookPrefilledBoxAllocation = {
+  warehouseCode: string
+  sku: string
+  optionName?: string | null
+  boxNo: string
+  quantity: number
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+  palletNo?: string | null
+}
+
+export type ChinaOutboundRegistrationWorkbookParseOptions = {
+  /** New-shipment registration requires a complete packing allocation when any box is entered. */
+  requireCompleteBoxAllocations?: boolean
+  /** Working workbooks include blank continuation rows for each selected item. */
+  ignoreBlankBoxPlaceholders?: boolean
+  /** Existing shipments can be packed even if a legacy shipment has no destination snapshot. */
+  requireDestination?: boolean
+  /** Working uploads do not apply header changes, so legacy destination labels remain acceptable. */
+  validateDestination?: boolean
+}
+
 const MAX_ITEM_ROWS = 1_000
 const MAX_BOX_ROWS = 5_000
 const HEADER_FILL: ExcelJS.FillPattern = {
@@ -219,12 +249,24 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   defaultWarehouseCode?: string | null
   warehouseCodes?: readonly string[]
   currentInventory?: readonly ChinaOutboundRegistrationCurrentInventoryRow[]
+  prefilledShipment?: {
+    displayName?: string | null
+    destinationName?: string | null
+    plannedOutboundDate?: string | null
+    memo?: string | null
+  }
+  prefilledItems?: readonly ChinaOutboundRegistrationWorkbookPrefilledItem[]
+  prefilledBoxAllocations?: readonly ChinaOutboundRegistrationWorkbookPrefilledBoxAllocation[]
+  includeBlankBoxPlaceholders?: boolean
 } = {}) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
   const defaultWarehouseCode = input.defaultWarehouseCode?.trim() ?? ''
   const warehouseCodes = normalizeWarehouseCodes(defaultWarehouseCode, input.warehouseCodes ?? [])
+  const prefilledShipment = input.prefilledShipment
+  const prefilledItems = input.prefilledItems ?? []
+  const prefilledBoxAllocations = input.prefilledBoxAllocations ?? []
 
   const shipment = createSheet(
     workbook,
@@ -234,11 +276,11 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   )
   addInputRow(shipment, [
     input.importKey ?? createChinaOutboundRegistrationImportKey(),
-    '',
-    '',
+    prefilledShipment?.displayName?.trim() ?? '',
+    prefilledShipment?.destinationName?.trim() ?? '',
     defaultWarehouseCode,
-    '',
-    '',
+    prefilledShipment?.plannedOutboundDate?.trim() ?? '',
+    prefilledShipment?.memo?.trim() ?? '',
   ])
 
   const items = createSheet(
@@ -247,7 +289,18 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
     [22, 22, 28, 16],
   )
-  addInputRow(items, ['', '', '', ''])
+  if (prefilledItems.length > 0) {
+    for (const item of prefilledItems) {
+      addInputRow(items, [
+        item.warehouseCode.trim(),
+        item.sku.trim(),
+        item.optionName?.trim() ?? '',
+        item.quantity,
+      ])
+    }
+  } else {
+    addInputRow(items, ['', '', '', ''])
+  }
 
   const boxes = createSheet(
     workbook,
@@ -255,7 +308,36 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
     [22, 22, 28, 18, 18, 16, 16, 16, 18],
   )
-  addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
+  for (const allocation of prefilledBoxAllocations) {
+    addInputRow(boxes, [
+      allocation.warehouseCode.trim(),
+      allocation.sku.trim(),
+      allocation.optionName?.trim() ?? '',
+      allocation.boxNo.trim(),
+      allocation.quantity,
+      allocation.lengthCm ?? '',
+      allocation.widthCm ?? '',
+      allocation.heightCm ?? '',
+      allocation.palletNo?.trim() ?? '',
+    ])
+  }
+  if (input.includeBlankBoxPlaceholders && prefilledItems.length > 0) {
+    for (const item of prefilledItems) {
+      addInputRow(boxes, [
+        item.warehouseCode.trim(),
+        item.sku.trim(),
+        item.optionName?.trim() ?? '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ])
+    }
+  } else if (prefilledBoxAllocations.length === 0) {
+    addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
+  }
 
   addCurrentInventorySheet(workbook, input.currentInventory ?? [])
 
@@ -271,12 +353,18 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
 
 export async function parseChinaOutboundRegistrationWorkbook(
   fileBuffer: ArrayBuffer | Uint8Array,
+  options: ChinaOutboundRegistrationWorkbookParseOptions = {},
 ): Promise<ChinaOutboundRegistrationWorkbook> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as ExcelJS.Buffer)
   const errors: ChinaOutboundRegistrationWorkbookError[] = []
 
-  const shipment = parseShipmentSheet(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment), errors)
+  const shipment = parseShipmentSheet(
+    workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment),
+    errors,
+    options.requireDestination ?? true,
+    options.validateDestination ?? true,
+  )
   const items = parseItemsSheet(
     workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items),
     shipment.defaultWarehouseCode,
@@ -286,8 +374,14 @@ export async function parseChinaOutboundRegistrationWorkbook(
     workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes),
     shipment.defaultWarehouseCode,
     errors,
+    options.ignoreBlankBoxPlaceholders ?? false,
   )
-  const normalizedBoxAllocations = validateRelationships(items, boxAllocations, errors)
+  const normalizedBoxAllocations = validateRelationships(
+    items,
+    boxAllocations,
+    errors,
+    options.requireCompleteBoxAllocations ?? true,
+  )
 
   return {
     ...shipment,
@@ -433,6 +527,8 @@ function formatSeoulDate(value: Date | string | null) {
 function parseShipmentSheet(
   sheet: ExcelJS.Worksheet | undefined,
   errors: ChinaOutboundRegistrationWorkbookError[],
+  requireDestination: boolean,
+  validateDestination: boolean,
 ): Pick<ChinaOutboundRegistrationWorkbook, 'importKey' | 'displayName' | 'destinationName' | 'defaultWarehouseCode' | 'plannedOutboundDate' | 'memo'> {
   const blank = {
     importKey: '',
@@ -480,8 +576,8 @@ function parseShipmentSheet(
   validateText(defaultWarehouseCode, '출고창고', 100, sheet.name, first.rowNumber, errors)
   validateText(memo, '메모', 2_000, sheet.name, first.rowNumber, errors)
   if (!destinationName) {
-    errors.push({ sheet: sheet.name, row: first.rowNumber, message: '도착지를 입력해주세요.' })
-  } else if (!CHINA_OUTBOUND_DESTINATIONS.includes(destinationName as (typeof CHINA_OUTBOUND_DESTINATIONS)[number])) {
+    if (requireDestination) errors.push({ sheet: sheet.name, row: first.rowNumber, message: '도착지를 입력해주세요.' })
+  } else if (validateDestination && !CHINA_OUTBOUND_DESTINATIONS.includes(destinationName as (typeof CHINA_OUTBOUND_DESTINATIONS)[number])) {
     errors.push({ sheet: sheet.name, row: first.rowNumber, message: `도착지는 ${CHINA_OUTBOUND_DESTINATIONS.join(', ')} 중 하나여야 합니다.` })
   }
   return { importKey, displayName, destinationName, defaultWarehouseCode, plannedOutboundDate, memo }
@@ -524,6 +620,7 @@ function parseBoxesSheet(
   sheet: ExcelJS.Worksheet | undefined,
   defaultWarehouseCode: string | null,
   errors: ChinaOutboundRegistrationWorkbookError[],
+  ignoreBlankBoxPlaceholders: boolean,
 ) {
   const allocations: ChinaOutboundRegistrationWorkbookBoxAllocation[] = []
   if (!sheet) {
@@ -540,9 +637,15 @@ function parseBoxesSheet(
     const sku = cellText(row.getCell(columns.get('품목코드')!)).trim()
     const optionName = nullableText(row.getCell(columns.get('옵션명')!))
     const boxNo = cellText(row.getCell(columns.get('박스번호')!)).trim()
-    const quantity = positiveInteger(cellText(row.getCell(columns.get('박스 적재수량')!)))
-    const dimensions = parseDimensions(row, columns, sheet.name, rowNumber, errors)
+    const quantityText = cellText(row.getCell(columns.get('박스 적재수량')!)).trim()
     const palletNo = nullableText(row.getCell(columns.get('파렛트번호')!))
+    const dimensionValues = ['가로(cm)', '세로(cm)', '높이(cm)']
+      .map((header) => cellText(row.getCell(columns.get(header)!)).trim())
+    if (ignoreBlankBoxPlaceholders && !boxNo && !quantityText && !palletNo && dimensionValues.every((value) => !value)) {
+      continue
+    }
+    const quantity = positiveInteger(quantityText)
+    const dimensions = parseDimensions(row, columns, sheet.name, rowNumber, errors)
     const valid = validateText(warehouseCode, '출고창고', 100, sheet.name, rowNumber, errors, true)
       && validateText(sku, '품목코드', 100, sheet.name, rowNumber, errors, true)
       && validateText(optionName, '옵션명', 200, sheet.name, rowNumber, errors)
@@ -574,6 +677,7 @@ function validateRelationships(
   items: ChinaOutboundRegistrationWorkbookItem[],
   allocations: ChinaOutboundRegistrationWorkbookBoxAllocation[],
   errors: ChinaOutboundRegistrationWorkbookError[],
+  requireCompleteBoxAllocations: boolean,
 ) {
   const itemByIdentity = new Map<string, ChinaOutboundRegistrationWorkbookItem>()
   for (const item of items) {
@@ -624,7 +728,7 @@ function validateRelationships(
     }
   }
 
-  if (uniqueAllocations.length > 0) {
+  if (requireCompleteBoxAllocations && uniqueAllocations.length > 0) {
     for (const item of itemByIdentity.values()) {
       const packedQuantity = uniqueAllocations
         .filter((allocation) => sourceKey(allocation) === sourceKey(item))

@@ -102,6 +102,102 @@ describe('China outbound registration workbook', () => {
     expect(boxes?.getCell('A5001').dataValidation).toMatchObject(warehouseDropdown)
   })
 
+  it('keeps the shared bilingual layout while pre-filling an existing outbound task', async () => {
+    const buffer = await exportChinaOutboundRegistrationTemplateWorkbook({
+      importKey: 'CN-20261028-PREFILLED01',
+      defaultWarehouseCode: '중국창고',
+      warehouseCodes: ['중국창고', '쿠팡'],
+      prefilledShipment: {
+        displayName: '10월 중국출고 작업',
+        destinationName: '인천',
+        plannedOutboundDate: '2026-10-30',
+        memo: '기존 출고요청 작업용',
+      },
+      prefilledItems: [
+        { warehouseCode: '중국창고', sku: 'SKU-A', optionName: '블랙', quantity: 100 },
+        { warehouseCode: '쿠팡', sku: 'SKU-B', optionName: null, quantity: 20 },
+      ],
+      prefilledBoxAllocations: [{
+        warehouseCode: '중국창고',
+        sku: 'SKU-A',
+        optionName: '블랙',
+        boxNo: 'BOX-01',
+        quantity: 40,
+        lengthCm: 50,
+        widthCm: 40,
+        heightCm: 30,
+        palletNo: 'PALLET-1',
+      }],
+      includeBlankBoxPlaceholders: true,
+    })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+
+    const shipment = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)!
+    const items = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!
+    const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
+
+    expect(shipment.getRow(1).values).toEqual([
+      undefined,
+      ...CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS,
+    ])
+    expect(items.getRow(1).values).toEqual([
+      undefined,
+      ...CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
+    ])
+    expect(boxes.getRow(1).values).toEqual([
+      undefined,
+      ...CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
+    ])
+    expect(shipment.getRow(2).values).toEqual([
+      undefined,
+      'CN-20261028-PREFILLED01',
+      '10월 중국출고 작업',
+      '인천',
+      '중국창고',
+      '2026-10-30',
+      '기존 출고요청 작업용',
+    ])
+    expect(items.getRow(2).values).toEqual([undefined, '중국창고', 'SKU-A', '블랙', 100])
+    expect(items.getRow(3).values).toEqual([undefined, '쿠팡', 'SKU-B', '', 20])
+    expect(boxes.getRow(2).values).toEqual([
+      undefined,
+      '중국창고',
+      'SKU-A',
+      '블랙',
+      'BOX-01',
+      40,
+      50,
+      40,
+      30,
+      'PALLET-1',
+    ])
+    expect(boxes.getRow(3).values).toEqual([
+      undefined,
+      '중국창고',
+      'SKU-A',
+      '블랙',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ])
+    expect(boxes.getRow(4).values).toEqual([
+      undefined,
+      '쿠팡',
+      'SKU-B',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ])
+  })
+
   it('parses a generated bilingual template and its box/pallet allocation together', async () => {
     const template = await exportChinaOutboundRegistrationTemplateWorkbook({
       importKey: 'CN-20261027-XLSX-BILINGUAL1',
@@ -145,6 +241,37 @@ describe('China outbound registration workbook', () => {
         lengthCm: 50, widthCm: 40, heightCm: 30, palletNo: 'PALLET-1',
       }],
     })
+  })
+
+  it('allows a prefilled working workbook to keep blank box rows and incomplete packing in relaxed mode', async () => {
+    const template = await exportChinaOutboundRegistrationTemplateWorkbook({
+      importKey: 'CN-20261028-WORKMODE01',
+      prefilledItems: [{ warehouseCode: '중국창고', sku: 'SKU-A', optionName: '블랙', quantity: 100 }],
+      prefilledBoxAllocations: [{
+        warehouseCode: '중국창고',
+        sku: 'SKU-A',
+        optionName: '블랙',
+        boxNo: 'BOX-01',
+        quantity: 40,
+        palletNo: 'PALLET-1',
+      }],
+      includeBlankBoxPlaceholders: true,
+    })
+
+    const parsed = await parseChinaOutboundRegistrationWorkbook(template, {
+      requireCompleteBoxAllocations: false,
+      ignoreBlankBoxPlaceholders: true,
+      requireDestination: false,
+    })
+
+    expect(parsed.errors).toEqual([])
+    expect(parsed.destinationName).toBeNull()
+    expect(parsed.items).toEqual([
+      expect.objectContaining({ warehouseCode: '중국창고', sku: 'SKU-A', optionName: '블랙', quantity: 100 }),
+    ])
+    expect(parsed.boxAllocations).toEqual([
+      expect.objectContaining({ boxNo: 'BOX-01', quantity: 40, palletNo: 'PALLET-1' }),
+    ])
   })
 
   it('continues to parse a legacy Korean-only workbook with box/pallet allocation', async () => {

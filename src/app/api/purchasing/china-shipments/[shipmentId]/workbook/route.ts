@@ -10,6 +10,8 @@ import {
 import {
   applyChinaOutboundWorkbook,
   getChinaOutboundShipmentDetail,
+  getSaasChinaInventory,
+  listSaasChinaOutboundWarehouses,
 } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
@@ -25,13 +27,18 @@ export async function GET(
   if (!isUuid(shipmentId)) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
   try {
-    const detail = await getChinaOutboundShipmentDetail({
-      userId: await getWorkspaceUserId(user.id),
-      shipmentId,
-    })
+    const workspaceUserId = await getWorkspaceUserId(user.id)
+    const [detail, warehouses, { items: currentInventory }] = await Promise.all([
+      getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId }),
+      listSaasChinaOutboundWarehouses(workspaceUserId),
+      getSaasChinaInventory(workspaceUserId),
+    ])
     if (!detail) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
-    const buffer = await exportChinaOutboundWorkWorkbook(detail)
+    const buffer = await exportChinaOutboundWorkWorkbook(detail, {
+      warehouseCodes: warehouses.map((warehouse) => warehouse.warehouseCode),
+      currentInventory,
+    })
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

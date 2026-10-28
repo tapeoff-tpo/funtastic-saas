@@ -68,7 +68,7 @@ export function ensurePurchaseRequestManagementCodeSkuLookupIndex(): Promise<voi
         ON "purchase_request_items" ("user_id", "purchase_management_code", "sku")
       `)
     })
-  }).catch((error) => {
+  })().catch((error) => {
     ensurePurchaseRequestManagementCodeSkuLookupIndexPromise = null
     throw error
   })

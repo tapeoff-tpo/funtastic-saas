@@ -165,6 +165,21 @@ describe('PurchasingRawDataUpload drag and drop', () => {
 
     expect(screen.getByText('purchase-plan.xlsx')).toBeInTheDocument()
   })
+
+  it('routes a stock-code workbook to domestic inventory even when it is selected on a purchasing card', () => {
+    renderUploader()
+    const file = new File(['workbook'], '재고코드관리_다운로드 - 2026-10-28T163634.164.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const requestInput = getCard('발주요청현황').querySelector('input[type="file"]')
+
+    expect(requestInput).not.toBeNull()
+    fireEvent.change(requestInput!, { target: { files: [file] } })
+
+    expect(getCard('국내재고현황')).toHaveTextContent(file.name)
+    expect(getCard('발주요청현황')).not.toHaveTextContent(file.name)
+    expect(screen.getByText(new RegExp(`파일명 기준 자동 분류: .*${file.name}`))).toBeInTheDocument()
+  })
 })
 
 function getCard(label: string) {

@@ -146,18 +146,24 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     let acceptedCount = 0
     let overflowCount = 0
 
-    if (!targetKey) {
-      for (const specialKey of SPECIAL_FILE_KEYS) {
-        const fileIndex = remainingFiles.findIndex((file) => getLikelySpecialFileKey(file) === specialKey)
-        if (fileIndex < 0) continue
-        next[specialKey] = remainingFiles.splice(fileIndex, 1)[0]
-        acceptedCount += 1
+    const autoRoutedLabels: string[] = []
+    for (const specialKey of SPECIAL_FILE_KEYS) {
+      const fileIndex = remainingFiles.findIndex((file) => getLikelySpecialFileKey(file) === specialKey)
+      if (fileIndex < 0) continue
+
+      const file = remainingFiles.splice(fileIndex, 1)[0]
+      next[specialKey] = file
+      acceptedCount += 1
+
+      if (targetKey && targetKey !== specialKey) {
+        const label = REQUIRED_FILES.find((item) => item.key === specialKey)?.label
+        if (label) autoRoutedLabels.push(`${file.name} → ${label}`)
       }
     }
 
     const allKeys = [...PURCHASING_FILE_KEYS, ...SPECIAL_FILE_KEYS]
     const slots = targetKey
-      ? [targetKey, ...allKeys.filter((key) => key !== targetKey && !next[key])]
+      ? [...(!next[targetKey] ? [targetKey] : []), ...allKeys.filter((key) => key !== targetKey && !next[key])]
       : [...PURCHASING_FILE_KEYS.filter((key) => !next[key]), ...SPECIAL_FILE_KEYS.filter((key) => !next[key])]
 
     for (const file of remainingFiles) {
@@ -179,6 +185,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setIsDraggingFiles(false)
     setMessage([
       `${acceptedCount}개 파일을 선택했습니다. 미리보기·검증을 누르면 실제 파일 종류대로 자동 정리됩니다.`,
+      autoRoutedLabels.length > 0 ? `파일명 기준 자동 분류: ${autoRoutedLabels.join(', ')}` : null,
       skippedCount > 0 ? `.xlsx가 아닌 ${skippedCount}개 파일은 제외했습니다.` : null,
       overflowCount > 0 ? `업로드 칸이 부족해 ${overflowCount}개 파일은 제외했습니다.` : null,
     ].filter(Boolean).join(' '))

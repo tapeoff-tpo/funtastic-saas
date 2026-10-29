@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: { select: mocks.select } }))
 
 import { products } from '@/lib/db/schema'
-import { getPurchasingItemLocationsBySku } from './items'
+import { getPurchasingItemLabelDataBySku, getPurchasingItemLocationsBySku } from './items'
 
 const dialect = new PgDialect()
 
@@ -50,6 +50,21 @@ describe('getPurchasingItemLocationsBySku', () => {
     expect(queryForCall(0).params).toEqual(['workspace-owner', 'SKU-1', 'SKU-2', 'SKU-3', 'SKU-4', 'MISSING'])
     expect(Object.fromEntries(result)).toEqual({ 'SKU-1': 'A-01', 'SKU-2': '', 'SKU-3': '', 'SKU-4': '42' })
     expect(result.has('MISSING')).toBe(false)
+  })
+
+  it('returns Chinese names without changing source location data or guessing missing values', async () => {
+    mocks.where.mockResolvedValue([
+      { internalSku: 'SKU-1', metadata: { chineseProductName: ' 多孔衣架 ', esa009m: { '한국창고기준 위치': 'A-01' } } },
+      { internalSku: 'SKU-2', metadata: { chineseProductName: 123 } },
+      { internalSku: 'SKU-3', metadata: null },
+    ])
+    const result = await getPurchasingItemLabelDataBySku('workspace-owner', [' SKU-1 ', 'SKU-2', 'SKU-3'])
+    expect(queryForCall(0).params).toEqual(['workspace-owner', 'SKU-1', 'SKU-2', 'SKU-3'])
+    expect(Object.fromEntries(result)).toEqual({
+      'SKU-1': { location: 'A-01', chineseProductName: '多孔衣架' },
+      'SKU-2': { location: '', chineseProductName: '' },
+      'SKU-3': { location: '', chineseProductName: '' },
+    })
   })
 
   it('deduplicates SKUs and queries in batches of at most 500', async () => {

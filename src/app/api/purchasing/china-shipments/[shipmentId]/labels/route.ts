@@ -6,7 +6,7 @@ import {
   chinaOutboundShipmentLabelFilename,
   exportChinaOutboundShipmentLabelWorkbook,
 } from '@/lib/purchasing/china-outbound-shipment-labels'
-import { getPurchasingItemLocationsBySku } from '@/lib/purchasing/items'
+import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
 
 export const runtime = 'nodejs'
@@ -39,7 +39,7 @@ export async function GET(
       return NextResponse.json({ error: '내용이 저장된 박스만 부착용 쉽먼트를 내려받을 수 있습니다.' }, { status: 400 })
     }
 
-    const locationsBySku = await getPurchasingItemLocationsBySku(
+    const labelsBySku = await getPurchasingItemLabelDataBySku(
       workspaceUserId,
       detail.items.map((item) => item.sku),
     )
@@ -47,7 +47,8 @@ export async function GET(
       ...detail,
       items: detail.items.map((item) => ({
         ...item,
-        location: locationsBySku.get(item.sku.trim()) ?? '',
+        location: labelsBySku.get(item.sku.trim())?.location ?? '',
+        chineseProductName: labelsBySku.get(item.sku.trim())?.chineseProductName ?? '',
       })),
     }
 

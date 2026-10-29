@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   getWorkspaceUserId: vi.fn(),
   getChinaOutboundShipmentDetail: vi.fn(),
-  getPurchasingItemLocationsBySku: vi.fn(),
+  getPurchasingItemLabelDataBySku: vi.fn(),
   exportChinaOutboundShipmentLabelWorkbook: vi.fn(),
   chinaOutboundShipmentBoxLabelFilename: vi.fn(),
   chinaOutboundShipmentLabelFilename: vi.fn(),
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.getWorkspaceUserId }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.getChinaOutboundShipmentDetail }))
-vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLocationsBySku: mocks.getPurchasingItemLocationsBySku }))
+vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mocks.getPurchasingItemLabelDataBySku }))
 vi.mock('@/lib/purchasing/china-outbound-shipment-labels', () => ({
   exportChinaOutboundShipmentLabelWorkbook: mocks.exportChinaOutboundShipmentLabelWorkbook,
   chinaOutboundShipmentBoxLabelFilename: mocks.chinaOutboundShipmentBoxLabelFilename,
@@ -39,9 +39,9 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
       ],
       boxes: [],
     })
-    mocks.getPurchasingItemLocationsBySku.mockResolvedValue(new Map([
-      ['SKU-1', 'A-01'],
-      ['SKU-2', 'B-02'],
+    mocks.getPurchasingItemLabelDataBySku.mockResolvedValue(new Map([
+      ['SKU-1', { location: 'A-01', chineseProductName: '衣架' }],
+      ['SKU-2', { location: 'B-02', chineseProductName: '置物架' }],
     ]))
     mocks.exportChinaOutboundShipmentLabelWorkbook.mockResolvedValue(Buffer.from('workbook'))
     mocks.chinaOutboundShipmentBoxLabelFilename.mockReturnValue('box-labels.xlsx')
@@ -54,18 +54,18 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(response.status).toBe(200)
     expect(mocks.getWorkspaceUserId).toHaveBeenCalledWith('admin-user')
     expect(mocks.getChinaOutboundShipmentDetail).toHaveBeenCalledWith({ userId: 'workspace-owner', shipmentId })
-    expect(mocks.getPurchasingItemLocationsBySku).toHaveBeenCalledWith('workspace-owner', ['SKU-1', ' SKU-2 ', 'MISSING'])
+    expect(mocks.getPurchasingItemLabelDataBySku).toHaveBeenCalledWith('workspace-owner', ['SKU-1', ' SKU-2 ', 'MISSING'])
     expect(mocks.exportChinaOutboundShipmentLabelWorkbook).toHaveBeenCalledWith(expect.objectContaining({
       items: [
-        { id: 'one', sku: 'SKU-1', productName: '물품 1', location: 'A-01' },
-        { id: 'two', sku: ' SKU-2 ', productName: '물품 2', location: 'B-02' },
-        { id: 'three', sku: 'MISSING', productName: '물품 3', location: '' },
+        { id: 'one', sku: 'SKU-1', productName: '물품 1', location: 'A-01', chineseProductName: '衣架' },
+        { id: 'two', sku: ' SKU-2 ', productName: '물품 2', location: 'B-02', chineseProductName: '置物架' },
+        { id: 'three', sku: 'MISSING', productName: '물품 3', location: '', chineseProductName: '' },
       ],
     }))
   })
 
   it('returns an error instead of silently exporting if the location lookup fails', async () => {
-    mocks.getPurchasingItemLocationsBySku.mockRejectedValue(new Error('database unavailable'))
+    mocks.getPurchasingItemLabelDataBySku.mockRejectedValue(new Error('database unavailable'))
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
@@ -94,7 +94,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
 
     expect(response.status).toBe(200)
     expect(mocks.exportChinaOutboundShipmentLabelWorkbook).toHaveBeenCalledWith(expect.objectContaining({
-      items: [{ id: 'one', sku: 'SKU-1', productName: '물품 1', location: 'A-01' }],
+      items: [{ id: 'one', sku: 'SKU-1', productName: '물품 1', location: 'A-01', chineseProductName: '衣架' }],
     }), { boxIds: [boxId], includePalletLabels: false })
     expect(mocks.chinaOutboundShipmentBoxLabelFilename).toHaveBeenCalledWith('OUT-1', '박스 1')
     expect(mocks.chinaOutboundShipmentLabelFilename).not.toHaveBeenCalled()
@@ -130,7 +130,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     )
 
     expect(response.status).toBe(404)
-    expect(mocks.getPurchasingItemLocationsBySku).not.toHaveBeenCalled()
+    expect(mocks.getPurchasingItemLabelDataBySku).not.toHaveBeenCalled()
     expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
   })
 
@@ -150,7 +150,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     )
 
     expect(response.status).toBe(400)
-    expect(mocks.getPurchasingItemLocationsBySku).not.toHaveBeenCalled()
+    expect(mocks.getPurchasingItemLabelDataBySku).not.toHaveBeenCalled()
     expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
   })
 
@@ -196,7 +196,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(box.getCell('A1').value).toBe('TAPEOFF')
     expect(box.pageSetup.printArea).toBe('A1:F12')
     expect(box.getCell('D11').value).toBe('박스 1')
-    expect(box.getCell('A2').value ?? '').toBe('')
+    expect(box.getCell('A2').value).toBe('衣架')
     expect([3, 6, 9].map((row) => {
       const value = box.getCell(`A${row}`).value as ExcelJS.CellRichTextValue
       return value.richText.map((run) => run.text).join('')
@@ -208,7 +208,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect([3, 4, 5].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
     expect(box.getCell('D2').value).toBe(2)
     expect(pallet.getCell('E2').value).toBe('상품명(중국어) / 商品名称（中文）')
-    expect(pallet.getCell('E3').value ?? '').toBe('')
+    expect(pallet.getCell('E3').value).toBe('衣架')
     expect(pallet.getCell('G3').value).toBe(2)
 
     box.getCell('A2').value = '中文商品名'

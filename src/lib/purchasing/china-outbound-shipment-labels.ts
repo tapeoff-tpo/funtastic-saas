@@ -7,7 +7,7 @@ export const CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS = {
 } as const
 
 export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDetail, 'items'> & {
-  items: Array<ChinaOutboundPackingExportDetail['items'][number] & { location?: string | null }>
+  items: Array<ChinaOutboundPackingExportDetail['items'][number] & { location?: string | null; chineseProductName?: string | null }>
 }
 
 export type ChinaOutboundShipmentLabelWorkbookOptions = {
@@ -21,6 +21,7 @@ type LabelRow = Array<string | number>
 type LabelProductRow = {
   sku: string
   productName: string
+  chineseProductName: string
   optionName: string | null
   location: string
   quantity: number
@@ -228,7 +229,7 @@ function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: Lab
     sheet.mergeCells(`A${row}:C${row}`)
     sheet.mergeCells(`D${row}:E${row}`)
     // The Chinese name and the reference's non-return note remain editable in Excel.
-    sheet.getCell(`A${row}`).value = null
+    sheet.getCell(`A${row}`).value = product.chineseProductName || null
     sheet.getCell(`A${row}`).dataValidation = {
       type: 'textLength', operator: 'lessThanOrEqual', formulae: [1000],
       showInputMessage: true, promptTitle: '중국어 상품명 / 中文品名',
@@ -280,7 +281,7 @@ function aggregatePalletLabelRows(
   const allocations = boxes.flatMap((box) => boxItemsByBoxId.get(box.id) ?? [])
   const productRows = aggregateLabelProducts(allocations, itemById)
   if (productRows.length === 0) return [[palletNo, boxes.length, '', '', '', '', '']]
-  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, '', row.optionName ?? '', row.quantity])
+  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, row.chineseProductName, row.optionName ?? '', row.quantity])
 }
 
 function aggregateLabelProducts(
@@ -298,6 +299,7 @@ function aggregateLabelProducts(
     products.set(key, {
       sku,
       productName: item.productName,
+      chineseProductName: item.chineseProductName?.trim() ?? '',
       optionName: item.optionName,
       location,
       quantity: (current?.quantity ?? 0) + allocation.quantity,

@@ -236,10 +236,12 @@ export async function getAllPurchasingItems(
   }))
 }
 
-/** Returns the same location shown on the purchasing item master for each SKU. */
-export async function getPurchasingItemLocationsBySku(userId: string, skus: string[]) {
+export type PurchasingItemLabelData = { location: string; chineseProductName: string }
+
+/** Resolves label text by exact SKU under the shared workspace in a single query. */
+export async function getPurchasingItemLabelDataBySku(userId: string, skus: string[]) {
   const uniqueSkus = Array.from(new Set(skus.map((sku) => sku.trim()).filter(Boolean)))
-  const locationsBySku = new Map<string, string>()
+  const labelsBySku = new Map<string, PurchasingItemLabelData>()
 
   for (const skuChunk of chunks(uniqueSkus, 500)) {
     const rows = await db.select({
@@ -251,14 +253,20 @@ export async function getPurchasingItemLocationsBySku(userId: string, skus: stri
     ))
 
     for (const row of rows) {
-      locationsBySku.set(
-        row.internalSku,
-        normalizeEsaData(row.metadata?.esa009m)['한국창고기준 위치'] ?? '',
-      )
+      const chineseName = row.metadata?.chineseProductName
+      labelsBySku.set(row.internalSku, {
+        location: normalizeEsaData(row.metadata?.esa009m)['한국창고기준 위치'] ?? '',
+        chineseProductName: typeof chineseName === 'string' ? chineseName.trim() : '',
+      })
     }
   }
+  return labelsBySku
+}
 
-  return locationsBySku
+/** Returns the same location shown on the purchasing item master for each SKU. */
+export async function getPurchasingItemLocationsBySku(userId: string, skus: string[]) {
+  const labels = await getPurchasingItemLabelDataBySku(userId, skus)
+  return new Map([...labels].map(([sku, value]) => [sku, value.location]))
 }
 
 export async function previewPurchasingItemsImport(input: {

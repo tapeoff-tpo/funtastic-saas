@@ -2,8 +2,8 @@ import ExcelJS from 'exceljs'
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 
 export const CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS = {
-  boxes: '装箱标签',
-  pallets: '托盘标签',
+  boxes: '박스 쉽먼트(装箱标签)',
+  pallets: '파렛트 쉽먼트(托盘标签)',
 } as const
 
 export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDetail, 'items'> & {
@@ -132,7 +132,7 @@ function addBoxLabelSheets(
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes)
     sheet.columns = [{ width: 17 }, { width: 36 }, { width: 28 }, { width: 11 }, { width: 20 }]
     configureLabelSheet(sheet, 'E')
-    addEmptyLabelMessage(sheet, '暂无已装箱商品。', 'E')
+    addEmptyLabelMessage(sheet, '포장된 상품이 없습니다. / 暂无已装箱商品。', 'E')
     return
   }
 
@@ -144,8 +144,8 @@ function addBoxLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'E',
-      title: `装箱标签 · ${box.boxNo}`,
-      headers: ['箱号', '商品名称（韩文）', '商品名称（中文）', '数量', '库位'],
+      title: `박스 쉽먼트 / 装箱标签 · ${box.boxNo}`,
+      headers: ['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'],
       rows,
       inputColumns: new Set([3, 5]),
       quantityColumns: new Set([4]),
@@ -175,7 +175,7 @@ function addPalletLabelSheets(
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets)
     sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 28 }, { width: 24 }, { width: 12 }]
     configureLabelSheet(sheet, 'G')
-    addEmptyLabelMessage(sheet, '暂无已分配到托盘的箱子。', 'G')
+    addEmptyLabelMessage(sheet, '파렛트에 배정된 박스가 없습니다. / 暂无已分配到托盘的箱子。', 'G')
     return
   }
 
@@ -188,8 +188,8 @@ function addPalletLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'G',
-      title: `托盘标签 · ${pallet.palletNo}`,
-      headers: ['托盘号', '箱数', '库位', '商品名称（韩文）', '商品名称（中文）', '规格', '数量'],
+      title: `파렛트 쉽먼트 / 托盘标签 · ${pallet.palletNo}`,
+      headers: ['파렛트번호 / 托盘号', '박스수량 / 箱数', '로케이션 / 库位', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '옵션 / 规格', '수량 / 数量'],
       rows,
       inputColumns: new Set([3, 5]),
       quantityColumns: new Set([2, 7]),
@@ -301,7 +301,7 @@ function addLabelBlock(input: {
   styleMergedRow(titleRow, DARK_FILL, { bold: true, size: 16, color: { argb: 'FFFFFFFF' } })
 
   const headerRow = input.sheet.addRow(input.headers)
-  headerRow.height = 28
+  headerRow.height = 42
   headerRow.eachCell({ includeEmpty: true }, (cell) => {
     cell.fill = HEADER_FILL
     cell.font = { bold: true, size: 10 }

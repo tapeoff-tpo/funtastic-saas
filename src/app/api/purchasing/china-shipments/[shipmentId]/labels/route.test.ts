@@ -191,17 +191,17 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     expect(response.headers.get('cache-control')).toBe('private, no-store')
-    const box = workbook.getWorksheet('装箱标签 01')!
-    const pallet = workbook.getWorksheet('托盘标签 01')!
+    const box = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
+    const pallet = workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!
     expect([1, 2, 3, 4, 5].map((column) => box.getRow(2).getCell(column).value))
-      .toEqual(['箱号', '商品名称（韩文）', '商品名称（中文）', '数量', '库位'])
+      .toEqual(['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'])
     expect(box.getCell('A3').value).toBe('박스 1')
     expect(box.getCell('B3').value).toBe('상품 A')
     expect(box.getCell('C3').value ?? '').toBe('')
     expect([3, 4, 5].map((row) => box.getCell(`E${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
     expect([3, 4, 5].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
     expect(box.getCell('D3').value).toBe(2)
-    expect(pallet.getCell('E2').value).toBe('商品名称（中文）')
+    expect(pallet.getCell('E2').value).toBe('상품명(중국어) / 商品名称（中文）')
     expect(pallet.getCell('E3').value ?? '').toBe('')
     expect(pallet.getCell('G3').value).toBe(2)
 
@@ -209,7 +209,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     pallet.getCell('E3').value = '中文商品名'
     const edited = new ExcelJS.Workbook()
     await edited.xlsx.load(await workbook.xlsx.writeBuffer())
-    expect(edited.getWorksheet('装箱标签 01')!.getCell('C3').value).toBe('中文商品名')
-    expect(edited.getWorksheet('托盘标签 01')!.getCell('E3').value).toBe('中文商品名')
+    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('C3').value).toBe('中文商品名')
+    expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('E3').value).toBe('中文商品名')
   })
 })

@@ -165,6 +165,7 @@ describe('China outbound registration workbook', () => {
       'SKU-A',
       '상품 A',
       '블랙',
+      100,
       'BOX-01',
       40,
       50,
@@ -179,6 +180,7 @@ describe('China outbound registration workbook', () => {
       'SKU-B',
       '',
       '',
+      20,
       '',
       '',
       '',
@@ -210,12 +212,13 @@ describe('China outbound registration workbook', () => {
     boxes.getCell('B2').value = 'SKU-A'
     boxes.getCell('C2').value = '상품 A'
     boxes.getCell('D2').value = '블랙'
-    boxes.getCell('E2').value = 'BOX-01'
-    boxes.getCell('F2').value = 100
-    boxes.getCell('G2').value = 50
-    boxes.getCell('H2').value = 40
-    boxes.getCell('I2').value = 30
-    boxes.getCell('J2').value = 'PALLET-1'
+    boxes.getCell('E2').value = 100
+    boxes.getCell('F2').value = 'BOX-01'
+    boxes.getCell('G2').value = 100
+    boxes.getCell('H2').value = 50
+    boxes.getCell('I2').value = 40
+    boxes.getCell('J2').value = 30
+    boxes.getCell('K2').value = 'PALLET-1'
 
     const parsed = await parseChinaOutboundRegistrationWorkbook(await workbook.xlsx.writeBuffer())
 

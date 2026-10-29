@@ -42,6 +42,7 @@ export const CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS = [
   '품목코드',
   '상품명',
   '옵션명',
+  '총 출고수량',
   '박스번호',
   '박스 적재수량',
   '가로(cm)',
@@ -76,6 +77,7 @@ export const CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS = [
   '품목코드 / 商品编码',
   '상품명 / 商品名称',
   '옵션명 / 规格',
+  '총 출고수량 / 出库总数量',
   '박스번호 / 箱号',
   '박스 적재수량 / 装箱数量',
   '가로(cm) / 长(cm)',
@@ -273,6 +275,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   const prefilledShipment = input.prefilledShipment
   const prefilledItems = input.prefilledItems ?? []
   const prefilledBoxAllocations = input.prefilledBoxAllocations ?? []
+  const outboundQuantityByItem = new Map(prefilledItems.map((item) => [prefilledSourceKey(item), item.quantity]))
 
   const shipment = createSheet(
     workbook,
@@ -313,7 +316,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
     CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
-    [22, 22, 40, 28, 18, 18, 16, 16, 16, 18],
+    [22, 22, 40, 28, 22, 18, 18, 16, 16, 16, 18],
   )
   for (const allocation of prefilledBoxAllocations) {
     addInputRow(boxes, [
@@ -321,6 +324,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
       allocation.sku.trim(),
       allocation.productName?.trim() ?? '',
       allocation.optionName?.trim() ?? '',
+      outboundQuantityByItem.get(prefilledSourceKey(allocation)) ?? '',
       allocation.boxNo.trim(),
       allocation.quantity,
       allocation.lengthCm ?? '',
@@ -332,22 +336,15 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
   if (input.includeBlankBoxPlaceholders && prefilledItems.length > 0) {
     // Saved allocations already provide editable rows. Add a starter row only
     // for items without any saved box, so repeated downloads do not grow rows.
-    const allocatedItems = new Set(prefilledBoxAllocations.map((allocation) => sourceKey({
-      warehouseCode: allocation.warehouseCode.trim(),
-      sku: allocation.sku.trim(),
-      optionName: allocation.optionName?.trim() || null,
-    })))
+    const allocatedItems = new Set(prefilledBoxAllocations.map(prefilledSourceKey))
     for (const item of prefilledItems) {
-      if (allocatedItems.has(sourceKey({
-        warehouseCode: item.warehouseCode.trim(),
-        sku: item.sku.trim(),
-        optionName: item.optionName?.trim() || null,
-      }))) continue
+      if (allocatedItems.has(prefilledSourceKey(item))) continue
       addInputRow(boxes, [
         item.warehouseCode.trim(),
         item.sku.trim(),
         item.productName?.trim() ?? '',
         item.optionName?.trim() ?? '',
+        item.quantity,
         '',
         '',
         '',
@@ -357,7 +354,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
       ])
     }
   } else if (prefilledBoxAllocations.length === 0) {
-    addInputRow(boxes, ['', '', '', '', '', '', '', '', '', ''])
+    addInputRow(boxes, ['', '', '', '', '', '', '', '', '', '', ''])
   }
 
   addCurrentInventorySheet(workbook, input.currentInventory ?? [])
@@ -643,8 +640,9 @@ function parseBoxesSheet(
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes, row: null, message: '박스 쉽먼트 시트를 찾을 수 없습니다.' })
     return allocations
   }
-  // Product names are reference text, so previously downloaded files remain valid.
-  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS.filter((header) => header !== '상품명'), errors)
+  // Product names and outbound totals are reference text. Older files remain valid;
+  // packing quantities always come from the separate box-allocation column.
+  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS.filter((header) => header !== '상품명' && header !== '총 출고수량'), errors)
   if (!columns) return allocations
   const lastRow = Math.min(sheet.rowCount, MAX_BOX_ROWS + 1)
   for (let rowNumber = 2; rowNumber <= lastRow; rowNumber += 1) {
@@ -856,6 +854,14 @@ function parseDate(cell: ExcelJS.Cell, sheet: string, row: number, errors: China
     return null
   }
   return normalized
+}
+
+function prefilledSourceKey(value: Pick<ChinaOutboundRegistrationWorkbookPrefilledItem, 'warehouseCode' | 'sku' | 'optionName'>) {
+  return sourceKey({
+    warehouseCode: value.warehouseCode.trim(),
+    sku: value.sku.trim(),
+    optionName: value.optionName?.trim() || null,
+  })
 }
 
 function sourceKey(value: Pick<ChinaOutboundRegistrationWorkbookItem, 'warehouseCode' | 'sku' | 'optionName'>) {

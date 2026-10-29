@@ -66,7 +66,7 @@ describe('China outbound work workbook', () => {
       .toEqual(CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS)
     expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!, 1, 5))
       .toEqual(CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS)
-    expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!, 1, 10))
+    expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!, 1, 11))
       .toEqual(CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS)
     expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.inventory)?.getCell('A2').value).toBe('중국창고A')
 
@@ -85,27 +85,27 @@ describe('China outbound work workbook', () => {
     expect(rowCellValues(itemSheet, 3, 5)).toEqual(['중국창고B', '100002-0001', '상품 B', '', 50])
 
     const boxSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
-    expect(rowCellValues(boxSheet, 2, 10)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', '', '', '', '', '', ''])
-    expect(rowCellValues(boxSheet, 3, 10)).toEqual(['중국창고B', '100002-0001', '상품 B', '', '', '', '', '', '', ''])
+    expect(rowCellValues(boxSheet, 2, 11)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', 100, '', '', '', '', '', ''])
+    expect(rowCellValues(boxSheet, 3, 11)).toEqual(['중국창고B', '100002-0001', '상품 B', '', 50, '', '', '', '', '', ''])
     expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET)?.getColumn(1).values).toEqual([
       undefined,
       '중국창고A',
       '중국창고B',
     ])
 
-    boxSheet.getCell('E2').value = 'A-01'
-    boxSheet.getCell('F2').value = 60
-    boxSheet.getCell('G2').value = 50
-    boxSheet.getCell('H2').value = 40
-    boxSheet.getCell('I2').value = 30
-    boxSheet.getCell('J2').value = '1'
-    boxSheet.addRow(['중국창고A', '100001-0001', '상품 A', '블랙', 'A-02', 40, 50, 40, 30, '1'])
-    boxSheet.getCell('E3').value = 'B-01'
-    boxSheet.getCell('F3').value = 50
-    boxSheet.getCell('G3').value = 60
-    boxSheet.getCell('H3').value = 50
-    boxSheet.getCell('I3').value = 40
-    boxSheet.getCell('J3').value = '2'
+    boxSheet.getCell('F2').value = 'A-01'
+    boxSheet.getCell('G2').value = 60
+    boxSheet.getCell('H2').value = 50
+    boxSheet.getCell('I2').value = 40
+    boxSheet.getCell('J2').value = 30
+    boxSheet.getCell('K2').value = '1'
+    boxSheet.addRow(['중국창고A', '100001-0001', '상품 A', '블랙', 100, 'A-02', 40, 50, 40, 30, '1'])
+    boxSheet.getCell('F3').value = 'B-01'
+    boxSheet.getCell('G3').value = 50
+    boxSheet.getCell('H3').value = 60
+    boxSheet.getCell('I3').value = 50
+    boxSheet.getCell('J3').value = 40
+    boxSheet.getCell('K3').value = '2'
 
     const parsed = await parseChinaOutboundWorkWorkbook({
       fileBuffer: await workbook.xlsx.writeBuffer(),
@@ -142,12 +142,13 @@ describe('China outbound work workbook', () => {
     }
     const workbook = await loadWorkbook(await exportChinaOutboundWorkWorkbook(packedDetail))
     const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
-    expect(rowCellValues(boxes, 2, 10)).toEqual([
-      '중국창고A', '100001-0001', '상품 A', '블랙', 'BOX-01', 60, 50, 40, 30, 'PALLET-1',
+    expect(rowCellValues(boxes, 2, 11)).toEqual([
+      '중국창고A', '100001-0001', '상품 A', '블랙', 100, 'BOX-01', 60, 50, 40, 30, 'PALLET-1',
     ])
     expect(boxes.getCell('C3').value).toBe('상품 B')
     expect(boxes.rowCount).toBe(3)
     if (legacy) {
+      boxes.spliceColumns(5, 1)
       boxes.spliceColumns(3, 1)
       workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!.spliceColumns(3, 1)
     }
@@ -163,15 +164,15 @@ describe('China outbound work workbook', () => {
     expect(parsed.palletAssignments).toEqual([{ boxNo: 'BOX-01', palletNo: 'PALLET-1' }])
   })
 
-  it('keeps exactly five box rows after importing 200 units split into five boxes', async () => {
+  it.each([{ total: 100, perBox: 20 }, { total: 200, perBox: 40 }])('keeps five box rows and the $total-unit reference total after import', async ({ total, perBox }) => {
     const selection: ChinaOutboundWorkbookDetail = {
       ...detail,
-      items: [{ ...detail.items[0], reservedQuantity: 200 }],
+      items: [{ ...detail.items[0], reservedQuantity: total }],
     }
     const workbook = await loadWorkbook(await exportChinaOutboundWorkWorkbook(selection))
     const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
     boxes.spliceRows(2, 1, ...Array.from({ length: 5 }, (_, index) => [
-      '중국창고A', '100001-0001', '상품 A', '블랙', `BOX-${index + 1}`, 40, '', '', '', '',
+      '중국창고A', '100001-0001', '상품 A', '블랙', total, `BOX-${index + 1}`, perBox, '', '', '', '',
     ]))
     const imported = await parseChinaOutboundWorkWorkbook({
       fileBuffer: await workbook.xlsx.writeBuffer(), detail: selection,
@@ -191,8 +192,9 @@ describe('China outbound work workbook', () => {
     for (let download = 0; download < 2; download += 1) {
       const exported = await loadWorkbook(await exportChinaOutboundWorkWorkbook(saved))
       const sheet = exported.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
+      expect([2, 3, 4, 5, 6].map((row) => sheet.getCell(`E${row}`).value)).toEqual([total, total, total, total, total])
       expect(sheet.rowCount).toBe(6) // Header plus the five saved boxes.
-      expect([2, 3, 4, 5, 6].map((row) => sheet.getCell(`F${row}`).value)).toEqual([40, 40, 40, 40, 40])
+      expect([2, 3, 4, 5, 6].map((row) => sheet.getCell(`G${row}`).value)).toEqual([perBox, perBox, perBox, perBox, perBox])
       const parsed = await parseChinaOutboundWorkWorkbook({
         fileBuffer: await exported.xlsx.writeBuffer(), detail: saved,
       })

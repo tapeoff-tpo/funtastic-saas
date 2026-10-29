@@ -2,9 +2,8 @@ import ExcelJS from 'exceljs'
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 
 export const CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS = {
-  guide: '인쇄 안내',
-  boxes: '박스 쉽먼트',
-  pallets: '파렛트 쉽먼트',
+  boxes: '装箱标签',
+  pallets: '托盘标签',
 } as const
 
 export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDetail, 'items'> & {
@@ -79,7 +78,6 @@ export function createChinaOutboundShipmentLabelWorkbook(
   const boxItemsByBoxId = groupBoxItemsByBox(detail)
   const includePalletLabels = options.includePalletLabels !== false
 
-  addGuideSheet(workbook, detail, includePalletLabels)
   addBoxLabelSheets(workbook, detail, itemById, boxItemsByBoxId, options.boxIds)
   if (includePalletLabels) {
     addPalletLabelSheets(workbook, detail, itemById, palletById, boxItemsByBoxId)
@@ -117,47 +115,6 @@ function safeFilenameSegment(value: string, fallback: string) {
   return value.replace(/[\\/:*?"<>|]/g, '_').trim() || fallback
 }
 
-function addGuideSheet(
-  workbook: ExcelJS.Workbook,
-  detail: ChinaOutboundShipmentLabelDetail,
-  includePalletLabels: boolean,
-) {
-  const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.guide)
-  sheet.columns = [{ width: 24 }, { width: 82 }]
-  sheet.views = [{ showGridLines: false }]
-  sheet.mergeCells('A1:B1')
-  sheet.getCell('A1').value = '중국출고 부착용 쉽먼트'
-  sheet.getCell('A1').font = { bold: true, size: 15, color: { argb: 'FF1F1F1F' } }
-  sheet.getCell('A1').alignment = { vertical: 'middle' }
-  sheet.getRow(1).height = 28
-
-  const rows: Array<[string, string]> = [
-    ['출고번호', detail.shipment.shipmentNo],
-    ['출고 창고', detail.shipment.originWarehouseCode],
-    ['도착지', detail.shipment.destinationName ?? '미입력'],
-    ['출고예정일', detail.shipment.plannedOutboundDate ?? '미입력'],
-    ['입력', '중국어 상품명은 직접 입력하세요. 위치는 품목에서 자동 입력되며 수정할 수 있습니다. 엑셀 수정 내용은 품목에 저장되지 않습니다.'],
-    ['출력 범위', includePalletLabels
-      ? '현재 내용이 저장된 박스만 박스 쉽먼트에, 현재 배정된 박스만 파렛트 쉽먼트에 포함됩니다. 박스 내용이나 파렛트 배정이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'
-      : '선택한 내용 저장 박스만 박스 쉽먼트에 포함됩니다. 박스 내용이 바뀌면 다시 내려받아 해당 시트를 인쇄하세요.'],
-    ['인쇄', includePalletLabels
-      ? '박스와 파렛트 라벨은 각각 별도 시트이며, 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'
-      : '박스 라벨은 한 시트가 한 장씩 인쇄되도록 설정되어 있습니다.'],
-  ]
-
-  for (const [label, value] of rows) {
-    const row = sheet.addRow([label, value])
-    row.height = label === '출력 범위' || label === '입력' ? 46 : label === '인쇄' ? 32 : 22
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.border = ALL_BORDERS
-      cell.alignment = { vertical: 'middle', wrapText: true }
-      cell.font = { size: 10 }
-    })
-    row.getCell(1).font = { bold: true, size: 10 }
-    row.getCell(1).fill = HEADER_FILL
-  }
-}
-
 function addBoxLabelSheets(
   workbook: ExcelJS.Workbook,
   detail: ChinaOutboundShipmentLabelDetail,
@@ -175,7 +132,7 @@ function addBoxLabelSheets(
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes)
     sheet.columns = [{ width: 17 }, { width: 36 }, { width: 28 }, { width: 11 }, { width: 20 }]
     configureLabelSheet(sheet, 'E')
-    addEmptyLabelMessage(sheet, '포장된 박스가 없어 박스 쉽먼트를 만들 수 없습니다.', 'E')
+    addEmptyLabelMessage(sheet, '暂无已装箱商品。', 'E')
     return
   }
 
@@ -187,8 +144,8 @@ function addBoxLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'E',
-      title: `박스 쉽먼트 · ${box.boxNo}`,
-      headers: ['박스번호', '상품명(한국어)', '상품명(중국어)', '수량', '로케이션'],
+      title: `装箱标签 · ${box.boxNo}`,
+      headers: ['箱号', '商品名称（韩文）', '商品名称（中文）', '数量', '库位'],
       rows,
       inputColumns: new Set([3, 5]),
       quantityColumns: new Set([4]),
@@ -218,7 +175,7 @@ function addPalletLabelSheets(
     const sheet = workbook.addWorksheet(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets)
     sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 28 }, { width: 24 }, { width: 12 }]
     configureLabelSheet(sheet, 'G')
-    addEmptyLabelMessage(sheet, '파렛트에 배정된 박스가 없어 파렛트 쉽먼트를 만들 수 없습니다.', 'G')
+    addEmptyLabelMessage(sheet, '暂无已分配到托盘的箱子。', 'G')
     return
   }
 
@@ -231,8 +188,8 @@ function addPalletLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'G',
-      title: `파렛트 쉽먼트 · ${pallet.palletNo}`,
-      headers: ['번호', '박스수량', '위치', '상품명(한국어)', '상품명(중국어)', '옵션', '수량'],
+      title: `托盘标签 · ${pallet.palletNo}`,
+      headers: ['托盘号', '箱数', '库位', '商品名称（韩文）', '商品名称（中文）', '规格', '数量'],
       rows,
       inputColumns: new Set([3, 5]),
       quantityColumns: new Set([2, 7]),
@@ -314,7 +271,6 @@ function configureLabelSheet(sheet: ExcelJS.Worksheet, lastColumn: string) {
     horizontalCentered: true,
     margins: PRINT_MARGINS,
   }
-  sheet.headerFooter.oddFooter = '&CPage &P of &N'
   sheet.pageSetup.printArea = `A1:${lastColumn}1`
 }
 
@@ -370,11 +326,7 @@ function addLabelBlock(input: {
     })
   }
 
-  const footerRow = input.sheet.addRow([''])
-  input.sheet.mergeCells(`A${footerRow.number}:${input.lastColumn}${footerRow.number}`)
-  footerRow.height = 8
-  styleMergedRow(footerRow)
-  input.sheet.pageSetup.printArea = `A1:${input.lastColumn}${footerRow.number}`
+  input.sheet.pageSetup.printArea = `A1:${input.lastColumn}${input.sheet.rowCount}`
 }
 
 function labelSheetName(prefix: string, index: number) {

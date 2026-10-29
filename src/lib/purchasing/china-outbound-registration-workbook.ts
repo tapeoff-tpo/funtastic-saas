@@ -40,6 +40,7 @@ export const CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS = [
 export const CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS = [
   '출고창고',
   '품목코드',
+  '상품명',
   '옵션명',
   '박스번호',
   '박스 적재수량',
@@ -73,6 +74,7 @@ export const CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS = [
 export const CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS = [
   '출고창고 / 出库仓库',
   '품목코드 / 商品编码',
+  '상품명 / 商品名称',
   '옵션명 / 规格',
   '박스번호 / 箱号',
   '박스 적재수량 / 装箱数量',
@@ -158,6 +160,7 @@ export type ChinaOutboundRegistrationWorkbookPrefilledItem = {
 export type ChinaOutboundRegistrationWorkbookPrefilledBoxAllocation = {
   warehouseCode: string
   sku: string
+  productName?: string | null
   optionName?: string | null
   boxNo: string
   quantity: number
@@ -310,12 +313,13 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes,
     CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
-    [22, 22, 28, 18, 18, 16, 16, 16, 18],
+    [22, 22, 40, 28, 18, 18, 16, 16, 16, 18],
   )
   for (const allocation of prefilledBoxAllocations) {
     addInputRow(boxes, [
       allocation.warehouseCode.trim(),
       allocation.sku.trim(),
+      allocation.productName?.trim() ?? '',
       allocation.optionName?.trim() ?? '',
       allocation.boxNo.trim(),
       allocation.quantity,
@@ -330,6 +334,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
       addInputRow(boxes, [
         item.warehouseCode.trim(),
         item.sku.trim(),
+        item.productName?.trim() ?? '',
         item.optionName?.trim() ?? '',
         '',
         '',
@@ -340,7 +345,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
       ])
     }
   } else if (prefilledBoxAllocations.length === 0) {
-    addInputRow(boxes, ['', '', '', '', '', '', '', '', ''])
+    addInputRow(boxes, ['', '', '', '', '', '', '', '', '', ''])
   }
 
   addCurrentInventorySheet(workbook, input.currentInventory ?? [])
@@ -632,7 +637,8 @@ function parseBoxesSheet(
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes, row: null, message: '박스 쉽먼트 시트를 찾을 수 없습니다.' })
     return allocations
   }
-  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS, errors)
+  // Product names are reference text, so previously downloaded files remain valid.
+  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS.filter((header) => header !== '상품명'), errors)
   if (!columns) return allocations
   const lastRow = Math.min(sheet.rowCount, MAX_BOX_ROWS + 1)
   for (let rowNumber = 2; rowNumber <= lastRow; rowNumber += 1) {

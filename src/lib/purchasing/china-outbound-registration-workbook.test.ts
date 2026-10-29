@@ -2,7 +2,6 @@ import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import {
   CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
-  CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS,
@@ -119,6 +118,7 @@ describe('China outbound registration workbook', () => {
       prefilledBoxAllocations: [{
         warehouseCode: '중국창고',
         sku: 'SKU-A',
+        productName: '상품 A',
         optionName: '블랙',
         boxNo: 'BOX-01',
         quantity: 40,
@@ -163,6 +163,7 @@ describe('China outbound registration workbook', () => {
       undefined,
       '중국창고',
       'SKU-A',
+      '상품 A',
       '블랙',
       'BOX-01',
       40,
@@ -175,6 +176,7 @@ describe('China outbound registration workbook', () => {
       undefined,
       '중국창고',
       'SKU-A',
+      '상품 A',
       '블랙',
       '',
       '',
@@ -187,6 +189,7 @@ describe('China outbound registration workbook', () => {
       undefined,
       '쿠팡',
       'SKU-B',
+      '',
       '',
       '',
       '',
@@ -217,13 +220,14 @@ describe('China outbound registration workbook', () => {
     items.getCell('E2').value = 100
     const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
     boxes.getCell('B2').value = 'SKU-A'
-    boxes.getCell('C2').value = '블랙'
-    boxes.getCell('D2').value = 'BOX-01'
-    boxes.getCell('E2').value = 100
-    boxes.getCell('F2').value = 50
-    boxes.getCell('G2').value = 40
-    boxes.getCell('H2').value = 30
-    boxes.getCell('I2').value = 'PALLET-1'
+    boxes.getCell('C2').value = '상품 A'
+    boxes.getCell('D2').value = '블랙'
+    boxes.getCell('E2').value = 'BOX-01'
+    boxes.getCell('F2').value = 100
+    boxes.getCell('G2').value = 50
+    boxes.getCell('H2').value = 40
+    boxes.getCell('I2').value = 30
+    boxes.getCell('J2').value = 'PALLET-1'
 
     const parsed = await parseChinaOutboundRegistrationWorkbook(await workbook.xlsx.writeBuffer())
 
@@ -358,7 +362,7 @@ describe('China outbound registration workbook', () => {
     items.addRow(['출고창고', '품목코드', '옵션명', '출고수량'])
     items.addRow(['중국창고', 'SKU-A', '', 10])
     const boxes = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
-    boxes.addRow([...CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS])
+    boxes.addRow(['출고창고', '품목코드', '옵션명', '박스번호', '박스 적재수량', '가로(cm)', '세로(cm)', '높이(cm)', '파렛트번호'])
 
     const parsed = await parseChinaOutboundRegistrationWorkbook(await workbook.xlsx.writeBuffer())
 
@@ -425,6 +429,6 @@ function createWorkbook() {
   const items = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)
   items.addRow(['출고창고', '품목코드', '옵션명', '출고수량'])
   const boxes = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
-  boxes.addRow([...CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS])
+  boxes.addRow(['출고창고', '품목코드', '옵션명', '박스번호', '박스 적재수량', '가로(cm)', '세로(cm)', '높이(cm)', '파렛트번호'])
   return workbook
 }

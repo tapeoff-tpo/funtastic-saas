@@ -131,6 +131,7 @@ export async function exportChinaOutboundWorkWorkbook(
     return [{
       warehouseCode: item.warehouseCode,
       sku: item.sku,
+      productName: item.productName,
       optionName: item.optionName,
       boxNo: box.boxNo,
       quantity: allocation.quantity,

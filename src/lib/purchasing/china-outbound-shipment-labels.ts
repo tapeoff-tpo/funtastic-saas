@@ -144,7 +144,7 @@ function addBoxLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'E',
-      title: `박스 쉽먼트 / 装箱标签 · ${box.boxNo}`,
+      title: 'TAPEOFF',
       headers: ['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'],
       rows,
       inputColumns: new Set([3, 5]),
@@ -188,7 +188,7 @@ function addPalletLabelSheets(
     addLabelBlock({
       sheet,
       lastColumn: 'G',
-      title: `파렛트 쉽먼트 / 托盘标签 · ${pallet.palletNo}`,
+      title: 'TAPEOFF',
       headers: ['파렛트번호 / 托盘号', '박스수량 / 箱数', '로케이션 / 库位', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '옵션 / 规格', '수량 / 数量'],
       rows,
       inputColumns: new Set([3, 5]),

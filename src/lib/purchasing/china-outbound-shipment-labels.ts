@@ -62,8 +62,8 @@ const PRINT_MARGINS = {
 
 /**
  * Produces a separately printable workbook for labels that are attached to
- * physical boxes and pallets. Yellow cells deliberately remain editable in
- * Excel so Chinese names can be entered and item-master locations corrected.
+ * physical boxes and pallets. Chinese-name fields and location text remain
+ * editable in Excel so operators can complete the printed label.
  */
 export function createChinaOutboundShipmentLabelWorkbook(
   detail: ChinaOutboundShipmentLabelDetail,
@@ -138,18 +138,11 @@ function addBoxLabelSheets(
 
   for (const [index, box] of boxes.entries()) {
     const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes, index))
-    sheet.columns = [{ width: 17 }, { width: 36 }, { width: 28 }, { width: 11 }, { width: 20 }]
-    configureLabelSheet(sheet, 'E')
-    const rows = aggregateBoxLabelRows(boxItemsByBoxId.get(box.id) ?? [], itemById, box.boxNo)
-    addLabelBlock({
-      sheet,
-      lastColumn: 'E',
-      title: 'TAPEOFF',
-      headers: ['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'],
-      rows,
-      inputColumns: new Set([3, 5]),
-      quantityColumns: new Set([4]),
-    })
+    configureLabelSheet(sheet, 'F')
+    // Use the full A4 landscape page for a physical carton label, not a small table.
+    sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
+    const products = aggregateLabelProducts(boxItemsByBoxId.get(box.id) ?? [], itemById)
+    addLargeBoxLabel(sheet, box.boxNo, products)
   }
 }
 
@@ -205,13 +198,77 @@ function groupBoxItemsByBox(detail: ChinaOutboundShipmentLabelDetail) {
   return grouped
 }
 
-function aggregateBoxLabelRows(
-  allocations: ChinaOutboundShipmentLabelDetail['boxItems'],
-  itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
-  boxNo: string,
-): LabelRow[] {
-  return aggregateLabelProducts(allocations, itemById)
-    .map((row) => [boxNo, koreanProductName(row.productName, row.optionName), '', row.quantity, row.location])
+const BOX_LABEL_FILL: ExcelJS.FillPattern = {
+  type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCFE8D0' },
+}
+const BOX_LABEL_EDGE: Partial<ExcelJS.Border> = { style: 'thin', color: { argb: 'FF000000' } }
+
+function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: LabelProductRow[]) {
+  sheet.columns = Array.from({ length: 6 }, () => ({ width: 24 }))
+  const count = Math.max(1, products.length)
+  const productFontSize = Math.max(14, Math.floor(40 / Math.sqrt(count)))
+  const labelFontSize = Math.min(22, productFontSize)
+  const lastRow = 3 * count + 3
+  for (let row = 1; row <= lastRow; row += 1) {
+    for (let column = 1; column <= 6; column += 1) {
+      const cell = sheet.getCell(row, column)
+      cell.fill = BOX_LABEL_FILL
+      cell.font = { name: 'Arial', size: productFontSize, color: { argb: 'FF000000' } }
+      cell.alignment = { vertical: 'middle', wrapText: true, indent: 1 }
+    }
+  }
+  sheet.mergeCells('A1:F1')
+  sheet.getCell('A1').value = 'TAPEOFF'
+  sheet.getCell('A1').font = { name: 'Times New Roman', size: 60, bold: true }
+  sheet.getCell('A1').border = { top: BOX_LABEL_EDGE, left: BOX_LABEL_EDGE, right: BOX_LABEL_EDGE }
+  sheet.getRow(1).height = 80
+
+  for (const [index, product] of products.entries()) {
+    const row = 2 + index * 3
+    sheet.mergeCells(`A${row}:C${row}`)
+    sheet.mergeCells(`D${row}:E${row}`)
+    // The Chinese name and the reference's non-return note remain editable in Excel.
+    sheet.getCell(`A${row}`).value = null
+    sheet.getCell(`A${row}`).dataValidation = {
+      type: 'textLength', operator: 'lessThanOrEqual', formulae: [1000],
+      showInputMessage: true, promptTitle: '중국어 상품명 / 中文品名',
+      prompt: '중국어 상품명을 입력하세요. / 请输入中文品名。',
+    }
+    sheet.getCell(`D${row}`).value = product.quantity
+    sheet.getCell(`D${row}`).numFmt = '#,##0" PC"'
+    sheet.getCell(`D${row}`).alignment = { horizontal: 'center', vertical: 'middle' }
+    sheet.getCell(`F${row}`).value = '不退'
+    sheet.getCell(`F${row}`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    sheet.getCell(`A${row}`).border = { left: BOX_LABEL_EDGE, bottom: BOX_LABEL_EDGE }
+    sheet.getCell(`D${row}`).border = { bottom: BOX_LABEL_EDGE }
+    sheet.getCell(`F${row}`).border = { right: BOX_LABEL_EDGE, bottom: BOX_LABEL_EDGE }
+    sheet.getRow(row).height = Math.max(30, 100 / count)
+    sheet.mergeCells(`A${row + 1}:F${row + 2}`)
+    const name = sheet.getCell(`A${row + 1}`)
+    name.value = { richText: [
+      { text: '한국어 상품명 / 韩文名称: ', font: { name: 'Arial', size: labelFontSize } },
+      { text: koreanProductName(product.productName, product.optionName), font: { name: 'Arial', size: productFontSize } },
+      ...(product.location ? [{ text: `\n로케이션 / 库位: ${product.location}`, font: { name: 'Arial', size: labelFontSize } }] : []),
+    ] }
+    name.border = ALL_BORDERS
+    sheet.getRow(row + 1).height = Math.max(24, 90 / count)
+    sheet.getRow(row + 2).height = Math.max(24, 90 / count)
+  }
+
+  const boxRow = 3 * count + 2
+  sheet.mergeCells(`A${boxRow}:C${boxRow + 1}`)
+  sheet.mergeCells(`D${boxRow}:F${boxRow + 1}`)
+  const boxLabel = sheet.getCell(`A${boxRow}`)
+  boxLabel.value = '박스번호 / 箱子号:'
+  boxLabel.font = { name: 'Arial', size: 34 }
+  boxLabel.border = ALL_BORDERS
+  const boxValue = sheet.getCell(`D${boxRow}`)
+  boxValue.value = boxNo
+  boxValue.font = { name: 'Arial', size: 40 }
+  boxValue.border = ALL_BORDERS
+  sheet.getRow(boxRow).height = 90
+  sheet.getRow(boxRow + 1).height = 90
+  sheet.pageSetup.printArea = `A1:F${lastRow}`
 }
 
 function aggregatePalletLabelRows(

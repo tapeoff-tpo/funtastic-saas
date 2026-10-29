@@ -56,16 +56,16 @@ describe('China outbound shipment label workbook', () => {
 
     const boxSheet = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
     expect(boxSheet.getCell('A1').value).toBe('TAPEOFF')
-    expect([1, 2, 3, 4, 5].map((column) => boxSheet.getRow(2).getCell(column).value))
-      .toEqual(['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'])
-    expect(boxSheet.getCell('A3').value).toBe('박스 1')
-    expect(boxSheet.getCell('B3').value).toBe('상품 A (블랙)')
-    expect(boxSheet.getCell('C3').value ?? '').toBe('')
-    expect(boxSheet.getCell('D3').value).toBe(60)
-    expect(boxSheet.getCell('E3').value).toBe('A-01-03')
-    expect(boxSheet.getCell('E4').value ?? '').toBe('')
-    expect(fillColor(boxSheet.getCell('C3'))).toBe('FFFFF2CC')
-    expect(fillColor(boxSheet.getCell('E3'))).toBe('FFFFF2CC')
+    expect(boxSheet.getCell('A2').value ?? '').toBe('')
+    expect(boxSheet.getCell('D2').value).toBe(60)
+    expect(boxSheet.getCell('D2').numFmt).toBe('#,##0" PC"')
+    expect(boxSheet.getCell('F2').value).toBe('不退')
+    expect(cellText(boxSheet.getCell('A3'))).toContain('상품 A (블랙)')
+    expect(cellText(boxSheet.getCell('A3'))).toContain('로케이션 / 库位: A-01-03')
+    expect(boxSheet.getCell('D5').value).toBe(5)
+    expect(boxSheet.getCell('D8').value).toBe('박스 1')
+    expect(fillColor(boxSheet.getCell('A2'))).toBe('FFCFE8D0')
+    expect(boxSheet.pageSetup.printArea).toBe('A1:F9')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 04')!.getCell('A1').value).toBe('TAPEOFF')
     expect(boxSheet.pageSetup.orientation).toBe('landscape')
     expect(boxSheet.pageSetup.paperSize).toBe(9)
@@ -94,19 +94,18 @@ describe('China outbound shipment label workbook', () => {
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 03')).toBeUndefined()
 
     expect(workbook.getWorksheet('인쇄 안내')).toBeUndefined()
-    expect(boxSheet.rowCount).toBe(4)
+    expect(boxSheet.rowCount).toBe(9)
     expect(palletSheet.rowCount).toBe(4)
-    expect(boxSheet.getCell('A2').value).toBe('박스번호 / 箱号')
     expect(palletSheet.getCell('A2').value).toBe('파렛트번호 / 托盘号')
 
-    boxSheet.getCell('C3').value = '中文商品名'
-    boxSheet.getCell('E3').value = '수정된 위치'
+    boxSheet.getCell('A2').value = '中文商品名'
+    boxSheet.getCell('A3').value = '한국어 상품명 / 韩文名称: 상품 A (블랙)\n로케이션 / 库位: 수정된 위치'
     palletSheet.getCell('C3').value = '수정된 위치'
     palletSheet.getCell('E3').value = '中文商品名'
     const edited = new ExcelJS.Workbook()
     await edited.xlsx.load(await workbook.xlsx.writeBuffer())
-    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('C3').value).toBe('中文商品名')
-    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('E3').value).toBe('수정된 위치')
+    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A2').value).toBe('中文商品名')
+    expect(cellText(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A3'))).toContain('수정된 위치')
     expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('C3').value).toBe('수정된 위치')
     expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('E3').value).toBe('中文商品名')
   })
@@ -137,10 +136,13 @@ describe('China outbound shipment label workbook', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
 
     const box = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
-    expect([3, 4, 5, 6].map((row) => [box.getCell(`D${row}`).value, box.getCell(`E${row}`).value ?? '']))
-      .toEqual([[3, 'A-01'], [3, 'B-02'], [4, ''], [8, 'A-01']])
-    expect([3, 4, 5, 6].map((row) => box.getCell(`B${row}`).value))
-      .toEqual(['동일 상품 (블랙)', '동일 상품 (블랙)', '동일 상품 (블랙)', '동일 상품 (블랙)'])
+    expect([2, 5, 8, 11].map((row) => box.getCell(`D${row}`).value)).toEqual([3, 3, 4, 8])
+    expect([3, 6, 9, 12].map((row) => cellText(box.getCell(`A${row}`)))).toEqual([
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: A-01',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: B-02',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: A-01',
+    ])
 
     const pallet = workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!
     expect([3, 4, 5, 6].map((row) => [pallet.getCell(`B${row}`).value, pallet.getCell(`C${row}`).value ?? '', pallet.getCell(`G${row}`).value]))
@@ -170,6 +172,14 @@ describe('China outbound shipment label workbook', () => {
     ])
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A1').value).toBe('TAPEOFF')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 02')!.getCell('A1').value).toBe('TAPEOFF')
+    const singleBox = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
+    expect(singleBox.pageSetup.printArea).toBe('A1:F6')
+    expect(singleBox.rowCount).toBe(6)
+    expect(singleBox.getCell('A1').font.size).toBe(60)
+    expect(singleBox.getCell('D2').font.size).toBe(40)
+    expect(singleBox.getCell('D2').value).toBe(40)
+    expect(singleBox.getCell('D5').value).toBe('박스 2')
+    expect([1, 2, 3, 4, 5, 6].reduce((height, row) => height + singleBox.getRow(row).height, 0)).toBe(540)
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')).toBeUndefined()
   })
 
@@ -199,7 +209,7 @@ describe('China outbound shipment label workbook', () => {
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A1').value).toBe('TAPEOFF')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 02')!.getCell('A1').value).toBe('TAPEOFF')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 03')).toBeUndefined()
-    expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('E3').value).toBe('A-01-03')
+    expect(cellText(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A3'))).toContain('A-01-03')
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('B3').value).toBe(2)
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('C3').value).toBe('A-01-03')
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('G3').value).toBe(100)
@@ -209,4 +219,10 @@ describe('China outbound shipment label workbook', () => {
 
 function fillColor(cell: ExcelJS.Cell) {
   return cell.fill.type === 'pattern' ? cell.fill.fgColor?.argb : undefined
+}
+
+function cellText(cell: ExcelJS.Cell) {
+  const value = cell.value
+  return value && typeof value === 'object' && 'richText' in value
+    ? value.richText.map((run) => run.text).join('') : String(value ?? '')
 }

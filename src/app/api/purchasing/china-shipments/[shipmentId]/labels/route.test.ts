@@ -193,23 +193,29 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     const box = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
     const pallet = workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!
-    expect([1, 2, 3, 4, 5].map((column) => box.getRow(2).getCell(column).value))
-      .toEqual(['박스번호 / 箱号', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '수량 / 数量', '로케이션 / 库位'])
-    expect(box.getCell('A3').value).toBe('박스 1')
-    expect(box.getCell('B3').value).toBe('상품 A')
-    expect(box.getCell('C3').value ?? '').toBe('')
-    expect([3, 4, 5].map((row) => box.getCell(`E${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
+    expect(box.getCell('A1').value).toBe('TAPEOFF')
+    expect(box.pageSetup.printArea).toBe('A1:F12')
+    expect(box.getCell('D11').value).toBe('박스 1')
+    expect(box.getCell('A2').value ?? '').toBe('')
+    expect([3, 6, 9].map((row) => {
+      const value = box.getCell(`A${row}`).value as ExcelJS.CellRichTextValue
+      return value.richText.map((run) => run.text).join('')
+    })).toEqual([
+      '한국어 상품명 / 韩文名称: 상품 A\n로케이션 / 库位: A-01',
+      '한국어 상품명 / 韩文名称: 상품 B\n로케이션 / 库位: B-02',
+      '한국어 상품명 / 韩文名称: 상품 C',
+    ])
     expect([3, 4, 5].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
-    expect(box.getCell('D3').value).toBe(2)
+    expect(box.getCell('D2').value).toBe(2)
     expect(pallet.getCell('E2').value).toBe('상품명(중국어) / 商品名称（中文）')
     expect(pallet.getCell('E3').value ?? '').toBe('')
     expect(pallet.getCell('G3').value).toBe(2)
 
-    box.getCell('C3').value = '中文商品名'
+    box.getCell('A2').value = '中文商品名'
     pallet.getCell('E3').value = '中文商品名'
     const edited = new ExcelJS.Workbook()
     await edited.xlsx.load(await workbook.xlsx.writeBuffer())
-    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('C3').value).toBe('中文商品名')
+    expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A2').value).toBe('中文商品名')
     expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('E3').value).toBe('中文商品名')
   })
 })

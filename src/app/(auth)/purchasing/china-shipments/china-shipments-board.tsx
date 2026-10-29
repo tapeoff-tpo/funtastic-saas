@@ -1,12 +1,12 @@
 'use client'
 
 import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
-import { navigateChinaWork } from './china-work-navigation'
+import { useChinaWorkNavigation } from './china-work-navigation'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
@@ -131,7 +131,7 @@ export function ChinaShipmentsBoard(props: {
   showCreate: boolean
   outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
-  return <ChinaWorkGuardProvider><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
+  return <ChinaWorkGuardProvider key={props.showCreate ? 'create' : props.selectedShipment?.shipment.id ?? 'list'}><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
 }
 
 function ChinaShipmentsBoardContent({
@@ -150,6 +150,11 @@ function ChinaShipmentsBoardContent({
   outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
   const guard = useChinaWorkGuard()
+  const navigateChinaWork = useChinaWorkNavigation()
+  const searchParams = useSearchParams()
+  const stepParam = searchParams.get('step')
+  const activeStep = stepParam === 'items' || stepParam === 'boxes' || stepParam === 'pallets' || stepParam === 'summary'
+    ? stepParam : selectedStep
   const [isPending, startTransition] = useTransition()
   const [initialDate] = useState(() => today())
   const createdShipmentId = useRef<string | null>(null)
@@ -348,10 +353,13 @@ function ChinaShipmentsBoardContent({
           key={`detail:${selectedShipment?.shipment.id ?? 'no-shipment'}`}
           detail={selectedShipment}
           inventoryItems={inventoryItems}
-          stage={selectedStep}
+          stage={activeStep}
           isPending={isPending || guard.busy}
           startTransition={startTransition}
-          onStageChange={(stage) => selectedShipment && stage !== selectedStep && guard.requestNavigation(() => navigateChinaWork(shipmentHref(selectedShipment.shipment.id, stage)))}
+          onStageChange={(stage) => selectedShipment && stage !== activeStep && guard.requestNavigation(() => {
+            // All four stages use this shipment snapshot; switching stages needs no server request.
+            window.history.replaceState(null, '', shipmentHref(selectedShipment.shipment.id, stage))
+          })}
         /> : null}
       </div>
     </fieldset>
@@ -367,6 +375,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   onSelect: (id: string) => void
 }) {
   const router = useRouter()
+  const navigateChinaWork = useChinaWorkNavigation()
   const guard = useChinaWorkGuard()
   const [isPending, startTransition] = useTransition()
   const [isEditing, setIsEditing] = useState(false)
@@ -484,8 +493,12 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const itemById = new Map(items.map((item) => [item.id, item]))
   const boxById = new Map(boxes.map((box) => [box.id, box]))
   const palletById = new Map(pallets.map((pallet) => [pallet.id, pallet]))
-  const boxItemsByItem = new Map(items.map((item) => [item.id, boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id)]))
-  const boxItemsByBox = new Map(boxes.map((box) => [box.id, boxItems.filter((boxItem) => boxItem.boxId === box.id)]))
+  const boxItemsByItem = new Map(items.map((item) => [item.id, [] as typeof boxItems]))
+  const boxItemsByBox = new Map(boxes.map((box) => [box.id, [] as typeof boxItems]))
+  for (const allocation of boxItems) {
+    boxItemsByItem.get(allocation.shipmentItemId)?.push(allocation)
+    boxItemsByBox.get(allocation.boxId)?.push(allocation)
+  }
   const savedBoxSummaries = buildSavedBoxSummaries({ boxes, boxItemsByBox, itemById, palletById })
   const totalOutboundQuantity = items.reduce((total, item) => total + item.reservedQuantity, 0)
   const totalPackedQuantity = items.reduce((total, item) => total + item.packedQuantity, 0)

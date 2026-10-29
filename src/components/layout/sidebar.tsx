@@ -251,7 +251,9 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
   function prefetchItem(href: string) {
     if (prefetchedHrefs.current.has(href)) return
     prefetchedHrefs.current.add(href)
-    router.prefetch(href)
+    router.prefetch(href, {
+      onInvalidate: () => prefetchedHrefs.current.delete(href),
+    })
   }
 
   function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
@@ -272,6 +274,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           onClick={() => onNavigate?.()}
           onMouseEnter={() => prefetchItem(item.href)}
           onFocus={() => prefetchItem(item.href)}
+          onTouchStart={() => prefetchItem(item.href)}
           className={`flex flex-1 items-center font-medium ${
             mobile
               ? 'min-h-11 gap-3 px-3 py-2 text-sm'

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
@@ -17,10 +18,14 @@ const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, sa
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/purchasing/china-shipments',
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), replace: navigate }),
+  useSearchParams: () => new URLSearchParams(useSyncExternalStore(
+    (notify) => { window.addEventListener('popstate', notify); return () => window.removeEventListener('popstate', notify) },
+    () => window.location.search,
+  )),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
-vi.mock('./china-work-navigation', () => ({ navigateChinaWork: navigate }))
+vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => navigate }))
 vi.mock('../saas-china-actions', () => ({
   addChinaOutboundShipmentItemsAction: addShipmentItems,
   assignChinaOutboundBoxesToPalletsAction: savePalletAssignments,
@@ -85,6 +90,8 @@ function asListItem(detail: ChinaShipmentDetailView): ChinaShipmentListItem {
     packedQuantity: 0,
   }
 }
+
+const replaceHistoryState = window.history.replaceState.bind(window.history)
 
 const shipmentA = makeShipment('a', '출고 A', 'SKU-A')
 const shipmentB = makeShipment('b', '출고 B', 'SKU-B')
@@ -237,6 +244,12 @@ function palletAssignmentRow(boxNo: string) {
 
 describe('ChinaShipmentsBoard', () => {
   beforeEach(() => {
+    replaceHistoryState(null, '', '/purchasing/china-shipments')
+    // Next's history integration notifies useSearchParams without a server navigation.
+    vi.spyOn(window.history, 'replaceState').mockImplementation((...args) => {
+      replaceHistoryState(...args)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
     window.localStorage.clear()
     createShipment.mockReset()
     updateShipment.mockReset()
@@ -1000,6 +1013,22 @@ describe('ChinaShipmentsBoard', () => {
       shipmentId: 'a',
       assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P4' }],
     }))
+  })
+
+  it('switches work stages immediately without navigating to the server', () => {
+    renderShipment(makeShipmentWithBox(), 'items')
+    for (const [step, title] of [['boxes', '2단계.*박스분할'], ['pallets', '3단계.*파렛트적재'], ['summary', '4단계.*최종 적재리스트'], ['items', '1단계.*출고품목']]) {
+      const button = screen.getByRole('button', { name: new RegExp(title) })
+      fireEvent.click(button)
+      expect(button).toHaveAttribute('aria-current', 'step')
+      expect(new URLSearchParams(window.location.search).get('step')).toBe(step)
+    }
+    expect(navigate).not.toHaveBeenCalled()
+    act(() => {
+      window.history.replaceState(null, '', '/purchasing/china-shipments?shipment=a&step=boxes')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(screen.getByRole('button', { name: /2단계.*박스분할/ })).toHaveAttribute('aria-current', 'step')
   })
 
   it('guards changing the work stage while a box draft is unsaved', () => {

@@ -89,8 +89,8 @@ export const CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS = [
   '품목코드 / 商品编码',
   '상품명(한국어) / 商品名称（韩文）',
   '옵션명(한국어) / 规格（韩文）',
-  '품목구분 / 品目分类',
   '현재고 / 当前库存',
+  '품목구분 / 品目分类',
   '예약수량 / 已预留',
   '출고가능수량 / 可出库数量',
   '최종 입고일 / 最近入库日',
@@ -443,7 +443,7 @@ function addCurrentInventorySheet(
   inventory: readonly ChinaOutboundRegistrationCurrentInventoryRow[],
 ) {
   const sheet = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.inventory)
-  sheet.columns = [22, 22, 42, 30, 18, 14, 14, 18, 18, 18].map((width) => ({ width }))
+  sheet.columns = [22, 22, 42, 30, 14, 18, 14, 18, 18, 18].map((width) => ({ width }))
   const header = sheet.addRow([...CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS])
   header.height = 36
   header.eachCell({ includeEmpty: true }, (cell) => {
@@ -464,8 +464,8 @@ function addCurrentInventorySheet(
       item.sku,
       item.productName,
       item.optionName ?? '',
-      formatItemCategory(item.itemCategory),
       item.onHandQuantity,
+      formatItemCategory(item.itemCategory),
       item.reservedQuantity,
       item.availableQuantity,
       formatSeoulDate(item.lastReceivedAt),
@@ -476,9 +476,9 @@ function addCurrentInventorySheet(
       cell.border = THIN_BORDER
       cell.alignment = {
         vertical: 'middle',
-        wrapText: columnNumber === 3 || columnNumber === 4 || columnNumber === 5,
+        wrapText: columnNumber === 3 || columnNumber === 4 || columnNumber === 6,
       }
-      if (columnNumber >= 6 && columnNumber <= 8) cell.numFmt = '#,##0'
+      if (columnNumber === 5 || columnNumber === 7 || columnNumber === 8) cell.numFmt = '#,##0'
     })
   }
 }

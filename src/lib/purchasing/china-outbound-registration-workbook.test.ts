@@ -67,8 +67,8 @@ describe('China outbound registration workbook', () => {
       'SKU-A',
       '멜팅 스윗 도넛 플레이트 세트',
       '대',
-      '상품',
       100,
+      '상품',
       20,
       80,
       '2026-10-21',
@@ -301,7 +301,7 @@ describe('China outbound registration workbook', () => {
       .addRow(['중국창고', 'SKU-A', '', 10])
     const inventory = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.inventory)
     inventory.addRow([...CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS])
-    inventory.addRow(['중국창고', 'SKU-A', '참조용 상품', '', '상품 / 商品', 100, 0, 100, '', ''])
+    inventory.addRow(['중국창고', 'SKU-A', '참조용 상품', '', 100, '상품', 0, 100, '', ''])
 
     const parsed = await parseChinaOutboundRegistrationWorkbook(await workbook.xlsx.writeBuffer())
 

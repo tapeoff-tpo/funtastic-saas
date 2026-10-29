@@ -172,20 +172,8 @@ describe('China outbound registration workbook', () => {
       30,
       'PALLET-1',
     ])
+    expect(boxes.rowCount).toBe(3)
     expect(boxes.getRow(3).values).toEqual([
-      undefined,
-      '중국창고',
-      'SKU-A',
-      '상품 A',
-      '블랙',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-    ])
-    expect(boxes.getRow(4).values).toEqual([
       undefined,
       '쿠팡',
       'SKU-B',

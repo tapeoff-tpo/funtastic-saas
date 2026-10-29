@@ -173,7 +173,7 @@ export type ChinaOutboundRegistrationWorkbookPrefilledBoxAllocation = {
 export type ChinaOutboundRegistrationWorkbookParseOptions = {
   /** New-shipment registration requires a complete packing allocation when any box is entered. */
   requireCompleteBoxAllocations?: boolean
-  /** Working workbooks include blank continuation rows for each selected item. */
+  /** Accept blank starter rows from workbooks downloaded before packing was saved. */
   ignoreBlankBoxPlaceholders?: boolean
   /** Existing shipments can be packed even if a legacy shipment has no destination snapshot. */
   requireDestination?: boolean
@@ -330,7 +330,19 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     ])
   }
   if (input.includeBlankBoxPlaceholders && prefilledItems.length > 0) {
+    // Saved allocations already provide editable rows. Add a starter row only
+    // for items without any saved box, so repeated downloads do not grow rows.
+    const allocatedItems = new Set(prefilledBoxAllocations.map((allocation) => sourceKey({
+      warehouseCode: allocation.warehouseCode.trim(),
+      sku: allocation.sku.trim(),
+      optionName: allocation.optionName?.trim() || null,
+    })))
     for (const item of prefilledItems) {
+      if (allocatedItems.has(sourceKey({
+        warehouseCode: item.warehouseCode.trim(),
+        sku: item.sku.trim(),
+        optionName: item.optionName?.trim() || null,
+      }))) continue
       addInputRow(boxes, [
         item.warehouseCode.trim(),
         item.sku.trim(),

@@ -145,7 +145,8 @@ describe('China outbound work workbook', () => {
     expect(rowCellValues(boxes, 2, 10)).toEqual([
       '중국창고A', '100001-0001', '상품 A', '블랙', 'BOX-01', 60, 50, 40, 30, 'PALLET-1',
     ])
-    expect(boxes.getCell('C3').value).toBe('상품 A')
+    expect(boxes.getCell('C3').value).toBe('상품 B')
+    expect(boxes.rowCount).toBe(3)
     if (legacy) {
       boxes.spliceColumns(3, 1)
       workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!.spliceColumns(3, 1)
@@ -160,6 +161,44 @@ describe('China outbound work workbook', () => {
       allocations: [{ boxNo: 'BOX-01', quantity: 60, lengthCm: 50, widthCm: 40, heightCm: 30 }],
     }, { shipmentItemId: 'item-b', allocations: [] }])
     expect(parsed.palletAssignments).toEqual([{ boxNo: 'BOX-01', palletNo: 'PALLET-1' }])
+  })
+
+  it('keeps exactly five box rows after importing 200 units split into five boxes', async () => {
+    const selection: ChinaOutboundWorkbookDetail = {
+      ...detail,
+      items: [{ ...detail.items[0], reservedQuantity: 200 }],
+    }
+    const workbook = await loadWorkbook(await exportChinaOutboundWorkWorkbook(selection))
+    const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
+    boxes.spliceRows(2, 1, ...Array.from({ length: 5 }, (_, index) => [
+      '중국창고A', '100001-0001', '상품 A', '블랙', `BOX-${index + 1}`, 40, '', '', '', '',
+    ]))
+    const imported = await parseChinaOutboundWorkWorkbook({
+      fileBuffer: await workbook.xlsx.writeBuffer(), detail: selection,
+    })
+    expect(imported.errors).toEqual([])
+    expect(imported.boxSplits[0].allocations).toHaveLength(5)
+
+    const saved: ChinaOutboundWorkbookDetail = {
+      ...selection,
+      boxes: imported.boxSplits[0].allocations.map((box) => ({
+        id: box.boxNo, boxNo: box.boxNo, palletId: null,
+      })),
+      boxItems: imported.boxSplits[0].allocations.map((box) => ({
+        id: box.boxNo, boxId: box.boxNo, shipmentItemId: 'item-a', quantity: box.quantity,
+      })),
+    }
+    for (let download = 0; download < 2; download += 1) {
+      const exported = await loadWorkbook(await exportChinaOutboundWorkWorkbook(saved))
+      const sheet = exported.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
+      expect(sheet.rowCount).toBe(6) // Header plus the five saved boxes.
+      expect([2, 3, 4, 5, 6].map((row) => sheet.getCell(`F${row}`).value)).toEqual([40, 40, 40, 40, 40])
+      const parsed = await parseChinaOutboundWorkWorkbook({
+        fileBuffer: await exported.xlsx.writeBuffer(), detail: saved,
+      })
+      expect(parsed.errors).toEqual([])
+      expect(parsed.boxSplits[0].allocations).toHaveLength(5)
+    }
   })
 
   it('rejects changing the selected outbound item quantity in a shared work workbook', async () => {

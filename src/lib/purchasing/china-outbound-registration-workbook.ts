@@ -464,7 +464,7 @@ function addCurrentInventorySheet(
       item.sku,
       item.productName,
       item.optionName ?? '',
-      bilingualItemCategory(item.itemCategory),
+      formatItemCategory(item.itemCategory),
       item.onHandQuantity,
       item.reservedQuantity,
       item.availableQuantity,
@@ -519,16 +519,10 @@ function addWarehouseDropdown(sheet: ExcelJS.Worksheet, range: string) {
   })
 }
 
-function bilingualItemCategory(value: string | null) {
+function formatItemCategory(value: string | null) {
   const normalized = value?.trim() ?? ''
   const category = normalized.replaceAll(/^[\[]|[\]]$/g, '').trim()
-  const chineseByCategory: Record<string, string> = {
-    '부재료': '辅料',
-    '원재료': '原材料',
-    '상품': '商品',
-  }
-  const chinese = chineseByCategory[category]
-  return chinese ? `${category} / ${chinese}` : normalized
+  return ['부재료', '원재료', '상품'].includes(category) ? category : normalized
 }
 
 function formatSeoulDate(value: Date | string | null) {

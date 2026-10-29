@@ -67,7 +67,7 @@ describe('China outbound registration workbook', () => {
       'SKU-A',
       '멜팅 스윗 도넛 플레이트 세트',
       '대',
-      '상품 / 商品',
+      '상품',
       100,
       20,
       80,

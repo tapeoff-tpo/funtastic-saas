@@ -64,7 +64,7 @@ describe('China outbound work workbook', () => {
 
     expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)!, 1, 6))
       .toEqual(CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS)
-    expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!, 1, 4))
+    expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!, 1, 5))
       .toEqual(CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS)
     expect(rowCellValues(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!, 1, 9))
       .toEqual(CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS)
@@ -81,8 +81,8 @@ describe('China outbound work workbook', () => {
     ])
 
     const itemSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!
-    expect(rowCellValues(itemSheet, 2, 4)).toEqual(['중국창고A', '100001-0001', '블랙', 100])
-    expect(rowCellValues(itemSheet, 3, 4)).toEqual(['중국창고B', '100002-0001', '', 50])
+    expect(rowCellValues(itemSheet, 2, 5)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', 100])
+    expect(rowCellValues(itemSheet, 3, 5)).toEqual(['중국창고B', '100002-0001', '상품 B', '', 50])
 
     const boxSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
     expect(rowCellValues(boxSheet, 2, 9)).toEqual(['중국창고A', '100001-0001', '블랙', '', '', '', '', '', ''])
@@ -136,7 +136,7 @@ describe('China outbound work workbook', () => {
   it('rejects changing the selected outbound item quantity in a shared work workbook', async () => {
     const workbook = await loadWorkbook(await exportChinaOutboundWorkWorkbook(detail))
     const itemSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!
-    itemSheet.getCell('D2').value = 99
+    itemSheet.getCell('E2').value = 99
 
     const parsed = await parseChinaOutboundWorkWorkbook({
       fileBuffer: await workbook.xlsx.writeBuffer(),

@@ -162,6 +162,7 @@ export async function exportChinaOutboundWorkWorkbook(
     prefilledItems: sortedItems.map((item) => ({
       warehouseCode: item.warehouseCode,
       sku: item.sku,
+      productName: item.productName,
       optionName: item.optionName,
       quantity: item.reservedQuantity,
     })),

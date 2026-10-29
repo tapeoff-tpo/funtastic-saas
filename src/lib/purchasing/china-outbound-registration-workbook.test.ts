@@ -5,7 +5,6 @@ import {
   CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_INVENTORY_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
-  CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS,
   CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_NAME,
@@ -114,7 +113,7 @@ describe('China outbound registration workbook', () => {
         memo: '기존 출고요청 작업용',
       },
       prefilledItems: [
-        { warehouseCode: '중국창고', sku: 'SKU-A', optionName: '블랙', quantity: 100 },
+        { warehouseCode: '중국창고', sku: 'SKU-A', productName: '상품 A', optionName: '블랙', quantity: 100 },
         { warehouseCode: '쿠팡', sku: 'SKU-B', optionName: null, quantity: 20 },
       ],
       prefilledBoxAllocations: [{
@@ -158,8 +157,8 @@ describe('China outbound registration workbook', () => {
       '2026-10-30',
       '기존 출고요청 작업용',
     ])
-    expect(items.getRow(2).values).toEqual([undefined, '중국창고', 'SKU-A', '블랙', 100])
-    expect(items.getRow(3).values).toEqual([undefined, '쿠팡', 'SKU-B', '', 20])
+    expect(items.getRow(2).values).toEqual([undefined, '중국창고', 'SKU-A', '상품 A', '블랙', 100])
+    expect(items.getRow(3).values).toEqual([undefined, '쿠팡', 'SKU-B', '', '', 20])
     expect(boxes.getRow(2).values).toEqual([
       undefined,
       '중국창고',
@@ -213,8 +212,9 @@ describe('China outbound registration workbook', () => {
     shipment.getCell('F2').value = '포워더 전달'
     const items = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!
     items.getCell('B2').value = 'SKU-A'
-    items.getCell('C2').value = '블랙'
-    items.getCell('D2').value = 100
+    items.getCell('C2').value = '상품 A'
+    items.getCell('D2').value = '블랙'
+    items.getCell('E2').value = 100
     const boxes = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
     boxes.getCell('B2').value = 'SKU-A'
     boxes.getCell('C2').value = '블랙'
@@ -355,7 +355,7 @@ describe('China outbound registration workbook', () => {
     shipment.addRow(['엑셀등록번호', '출고작업명', '도착지', '출고예정일', '메모'])
     shipment.addRow(['CN-20261027-XLSX-LEGACY01', '기존 양식 출고', '인천', '2026-10-27', ''])
     const items = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)
-    items.addRow([...CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS])
+    items.addRow(['출고창고', '품목코드', '옵션명', '출고수량'])
     items.addRow(['중국창고', 'SKU-A', '', 10])
     const boxes = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
     boxes.addRow([...CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS])
@@ -423,7 +423,7 @@ function createWorkbook() {
   const shipment = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)
   shipment.addRow([...CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS])
   const items = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)
-  items.addRow([...CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS])
+  items.addRow(['출고창고', '품목코드', '옵션명', '출고수량'])
   const boxes = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
   boxes.addRow([...CHINA_OUTBOUND_REGISTRATION_BOX_HEADERS])
   return workbook

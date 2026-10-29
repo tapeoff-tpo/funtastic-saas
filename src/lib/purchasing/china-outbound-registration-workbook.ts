@@ -32,6 +32,7 @@ export const CHINA_OUTBOUND_REGISTRATION_SHIPMENT_HEADERS = [
 export const CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS = [
   '출고창고',
   '품목코드',
+  '상품명',
   '옵션명',
   '출고수량',
 ] as const
@@ -64,6 +65,7 @@ export const CHINA_OUTBOUND_REGISTRATION_SHIPMENT_DISPLAY_HEADERS = [
 export const CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS = [
   '출고창고 / 出库仓库',
   '품목코드 / 商品编码',
+  '상품명 / 商品名称',
   '옵션명 / 规格',
   '출고수량 / 出库数量',
 ] as const
@@ -148,6 +150,7 @@ export type ChinaOutboundRegistrationCurrentInventoryRow = {
 export type ChinaOutboundRegistrationWorkbookPrefilledItem = {
   warehouseCode: string
   sku: string
+  productName?: string | null
   optionName?: string | null
   quantity: number
 }
@@ -287,19 +290,20 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     workbook,
     CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items,
     CHINA_OUTBOUND_REGISTRATION_ITEM_DISPLAY_HEADERS,
-    [22, 22, 28, 16],
+    [22, 22, 40, 28, 16],
   )
   if (prefilledItems.length > 0) {
     for (const item of prefilledItems) {
       addInputRow(items, [
         item.warehouseCode.trim(),
         item.sku.trim(),
+        item.productName?.trim() ?? '',
         item.optionName?.trim() ?? '',
         item.quantity,
       ])
     }
   } else {
-    addInputRow(items, ['', '', '', ''])
+    addInputRow(items, ['', '', '', '', ''])
   }
 
   const boxes = createSheet(
@@ -593,7 +597,8 @@ function parseItemsSheet(
     errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items, row: null, message: '출고상품 시트를 찾을 수 없습니다.' })
     return items
   }
-  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS, errors)
+  // Product names are reference text; older files without this column remain valid.
+  const columns = headerColumns(sheet, CHINA_OUTBOUND_REGISTRATION_ITEM_HEADERS.filter((header) => header !== '상품명'), errors)
   if (!columns) return items
   const lastRow = Math.min(sheet.rowCount, MAX_ITEM_ROWS + 1)
   for (let rowNumber = 2; rowNumber <= lastRow; rowNumber += 1) {

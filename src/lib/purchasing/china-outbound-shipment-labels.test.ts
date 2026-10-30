@@ -62,9 +62,10 @@ describe('China outbound shipment label workbook', () => {
     expect(boxSheet.getCell('D2').numFmt).toBe('#,##0" PC"')
     expect(boxSheet.getCell('F2').value).toBe('不退')
     expect(cellText(boxSheet.getCell('A3'))).toContain('상품 A (블랙)')
-    expect(cellText(boxSheet.getCell('A3'))).toContain('로케이션 / 库位: A-01-03')
+    expect(cellText(boxSheet.getCell('A3'))).not.toContain('로케이션')
+    expect(cellText(boxSheet.getCell('D8'))).toBe('로케이션 / 库位:\nA-01-03')
     expect(boxSheet.getCell('D5').value).toBe(5)
-    expect(boxSheet.getCell('D8').value).toBe('박스 1')
+    expect(cellText(boxSheet.getCell('A8'))).toBe('박스번호 / 箱子号: 박스 1')
     expect(fillColor(boxSheet.getCell('A2'))).toBe('FFCFE8D0')
     expect(boxSheet.pageSetup.printArea).toBe('A1:F9')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 04')!.getCell('A1').value).toBe('TAPEOFF')
@@ -104,13 +105,13 @@ describe('China outbound shipment label workbook', () => {
     expect(palletSheet.getCell('A2').value).toBe('번호\n序号')
 
     boxSheet.getCell('A2').value = '中文商品名'
-    boxSheet.getCell('A3').value = '한국어 상품명 / 韩文名称: 상품 A (블랙)\n로케이션 / 库位: 수정된 위치'
+    boxSheet.getCell('D8').value = '로케이션 / 库位: 수정된 위치'
     palletSheet.getCell('D3').value = '수정된 위치'
     palletSheet.getCell('E3').value = '中文商品名'
     const edited = new ExcelJS.Workbook()
     await edited.xlsx.load(await workbook.xlsx.writeBuffer())
     expect(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A2').value).toBe('中文商品名')
-    expect(cellText(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A3'))).toContain('수정된 위치')
+    expect(cellText(edited.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('D8'))).toContain('수정된 위치')
     expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('D3').value).toBe('수정된 위치')
     expect(edited.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('E3').value).toBe('中文商品名')
   })
@@ -143,11 +144,14 @@ describe('China outbound shipment label workbook', () => {
     const box = workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!
     expect([2, 5, 8, 11].map((row) => box.getCell(`D${row}`).value)).toEqual([3, 3, 4, 8])
     expect([3, 6, 9, 12].map((row) => cellText(box.getCell(`A${row}`)))).toEqual([
-      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: A-01',
-      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: B-02',
       '한국어 상품명 / 韩文名称: 동일 상품 (블랙)',
-      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)\n로케이션 / 库位: A-01',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)',
+      '한국어 상품명 / 韩文名称: 동일 상품 (블랙)',
     ])
+
+    expect(cellText(box.getCell('D14'))).toContain('SKU-A: A-01')
+    expect(cellText(box.getCell('D14'))).toContain('SKU-B: B-02')
 
     const pallet = workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!
     expect([3, 4, 5, 6].map((row) => [pallet.getCell(`B${row}`).value, pallet.getCell(`C${row}`).value, pallet.getCell(`D${row}`).value ?? '', pallet.getCell(`G${row}`).value]))
@@ -188,6 +192,29 @@ describe('China outbound shipment label workbook', () => {
     expect(Array.from({ length: 12 }, (_, index) => sheet.getCell(index + 3, 7).value as number).reduce((sum, quantity) => sum + quantity, 0)).toBe(78)
   })
 
+  it('omits Chinese product names only from pallets and uses consistent font sizes across pallet sheets', async () => {
+    const buffer = await exportChinaOutboundShipmentLabelWorkbook({
+      ...detail,
+      items: detail.items.map((item) => ({ ...item, chineseProductName: '中文商品名' })),
+    })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A2').value).toBe('中文商品名')
+    const sizes = new Set<number | undefined>()
+    const titleSizes = new Set<number | undefined>()
+    for (const sheet of workbook.worksheets.filter((sheet) => sheet.name.startsWith('파렛트'))) {
+      expect(sheet.getCell('E3').value).toBe(sheet.name.endsWith('01') ? '상품 A' : '상품 B')
+      titleSizes.add(sheet.getCell('A1').font.size)
+      for (let column = 1; column <= 7; column += 1) {
+        expect(sheet.getCell(2, column).font.size).toBe(16)
+        for (let row = 3; row <= sheet.rowCount; row += 1) sizes.add(sheet.getCell(row, column).font.size)
+      }
+    }
+    expect(sizes.size).toBe(1)
+    expect(titleSizes.size).toBe(1)
+    expect([...sizes][0]).toBeGreaterThanOrEqual(18)
+  })
+
   it('creates a Windows-safe attachment filename', () => {
     expect(chinaOutboundShipmentLabelFilename('CN:10/15', new Date('2026-10-15T00:00:00.000Z')))
       .toBe('CN_10_15_부착용쉽먼트_20261015.xlsx')
@@ -215,7 +242,7 @@ describe('China outbound shipment label workbook', () => {
     expect(singleBox.getCell('A1').font.size).toBe(60)
     expect(singleBox.getCell('D2').font.size).toBe(40)
     expect(singleBox.getCell('D2').value).toBe(40)
-    expect(singleBox.getCell('D5').value).toBe('박스 2')
+    expect(cellText(singleBox.getCell('A5'))).toBe('박스번호 / 箱子号: 박스 2')
     expect([1, 2, 3, 4, 5, 6].reduce((height, row) => height + singleBox.getRow(row).height, 0)).toBe(540)
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')).toBeUndefined()
   })
@@ -246,7 +273,7 @@ describe('China outbound shipment label workbook', () => {
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A1').value).toBe('TAPEOFF')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 02')!.getCell('A1').value).toBe('TAPEOFF')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 03')).toBeUndefined()
-    expect(cellText(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('A3'))).toContain('A-01-03')
+    expect(cellText(workbook.getWorksheet('박스 쉽먼트(装箱标签) 01')!.getCell('D8'))).toContain('A-01-03')
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('C3').value).toBe(2)
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('D3').value).toBe('A-01-03')
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!.getCell('G3').value).toBe(100)

@@ -171,12 +171,17 @@ function addPalletLabelSheets(
     return
   }
 
-  for (const [index, pallet] of pallets.entries()) {
+  const labels = pallets.map((pallet) => ({
+    pallet,
+    products: aggregatePalletLabelRows(boxesByPalletId.get(pallet.id) ?? [], boxItemsByBoxId, itemById),
+  }))
+  // Use one body size across all pallet sheets, including short quantities and long names.
+  const bodyFontSize = Math.min(...labels.map((label) => palletBodyFontSize(label.products)))
+  const titleFontSize = Math.min(76, ...labels.map(({ pallet }) => Math.floor(570 / textWidth(`TAPEOFF (${pallet.palletNo})`))))
+  for (const [index, { pallet, products }] of labels.entries()) {
     const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets, index))
     configureLabelSheet(sheet, 'G')
-    const boxes = boxesByPalletId.get(pallet.id) ?? []
-    const rows = aggregatePalletLabelRows(boxes, boxItemsByBoxId, itemById)
-    addLargePalletLabel(sheet, pallet.palletNo, detail.shipment.plannedOutboundDate, rows)
+    addLargePalletLabel(sheet, pallet.palletNo, detail.shipment.plannedOutboundDate, products, { bodyFontSize, titleFontSize })
   }
 }
 
@@ -238,7 +243,6 @@ function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: Lab
     name.value = { richText: [
       { text: '한국어 상품명 / 韩文名称: ', font: { name: 'Arial', size: labelFontSize } },
       { text: koreanProductName(product.productName, product.optionName), font: { name: 'Arial', size: productFontSize } },
-      ...(product.location ? [{ text: `\n로케이션 / 库位: ${product.location}`, font: { name: 'Arial', size: labelFontSize } }] : []),
     ] }
     name.border = ALL_BORDERS
     sheet.getRow(row + 1).height = Math.max(24, 90 / count)
@@ -249,11 +253,21 @@ function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: Lab
   sheet.mergeCells(`A${boxRow}:C${boxRow + 1}`)
   sheet.mergeCells(`D${boxRow}:F${boxRow + 1}`)
   const boxLabel = sheet.getCell(`A${boxRow}`)
-  boxLabel.value = '박스번호 / 箱子号:'
-  boxLabel.font = { name: 'Arial', size: 34 }
+  boxLabel.value = { richText: [
+    { text: '박스번호 / 箱子号: ', font: { name: 'Arial', size: 26 } },
+    { text: boxNo, font: { name: 'Arial', size: 40 } },
+  ] }
+  boxLabel.font = { name: 'Arial', size: 40 }
   boxLabel.border = ALL_BORDERS
   const boxValue = sheet.getCell(`D${boxRow}`)
-  boxValue.value = boxNo
+  const locations = [...new Set(products.map((product) => product.location).filter(Boolean))]
+  const locationLines = locations.length <= 1
+    ? locations
+    : products.filter((product) => product.location).map((product) => `${product.sku}: ${product.location}`)
+  boxValue.value = locationLines.length ? { richText: [
+    { text: '로케이션 / 库位:\n', font: { name: 'Arial', size: 22 } },
+    { text: locationLines.join('\n'), font: { name: 'Arial', size: locations.length === 1 ? 40 : Math.max(12, Math.min(24, Math.floor(100 / locationLines.length))) } },
+  ] } : null
   boxValue.font = { name: 'Arial', size: 40 }
   boxValue.border = ALL_BORDERS
   sheet.getRow(boxRow).height = 90
@@ -262,24 +276,41 @@ function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: Lab
 }
 
 type PalletLabelProductRow = LabelProductRow & { boxCount: number }
+const PALLET_LABEL_WIDTHS = [8, 18, 18, 18, 55, 22, 16]
+
+function palletProductValues(product: PalletLabelProductRow, index: number) {
+  return [index + 1, product.sku, product.boxCount, product.location, product.productName, product.optionName, product.quantity]
+}
+
+function palletBodyFontSize(products: PalletLabelProductRow[]) {
+  const rowHeight = 380 / Math.max(7, products.length)
+  let size = Math.floor(Math.min(28, rowHeight * 0.7))
+  const rows = products.map(palletProductValues)
+  while (size > 10 && rows.some((values) => values.some((value, column) => {
+    const width = PALLET_LABEL_WIDTHS[column] * 5.25 - 8
+    const lines = String(value ?? '').split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(textWidth(line) * size / width)), 0)
+    return lines * size * 1.2 > rowHeight - 5
+  }))) size -= 1
+  return size
+}
 
 function addLargePalletLabel(
   sheet: ExcelJS.Worksheet,
   palletNo: string,
   outboundDate: string | null,
   products: PalletLabelProductRow[],
+  typography: { bodyFontSize: number; titleFontSize: number },
 ) {
-  const widths = [8, 18, 18, 18, 55, 22, 16]
-  sheet.columns = widths.map((width) => ({ width }))
+  sheet.columns = PALLET_LABEL_WIDTHS.map((width) => ({ width }))
   sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
   sheet.mergeCells('A1:E1')
   const title = `TAPEOFF (${palletNo})`
   sheet.getCell('A1').value = title
-  sheet.getCell('A1').font = { name: 'Arial', bold: true, size: Math.min(76, Math.floor(570 / textWidth(title))) }
+  sheet.getCell('A1').font = { name: 'Arial', bold: true, size: typography.titleFontSize }
   sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' }
   sheet.mergeCells('F1:G1')
   sheet.getCell('F1').value = `출고일 / 出库日期\n${outboundDate ?? ''}`
-  sheet.getCell('F1').font = { name: 'Arial', size: 18, bold: true }
+  sheet.getCell('F1').font = { name: 'Arial', size: 16, bold: true }
   sheet.getCell('F1').alignment = { vertical: 'bottom', horizontal: 'center', wrapText: true }
   sheet.getRow(1).height = 100
 
@@ -287,8 +318,8 @@ function addLargePalletLabel(
   const header = sheet.getRow(2)
   header.values = headers
   header.height = 60
-  header.eachCell((cell, column) => {
-    cell.font = { name: 'Arial', size: column === 2 ? 16 : 18 }
+  header.eachCell((cell) => {
+    cell.font = { name: 'Arial', size: 16 }
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
     cell.border = ALL_BORDERS
   })
@@ -300,17 +331,13 @@ function addLargePalletLabel(
     const row = sheet.getRow(index + 3)
     row.height = rowHeight
     row.values = product
-      ? [index + 1, product.sku, product.boxCount, product.location, [product.productName, product.chineseProductName].filter(Boolean).join('\n'), product.optionName, product.quantity]
+      ? palletProductValues(product, index)
       : [index + 1]
     for (let column = 1; column <= 7; column += 1) {
       const cell = row.getCell(column)
       cell.border = ALL_BORDERS
       cell.alignment = { horizontal: column === 5 ? 'left' : 'center', vertical: 'middle', wrapText: true }
-      let size = Math.min(28, rowHeight * 0.7)
-      const text = cell.text
-      const availableWidth = widths[column - 1] * 5.25 - 8
-      while (size > 10 && text.split('\n').reduce((lines, line) => lines + Math.max(1, Math.ceil(textWidth(line) * size / availableWidth)), 0) * size * 1.2 > rowHeight - 5) size -= 1
-      cell.font = { name: 'Arial', size }
+      cell.font = { name: 'Arial', size: typography.bodyFontSize }
       if ([1, 3, 7].includes(column)) cell.numFmt = '#,##0'
     }
   }

@@ -217,20 +217,21 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     const pallet = workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 01')!
     expect(box.getCell('A1').value).toBe('TAPEOFF')
     expect(box.pageSetup.printArea).toBe('A1:F12')
-    expect(box.getCell('D11').value).toBe('박스 1')
+    expect((box.getCell('A11').value as ExcelJS.CellRichTextValue).richText.map((run) => run.text).join('')).toBe('박스번호 / 箱子号: 박스 1')
+    expect((box.getCell('D11').value as ExcelJS.CellRichTextValue).richText.map((run) => run.text).join('')).toContain('SKU-1: A-01')
     expect(box.getCell('A2').value).toBe('衣架')
     expect([3, 6, 9].map((row) => {
       const value = box.getCell(`A${row}`).value as ExcelJS.CellRichTextValue
       return value.richText.map((run) => run.text).join('')
     })).toEqual([
-      '한국어 상품명 / 韩文名称: 상품 A\n로케이션 / 库位: A-01',
-      '한국어 상품명 / 韩文名称: 상품 B\n로케이션 / 库位: B-02',
+      '한국어 상품명 / 韩文名称: 상품 A',
+      '한국어 상품명 / 韩文名称: 상품 B',
       '한국어 상품명 / 韩文名称: 상품 C',
     ])
     expect([3, 4, 5].map((row) => pallet.getCell(`D${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
     expect(box.getCell('D2').value).toBe(2)
     expect(pallet.getCell('E2').value).toBe('품명 / 品名')
-    expect(pallet.getCell('E3').value).toBe('상품 A\n衣架')
+    expect(pallet.getCell('E3').value).toBe('상품 A')
     expect(pallet.getCell('G3').value).toBe(2)
 
     box.getCell('A2').value = '中文商品名'

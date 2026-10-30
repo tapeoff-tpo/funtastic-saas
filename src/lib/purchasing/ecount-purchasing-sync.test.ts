@@ -15,6 +15,12 @@ import {
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
 
+it('preserves inspected purchases and suppresses only the same management code and SKU in refreshed snapshots', () => {
+  const keys = getSaasChinaProtectedPurchaseKeys([{ sku: 'SKU-A', purchaseManagementCode: 'PM-001', rawData: {}, purchaseInspection: { version: 1 } }])
+  const candidates = [{ sku: 'SKU-A', purchaseManagementCode: 'PM-001' }, { sku: 'SKU-A', purchaseManagementCode: 'PM-002' }]
+  expect(excludeSaasChinaProtectedSnapshotItems(candidates, keys)).toEqual([candidates[1]])
+})
+
 describe('bulk payment override persistence', () => {
   it('carries a manual bulk-payment marker across an Ecount stage replacement', () => {
     const overrides = collectBulkPaymentOverrides([{

@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),
-  status: z.enum(['requested', 'purchased', 'purchase_completed', 'china_arrived', 'outbound_requested', 'completed']),
+  status: z.enum(['requested', 'purchased', 'purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed']),
 })
 
 export async function PATCH(request: NextRequest) {

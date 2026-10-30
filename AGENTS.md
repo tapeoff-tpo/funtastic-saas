@@ -42,7 +42,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Purchasing Operations Policy
 
 - The purchasing workflow is an operational workflow, not a marketing or analytics-only feature. Keep purchasing data shared under the canonical workspace owner.
-- The active purchasing statuses are: `발주검토`, `발주요청`, `구매완료`, `중국창고도착`, `중국출고요청`, and `중국출고완료`.
+- The active purchasing statuses are: `발주검토`, `발주요청`, `구매완료`, `검수`, `중국창고도착`, `중국출고요청`, and `중국출고완료`.
+- Saving tracking numbers for a purchase-completed row moves it into `검수`. Support multiple tracking numbers and per-tracking box quantities, dimensions, and weights.
+- Quantity discrepancies are `입고오류` handled in `검수`. Arrival requires completed measurements and counts; shortages/excesses require explicit acknowledgement and a resolution note. Only the verified actual received quantity may enter China inventory.
+- Inspection records must survive Excel/Ecount refreshes and cannot be bypassed by generic status/quantity edits.
 - `발주검토` is managed as its own review page. The main `발주` page manages `발주요청` through `중국출고완료` in one place.
 - The old purchase/shipping/arrival tab split must not be reintroduced unless the user explicitly asks for it.
 - Moving an item from `발주검토` to `발주요청` must set the `발주요청 날짜` automatically to the move date, while still allowing the user to manually edit the date afterward.

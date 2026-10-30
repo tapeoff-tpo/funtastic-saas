@@ -54,6 +54,11 @@ describe('normalize optional purchase request quantity', () => {
 })
 
 describe('purchase request stage quantities', () => {
+  it('keeps inspection quantities in the purchase pipeline and payment view', () => {
+    const row = { sku: 'SKU-INSPECT', status: 'inspecting', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: 90, rawData: {} }
+    expect(summarizePurchaseReviewPipelineQuantities([row]).get(row.sku)?.purchaseInProgressQuantity).toBe(100)
+    expect(isPurchasePaymentFlowViewItem({ status: 'inspecting' }, 'purchase_completed')).toBe(true)
+  })
   it('reads outbound requested quantity from raw data and falls back to received or purchased quantity', () => {
     expect(getOutboundRequestedQuantity({
       rawData: { outboundRequestedQuantity: 7 },

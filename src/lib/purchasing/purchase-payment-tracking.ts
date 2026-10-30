@@ -15,6 +15,7 @@ const PAYMENT_TRACKING_COLUMNS = [
   'cost_exchange_rate_krw',
   'cost_exchange_rate_date',
   'tracking_number',
+  'purchase_inspection',
 ] as const
 
 type PaymentTrackingSchemaRow = {
@@ -57,7 +58,8 @@ export function ensurePurchasePaymentTrackingSchema() {
         ADD COLUMN IF NOT EXISTS bulk_payment_deposit_memo text,
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_krw numeric(12, 4),
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_date date,
-        ADD COLUMN IF NOT EXISTS tracking_number varchar(100)
+        ADD COLUMN IF NOT EXISTS tracking_number varchar(100),
+        ADD COLUMN IF NOT EXISTS purchase_inspection jsonb
     `)
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS purchase_request_items_user_payment_status

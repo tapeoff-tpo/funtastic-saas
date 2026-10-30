@@ -1841,11 +1841,12 @@ export async function syncEcountPurchasingSnapshot(input: {
         sku: purchaseRequestItems.sku,
         purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
         rawData: purchaseRequestItems.rawData,
+        purchaseInspection: purchaseRequestItems.purchaseInspection,
       })
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        sql`${purchaseRequestItems.rawData}->'saasChinaMode' = 'true'::jsonb`,
+        sql`(${purchaseRequestItems.rawData}->'saasChinaMode' = 'true'::jsonb OR ${purchaseRequestItems.purchaseInspection} IS NOT NULL)`,
       ))
     const saasChinaProtectedPurchaseKeys = getSaasChinaProtectedPurchaseKeys(
       saasChinaProtectedRows,
@@ -1864,6 +1865,7 @@ export async function syncEcountPurchasingSnapshot(input: {
           sku: purchaseRequestItems.sku,
           purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
           rawData: purchaseRequestItems.rawData,
+          purchaseInspection: purchaseRequestItems.purchaseInspection,
         })
         .from(purchaseRequestItems)
         .where(and(
@@ -1872,7 +1874,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         ))
       const conflicts = existingRows.filter((row) => {
         const source = readRawDataSource(row.rawData)
-        const isMatchingProtectedSaasChinaRow = isSaasChinaMode(row.rawData)
+        const isMatchingProtectedSaasChinaRow = (isSaasChinaMode(row.rawData) || Boolean(row.purchaseInspection))
           && snapshotManagedItems.some((item) => saasChinaPurchaseKeysMatch(row, item))
         if (isMatchingProtectedSaasChinaRow) return false
         return !REPLACEABLE_ECOUNT_SOURCES.includes(source as (typeof REPLACEABLE_ECOUNT_SOURCES)[number])
@@ -2492,11 +2494,11 @@ function sumQuantities<T extends { quantity?: number; requestedQuantity?: number
  * code) is never enough to suppress a raw row.
  */
 export function getSaasChinaProtectedPurchaseKeys(
-  rows: ReadonlyArray<PurchaseManagementSkuIdentity & { rawData: unknown }>,
+  rows: ReadonlyArray<PurchaseManagementSkuIdentity & { rawData: unknown; purchaseInspection?: unknown }>,
 ) {
   const keys = new Set<string>()
   for (const row of rows) {
-    if (!isSaasChinaMode(row.rawData)) continue
+    if (!isSaasChinaMode(row.rawData) && !row.purchaseInspection) continue
     const key = saasChinaPurchaseKey(row)
     if (key) keys.add(key)
   }
@@ -2552,7 +2554,7 @@ function isReplaceableEcountSource(sources: readonly string[] = REPLACEABLE_ECOU
     sources.map((source) => sql`${source}`),
     sql`, `,
   )
-  return sql`COALESCE(${purchaseRequestItems.rawData}->>'source', '') IN (
+  return sql`${purchaseRequestItems.purchaseInspection} IS NULL AND COALESCE(${purchaseRequestItems.rawData}->>'source', '') IN (
     ${sourceList}
   )`
 }

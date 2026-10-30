@@ -33,6 +33,7 @@ import {
   type PurchaseRequestStatus,
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, type PurchaseInspection } from './purchase-inspection'
 import {
   ensurePurchaseFundLedgerSchema,
   reconcilePurchaseFundDebitsInTransaction,
@@ -64,6 +65,7 @@ const CHINA_INVENTORY_WAREHOUSE_ORDER = [
 const ACTIVE_PURCHASE_PAYMENT_STATUSES = [
   'purchased',
   'purchase_completed',
+  'inspecting',
   'china_arrived',
   'outbound_requested',
 ] as const
@@ -221,7 +223,7 @@ export type PurchasePaymentFlowSort = (typeof PURCHASE_PAYMENT_FLOW_SORTS)[numbe
 export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
   total: '발주금액 총액',
   purchase_before: '발주요청',
-  purchase_completed: '구매완료',
+  purchase_completed: '구매완료·검수',
   china_arrived: '중국창고도착',
   outbound_requested: '중국출고요청',
   order_number_registered: '주문서번호 등록',
@@ -477,7 +479,7 @@ export function isPurchasePaymentFlowViewItem(
 
   if (view === 'total') return true
   if (view === 'purchase_before') return item.status === 'purchased'
-  if (view === 'purchase_completed') return item.status === 'purchase_completed'
+  if (view === 'purchase_completed') return item.status === 'purchase_completed' || item.status === 'inspecting'
   if (view === 'china_arrived') return item.status === 'china_arrived'
   if (view === 'outbound_requested') return item.status === 'outbound_requested'
   if (view === 'order_number_registered') return hasSupplierOrderNumber
@@ -703,7 +705,7 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, s
   if (view === 'purchase_before') {
     conditions.push(eq(purchaseRequestItems.status, 'purchased'))
   } else if (view === 'purchase_completed') {
-    conditions.push(eq(purchaseRequestItems.status, 'purchase_completed'))
+    conditions.push(inArray(purchaseRequestItems.status, ['purchase_completed', 'inspecting']))
   } else if (view === 'china_arrived') {
     conditions.push(eq(purchaseRequestItems.status, 'china_arrived'))
   } else if (view === 'outbound_requested') {
@@ -727,6 +729,8 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, s
       ilike(purchaseRequestItems.optionName, pattern),
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+      ilike(purchaseRequestItems.trackingNumber, pattern),
+      purchaseTrackingSearchCondition(pattern),
     )!)
   }
 
@@ -1016,7 +1020,7 @@ export async function getPurchaseRequests(input: {
       conditions.push(sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`)
       conditions.push(sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`)
     } else if (input.status === 'purchase_completed') {
-      conditions.push(eq(purchaseRequestItems.status, 'purchase_completed'))
+      conditions.push(inArray(purchaseRequestItems.status, ['purchase_completed', 'inspecting']))
       conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`)
       conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`)
     } else {
@@ -1028,7 +1032,7 @@ export async function getPurchaseRequests(input: {
           sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
         ),
         and(
-          eq(purchaseRequestItems.status, 'purchase_completed'),
+          inArray(purchaseRequestItems.status, ['purchase_completed', 'inspecting']),
           sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
           sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
         ),
@@ -1054,6 +1058,7 @@ export async function getPurchaseRequests(input: {
       ilike(purchaseRequestItems.optionName, pattern),
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+      purchaseTrackingSearchCondition(pattern),
     )!)
   }
 
@@ -1068,7 +1073,7 @@ export async function getPurchaseRequests(input: {
   ]
   const overduePurchaseCompletedConditions: SQL[] = [
     eq(purchaseRequestItems.userId, input.userId),
-    eq(purchaseRequestItems.status, 'purchase_completed'),
+    inArray(purchaseRequestItems.status, ['purchase_completed', 'inspecting']),
     sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
     sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
   ]
@@ -1080,6 +1085,7 @@ export async function getPurchaseRequests(input: {
       ilike(purchaseRequestItems.optionName, pattern),
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+      purchaseTrackingSearchCondition(pattern),
     )!
     overduePurchaseRequestConditions.push(searchCondition)
     overduePurchaseCompletedConditions.push(searchCondition)
@@ -1577,6 +1583,7 @@ function sortPurchaseReviewListRows<T extends {
 
 const PURCHASE_REVIEW_HISTORY_STATUSES = [
   'purchase_completed',
+  'inspecting',
   'china_arrived',
   'outbound_requested',
   'completed',
@@ -1759,6 +1766,7 @@ export function summarizePurchaseReviewPipelineQuantities(
     } else if (
       row.status === 'purchased'
       || row.status === 'purchase_completed'
+      || row.status === 'inspecting'
       || row.status === 'china_arrived'
     ) {
       current.purchaseInProgressQuantity += purchasePipelineQuantity(row)
@@ -1920,6 +1928,52 @@ export async function getCompletedOutboundDateOptions(userId: string) {
     .orderBy(desc(purchaseRequestItems.outboundExpectedDate))
 }
 
+export function purchaseTrackingSearchCondition(pattern: string): SQL {
+  return or(ilike(purchaseRequestItems.trackingNumber, pattern), sql`EXISTS (
+    SELECT 1 FROM jsonb_array_elements(COALESCE(${purchaseRequestItems.purchaseInspection}->'parcels', '[]'::jsonb)) parcel
+    WHERE parcel->>'trackingNumber' ILIKE ${pattern}
+  )`)!
+}
+
+export async function getPurchaseInspection(userId: string, id: string) {
+  await ensurePurchasePaymentTrackingSchema()
+  const [row] = await db.select({ item: purchaseRequestItems, images: products.images })
+    .from(purchaseRequestItems).leftJoin(products, and(eq(products.userId, purchaseRequestItems.userId), eq(products.internalSku, purchaseRequestItems.sku)))
+    .where(and(eq(purchaseRequestItems.userId, userId), eq(purchaseRequestItems.id, id))).limit(1)
+  if (!row) return null
+  return {
+    id: row.item.id, status: row.item.status, productName: row.item.productName, sku: row.item.sku,
+    inspection: row.item.purchaseInspection ?? createPurchaseInspection(row.item.actualPurchaseQuantity ?? row.item.requestedQuantity, row.item.trackingNumber),
+    imageUrls: (row.images ?? []).sort((a, b) => a.sortOrder - b.sortOrder).map((image) => image.url).filter((url) => /^https?:\/\//i.test(url) || /^\/(?!\/)/.test(url)),
+  }
+}
+
+export async function savePurchaseInspection(input: { userId: string; actorId: string; id: string; data: unknown }) {
+  const parsed = purchaseInspectionInputSchema.parse(input.data)
+  await ensurePurchasePaymentTrackingSchema()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const [current] = await tx.select().from(purchaseRequestItems)
+      .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id))).for('update')
+    if (!current) return null
+    if (!['purchase_completed', 'inspecting'].includes(current.status)) throw new Error('구매완료·검수 단계에서만 송장과 박스를 수정할 수 있습니다.')
+    if ((current.purchaseInspection?.revision ?? 0) !== parsed.revision) throw new Error('다른 작업자가 검수 정보를 변경했습니다. 다시 열어 확인해주세요.')
+    const inspection: PurchaseInspection = {
+      version: 1, revision: parsed.revision + 1,
+      expectedQuantity: current.purchaseInspection?.expectedQuantity ?? current.actualPurchaseQuantity ?? current.requestedQuantity,
+      parcels: parsed.parcels, resolutionNote: parsed.resolutionNote,
+      checkedAt: parsed.complete ? new Date().toISOString() : null, checkedBy: parsed.complete ? input.actorId : null,
+    }
+    const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : inspectionSummary(inspection)
+    await tx.update(purchaseRequestItems).set({
+      status: 'inspecting', purchaseInspection: inspection,
+      trackingNumber: inspection.parcels[0].trackingNumber,
+      chinaReceivedQuantity: summary.quantityPending ? null : summary.receivedQuantity, updatedAt: new Date(),
+    }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
+    return { inspection, summary }
+  })
+}
+
 export async function updatePurchaseRequestStatus(input: {
   userId: string
   id: string
@@ -1943,6 +1997,17 @@ export async function updatePurchaseRequestStatus(input: {
 
     if (!current) return null
     if (current.status === input.status) return { id: current.id }
+    if (current.purchaseInspection && ['china_arrived', 'outbound_requested', 'completed'].includes(current.status)
+      && ['requested', 'purchased', 'purchase_completed', 'inspecting'].includes(input.status)) throw new Error('검수가 완료된 입고 기록을 이전 단계로 되돌릴 수 없습니다.')
+    if (input.status === 'inspecting' && current.status !== 'purchase_completed') throw new Error('구매완료 항목만 검수로 이동할 수 있습니다.')
+    if (input.status === 'inspecting' && !current.trackingNumber?.trim() && !current.purchaseInspection?.parcels.length) throw new Error('송장번호를 먼저 등록해주세요.')
+    if (current.status === 'inspecting' && input.status !== 'china_arrived') throw new Error('검수 화면에서 검수를 완료해주세요.')
+    if (['china_arrived', 'outbound_requested', 'completed'].includes(input.status)
+      && ['requested', 'purchased', 'purchase_completed', 'inspecting'].includes(current.status)) {
+      if (input.status !== 'china_arrived' || current.status !== 'inspecting' || !current.purchaseInspection?.checkedAt) throw new Error('송장별 박스 검수를 먼저 완료해주세요.')
+      validateInspectionCompletion(current.purchaseInspection)
+      if (current.chinaReceivedQuantity !== inspectionSummary(current.purchaseInspection).receivedQuantity) throw new Error('검수 수량이 변경되었습니다. 다시 확인해주세요.')
+    }
 
     const saasChinaMode = usesSaasChinaInventory(current.rawData)
     if (saasChinaMode) {
@@ -1960,7 +2025,7 @@ export async function updatePurchaseRequestStatus(input: {
     }
 
     if (input.status === 'china_arrived') {
-      if (saasChinaMode) {
+      if (saasChinaMode && purchaseQuantity(current) > 0) {
         await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
           userId: input.userId,
           createdBy: input.userId,
@@ -1990,6 +2055,10 @@ export async function updatePurchaseRequestStatus(input: {
     const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
       status: input.status,
       updatedAt: new Date(),
+    }
+    if (input.status === 'inspecting' && !current.purchaseInspection) {
+      values.purchaseInspection = createPurchaseInspection(current.actualPurchaseQuantity ?? current.requestedQuantity, current.trackingNumber)
+      values.chinaReceivedQuantity = null
     }
     if (input.status !== 'requested' && !current.costExchangeRateKrw && exchangeRateReference) {
       values.costExchangeRateKrw = String(exchangeRateReference.rate)
@@ -2127,6 +2196,18 @@ export async function updatePurchaseRequestPlanFields(input: {
     if (!current) return null
 
     const effectiveBulkPaymentPending = input.bulkPaymentPending ?? current.bulkPaymentPending
+    if (current.purchaseInspection) {
+      if (requestedQuantity !== undefined && requestedQuantity !== current.requestedQuantity) throw new Error('검수를 시작한 항목의 발주수량은 변경할 수 없습니다.')
+      if (actualPurchaseQuantity !== undefined && actualPurchaseQuantity !== current.actualPurchaseQuantity) throw new Error('검수를 시작한 항목의 구매수량은 변경할 수 없습니다.')
+      if (chinaReceivedQuantity !== undefined && chinaReceivedQuantity !== current.chinaReceivedQuantity) throw new Error('검수 기록이 있는 입고수량은 검수 화면에서 관리해주세요.')
+      if (input.trackingNumber !== undefined && values.trackingNumber !== current.trackingNumber) throw new Error('송장번호는 송장·검수 화면에서 수정해주세요.')
+    }
+    if (input.trackingNumber?.trim() && current.status === 'purchase_completed' && !current.purchaseInspection) {
+      values.status = 'inspecting'
+      values.purchaseInspection = createPurchaseInspection(actualPurchaseQuantity ?? current.actualPurchaseQuantity ?? current.requestedQuantity, input.trackingNumber)
+      values.trackingNumber = values.purchaseInspection.parcels[0]?.trackingNumber ?? null
+      values.chinaReceivedQuantity = null
+    }
     if (input.bulkPaymentDueDate && !effectiveBulkPaymentPending) return null
 
     const supplierOrderNumber = input.supplierOrderNumber === undefined
@@ -2149,7 +2230,7 @@ export async function updatePurchaseRequestPlanFields(input: {
 
     const currentSaasChinaMode = usesSaasChinaInventory(current.rawData)
     if (input.saasChinaMode !== undefined) {
-      const canChangeSaasMode = current.status === 'purchased' || current.status === 'purchase_completed'
+      const canChangeSaasMode = current.status === 'purchased' || current.status === 'purchase_completed' || current.status === 'inspecting'
       if (!canChangeSaasMode && input.saasChinaMode !== currentSaasChinaMode) {
         throw new Error('SaaS 중국재고 연동은 중국창고도착 전에만 변경할 수 있습니다.')
       }
@@ -2721,7 +2802,7 @@ export async function completeOutstandingPurchaseRequestItems(input: {
       ))
     const workspaceIds = new Set(workspaceRows.map((row) => row.id))
     const eligibleRows = workspaceRows.filter((row) => (
-      isOutstandingPurchasePaymentRow(row) && !usesSaasChinaInventory(row.rawData)
+      isOutstandingPurchasePaymentRow(row) && row.status !== 'inspecting' && !usesSaasChinaInventory(row.rawData)
     ))
     const eligibleIds = eligibleRows.map((row) => row.id)
 
@@ -2749,6 +2830,7 @@ export async function completeOutstandingPurchaseRequestItems(input: {
           eq(purchaseRequestItems.userId, input.userId),
           inArray(purchaseRequestItems.id, eligibleIds),
           inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+          ne(purchaseRequestItems.status, 'inspecting'),
           sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NULL`,
           sql`COALESCE(${purchaseRequestItems.rawData}->'saasChinaMode', 'false'::jsonb) <> 'true'::jsonb`,
           sql`NOT EXISTS (

@@ -17,6 +17,7 @@ import {
   foreignKey,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+import type { PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 
 // ─── Phase 1: Marketplace Connections ───────────────────────────
 
@@ -663,6 +664,7 @@ export const purchaseRequestStatusEnum = pgEnum('purchase_request_status', [
   'requested',
   'purchased',
   'purchase_completed',
+  'inspecting',
   'china_arrived',
   'outbound_requested',
   'completed',
@@ -753,6 +755,7 @@ export const purchaseRequestItems = pgTable(
 
     supplierOrderNumber: varchar('supplier_order_number', { length: 100 }),
     trackingNumber: varchar('tracking_number', { length: 100 }),
+    purchaseInspection: jsonb('purchase_inspection').$type<PurchaseInspection>(),
     outboundExpectedDate: date('outbound_expected_date'),
     purchaseMethod: varchar('purchase_method', { length: 100 }),
     purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),

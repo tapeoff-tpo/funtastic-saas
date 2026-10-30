@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import ExcelJS from 'exceljs'
-import { and, asc, desc, eq, getTableColumns, gt, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gt, ilike, inArray, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
@@ -10,6 +10,7 @@ import { purchaseRequestWriteLockKey } from './purchase-request-create'
 import {
   getPurchaseReviewList,
   getPurchaseReviewOperationalMetricsBySku,
+  purchaseTrackingSearchCondition,
   type PurchaseReviewListItem,
   type PurchaseReviewListStatus,
 } from './purchase-requests'
@@ -24,6 +25,7 @@ import {
   type PurchaseRequestStatus,
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import { createPurchaseInspection, splitTrackingNumbers } from './purchase-inspection'
 import {
   getPurchaseStockCoverageMonths,
   getPurchaseUrgencyStatus,
@@ -184,7 +186,7 @@ export async function exportPurchaseRequestsExcel(input: {
       '총 원가(₩)': costs.totalCostKrw ?? '',
       구입관리코드: row.purchaseManagementCode ?? '',
       주문서번호: row.supplierOrderNumber ?? '',
-      송장번호: row.trackingNumber ?? '',
+      송장번호: ('purchaseInspection' in row ? row.purchaseInspection?.parcels.map((parcel) => parcel.trackingNumber).join('\n') : null) ?? row.trackingNumber ?? '',
       '발주요청 날짜': dateText(row.requestDate),
       구매날짜: dateText(row.outboundExpectedDate),
       구매방법: row.purchaseMethod ?? '',
@@ -312,7 +314,12 @@ export async function importPurchaseRequestsExcel(input: {
         memo: emptyToNull(data.메모),
         updatedAt: new Date(),
       }
-      if (hasTrackingNumberColumn) values.trackingNumber = emptyToNull(data.송장번호)
+      if (hasTrackingNumberColumn) values.trackingNumber = splitTrackingNumbers(data.송장번호)[0] ?? null
+      if (status === 'purchase_completed' && data.송장번호?.trim()) {
+        values.status = 'inspecting'
+        values.purchaseInspection = createPurchaseInspection(values.actualPurchaseQuantity ?? requestedQuantity, data.송장번호)
+        values.chinaReceivedQuantity = null
+      }
       if (hasDelayReasonColumn) values.delayReason = parsePurchaseDelayReason(data.지연사유)
       if (hasDelayNoteColumn) values.delayNote = emptyToNull(data['지연 상세'])
 
@@ -320,6 +327,11 @@ export async function importPurchaseRequestsExcel(input: {
         const [current] = await tx.select({
           id: purchaseRequestItems.id,
           rawData: purchaseRequestItems.rawData,
+          status: purchaseRequestItems.status,
+          actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+          requestedQuantity: purchaseRequestItems.requestedQuantity,
+          chinaReceivedQuantity: purchaseRequestItems.chinaReceivedQuantity,
+          purchaseInspection: purchaseRequestItems.purchaseInspection,
         }).from(purchaseRequestItems).where(and(
           eq(purchaseRequestItems.userId, input.userId),
           eq(purchaseRequestItems.id, id),
@@ -329,6 +341,18 @@ export async function importPurchaseRequestsExcel(input: {
           skipped += 1
           errors.push({ row: rowNumber, message: 'ID에 해당하는 발주 항목을 찾을 수 없습니다.' })
           continue
+        }
+
+        if (current.purchaseInspection) {
+          if (values.status !== current.status || values.requestedQuantity !== current.requestedQuantity || values.actualPurchaseQuantity !== current.actualPurchaseQuantity
+            || values.chinaReceivedQuantity !== current.chinaReceivedQuantity) {
+            skipped += 1; errors.push({ row: rowNumber, message: '검수 기록이 있는 항목의 상태·구매수량·입고수량은 검수 화면에서 관리해주세요.' }); continue
+          }
+          if (hasTrackingNumberColumn && splitTrackingNumbers(data.송장번호).join('\n') !== current.purchaseInspection.parcels.map((parcel) => parcel.trackingNumber).join('\n')) {
+            skipped += 1; errors.push({ row: rowNumber, message: '송장번호는 송장·검수 화면에서 수정해주세요.' }); continue
+          }
+          delete values.purchaseInspection
+          delete values.trackingNumber
         }
 
         values.rawData = mergeOutboundQuantity(current.rawData, outboundQuantity)
@@ -377,7 +401,7 @@ async function getPurchaseRequestRowsForExcel(input: {
       sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
     )!
     const purchaseCompletedOverdue = and(
-      eq(purchaseRequestItems.status, 'purchase_completed'),
+      inArray(purchaseRequestItems.status, ['purchase_completed', 'inspecting']),
       sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
       sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
     )!
@@ -406,6 +430,7 @@ async function getPurchaseRequestRowsForExcel(input: {
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
       ilike(purchaseRequestItems.trackingNumber, pattern),
+      purchaseTrackingSearchCondition(pattern),
     )!)
   }
 

@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
+import { PurchaseInspectionButton } from './purchase-inspection-dialog'
+import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
@@ -77,7 +79,7 @@ export default async function PurchasingOrdersPage({
       allowedStatuses={ORDER_STATUSES}
       basePath="/purchasing/orders"
       title="발주"
-      description="발주요청부터 구매완료, 중국창고도착, 중국출고요청, 중국출고완료까지 한 화면에서 관리합니다."
+      description="발주요청부터 구매완료, 검수, 중국창고도착, 중국출고요청, 중국출고완료까지 한 화면에서 관리합니다."
     />
   )
 }
@@ -192,7 +194,7 @@ export async function PurchasingOrdersView({
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
     : []
-  const showPurchaseUrlColumn = status === 'purchased' || status === 'purchase_completed' || overdueOnly
+  const showPurchaseUrlColumn = status === 'purchased' || status === 'purchase_completed' || status === 'inspecting' || overdueOnly
   const recommendationBasisParam = stringParam(params.showRecommendationBasis)
   const showRecommendationBasis = recommendationBasisParam === undefined
     ? isRequestedStatus
@@ -283,7 +285,7 @@ export async function PurchasingOrdersView({
           <input
             name="search"
             defaultValue={search ?? ''}
-            placeholder="품목코드, 상품명, 주문번호"
+            placeholder="품목코드, 상품명, 주문번호, 송장번호"
             className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:w-64 md:flex-none"
           />
           <Button type="submit" variant="outline" className="shrink-0">검색</Button>
@@ -496,7 +498,7 @@ export async function PurchasingOrdersView({
               {isRequestedStatus ? null : <PurchaseBulkPaymentDialog />}
               <PurchaseBulkDeleteButton />
               {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
-              {overdueOnly ? null : <PurchaseBulkStatusButton />}
+              {overdueOnly || status === 'purchase_completed' || status === 'inspecting' ? null : <PurchaseBulkStatusButton />}
             </div>
           </div>
 
@@ -600,7 +602,7 @@ export async function PurchasingOrdersView({
                     const isPurchaseRequestOverdue = item.status === 'purchased'
                       && isPurchaseDelayTrackingDate(item.requestDate)
                       && requestDateElapsedDays >= 7
-                    const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
+                    const isArrivalOverdue = (item.status === 'purchase_completed' || item.status === 'inspecting') && purchaseDateElapsedDays >= 7
                     const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
                     const purchaseUrgencyStatus = item.purchaseUrgencyStatus ?? (isPurchaseUrgencyActionNeeded(item.status)
                       ? getPurchaseUrgencyStatus(item.rawData)
@@ -615,6 +617,8 @@ export async function PurchasingOrdersView({
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
+                    const receipt = ('purchaseInspection' in item ? item.purchaseInspection : null) as PurchaseInspection | null
+                    const receiptSummary = receipt ? inspectionSummary(receipt) : null
                     const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
@@ -630,6 +634,7 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
+                        {item.status === 'inspecting' && receiptSummary?.hasError && <div className="mt-1"><Badge className="border-red-300 bg-red-100 text-red-800">입고오류 · {receiptSummary.difference < 0 ? '부족' : '초과'} {Math.abs(receiptSummary.difference)}개</Badge></div>}
                         {purchaseUrgencyStatus ? (
                           <div className="mt-1">
                             <Badge
@@ -662,7 +667,9 @@ export async function PurchasingOrdersView({
                         ) : null}
                       </td>
                       <td className="px-3 py-2 align-middle">
-                        <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>
+                        {item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
+                          ? <PurchaseInspectionButton id={item.id} productName={item.productName} mode="image" />
+                          : <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>}
                         <div data-no-translate className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
@@ -691,6 +698,8 @@ export async function PurchasingOrdersView({
                             {formatNumber(stageQuantity)}
                             <p className="mt-0.5 text-[11px] font-normal leading-tight text-sky-700">중국출고 작업 기준</p>
                           </div>
+                        ) : item.status === 'inspecting' || (receipt && item.status === 'china_arrived') ? (
+                          <span className="inline-block py-1 font-medium">{item.status === 'inspecting' && item.chinaReceivedQuantity === null ? '미입력' : formatNumber(stageQuantity)}</span>
                         ) : item.id ? (
                           <PurchaseQuantityField
                             id={item.id}
@@ -753,7 +762,7 @@ export async function PurchasingOrdersView({
                                 id={item.id}
                                 supplierOrderNumber={item.supplierOrderNumber}
                                 trackingNumber={item.trackingNumber}
-                                showTrackingNumber={item.status === 'purchase_completed'}
+                                showTrackingNumber={false}
                                 dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
                                 dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
                                 dateLabel={item.status === 'china_arrived'
@@ -765,6 +774,10 @@ export async function PurchasingOrdersView({
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
                               />
+                              {['purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed'].includes(item.status) && <div className="mt-2 space-y-1 text-xs">
+                                {(receipt?.parcels.map((parcel) => parcel.trackingNumber) ?? (item.trackingNumber ? [item.trackingNumber] : [])).map((number) => <div key={number} data-no-translate className="break-all"><a className="text-blue-700 underline" href={`https://www.baidu.com/s?wd=${encodeURIComponent(number)}`} target="_blank" rel="noreferrer">{number}</a></div>)}
+                                {item.status === 'china_arrived' && <PurchaseInspectionButton id={item.id} productName={item.productName} />}
+                              </div>}
                             </>
                           ) : '-'}
                         </td>
@@ -801,7 +814,7 @@ export async function PurchasingOrdersView({
                         {item.id ? <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} /> : '-'}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
-                        {item.id ? (
+                        {item.id && (item.status === 'purchase_completed' || item.status === 'inspecting') ? <PurchaseInspectionButton id={item.id} productName={item.productName} /> : item.id ? (
                           <PurchaseStatusButton
                             id={item.id}
                             nextStatus={getNextPurchaseStatus(item.status)}
@@ -1008,6 +1021,7 @@ function SortHeader({
 }
 
 function getStageQuantityColumn(status: PurchaseRequestStatus) {
+  if (status === 'inspecting') return { label: '실제 입고수량', field: 'chinaReceivedQuantity' as const }
   if (status === 'purchased' || status === 'purchase_completed') {
     return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
   }
@@ -1033,6 +1047,7 @@ function getStageQuantity(
   status: PurchaseRequestStatus,
   outboundRequestedQuantity: number,
 ) {
+  if (status === 'inspecting') return item.chinaReceivedQuantity ?? 0
   if (status === 'purchased' || status === 'purchase_completed') return item.actualPurchaseQuantity ?? item.requestedQuantity
   if (status === 'china_arrived') {
     return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity

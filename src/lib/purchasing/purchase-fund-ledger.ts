@@ -83,6 +83,7 @@ const STATUS_PRIORITY: Record<PurchaseRequestStatus, number> = {
   requested: 0,
   purchased: 10,
   purchase_completed: 20,
+  inspecting: 25,
   china_arrived: 30,
   outbound_requested: 40,
   completed: 50,

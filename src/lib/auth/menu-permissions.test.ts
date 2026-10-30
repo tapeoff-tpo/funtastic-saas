@@ -75,4 +75,9 @@ describe('menu authorization policy', () => {
     expect(canAccessApi(finance, '/api/purchasing/purchase-requests/1/bulk-payment-deposit', 'PATCH')).toBe(true)
     expect(canAccessApi(finance, '/api/purchasing/purchase-requests/bulk-delete', 'POST')).toBe(false)
   })
+  it('requires the purchasing operations or overdue menu for inspection, not review alone', () => {
+    const api = '/api/purchasing/purchase-requests/1/inspection'
+    expect(canAccessApi({ superAdmin: false, allowedMenus: ['/purchasing/purchases'] }, api, 'POST')).toBe(false)
+    expect(canAccessApi({ superAdmin: false, allowedMenus: ['/purchasing/orders'] }, api, 'POST')).toBe(true)
+  })
 })

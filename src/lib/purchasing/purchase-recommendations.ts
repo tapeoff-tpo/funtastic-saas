@@ -867,6 +867,7 @@ export async function generatePurchaseRecommendations(input: {
             'requested',
             'purchased',
             'purchase_completed',
+            'inspecting',
             'outbound_requested',
             'completed',
           ]),
@@ -1482,7 +1483,7 @@ export function purchasePipelineQuantity(input: {
       ? isPendingChinaInventorySnapshot(input.rawData)
         ? readPositiveInteger(input.rawData, 'pendingChinaInventoryQuantity') ?? 0
         : 0
-      : input.status === 'purchase_completed' || input.status === 'purchased'
+      : input.status === 'purchase_completed' || input.status === 'purchased' || input.status === 'inspecting'
         ? input.actualPurchaseQuantity
           ?? input.requestedQuantity
         : input.requestedQuantity

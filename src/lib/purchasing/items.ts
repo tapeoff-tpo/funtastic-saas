@@ -5,10 +5,13 @@ import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 
 export const PURCHASE_URL_HEADER = '구매 URL'
+export const CHINESE_PRODUCT_NAME_HEADER = '중국어 상품명'
+export const CHINESE_PRODUCT_NAME_DELETE_HEADER = '중국어 상품명 삭제'
 
 export const ESA009M_HEADERS = [
   '품목코드',
   '품목명',
+  CHINESE_PRODUCT_NAME_HEADER,
   '규격정보',
   '한국창고기준 위치',
   '영문명',
@@ -43,6 +46,7 @@ export const ESA009M_HEADERS = [
 
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
 export type Esa009mData = Record<Esa009mHeader, string | null>
+export type Esa009mImportRow = Esa009mData & { deleteChineseProductName?: boolean }
 export type PurchasingItemSortDirection = 'asc' | 'desc'
 export type PurchasingSpecialBulkOutgoingAdjustment = {
   specialMall: string
@@ -125,7 +129,7 @@ export const PURCHASING_ITEM_DEFAULT_UPDATE_HEADERS = [
   PURCHASE_URL_HEADER,
 ] as const satisfies readonly Esa009mHeader[]
 
-export type PurchasingItemImportMode = 'cost-url-and-new' | 'new-only' | 'selected'
+export type PurchasingItemImportMode = 'cost-url-and-new' | 'new-only' | 'selected' | 'chinese-names'
 
 export type PurchasingItemImportOptions = {
   mode: PurchasingItemImportMode
@@ -143,6 +147,8 @@ export type PurchasingItemImportPreview = {
   unchangedItems: number
   skippedExisting: number
   invalidNewItems: number
+  chineseNameDeletions: number
+  unmatchedItems: number
   fieldChanges: Record<string, number>
   sampleChanges: Array<{
     sku: string
@@ -177,6 +183,7 @@ export async function getPurchasingItems(input: {
     db.select({
       id: products.id,
       internalSku: products.internalSku,
+      name: products.name,
       metadata: products.metadata,
       purchasingStatus: products.purchasingStatus,
       purchasingStatusNote: products.purchasingStatusNote,
@@ -193,7 +200,7 @@ export async function getPurchasingItems(input: {
   return {
     items: rows.map((row) => ({
       id: row.id,
-      data: normalizeEsaData(row.metadata?.esa009m),
+      data: ensurePurchasingItemIdentity(purchasingItemData(row.metadata), row),
       purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
       purchaseUrlVerification: purchaseUrlVerification(row.metadata),
       purchasingStatus: row.purchasingStatus,
@@ -212,6 +219,7 @@ export async function getAllPurchasingItems(
   const rows = await db.select({
     id: products.id,
     internalSku: products.internalSku,
+    name: products.name,
     metadata: products.metadata,
     purchasingStatus: products.purchasingStatus,
     purchasingStatusNote: products.purchasingStatusNote,
@@ -226,7 +234,7 @@ export async function getAllPurchasingItems(
 
   return rows.map((row) => ({
     id: row.id,
-    data: normalizeEsaData(row.metadata?.esa009m),
+    data: ensurePurchasingItemIdentity(purchasingItemData(row.metadata), row),
     purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
     purchaseUrlVerification: purchaseUrlVerification(row.metadata),
     purchasingStatus: row.purchasingStatus,
@@ -253,7 +261,7 @@ export async function getPurchasingItemLabelDataBySku(userId: string, skus: stri
     ))
 
     for (const row of rows) {
-      const chineseName = row.metadata?.chineseProductName
+      const chineseName = purchasingItemData(row.metadata)[CHINESE_PRODUCT_NAME_HEADER]
       labelsBySku.set(row.internalSku, {
         location: normalizeEsaData(row.metadata?.esa009m)['한국창고기준 위치'] ?? '',
         chineseProductName: typeof chineseName === 'string' ? chineseName.trim() : '',
@@ -311,7 +319,7 @@ export async function importPurchasingItems(input: {
         costPrice: numericText(nextData['works 신규 원가'] || nextData['works 기존 원가']),
         warehouseLocation: nextData['한국창고기준 위치'],
         status: 'active' as const,
-        metadata: { esa009m: nextData },
+        metadata: metadataWithPurchasingItemData({}, nextData),
       }).onConflictDoNothing()
       inserted += 1
       continue
@@ -319,7 +327,7 @@ export async function importPurchasingItems(input: {
 
     if (options.mode === 'new-only') continue
     const headers = updateHeadersForImport(options)
-    const currentData = normalizeEsaData(current.metadata?.esa009m)
+    const currentData = purchasingItemData(current.metadata)
     const nextData = ensurePurchasingItemIdentity(
       mergeEsaData(currentData, row, headers, false),
       current,
@@ -389,7 +397,7 @@ export async function createPurchasingItem(input: {
       costPrice: numericText(nextData['works 신규 원가'] || nextData['works 기존 원가']),
       warehouseLocation: nextData['한국창고기준 위치'],
       status: 'active' as const,
-      metadata: { esa009m: nextData },
+      metadata: metadataWithPurchasingItemData({}, nextData),
     })
     .returning({
       id: products.id,
@@ -418,7 +426,7 @@ export async function updatePurchasingItem(input: {
   if (!current) return null
 
   const mergedData = {
-    ...normalizeEsaData(current.metadata?.esa009m),
+    ...purchasingItemData(current.metadata),
     ...Object.fromEntries(
       Object.entries(input.data)
         .filter(([header]) => ESA009M_HEADERS.includes(header as Esa009mHeader))
@@ -455,7 +463,6 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   await workbook.xlsx.load(fileBuffer)
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new Error('엑셀 시트를 찾을 수 없습니다.')
-
   const headerRow = findHeaderRow(sheet)
   if (!headerRow) throw new Error('엑셀에서 품목코드 헤더를 찾을 수 없습니다.')
   const columnByHeader = new Map<string, number>()
@@ -464,26 +471,32 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
     columnByHeader.set('특가(元)', columnByHeader.get('기존원가(元)')!)
   }
   if (!columnByHeader.has('품목코드')) throw new Error('필수 열이 없습니다: 품목코드')
-
-  const rows: Esa009mData[] = []
+  const rows: Esa009mImportRow[] = []
   let total = 0
   let skipped = 0
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber <= headerRow) return
     const data = Object.fromEntries(ESA009M_HEADERS.map((header) => {
       const column = columnByHeader.get(header)
-      const value = column ? cellText(row.getCell(column).value) : ''
-      return [header, value || null]
-    })) as Esa009mData
-    if (!Object.values(data).some(Boolean)) return
+      return [header, column ? cellText(row.getCell(column).value) || null : null]
+    })) as Esa009mImportRow
+    const deleteColumn = columnByHeader.get(CHINESE_PRODUCT_NAME_DELETE_HEADER)
+    const marker = deleteColumn ? cellText(row.getCell(deleteColumn).value).trim().toUpperCase() : ''
+    if (!Object.values(data).some(Boolean) && !marker) return
     total += 1
-    if (!data['품목코드']) {
-      skipped += 1
-      return
+    if (!data['품목코드']) { skipped += 1; return }
+    if (marker && !['Y', 'YES', 'TRUE', '1', '삭제', 'N', 'NO', 'FALSE', '0'].includes(marker)) {
+      throw new Error(`${rowNumber}행: 중국어 상품명 삭제는 Y 또는 빈칸으로 입력해주세요.`)
     }
+    if (['Y', 'YES', 'TRUE', '1', '삭제'].includes(marker)) {
+      if (data[CHINESE_PRODUCT_NAME_HEADER]) throw new Error(`${rowNumber}행: 중국어 상품명 입력과 삭제를 동시에 지정할 수 없습니다.`)
+      data.deleteChineseProductName = true
+    }
+    if ((data[CHINESE_PRODUCT_NAME_HEADER]?.length ?? 0) > 1000) throw new Error(`${rowNumber}행: 중국어 상품명은 1,000자 이하로 입력해주세요.`)
     rows.push(data)
   })
-  return { rows, total, skipped, headers: ESA009M_HEADERS.filter((header) => columnByHeader.has(header)) }
+  return { rows, total, skipped, headers: ESA009M_HEADERS.filter((header) => columnByHeader.has(header)
+    || (header === CHINESE_PRODUCT_NAME_HEADER && columnByHeader.has(CHINESE_PRODUCT_NAME_DELETE_HEADER))) }
 }
 
 /**
@@ -846,24 +859,29 @@ export function purchaseUrlExportStatus(
   return data[PURCHASE_URL_HEADER]?.trim() ? '등록됨' : 'URL 없음'
 }
 
-function metadataWithPurchasingItemData(metadata: unknown, esa009m: Esa009mData) {
-  const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-    ? metadata as Record<string, unknown>
-    : {}
-  const currentData = normalizeEsaData(root.esa009m)
-  const purchaseUrlChanged = currentData[PURCHASE_URL_HEADER]?.trim()
-    !== esa009m[PURCHASE_URL_HEADER]?.trim()
-  if (!purchaseUrlChanged) {
-    return { ...root, esa009m }
-  }
+/** The root metadata value is authoritative, including an explicit deletion (null). */
+export function purchasingItemData(metadata: unknown): Esa009mData {
+  const root = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+  const data = normalizeEsaData(root.esa009m)
+  const value = Object.prototype.hasOwnProperty.call(root, 'chineseProductName')
+    ? root.chineseProductName : data[CHINESE_PRODUCT_NAME_HEADER]
+  data[CHINESE_PRODUCT_NAME_HEADER] = typeof value === 'string' ? value.trim() || null : null
+  return data
+}
 
-  const hasReplacementUrl = Boolean(esa009m[PURCHASE_URL_HEADER]?.trim())
-  const withoutVerification = { ...root }
-  delete withoutVerification.purchaseUrlVerification
-  return {
-    ...(hasReplacementUrl ? withoutVerification : root),
-    esa009m,
+export function metadataWithPurchasingItemData(metadata: unknown, data: Esa009mData) {
+  const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown> : {}
+  const currentData = purchasingItemData(root)
+  const { [CHINESE_PRODUCT_NAME_HEADER]: name, ...esa009m } = data
+  const chineseProductName = name?.trim() || null
+  const next: Record<string, unknown> = { ...root, esa009m, chineseProductName }
+  if (currentData[CHINESE_PRODUCT_NAME_HEADER] !== chineseProductName) {
+    next.chineseProductNameSource = { type: 'item_master', updatedAt: new Date().toISOString() }
   }
+  const purchaseUrlChanged = currentData[PURCHASE_URL_HEADER]?.trim() !== data[PURCHASE_URL_HEADER]?.trim()
+  if (purchaseUrlChanged && data[PURCHASE_URL_HEADER]?.trim()) delete next.purchaseUrlVerification
+  return next
 }
 
 export function resolveOutgoingMetrics(
@@ -1078,7 +1096,7 @@ function purchasingItemConditions(
 ) {
   const conditions = [
     eq(products.userId, userId),
-    sql`${products.metadata}->'esa009m' IS NOT NULL`,
+    or(sql`${products.metadata}->'esa009m' IS NOT NULL`, sql`NULLIF(${products.metadata}->>'chineseProductName', '') IS NOT NULL`)!,
   ]
   if (search) {
     const searchTerms = Array.from(new Set(search
@@ -1090,6 +1108,7 @@ function purchasingItemConditions(
       return or(
         ilike(products.internalSku, pattern),
         ilike(products.name, pattern),
+        sql`${products.metadata}->>'chineseProductName' ILIKE ${pattern}`,
         sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
         sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
         sql`${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER} ILIKE ${pattern}`,
@@ -1099,7 +1118,9 @@ function purchasingItemConditions(
   }
   for (const header of ESA009M_HEADERS) {
     const value = filters?.[header]?.trim()
-    if (value) conditions.push(sql`${products.metadata}->'esa009m'->>${header} ILIKE ${`%${value}%`}`)
+    if (value) conditions.push(header === CHINESE_PRODUCT_NAME_HEADER
+      ? sql`${products.metadata}->>'chineseProductName' ILIKE ${`%${value}%`}`
+      : sql`${products.metadata}->'esa009m'->>${header} ILIKE ${`%${value}%`}`)
   }
   return conditions
 }
@@ -1110,6 +1131,10 @@ function purchasingItemOrderBy(
 ) {
   const field = sort === 'updatedAt'
     ? products.updatedAt
+    : sort === '품목코드'
+      ? products.internalSku
+    : sort === CHINESE_PRODUCT_NAME_HEADER
+      ? sql<string>`COALESCE(${products.metadata}->>'chineseProductName', '')`
     : NUMERIC_HEADERS.has(sort)
       ? sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>${sort}, ''), '[^0-9.-]', '', 'g'), '')::numeric`
       : sql<string>`COALESCE(${products.metadata}->'esa009m'->>${sort}, '')`
@@ -1165,13 +1190,15 @@ function buildPurchasingItemsImportPreview(
   let unchangedItems = 0
   let skippedExisting = 0
   let invalidNewItems = 0
+  let chineseNameDeletions = 0
+  let unmatchedItems = 0
 
   for (const row of parsed.rows) {
     const sku = row['품목코드']?.trim()
     if (!sku) continue
     const current = existingBySku.get(sku)
     if (!current) {
-      if (!shouldCreateMissing(options)) continue
+      if (!shouldCreateMissing(options)) { unmatchedItems += 1; continue }
       if (!row['품목명']?.trim()) {
         invalidNewItems += 1
         pushSample(sampleChanges, {
@@ -1198,7 +1225,7 @@ function buildPurchasingItemsImportPreview(
     }
 
     updateItems += 1
-    const currentData = normalizeEsaData(current.metadata?.esa009m)
+    const currentData = purchasingItemData(current.metadata)
     const nextData = ensurePurchasingItemIdentity(
       mergeEsaData(currentData, row, headers, false),
       current,
@@ -1211,6 +1238,7 @@ function buildPurchasingItemsImportPreview(
       continue
     }
     changedItems += 1
+    if (changedHeaders.includes(CHINESE_PRODUCT_NAME_HEADER) && nextData[CHINESE_PRODUCT_NAME_HEADER] === null) chineseNameDeletions += 1
     for (const header of allChangedHeaders) fieldChanges[header] = (fieldChanges[header] ?? 0) + 1
     pushSample(sampleChanges, {
       sku,
@@ -1230,6 +1258,8 @@ function buildPurchasingItemsImportPreview(
     unchangedItems,
     skippedExisting,
     invalidNewItems,
+    chineseNameDeletions,
+    unmatchedItems,
     fieldChanges,
     sampleChanges,
   }
@@ -1242,12 +1272,13 @@ function normalizeImportOptions(options?: PurchasingItemImportOptions): Required
   return {
     mode,
     selectedHeaders,
-    createMissing: options?.createMissing ?? mode !== 'selected',
+    createMissing: options?.createMissing ?? (mode === 'cost-url-and-new' || mode === 'new-only'),
   }
 }
 
 function updateHeadersForImport(options: Required<PurchasingItemImportOptions>): Esa009mHeader[] {
   if (options.mode === 'new-only') return []
+  if (options.mode === 'chinese-names') return [CHINESE_PRODUCT_NAME_HEADER]
   if (options.mode === 'selected') {
     return Array.from(new Set(options.selectedHeaders.filter((header) => header !== '품목코드')))
   }
@@ -1255,7 +1286,7 @@ function updateHeadersForImport(options: Required<PurchasingItemImportOptions>):
 }
 
 function shouldCreateMissing(options: Required<PurchasingItemImportOptions>) {
-  return options.mode === 'new-only' || options.createMissing
+  return options.mode === 'new-only' || (options.mode !== 'chinese-names' && options.createMissing)
 }
 
 const PURCHASING_ITEM_IDENTITY_HEADERS = ['품목코드', '품목명'] as const satisfies readonly Esa009mHeader[]
@@ -1277,7 +1308,7 @@ function purchasingItemIdentityChangedHeaders(current: Esa009mData, next: Esa009
 
 function mergeEsaData(
   current: Esa009mData,
-  incoming: Esa009mData,
+  incoming: Esa009mImportRow,
   headers: readonly Esa009mHeader[],
   includeBlank: boolean,
 ) {
@@ -1287,6 +1318,7 @@ function mergeEsaData(
     if (!includeBlank && value == null) continue
     next[header] = value
   }
+  if (headers.includes(CHINESE_PRODUCT_NAME_HEADER) && incoming.deleteChineseProductName) next[CHINESE_PRODUCT_NAME_HEADER] = null
   return next
 }
 

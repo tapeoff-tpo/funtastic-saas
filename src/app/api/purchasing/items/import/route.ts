@@ -10,7 +10,7 @@ import {
   previewPurchasingItemsImport,
 } from '@/lib/purchasing/items'
 
-const IMPORT_MODES = new Set<PurchasingItemImportMode>(['cost-url-and-new', 'new-only', 'selected'])
+const IMPORT_MODES = new Set<PurchasingItemImportMode>(['cost-url-and-new', 'new-only', 'selected', 'chinese-names'])
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()

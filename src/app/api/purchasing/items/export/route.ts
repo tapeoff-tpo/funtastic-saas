@@ -5,6 +5,8 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import {
   ESA009M_HEADERS,
+  CHINESE_PRODUCT_NAME_HEADER,
+  CHINESE_PRODUCT_NAME_DELETE_HEADER,
   type Esa009mHeader,
   getAllPurchasingItems,
   purchaseUrlExportStatus,
@@ -26,7 +28,8 @@ export async function GET(request: NextRequest) {
   const sheet = workbook.addWorksheet(isTemplate ? '업로드양식' : '품목')
 
   sheet.columns = [
-    ...selectedHeaders.map((header) => ({ header, key: header, width: Math.max(14, Math.min(32, header.length + 6)) })),
+    ...selectedHeaders.map((header) => ({ header, key: header, width: header === CHINESE_PRODUCT_NAME_HEADER ? 38 : Math.max(14, Math.min(32, header.length + 6)) })),
+    ...(selectedHeaders.includes(CHINESE_PRODUCT_NAME_HEADER) ? [{ header: CHINESE_PRODUCT_NAME_DELETE_HEADER, key: 'deleteChineseName', width: 24 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('구매 URL 상태') ? [{ header: '구매 URL 상태', key: 'purchaseUrlStatus', width: 14 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('당월 출고수량') ? [{ header: '당월 출고수량', key: 'currentMonthOutgoing', width: 16 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('3개월 평균 출고수량') ? [{ header: '3개월 평균 출고수량', key: 'threeMonthAverageOutgoing', width: 20 }] : []),
@@ -36,6 +39,12 @@ export async function GET(request: NextRequest) {
   sheet.autoFilter = { from: 'A1', to: { row: 1, column: sheet.columns.length } }
 
   styleHeaderRow(sheet.getRow(1))
+  if (selectedHeaders.includes(CHINESE_PRODUCT_NAME_HEADER)) {
+    const column = selectedHeaders.length + 1
+    const sheetValidation = sheet as ExcelJS.Worksheet & { dataValidations: { add(range: string, validation: ExcelJS.DataValidation): void } }
+    const letter = sheet.getColumn(column).letter
+    sheetValidation.dataValidations.add(`${letter}2:${letter}10001`, { type: 'list', allowBlank: true, formulae: ['"Y,N"'], showInputMessage: true, promptTitle: '중국어명 삭제', prompt: '이름 칸을 비우고 Y를 입력하면 삭제합니다. 이름만 빈칸이면 기존 값을 유지합니다.' })
+  }
 
   if (isTemplate) {
     addTemplateRows(sheet, selectedHeaders)
@@ -88,6 +97,7 @@ function parseExtraHeaders(value: string | null): ExtraHeader[] {
 function addTemplateRows(sheet: ExcelJS.Worksheet, headers: Esa009mHeader[]) {
   const example = Object.fromEntries(headers.map((header) => [header, '']))
   example['품목코드'] = '100000-0001'
+  if (CHINESE_PRODUCT_NAME_HEADER in example) example[CHINESE_PRODUCT_NAME_HEADER] = '示例商品'
   if ('품목명' in example) example['품목명'] = '샘플 상품명'
   if ('works 신규 원가' in example) example['works 신규 원가'] = '1000'
   if ('구매 URL' in example) example['구매 URL'] = 'https://detail.1688.com/offer/example.html'

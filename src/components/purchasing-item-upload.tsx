@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
-type ImportMode = 'cost-url-and-new' | 'new-only' | 'selected'
+type ImportMode = 'cost-url-and-new' | 'new-only' | 'selected' | 'chinese-names'
 
 type ImportPreview = {
   total: number
@@ -18,6 +18,8 @@ type ImportPreview = {
   unchangedItems: number
   skippedExisting: number
   invalidNewItems: number
+  chineseNameDeletions?: number
+  unmatchedItems?: number
   imported?: number
   inserted?: number
   updated?: number
@@ -32,6 +34,7 @@ type ImportPreview = {
 
 const SELECTABLE_HEADERS = [
   '품목명',
+  '중국어 상품명',
   '규격정보',
   '한국창고기준 위치',
   '영문명',
@@ -77,6 +80,7 @@ const DEFAULT_SELECTED_HEADERS = [
 const DEFAULT_DOWNLOAD_HEADERS = [
   '품목코드',
   '품목명',
+  '중국어 상품명',
   '규격정보',
   ...DEFAULT_SELECTED_HEADERS,
 ]
@@ -116,7 +120,7 @@ export function PurchasingItemUpload() {
     form.set('file', file)
     form.set('intent', intent)
     form.set('mode', mode)
-    form.set('createMissing', String(mode === 'selected' ? createMissing : mode !== 'new-only'))
+    form.set('createMissing', String(mode === 'selected' ? createMissing : mode !== 'chinese-names'))
     form.set('selectedHeaders', JSON.stringify(mode === 'selected' ? selectedHeaders : []))
     return form
   }
@@ -232,6 +236,7 @@ export function PurchasingItemUpload() {
                     >
                       전체 선택
                     </button>
+                    <button type="button" className="text-xs font-medium text-primary hover:underline" onClick={() => setDownloadHeaders(['품목코드', '품목명', '규격정보', '중국어 상품명'])}>중국어명 관리</button>
                     <button
                       type="button"
                       className="text-xs font-medium text-primary hover:underline"
@@ -320,9 +325,14 @@ export function PurchasingItemUpload() {
                   >
                     <option value="cost-url-and-new">신상품 추가 + 원가/URL 업데이트</option>
                     <option value="new-only">신상품만 추가</option>
+                    <option value="chinese-names">중국어 상품명만 수정</option>
                     <option value="selected">선택 컬럼만 업데이트</option>
                   </select>
                 </label>
+
+                {mode === 'chinese-names' || (mode === 'selected' && selectedHeaders.includes('중국어 상품명')) ? (
+                  <p className="rounded-md border bg-muted/30 p-3 text-xs leading-relaxed">품목코드로 중국어 상품명을 반영합니다. 빈칸은 기존 이름을 유지하고, 삭제할 때는 이름 칸을 비우고 <strong>중국어 상품명 삭제</strong> 열에 <strong>Y</strong>를 입력하세요. 삭제 표시와 새 이름을 함께 입력할 수 없습니다.</p>
+                ) : null}
 
                 {mode === 'selected' ? (
                   <div className="rounded-md border p-3">
@@ -406,7 +416,7 @@ export function PurchasingItemUpload() {
                       <PreviewMetric label="신규 추가" value={preview.newItems} />
                       <PreviewMetric label="변경 품목" value={preview.changedItems} />
                       <PreviewMetric label="변경 없음" value={preview.unchangedItems} />
-                      <PreviewMetric label="제외/오류" value={preview.skipped + preview.invalidNewItems} tone={preview.skipped + preview.invalidNewItems > 0 ? 'warn' : 'normal'} />
+                      <PreviewMetric label="제외/오류" value={preview.skipped + preview.invalidNewItems + (preview.unmatchedItems ?? 0)} tone={preview.skipped + preview.invalidNewItems + (preview.unmatchedItems ?? 0) > 0 ? 'warn' : 'normal'} />
                     </div>
 
                     <div className="rounded-md border p-3 text-xs">
@@ -416,6 +426,8 @@ export function PurchasingItemUpload() {
                         <PreviewLine label="기존상품 검사" value={preview.updateItems} />
                         <PreviewLine label="기존상품 건너뜀" value={preview.skippedExisting} />
                         <PreviewLine label="신규인데 품목명 없음" value={preview.invalidNewItems} />
+                        {(preview.unmatchedItems ?? 0) > 0 ? <PreviewLine label="미등록 품목코드 (제외)" value={preview.unmatchedItems!} /> : null}
+                        {(preview.chineseNameDeletions ?? 0) > 0 ? <PreviewLine label="중국어명 삭제" value={preview.chineseNameDeletions!} strong /> : null}
                         {preview.imported != null ? <PreviewLine label="이번 반영 완료" value={preview.imported} strong /> : null}
                       </div>
                     </div>

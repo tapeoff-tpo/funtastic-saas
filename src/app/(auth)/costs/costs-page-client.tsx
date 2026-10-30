@@ -152,7 +152,7 @@ export function CostsPageClient({
         <input
           name="search"
           defaultValue={search}
-          placeholder="품목코드, 품목명, 영문명, HS CODE 검색 (쉼표로 여러 개)"
+          placeholder="품목코드, 품목명, 중국어명, 영문명, HS CODE 검색 (쉼표로 여러 개)"
           className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
         />
         <button className="h-9 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">

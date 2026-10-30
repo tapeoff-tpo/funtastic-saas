@@ -226,7 +226,7 @@ export function CostsEditableTable({
     const value = row.data[header]
     if (header !== PURCHASE_URL_HEADER) {
       if (!value) return '-'
-      const isProductIdentity = header === codeHeader || header === nameHeader || header === '규격정보' || header === '옵션명'
+      const isProductIdentity = header === codeHeader || header === nameHeader || header === '중국어 상품명' || header === '규격정보' || header === '옵션명'
       return isProductIdentity ? <span data-no-translate>{value}</span> : value
     }
 
@@ -418,16 +418,19 @@ export function CostsEditableTable({
                 </div>
               ) : null}
               {editableHeaders.map((header) => (
-                <label key={header} className="space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">{header}</span>
+                <div key={header} className="space-y-1">
+                  <span className="flex items-center justify-between text-xs font-medium text-muted-foreground"><label htmlFor={`purchasing-field-${header.replaceAll(' ', '-')}`}>{header}</label>{header === '중국어 상품명' && draft[header] ? <button type="button" aria-label="중국어명 삭제" disabled={isPending} className="text-red-600 hover:underline" onClick={() => setDraft((current) => ({ ...current, [header]: '' }))}>중국어명 삭제</button> : null}</span>
                   <Input
+                    id={`purchasing-field-${header.replaceAll(' ', '-')}`}
+                    aria-label={header}
+                    maxLength={header === '중국어 상품명' ? 1000 : undefined}
                     type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
                     value={draft[header] ?? ''}
                     onChange={(event) => setDraft((current) => ({ ...current, [header]: event.target.value }))}
                     className={header === codeHeader ? 'font-mono text-xs' : 'text-xs'}
                     required={isCreating && (header === codeHeader || header === nameHeader)}
                   />
-                </label>
+                </div>
               ))}
             </div>
 
@@ -522,12 +525,14 @@ function CollapsedCell() {
 function headerClassName(header: string) {
   const base = 'whitespace-nowrap px-3 py-2.5 text-left font-medium'
   if (header === '품목코드') return `${base} w-28`
+  if (header === '중국어 상품명') return `${base} w-[220px]`
   if (header === '품목명') return `${base} w-[260px]`
   if (header === PURCHASE_URL_HEADER) return `${base} w-20`
   return base
 }
 
 function cellClassName(header: string, nameHeader: string) {
+  if (header === '중국어 상품명') return 'w-[220px] min-w-[180px] whitespace-normal'
   if (header === nameHeader) return 'w-[260px] min-w-[220px] whitespace-normal font-medium'
   if (header === '품목코드') return 'w-28 whitespace-nowrap font-mono text-xs text-muted-foreground'
   if (header === PURCHASE_URL_HEADER) return 'w-20 whitespace-nowrap'

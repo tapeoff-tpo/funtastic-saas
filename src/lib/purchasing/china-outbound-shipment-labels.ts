@@ -20,7 +20,6 @@ export type ChinaOutboundShipmentLabelWorkbookOptions = {
   includePalletLabels?: boolean
 }
 
-type LabelRow = Array<string | number>
 type LabelProductRow = {
   sku: string
   productName: string
@@ -30,22 +29,10 @@ type LabelProductRow = {
   quantity: number
 }
 
-const DARK_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FF1F4E78' },
-}
-
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: 'pattern',
   pattern: 'solid',
   fgColor: { argb: 'FFD9EAF7' },
-}
-
-const INPUT_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFFFF2CC' },
 }
 
 const ALL_BORDERS: Partial<ExcelJS.Borders> = {
@@ -186,19 +173,10 @@ function addPalletLabelSheets(
 
   for (const [index, pallet] of pallets.entries()) {
     const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.pallets, index))
-    sheet.columns = [{ width: 14 }, { width: 14 }, { width: 20 }, { width: 34 }, { width: 28 }, { width: 24 }, { width: 12 }]
     configureLabelSheet(sheet, 'G')
     const boxes = boxesByPalletId.get(pallet.id) ?? []
-    const rows = aggregatePalletLabelRows(boxes, boxItemsByBoxId, itemById, pallet.palletNo)
-    addLabelBlock({
-      sheet,
-      lastColumn: 'G',
-      title: 'TAPEOFF',
-      headers: ['파렛트번호 / 托盘号', '박스수량 / 箱数', '로케이션 / 库位', '상품명(한국어) / 商品名称（韩文）', '상품명(중국어) / 商品名称（中文）', '옵션 / 规格', '수량 / 数量'],
-      rows,
-      inputColumns: new Set([3, 5]),
-      quantityColumns: new Set([2, 7]),
-    })
+    const rows = aggregatePalletLabelRows(boxes, boxItemsByBoxId, itemById)
+    addLargePalletLabel(sheet, pallet.palletNo, detail.shipment.plannedOutboundDate, rows)
   }
 }
 
@@ -283,16 +261,91 @@ function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: Lab
   sheet.pageSetup.printArea = `A1:F${lastRow}`
 }
 
+type PalletLabelProductRow = LabelProductRow & { boxCount: number }
+
+function addLargePalletLabel(
+  sheet: ExcelJS.Worksheet,
+  palletNo: string,
+  outboundDate: string | null,
+  products: PalletLabelProductRow[],
+) {
+  const widths = [8, 18, 12, 18, 55, 22, 16]
+  sheet.columns = widths.map((width) => ({ width }))
+  sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
+  sheet.mergeCells('A1:E1')
+  const title = `TAPEOFF (${palletNo})`
+  sheet.getCell('A1').value = title
+  sheet.getCell('A1').font = { name: 'Arial', bold: true, size: Math.min(76, Math.floor(570 / textWidth(title))) }
+  sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' }
+  sheet.mergeCells('F1:G1')
+  sheet.getCell('F1').value = `출고일 / 出库日期\n${outboundDate ?? ''}`
+  sheet.getCell('F1').font = { name: 'Arial', size: 18, bold: true }
+  sheet.getCell('F1').alignment = { vertical: 'bottom', horizontal: 'center', wrapText: true }
+  sheet.getRow(1).height = 100
+
+  const headers = ['번호\n序号', '품목코드\nNO. / 编码', '박스수량\n箱数', '위치\n库位', '품명 / 品名', '옵션\n规格', '수량\n数量']
+  const header = sheet.getRow(2)
+  header.values = headers
+  header.height = 52
+  header.eachCell((cell, column) => {
+    cell.font = { name: 'Arial', size: column === 2 ? 16 : 18 }
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+    cell.border = ALL_BORDERS
+  })
+
+  const count = Math.max(7, products.length)
+  const rowHeight = 388 / count
+  for (let index = 0; index < count; index += 1) {
+    const product = products[index]
+    const row = sheet.getRow(index + 3)
+    row.height = rowHeight
+    row.values = product
+      ? [index + 1, product.sku, product.boxCount, product.location, [product.productName, product.chineseProductName].filter(Boolean).join('\n'), product.optionName, product.quantity]
+      : [index + 1]
+    for (let column = 1; column <= 7; column += 1) {
+      const cell = row.getCell(column)
+      cell.border = ALL_BORDERS
+      cell.alignment = { horizontal: column === 5 ? 'left' : 'center', vertical: 'middle', wrapText: true }
+      let size = Math.min(28, rowHeight * 0.7)
+      const text = cell.text
+      const availableWidth = widths[column - 1] * 5.25 - 8
+      while (size > 10 && text.split('\n').reduce((lines, line) => lines + Math.max(1, Math.ceil(textWidth(line) * size / availableWidth)), 0) * size * 1.2 > rowHeight - 5) size -= 1
+      cell.font = { name: 'Arial', size }
+      if ([1, 3, 7].includes(column)) cell.numFmt = '#,##0'
+    }
+  }
+  sheet.pageSetup.printArea = `A1:G${count + 2}`
+}
+
+function textWidth(text: string) {
+  return [...text].reduce((width, character) => width + (/[^\u0000-\u00ff]/.test(character) ? 1 : 0.6), 0)
+}
+
+function labelProductKey(item: Pick<LabelProductRow, 'sku' | 'productName' | 'optionName'> & { location?: string | null }) {
+  return JSON.stringify([item.sku.trim(), item.productName, item.optionName ?? '', item.location ?? ''])
+}
+
 function aggregatePalletLabelRows(
   boxes: ChinaOutboundShipmentLabelDetail['boxes'],
   boxItemsByBoxId: Map<string, ChinaOutboundShipmentLabelDetail['boxItems']>,
   itemById: Map<string, ChinaOutboundShipmentLabelDetail['items'][number]>,
-  palletNo: string,
-): LabelRow[] {
-  const allocations = boxes.flatMap((box) => boxItemsByBoxId.get(box.id) ?? [])
-  const productRows = aggregateLabelProducts(allocations, itemById)
-  if (productRows.length === 0) return [[palletNo, boxes.length, '', '', '', '', '']]
-  return productRows.map((row) => [palletNo, boxes.length, row.location, row.productName, row.chineseProductName, row.optionName ?? '', row.quantity])
+): PalletLabelProductRow[] {
+  const boxIdsByProduct = new Map<string, Set<string>>()
+  const allocations = boxes.flatMap((box) => {
+    const contents = boxItemsByBoxId.get(box.id) ?? []
+    for (const allocation of contents) {
+      const item = itemById.get(allocation.shipmentItemId)
+      if (!item) continue
+      const key = labelProductKey(item)
+      const ids = boxIdsByProduct.get(key) ?? new Set<string>()
+      ids.add(box.id)
+      boxIdsByProduct.set(key, ids)
+    }
+    return contents
+  })
+  return aggregateLabelProducts(allocations, itemById).map((product) => ({
+    ...product, boxCount: boxIdsByProduct.get(labelProductKey(product))?.size ?? 0,
+  }))
 }
 
 function aggregateLabelProducts(
@@ -305,7 +358,7 @@ function aggregateLabelProducts(
     if (!item) continue
     const sku = item.sku.trim()
     const location = item.location ?? ''
-    const key = JSON.stringify([sku, item.productName, item.optionName ?? '', location])
+    const key = labelProductKey(item)
     const current = products.get(key)
     products.set(key, {
       sku,
@@ -356,61 +409,6 @@ function addEmptyLabelMessage(sheet: ExcelJS.Worksheet, message: string, lastCol
   sheet.pageSetup.printArea = `A1:${lastColumn}1`
 }
 
-function addLabelBlock(input: {
-  sheet: ExcelJS.Worksheet
-  lastColumn: string
-  title: string
-  headers: string[]
-  rows: LabelRow[]
-  inputColumns: Set<number>
-  quantityColumns: Set<number>
-}) {
-  const titleRow = input.sheet.addRow([input.title])
-  input.sheet.mergeCells(`A${titleRow.number}:${input.lastColumn}${titleRow.number}`)
-  titleRow.height = 30
-  styleMergedRow(titleRow, DARK_FILL, { bold: true, size: 16, color: { argb: 'FFFFFFFF' } })
-
-  const headerRow = input.sheet.addRow(input.headers)
-  headerRow.height = 42
-  headerRow.eachCell({ includeEmpty: true }, (cell) => {
-    cell.fill = HEADER_FILL
-    cell.font = { bold: true, size: 10 }
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-    cell.border = ALL_BORDERS
-  })
-
-  const rows = input.rows.length > 0 ? input.rows : [input.headers.map(() => '')]
-  for (const values of rows) {
-    const row = input.sheet.addRow(values)
-    row.height = 30
-    row.eachCell({ includeEmpty: true }, (cell, column) => {
-      cell.font = { size: 11 }
-      cell.alignment = {
-        horizontal: input.quantityColumns.has(column) ? 'right' : 'left',
-        vertical: 'middle',
-        wrapText: true,
-      }
-      cell.border = ALL_BORDERS
-      if (input.inputColumns.has(column)) cell.fill = INPUT_FILL
-      if (input.quantityColumns.has(column) && typeof cell.value === 'number') cell.numFmt = '#,##0'
-    })
-  }
-
-  input.sheet.pageSetup.printArea = `A1:${input.lastColumn}${input.sheet.rowCount}`
-}
-
 function labelSheetName(prefix: string, index: number) {
   return `${prefix} ${String(index + 1).padStart(2, '0')}`
-}
-
-function styleMergedRow(
-  row: ExcelJS.Row,
-  fill?: ExcelJS.FillPattern,
-  font: Partial<ExcelJS.Font> = {},
-) {
-  const cell = row.getCell(1)
-  if (fill) cell.fill = fill
-  cell.font = font
-  cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
-  cell.border = ALL_BORDERS
 }

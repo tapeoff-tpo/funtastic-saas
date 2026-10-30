@@ -227,10 +227,10 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
       '한국어 상품명 / 韩文名称: 상품 B\n로케이션 / 库位: B-02',
       '한국어 상품명 / 韩文名称: 상품 C',
     ])
-    expect([3, 4, 5].map((row) => pallet.getCell(`C${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
+    expect([3, 4, 5].map((row) => pallet.getCell(`D${row}`).value ?? '')).toEqual(['A-01', 'B-02', ''])
     expect(box.getCell('D2').value).toBe(2)
-    expect(pallet.getCell('E2').value).toBe('상품명(중국어) / 商品名称（中文）')
-    expect(pallet.getCell('E3').value).toBe('衣架')
+    expect(pallet.getCell('E2').value).toBe('품명 / 品名')
+    expect(pallet.getCell('E3').value).toBe('상품 A\n衣架')
     expect(pallet.getCell('G3').value).toBe(2)
 
     box.getCell('A2').value = '中文商品名'

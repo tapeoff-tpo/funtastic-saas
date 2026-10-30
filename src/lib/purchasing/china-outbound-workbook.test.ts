@@ -75,18 +75,18 @@ describe('China outbound work workbook', () => {
       'CN-20261001-TEST',
       '10월 1일 중국출고',
       '한국 1창고',
-      '',
+      null,
       '2026-10-01',
-      '',
+      null,
     ])
 
     const itemSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.items)!
     expect(rowCellValues(itemSheet, 2, 5)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', 100])
-    expect(rowCellValues(itemSheet, 3, 5)).toEqual(['중국창고B', '100002-0001', '상품 B', '', 50])
+    expect(rowCellValues(itemSheet, 3, 5)).toEqual(['중국창고B', '100002-0001', '상품 B', null, 50])
 
     const boxSheet = workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)!
-    expect(rowCellValues(boxSheet, 2, 11)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', 100, '', '', '', '', '', ''])
-    expect(rowCellValues(boxSheet, 3, 11)).toEqual(['중국창고B', '100002-0001', '상품 B', '', 50, '', '', '', '', '', ''])
+    expect(rowCellValues(boxSheet, 2, 11)).toEqual(['중국창고A', '100001-0001', '상품 A', '블랙', 100, null, null, null, null, null, null])
+    expect(rowCellValues(boxSheet, 3, 11)).toEqual(['중국창고B', '100002-0001', '상품 B', null, 50, null, null, null, null, null, null])
     expect(workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WAREHOUSE_OPTIONS_SHEET)?.getColumn(1).values).toEqual([
       undefined,
       '중국창고A',

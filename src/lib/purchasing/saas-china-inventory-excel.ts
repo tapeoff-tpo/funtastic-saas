@@ -1,3 +1,4 @@
+import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
 
 export const SAAS_CHINA_INVENTORY_EXCEL_SHEET = 'SaaS 중국재고'
@@ -707,6 +708,7 @@ function styleDataRow(
 }
 
 async function toBuffer(workbook: ExcelJS.Workbook) {
+  clearBlankExcelCells(workbook)
   return Buffer.from(await workbook.xlsx.writeBuffer() as unknown as Uint8Array)
 }
 

@@ -1,3 +1,4 @@
+import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
 import {
   calculateChinaOutboundBoxCbm,
@@ -251,6 +252,7 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     }
   }
 
+  clearBlankExcelCells(workbook)
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 

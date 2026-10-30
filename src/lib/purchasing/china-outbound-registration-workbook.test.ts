@@ -148,7 +148,7 @@ describe('China outbound registration workbook', () => {
       undefined,
       ...CHINA_OUTBOUND_REGISTRATION_BOX_DISPLAY_HEADERS,
     ])
-    expect(shipment.getRow(2).values).toEqual([
+    expect(rowCellValues(shipment, 2, 6)).toEqual([
       undefined,
       'CN-20261028-PREFILLED01',
       '10월 중국출고 작업',
@@ -157,9 +157,9 @@ describe('China outbound registration workbook', () => {
       '2026-10-30',
       '기존 출고요청 작업용',
     ])
-    expect(items.getRow(2).values).toEqual([undefined, '중국창고', 'SKU-A', '상품 A', '블랙', 100])
-    expect(items.getRow(3).values).toEqual([undefined, '쿠팡', 'SKU-B', '', '', 20])
-    expect(boxes.getRow(2).values).toEqual([
+    expect(rowCellValues(items, 2, 5)).toEqual([undefined, '중국창고', 'SKU-A', '상품 A', '블랙', 100])
+    expect(rowCellValues(items, 3, 5)).toEqual([undefined, '쿠팡', 'SKU-B', null, null, 20])
+    expect(rowCellValues(boxes, 2, 11)).toEqual([
       undefined,
       '중국창고',
       'SKU-A',
@@ -174,19 +174,19 @@ describe('China outbound registration workbook', () => {
       'PALLET-1',
     ])
     expect(boxes.rowCount).toBe(3)
-    expect(boxes.getRow(3).values).toEqual([
+    expect(rowCellValues(boxes, 3, 11)).toEqual([
       undefined,
       '쿠팡',
       'SKU-B',
-      '',
-      '',
+      null,
+      null,
       20,
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
     ])
   })
 
@@ -422,4 +422,8 @@ function createWorkbook() {
   const boxes = workbook.addWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes)
   boxes.addRow(['출고창고', '품목코드', '옵션명', '박스번호', '박스 적재수량', '가로(cm)', '세로(cm)', '높이(cm)', '파렛트번호'])
   return workbook
+}
+
+function rowCellValues(sheet: ExcelJS.Worksheet, row: number, columns: number) {
+  return [undefined, ...Array.from({ length: columns }, (_, index) => sheet.getRow(row).getCell(index + 1).value)]
 }

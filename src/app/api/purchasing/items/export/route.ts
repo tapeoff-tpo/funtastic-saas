@@ -1,3 +1,4 @@
+import { clearBlankExcelCells } from '@/lib/excel/empty-cells'
 import ExcelJS from 'exceljs'
 import { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
     addPurchaseUrlIssueSheet(workbook, items)
   }
 
+  clearBlankExcelCells(workbook)
   const buffer = await workbook.xlsx.writeBuffer()
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
   const baseName = isTemplate ? '품목업로드양식' : '품목다운로드'

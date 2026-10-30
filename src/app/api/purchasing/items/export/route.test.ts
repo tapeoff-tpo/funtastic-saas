@@ -34,6 +34,23 @@ describe('Chinese-name item exports', () => {
     expect(mocks.getAll).toHaveBeenCalledWith('workspace-owner', { includeOutgoingMetrics: false })
   })
 
+  it('writes whitespace-only item fields as actual blank cells without removing their headers', async () => {
+    mocks.getAll.mockResolvedValue([{
+      data: { '품목코드': 'SKU-A', '중국어 상품명': ' \u200B ' },
+      purchaseUrlVerification: null, purchaseUrlVerificationStatus: null,
+      outgoingMetrics: {}, updatedAt: new Date('2026-10-30T00:00:00Z'),
+    }])
+    const params = new URLSearchParams({ headers: '품목코드,중국어 상품명', extraHeaders: 'none' })
+    const response = await GET(new NextRequest(`http://localhost/items/export?${params}`))
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await response.arrayBuffer())
+    const sheet = workbook.getWorksheet('품목')!
+    expect(sheet.getCell('B1').value).toBe('중국어 상품명')
+    expect(sheet.getCell('B2').value).toBeNull()
+    expect(sheet.getCell('A2').value).toBe('SKU-A')
+    expect(sheet.getCell('C2').dataValidation).toMatchObject({ type: 'list' })
+  })
+
   it('includes both Chinese-name fields in an upload template without loading operational rows', async () => {
     const params = new URLSearchParams({ headers: '품목코드,중국어 상품명', template: '1' })
     const response = await GET(new NextRequest(`http://localhost/items/export?${params}`))

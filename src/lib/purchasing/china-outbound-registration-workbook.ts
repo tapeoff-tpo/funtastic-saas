@@ -1,3 +1,4 @@
+import { clearBlankExcelCells } from '../excel/empty-cells'
 import { createHash, randomUUID } from 'node:crypto'
 import ExcelJS from 'exceljs'
 import { CHINA_OUTBOUND_DESTINATIONS } from './china-outbound-destinations'
@@ -366,6 +367,7 @@ export async function exportChinaOutboundRegistrationTemplateWorkbook(input: {
     addWarehouseDropdown(boxes, `A2:A${MAX_BOX_ROWS + 1}`)
   }
 
+  clearBlankExcelCells(workbook)
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 

@@ -1,3 +1,4 @@
+import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 
@@ -92,6 +93,7 @@ export async function exportChinaOutboundShipmentLabelWorkbook(
   options: ChinaOutboundShipmentLabelWorkbookOptions = {},
 ): Promise<Buffer> {
   const workbook = createChinaOutboundShipmentLabelWorkbook(detail, options)
+  clearBlankExcelCells(workbook)
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 

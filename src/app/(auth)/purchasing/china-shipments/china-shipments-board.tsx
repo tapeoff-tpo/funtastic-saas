@@ -8,6 +8,7 @@ import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatC
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import { useChinaWorkNavigation } from './china-work-navigation'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
+import { ChinaImportDocumentDialog } from './china-import-document-dialog'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
@@ -670,6 +671,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
             <button key={type} type="button" disabled title={reason} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> {label}</button>
           ))}
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
+          <ChinaImportDocumentDialog shipmentId={shipment.id} />
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {editable && stage === 'summary' ? <button type="button" disabled={isPending || cannotMarkReady} title={cannotMarkReady ? '품목·박스·파렛트 상태와 파렛트 배정을 확인해주세요.' : undefined} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
           {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={requestDispatch} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}

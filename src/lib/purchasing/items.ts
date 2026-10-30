@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
+import { importUnitPriceCny, type ImportItemMetadata } from './china-import-document'
 
 export const PURCHASE_URL_HEADER = '구매 URL'
 export const CHINESE_PRODUCT_NAME_HEADER = '중국어 상품명'
@@ -247,6 +248,22 @@ export async function getAllPurchasingItems(
 export type PurchasingItemLabelData = { location: string; chineseProductName: string }
 
 /** Resolves label text by exact SKU under the shared workspace in a single query. */
+export async function getPurchasingItemTradeDataBySku(userId: string, skus: string[]) {
+  const result = new Map<string, ImportItemMetadata>()
+  for (const skuChunk of chunks([...new Set(skus.map((sku) => sku.trim()).filter(Boolean))], 500)) {
+    const rows = await db.select({ internalSku: products.internalSku, metadata: products.metadata })
+      .from(products).where(and(eq(products.userId, userId), inArray(products.internalSku, skuChunk)))
+    for (const row of rows) {
+      const data = purchasingItemData(row.metadata)
+      result.set(row.internalSku, {
+        englishName: data['영문명'] ?? '', chineseName: data[CHINESE_PRODUCT_NAME_HEADER] ?? '',
+        hsCode: data['HS CODE'] ?? '', material: data['재질'] ?? '', unitPriceCny: importUnitPriceCny(data),
+      })
+    }
+  }
+  return result
+}
+
 export async function getPurchasingItemLabelDataBySku(userId: string, skus: string[]) {
   const uniqueSkus = Array.from(new Set(skus.map((sku) => sku.trim()).filter(Boolean)))
   const labelsBySku = new Map<string, PurchasingItemLabelData>()

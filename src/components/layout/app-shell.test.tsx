@@ -5,6 +5,7 @@ import { AppShell } from './app-shell'
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
+  useRouter: () => ({ refresh: vi.fn() }),
 }))
 
 vi.mock('./sidebar', () => ({

@@ -1,11 +1,13 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { db } from '@/lib/db'
 import { devLogEntries, DEV_LOG_AUTHORS, type DevLogAuthor } from '@/lib/db/schema'
 import { desc, eq } from 'drizzle-orm'
 
 export async function listDevLogEntries() {
+  await assertMenuAccess('/admin/dev-log')
   return db
     .select()
     .from(devLogEntries)
@@ -16,6 +18,7 @@ export async function createDevLogEntry(
   _prev: { error?: string; success?: boolean } | null,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
+  await assertMenuAccess('/admin/dev-log')
   const author = String(formData.get('author') ?? '') as DevLogAuthor
   const logDate = String(formData.get('logDate') ?? '')
   const content = String(formData.get('content') ?? '').trim()
@@ -36,6 +39,7 @@ export async function createDevLogEntry(
 }
 
 export async function deleteDevLogEntry(id: string) {
+  await assertMenuAccess('/admin/dev-log')
   if (!id) return
   await db.delete(devLogEntries).where(eq(devLogEntries.id, id))
   revalidatePath('/admin/dev-log')

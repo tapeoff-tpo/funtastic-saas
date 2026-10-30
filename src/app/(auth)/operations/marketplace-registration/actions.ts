@@ -1,4 +1,5 @@
 'use server'
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -9,12 +10,14 @@ import {
 } from '@/lib/operations/marketplace-registration'
 
 export async function applyRegistrationAction(formData: FormData) {
+  await assertMenuAccess('/operations/marketplace-registration')
   const user = await getCurrentUser(); if (!user) return
   await applyMarketplaceRegistration({ userId: await getWorkspaceUserId(user.id), productCode: String(formData.get('productCode') ?? ''), commonCategory: String(formData.get('commonCategory') ?? '').trim() || null, brand: String(formData.get('brand') ?? '').trim() || null, manufacturer: String(formData.get('manufacturer') ?? '').trim() || null, countryOfOrigin: String(formData.get('countryOfOrigin') ?? '').trim() || null, sourceProductUrl: String(formData.get('sourceProductUrl') ?? '').trim() || null, primaryImageUrl: String(formData.get('primaryImageUrl') ?? '').trim() || null, imageUrls: String(formData.get('detailImageUrls') ?? '').split(/\r?\n/).map((url) => url.trim()).filter(Boolean), salesCodes: String(formData.get('salesCodes') ?? '').split(/[\s,]+/).map((code) => code.trim()).filter(Boolean) })
   revalidatePath('/operations/marketplace-registration')
 }
 
 export async function syncMarketplaceRegistrationSalesCodesAction() {
+  await assertMenuAccess('/operations/marketplace-registration')
   const user = await getCurrentUser()
   if (!user) return { error: '로그인이 필요합니다.' }
   try {
@@ -28,6 +31,7 @@ export async function syncMarketplaceRegistrationSalesCodesAction() {
 }
 
 export async function syncFuntasticB2bAction() {
+  await assertMenuAccess('/operations/marketplace-registration')
   const user = await getCurrentUser()
   if (!user) return { error: '로그인이 필요합니다.' }
   try {

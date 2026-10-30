@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { getProfile, listAdmins } from '@/lib/admin-accounts/queries'
 import { AccountsTable } from './accounts-table'
 import { CreateAccountDialog } from './create-account-dialog'
+import { db } from '@/lib/db'
+import { userMenuPermissions } from '@/lib/db/schema'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +21,8 @@ export default async function AccountsPage() {
   }
 
   const accounts = await listAdmins()
+  const permissions = await db.select().from(userMenuPermissions)
+  const menuPermissions = Object.fromEntries(permissions.map((row) => [row.userId, row.allowedMenus]))
 
   return (
     <div className="space-y-6">
@@ -32,7 +36,7 @@ export default async function AccountsPage() {
         <CreateAccountDialog />
       </div>
 
-      <AccountsTable accounts={accounts} currentUserId={me.id} />
+      <AccountsTable accounts={accounts} currentUserId={me.id} menuPermissions={menuPermissions} />
     </div>
   )
 }

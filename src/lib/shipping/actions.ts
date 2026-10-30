@@ -10,6 +10,7 @@
  * /shipping/held management page.
  */
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { db } from '@/lib/db'
 import { orders, shipments } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
@@ -315,6 +316,7 @@ export async function bulkRegisterInvoice(
 export async function reprocessHeldOrder(
   orderId: string,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/shipping/held')
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -360,6 +362,7 @@ export async function updateHeldMemo(
   orderId: string,
   memo: string,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/shipping/held')
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()

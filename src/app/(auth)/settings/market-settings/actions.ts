@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { nanoid } from 'nanoid'
 import { revalidatePath, updateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
@@ -21,6 +22,7 @@ export async function createCustomMarketplace(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/market-settings')
   const supabase = await createClient()
   const { data: { user }, error } = await supabase.auth.getUser()
   if (error || !user) return { error: '인증이 필요합니다.' }

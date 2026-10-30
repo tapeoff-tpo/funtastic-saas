@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
@@ -13,6 +14,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
  * Creates shipment groups for orders that can be merged.
  */
 export async function detectCombinedShippingAction(): Promise<{ created: number }> {
+  await assertMenuAccess('/shipping/combined')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { created: 0 }

@@ -3,30 +3,34 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Home, X } from 'lucide-react'
-import { tabPathname, useNavState } from './nav-state'
+import { getRouteLabel, tabPathname, useNavState } from './nav-state'
+import { useMenuAccess } from './menu-access-provider'
+import { canAccessPage, MENU_PATHS } from '@/lib/auth/menu-permissions'
 
 export function TabBar() {
   const pathname = usePathname()
   const { tabs, closeTab } = useNavState()
+  const access = useMenuAccess()
+  const home = MENU_PATHS.find((path) => canAccessPage(access, path)) ?? '/access-denied'
 
-  const isDashboard = pathname === '/dashboard'
+  const isHome = pathname === home
 
   return (
     <div className="flex h-9 items-stretch gap-px overflow-x-auto border-b border-gray-200 bg-gray-100 px-1">
       {/* Home / Dashboard tab — always present, not closable */}
       <Link
-        href="/dashboard"
+        href={home}
         className={`flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
-          isDashboard
+          isHome
             ? 'border-t-2 border-blue-500 bg-white text-gray-900'
             : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
         }`}
-        title="대시보드"
+        title={getRouteLabel(home)}
       >
         <Home className="h-3.5 w-3.5" />
       </Link>
 
-      {tabs.map((tab) => {
+      {tabs.filter((tab) => canAccessPage(access, tab.href)).map((tab) => {
         // tab.href may include query string (e.g. "/orders?from=...") so compare by pathname.
         const tabPath = tabPathname(tab)
         const active = pathname === tabPath

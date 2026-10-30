@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -26,6 +27,7 @@ async function actionUser() {
 export async function createNewProductAction(input: {
   values: Record<string, unknown>
 }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const values = newProductValues(input.values)
@@ -48,6 +50,7 @@ export async function updateNewProductAction(input: {
   itemId: string
   values: Record<string, unknown>
 }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const values = newProductValues(input.values)
@@ -68,6 +71,7 @@ export async function updateNewProductAction(input: {
 }
 
 export async function deleteNewProductAction(input: { itemId: string }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const deleted = await deleteNewProduct({
@@ -83,6 +87,7 @@ export async function deleteNewProductAction(input: { itemId: string }) {
 }
 
 export async function deleteNewProductsAction(input: { itemIds: string[] }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const itemIds = [...new Set(input.itemIds)].slice(0, 500)
@@ -100,6 +105,7 @@ export async function moveNewProductsAction(input: {
   stageId: string
   note?: string | null
 }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const result = await moveNewProducts({
@@ -120,6 +126,7 @@ export async function moveNewProductsAction(input: {
 export async function saveNewProductStagesAction(input: {
   stages: Array<{ id?: string; name: string; tone: string }>
 }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     await saveNewProductStages({
@@ -137,6 +144,7 @@ export async function saveNewProductStagesAction(input: {
 export async function saveNewProductEditorLayoutAction(input: {
   layout: NewProductEditorLayout
 }) {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const layout = await saveNewProductEditorLayout({
@@ -246,6 +254,7 @@ function message(error: unknown) {
 }
 
 export async function migrateDaouWorksTextFieldsAction() {
+  await assertMenuAccess('/new-products')
   try {
     const auth = await actionUser()
     const result = await migrateDaouWorksTextFields({

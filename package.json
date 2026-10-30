@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/prepare-admin-menu-permissions.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "funtastic": "node scripts/funtastic.mjs",

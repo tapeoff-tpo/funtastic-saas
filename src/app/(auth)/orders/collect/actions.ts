@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
@@ -70,6 +71,7 @@ async function listTemplatesForUser(userId: string): Promise<ExcelImportTemplate
 export async function addManualChannel(
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/orders/collect', '/orders/import')
   const supabase = await createClient()
   const {
     data: { user },
@@ -117,6 +119,7 @@ export async function addManualChannel(
 export async function createExcelImportTemplate(
   formData: FormData,
 ): Promise<{ templates?: ExcelImportTemplateView[]; error?: string }> {
+  await assertMenuAccess('/orders/collect', '/orders/import')
   const userId = await getCurrentUserId()
   if (!userId) return { error: '인증이 필요합니다.' }
 
@@ -149,6 +152,7 @@ export async function createExcelImportTemplate(
 export async function updateExcelImportTemplate(
   formData: FormData,
 ): Promise<{ templates?: ExcelImportTemplateView[]; error?: string }> {
+  await assertMenuAccess('/orders/collect', '/orders/import')
   const userId = await getCurrentUserId()
   if (!userId) return { error: '인증이 필요합니다.' }
 
@@ -181,6 +185,7 @@ export async function updateExcelImportTemplate(
 export async function deleteExcelImportTemplate(
   templateId: string,
 ): Promise<{ templates?: ExcelImportTemplateView[]; error?: string }> {
+  await assertMenuAccess('/orders/collect', '/orders/import')
   const userId = await getCurrentUserId()
   if (!userId) return { error: '인증이 필요합니다.' }
 

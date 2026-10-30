@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createDealEvent, updateDealChecklist, updateDealPerformance, updateDealStatus } from '@/lib/operations/deal-calendar'
@@ -12,6 +13,7 @@ async function workspaceId() {
 }
 
 export async function updateDealStatusAction(formData: FormData) {
+  await assertMenuAccess('/operations/deal-calendar')
   const userId = await workspaceId()
   if (!userId) return
   await updateDealStatus(userId, String(formData.get('id')), String(formData.get('status')))
@@ -19,6 +21,7 @@ export async function updateDealStatusAction(formData: FormData) {
 }
 
 export async function updateDealChecklistAction(formData: FormData) {
+  await assertMenuAccess('/operations/deal-calendar')
   const userId = await workspaceId()
   if (!userId) return
   await updateDealChecklist(
@@ -31,6 +34,7 @@ export async function updateDealChecklistAction(formData: FormData) {
 }
 
 export async function updateDealPerformanceAction(formData: FormData) {
+  await assertMenuAccess('/operations/deal-calendar')
   const userId = await workspaceId()
   if (!userId) return
   await updateDealPerformance(
@@ -43,6 +47,7 @@ export async function updateDealPerformanceAction(formData: FormData) {
 }
 
 export async function createDealEventAction(formData: FormData) {
+  await assertMenuAccess('/operations/deal-calendar')
   const userId = await workspaceId()
   if (!userId) return
   await createDealEvent({

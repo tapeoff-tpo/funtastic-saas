@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
@@ -28,6 +29,7 @@ export async function createAiAccountAction(
   _prev: { error?: string; success?: boolean } | null,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean }> {
+  await assertMenuAccess('/operations/ai-accounts')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
@@ -62,6 +64,7 @@ async function getWorkspaceIdForAction() {
 }
 
 export async function addAiAccountMessageAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -76,6 +79,7 @@ export async function addAiAccountMessageAction(formData: FormData) {
 }
 
 export async function updateAiAccountOperationalStateAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
 
@@ -92,6 +96,7 @@ export async function updateAiAccountOperationalStateAction(formData: FormData) 
 }
 
 export async function updateAiAccountAvailabilityAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -109,6 +114,7 @@ export async function bulkUpdateAiAccountRenewalAction(input: {
   accountIds: string[]
   renewalDueOn: string
 }) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
 
@@ -122,6 +128,7 @@ export async function bulkUpdateAiAccountOperationalStateAction(input: {
   currentUserName?: string | null
   changedField: 'status' | 'currentUserName'
 }) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
 
@@ -131,6 +138,7 @@ export async function bulkUpdateAiAccountOperationalStateAction(input: {
 }
 
 export async function updateAiAccountLimitsAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
 
@@ -160,6 +168,7 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
 }
 
 export async function resetAiAccountRuntimeStateAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   const result = await resetAiAccountRuntimeState({
@@ -171,6 +180,7 @@ export async function resetAiAccountRuntimeStateAction(formData: FormData) {
 }
 
 export async function bulkResetAiAccountRuntimeStateAction() {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   const result = await bulkResetAiAccountRuntimeState({ userId })
@@ -179,6 +189,7 @@ export async function bulkResetAiAccountRuntimeStateAction() {
 }
 
 export async function addAiAccountUserCandidateAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -190,6 +201,7 @@ export async function addAiAccountUserCandidateAction(formData: FormData) {
 }
 
 export async function deleteAiAccountUserCandidateAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -201,6 +213,7 @@ export async function deleteAiAccountUserCandidateAction(formData: FormData) {
 }
 
 export async function deleteAiAccountUserCandidatesAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -212,6 +225,7 @@ export async function deleteAiAccountUserCandidatesAction(formData: FormData) {
 }
 
 export async function updateAiAccountAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
@@ -231,18 +245,21 @@ export async function updateAiAccountAction(formData: FormData) {
 }
 
 export async function readAiAccountPasswordAction(accountId: string) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   return readAiAccountPassword({ userId, accountId })
 }
 
 export async function readAiAccountLoginInfoAction(accountId: string) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   return readAiAccountLoginInfo({ userId, accountId })
 }
 
 export async function updateAiAccountLoginInfoAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   const result = await updateAiAccountLoginInfo({
@@ -259,6 +276,7 @@ export async function updateAiAccountLoginInfoAction(formData: FormData) {
 }
 
 export async function deleteAiAccountAction(formData: FormData) {
+  await assertMenuAccess('/operations/ai-accounts')
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 

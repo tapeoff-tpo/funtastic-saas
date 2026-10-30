@@ -1728,9 +1728,18 @@ export const userProfiles = pgTable(
 export type UserProfile = typeof userProfiles.$inferSelect
 export type UserRole = (typeof userRoleEnum.enumValues)[number]
 
+// Account-specific authorization; business data still belongs to the shared workspace.
+export const userMenuPermissions = pgTable('user_menu_permissions', {
+  userId: uuid('user_id').primaryKey().references(() => userProfiles.id, { onDelete: 'cascade' }),
+  allowedMenus: jsonb('allowed_menus').$type<string[] | null>(),
+  updatedBy: uuid('updated_by').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const auditActionEnum = pgEnum('audit_action', [
   'account.create',
   'account.role_change',
+  'account.menu_permissions_change',
   'account.deactivate',
   'account.reactivate',
   'account.password_reset',

@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
@@ -51,6 +52,7 @@ async function actionUser() {
 }
 
 export async function createSourcingMeetingAction(values: SourcingMeetingValues) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     const meeting = await createSourcingMeeting({
@@ -68,6 +70,7 @@ export async function createSourcingMeetingAction(values: SourcingMeetingValues)
 }
 
 export async function updateSourcingMeetingAction(input: { meetingId: string; values: SourcingMeetingValues }) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     await updateSourcingMeeting({
@@ -86,6 +89,7 @@ export async function updateSourcingMeetingAction(input: { meetingId: string; va
 }
 
 export async function deleteSourcingMeetingAction(meetingId: string) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     const result = await deleteSourcingMeeting({
@@ -101,6 +105,7 @@ export async function deleteSourcingMeetingAction(meetingId: string) {
 }
 
 export async function deleteManualSourcingItemAction(itemId: string) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     await deleteManualSourcingItem({
@@ -118,6 +123,7 @@ export async function deleteManualSourcingItemAction(itemId: string) {
 export async function saveSourcingOperatorsAction(input: {
   operators: Array<{ memberUserId: string; displayName: string }>
 }) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     await saveSourcingOperators({
@@ -136,6 +142,7 @@ export async function saveSourcingMeetingRowsAction(input: {
   meetingId: string
   rows: SourcingRowValues[]
 }) {
+  await assertMenuAccess('/operations/sourcing')
   try {
     const auth = await actionUser()
     const rows = input.rows.slice(0, 100).map(rowValues)

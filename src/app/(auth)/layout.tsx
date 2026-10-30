@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { AppShell } from '@/components/layout/app-shell'
 import { getProfile } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
 
 export default async function AuthLayout({
   children,
@@ -27,5 +28,7 @@ export default async function AuthLayout({
     redirect('/change-password')
   }
 
-  return <AppShell>{children}</AppShell>
+  const menuAccess = await getUserMenuAccess(user.id)
+  if (!menuAccess) redirect('/login')
+  return <AppShell menuAccess={menuAccess}>{children}</AppShell>
 }

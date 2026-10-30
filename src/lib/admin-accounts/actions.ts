@@ -16,7 +16,9 @@ import {
   withPasswordChangeRequired,
 } from '@/lib/auth/force-password-change'
 import { db } from '@/lib/db'
-import { userProfiles, auditLogs, type UserRole } from '@/lib/db/schema'
+import { userProfiles, userMenuPermissions, auditLogs, type UserRole } from '@/lib/db/schema'
+import { MENU_PATHS } from '@/lib/auth/menu-permissions'
+import { z } from 'zod'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import {
@@ -24,6 +26,35 @@ import {
 } from '@/lib/auth/temporary-reset-password'
 
 const BAN_FOREVER = '876000h' // ~100 years (Supabase ban_duration is a Go duration string)
+
+const menuPermissionSchema = z.object({
+  targetId: z.string().uuid(),
+  allowedMenus: z.array(z.string().refine((path) => MENU_PATHS.includes(path), '알 수 없는 메뉴입니다.')).max(MENU_PATHS.length).nullable(),
+})
+
+export async function saveMenuPermissions(input: { targetId: string; allowedMenus: string[] | null }): Promise<ActionResult> {
+  const guard = await assertSuperAdmin()
+  if (!guard.ok) return { success: false, error: guard.error }
+  const parsed = menuPermissionSchema.safeParse(input)
+  if (!parsed.success) return { success: false, error: '메뉴 권한 설정을 확인해주세요.' }
+  const allowedMenus = parsed.data.allowedMenus === null ? null : [...new Set(parsed.data.allowedMenus)]
+  try {
+    await db.transaction(async (tx) => {
+      const [target] = await tx.select().from(userProfiles).where(eq(userProfiles.id, parsed.data.targetId)).for('update')
+      if (!target) throw new Error('계정을 찾을 수 없습니다.')
+      if (target.role === 'super_admin') throw new Error('최고관리자는 모든 메뉴에 접근할 수 있습니다.')
+      const [before] = await tx.select().from(userMenuPermissions).where(eq(userMenuPermissions.userId, target.id))
+      await tx.insert(userMenuPermissions).values({ userId: target.id, allowedMenus, updatedBy: guard.callerId })
+        .onConflictDoUpdate({ target: userMenuPermissions.userId, set: { allowedMenus, updatedBy: guard.callerId, updatedAt: new Date() } })
+      await tx.insert(auditLogs).values({
+        actorId: guard.callerId, targetId: target.id, action: 'account.menu_permissions_change',
+        metadata: { before: before?.allowedMenus ?? null, after: allowedMenus },
+      })
+    })
+    revalidatePath('/', 'layout')
+    return { success: true }
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : '권한 저장에 실패했습니다.' } }
+}
 
 type ActionResult<T = void> = { success: true; data?: T } | { success: false; error: string }
 

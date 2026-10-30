@@ -1,4 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { getProxyUser } from '@/lib/auth/proxy-user'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { canAccessApi, canAccessPage } from '@/lib/auth/menu-permissions'
 import {
   LOGIN_SESSION_MODE_COOKIE,
   LOGIN_SESSION_PROOF_COOKIE,
@@ -68,6 +71,27 @@ export async function proxy(request: NextRequest) {
 
   // Prevent caching of authenticated responses
   supabaseResponse.headers.set('Cache-Control', 'private, no-store')
+
+  if (pathname !== '/login') {
+    const user = await getProxyUser(request, supabaseResponse)
+    const access = user ? await getUserMenuAccess(user.id) : null
+    const isApi = pathname.startsWith('/api/')
+    if (!access) {
+      return isApi ? NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
+        : NextResponse.redirect(new URL('/login', request.url))
+    }
+    const allowed = isApi ? canAccessApi(access, pathname, request.method) : canAccessPage(access, pathname)
+    if (!allowed) {
+      if (isApi || request.method !== 'GET') {
+        return NextResponse.json({ error: '이 메뉴에 접근할 권한이 없습니다.' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } })
+      }
+      return NextResponse.redirect(new URL('/access-denied', request.url))
+    }
+    const next = NextResponse.next({ request: { headers: request.headers } })
+    for (const cookie of supabaseResponse.cookies.getAll()) next.cookies.set(cookie)
+    next.headers.set('Cache-Control', 'private, no-store')
+    return next
+  }
 
   return supabaseResponse
 }

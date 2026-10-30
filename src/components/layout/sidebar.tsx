@@ -38,6 +38,8 @@ import {
 } from 'lucide-react'
 import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'
+import { useMenuAccess } from './menu-access-provider'
+import { canAccessPage } from '@/lib/auth/menu-permissions'
 import {
   applySidebarMenuOrder,
   fetchSidebarMenuOrder,
@@ -197,8 +199,6 @@ export const navSections: NavSection[] = [
   },
 ]
 
-const allNavItems: NavItem[] = navSections.flatMap((section) => section.items)
-
 interface SidebarProps {
   onCollapse?: () => void
   onNavigate?: () => void
@@ -209,6 +209,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
   const pathname = usePathname()
   const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
+  const access = useMenuAccess()
   const prefetchedHrefs = useRef(new Set<string>())
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
@@ -231,9 +232,14 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
     }
   }, [])
 
-  const orderedNavItems = orderedSections.flatMap((section) => section.items)
+  const visibleSections = orderedSections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => canAccessPage(access, item.href)),
+    groups: section.groups?.map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(access, item.href)) })).filter((group) => group.items.length),
+  })).filter((section) => section.items.length)
+  const orderedNavItems = visibleSections.flatMap((section) => section.items)
   const favoriteItems = favorites
-    .map((href) => orderedNavItems.find((item) => item.href === href) ?? allNavItems.find((item) => item.href === href))
+    .map((href) => orderedNavItems.find((item) => item.href === href))
     .filter((item): item is NavItem => Boolean(item))
 
   function isItemActive(href: string) {
@@ -344,7 +350,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
 
       <nav className={`flex-1 overflow-y-auto ${mobile ? 'px-3 py-3' : 'px-2 py-1.5'}`}>
         <div className="space-y-px">
-          {orderedSections.find((section) => section.id === 'dashboard')?.items.map((item) => renderNavItem(item, { showStar: false }))}
+          {visibleSections.find((section) => section.id === 'dashboard')?.items.map((item) => renderNavItem(item, { showStar: false }))}
         </div>
 
         {favoriteItems.length > 0 && (
@@ -359,7 +365,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           </div>
         )}
 
-        {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => {
+        {visibleSections.filter((section) => section.id !== 'dashboard').map((section) => {
           const sectionIsActive = isSectionActive(section)
           const sectionIsOpen = section.collapsible
             ? openSections[section.id] ?? (sectionIsActive || !section.defaultCollapsed)

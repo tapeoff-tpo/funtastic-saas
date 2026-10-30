@@ -5,6 +5,7 @@
  * 기존에 carrier_id 가 채워진 양식도 그대로 표시되지만 신규는 NULL.
  */
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import {
   getCarrierTemplateById,
   getCarrierTemplates,
@@ -43,6 +44,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
 
   async function handleDelete(formData: FormData) {
     'use server'
+    await assertMenuAccess('/shipping/templates')
     const templateId = formData.get('templateId') as string
     if (templateId) {
       await deleteCarrierTemplate(templateId)
@@ -52,6 +54,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
 
   async function handleCreate(formData: FormData) {
     'use server'
+    await assertMenuAccess('/shipping/templates')
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -74,6 +77,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
 
   async function handleUpdate(formData: FormData) {
     'use server'
+    await assertMenuAccess('/shipping/templates')
     const templateId = formData.get('templateId') as string
     const name = formData.get('name') as string
     const columnsJson = formData.get('columns') as string

@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { companySettings } from '@/lib/db/schema'
@@ -7,6 +8,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq } from 'drizzle-orm'
 
 export async function getCompanySettings(userId: string) {
+  await assertMenuAccess('/settings/company')
   const rows = await db
     .select()
     .from(companySettings)
@@ -19,6 +21,7 @@ export async function saveCompanySettings(
   _prevState: { success?: boolean; error?: string } | null,
   formData: FormData,
 ) {
+  await assertMenuAccess('/settings/company')
   const supabase = await createClient()
   const {
     data: { user },

@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
@@ -22,6 +23,7 @@ interface ActionResult {
 export async function setStockAction(
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/inventory')
   const supabase = await createClient()
   const {
     data: { user },
@@ -69,6 +71,7 @@ export async function setStockAction(
 export async function adjustStockAction(
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/inventory')
   const supabase = await createClient()
   const {
     data: { user },
@@ -145,6 +148,7 @@ export async function updateShippingCost(
   productId: string,
   value: number | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  await assertMenuAccess('/inventory')
   const supabase = await createClient()
   const {
     data: { user },
@@ -176,6 +180,7 @@ export async function getHistoryAction(
   inventoryId: string,
   page = 1,
 ) {
+  await assertMenuAccess('/inventory')
   const supabase = await createClient()
   const {
     data: { user },

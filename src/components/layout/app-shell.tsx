@@ -7,14 +7,17 @@ import { Sidebar } from './sidebar'
 import { TabBar } from './tab-bar'
 import { getRouteLabel, NavStateProvider } from './nav-state'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
+import { MenuAccessProvider } from './menu-access-provider'
+import { UNRESTRICTED_MENU_ACCESS, type MenuAccess } from '@/lib/auth/menu-permissions'
 
 interface AppShellProps {
   children: React.ReactNode
+  menuAccess?: MenuAccess
 }
 
 const STORAGE_KEY = 'funtastic-sidebar-collapsed'
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, menuAccess = UNRESTRICTED_MENU_ACCESS }: AppShellProps) {
   const pathname = usePathname()
   const mainRef = useRef<HTMLElement>(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
@@ -50,7 +53,7 @@ export function AppShell({ children }: AppShellProps) {
   }, [mobileMenuOpen])
 
   return (
-    <NavStateProvider>
+    <MenuAccessProvider initialAccess={menuAccess}><NavStateProvider>
       <div data-app-translate className="fixed inset-0 flex overflow-hidden">
         {collapsed ? (
           <button
@@ -134,6 +137,6 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         ) : null}
       </div>
-    </NavStateProvider>
+    </NavStateProvider></MenuAccessProvider>
   )
 }

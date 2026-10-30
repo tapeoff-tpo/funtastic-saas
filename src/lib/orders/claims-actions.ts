@@ -7,6 +7,7 @@
  * All actions require authentication and verify claim ownership.
  */
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath, revalidateTag, updateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
@@ -27,6 +28,7 @@ export async function updateClaimStatus(
   claimId: string,
   status: ClaimStatus,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/orders/claims')
   const supabase = await createClient()
   const {
     data: { user },
@@ -107,6 +109,7 @@ export async function updateClaimMemo(
   claimId: string,
   memo: string,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/orders/claims')
   const supabase = await createClient()
   const {
     data: { user },

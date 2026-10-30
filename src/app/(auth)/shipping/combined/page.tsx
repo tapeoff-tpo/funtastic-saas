@@ -5,6 +5,7 @@
  * Admin can detect new merge candidates and manage groups.
  */
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { getShipmentGroups, confirmShipmentGroup, rejectShipmentGroup } from '@/lib/shipping/combined-queries'
 import type { ShipmentGroupWithCount } from '@/lib/shipping/combined-queries'
 import type { Metadata } from 'next'
@@ -96,12 +97,14 @@ async function ShipmentGroupCard({ group }: { group: ShipmentGroupWithCount }) {
 
   async function handleConfirm() {
     'use server'
+    await assertMenuAccess('/shipping/combined')
     await confirmShipmentGroup(group.id)
     revalidatePath('/shipping/combined')
   }
 
   async function handleReject() {
     'use server'
+    await assertMenuAccess('/shipping/combined')
     await rejectShipmentGroup(group.id)
     revalidatePath('/shipping/combined')
   }

@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { createClient } from '@/lib/supabase/server'
 import { storeCredential, deleteCredential, deleteCredentialByName, readCredential } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
@@ -43,6 +44,7 @@ export async function saveCommonAuthProfile(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -149,6 +151,7 @@ export async function getMarketplaceCredentials(
     values: Record<string, string>
   }
 }> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -214,6 +217,7 @@ export async function testMarketplaceCredentials(
   marketplaceId: string,
   credentials: Record<string, string>
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -344,6 +348,7 @@ export async function saveSalesExportSettings(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -450,6 +455,7 @@ export async function registerMarketplaceCredentials(
   _prevState: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -684,6 +690,7 @@ export async function registerRpaMarketplaceConnection(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -824,6 +831,7 @@ export async function renameRpaMarketplaceConnection(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -922,6 +930,7 @@ export async function registerExcelMarketplaceConnection(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },
@@ -1005,6 +1014,7 @@ export async function deleteMarketplaceConnection(
   _prevState: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
+  await assertMenuAccess('/settings/marketplaces')
   const supabase = await createClient()
   const {
     data: { user },

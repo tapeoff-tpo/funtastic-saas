@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
@@ -20,6 +21,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 export async function bulkCombineByContactAction(
   orderIds?: string[],
 ): Promise<{ created: number; totalOrders: number }> {
+  await assertMenuAccess('/orders', '/shipping/combined')
   const supabase = await createClient()
   const {
     data: { user },

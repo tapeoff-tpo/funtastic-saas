@@ -1,6 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,14 +11,17 @@ import {
   reactivateAccount,
 } from '@/lib/admin-accounts/actions'
 import type { UserProfile } from '@/lib/db/schema'
+import { MenuPermissionsDialog } from './menu-permissions-dialog'
 
 interface Props {
   accounts: UserProfile[]
   currentUserId: string
+  menuPermissions: Record<string, string[] | null>
 }
 
-export function AccountsTable({ accounts, currentUserId }: Props) {
+export function AccountsTable({ accounts, currentUserId, menuPermissions }: Props) {
   const [pending, startTransition] = useTransition()
+  const [editing, setEditing] = useState<UserProfile | null>(null)
 
   function handleChangeRole(targetId: string, currentRole: 'admin' | 'super_admin') {
     const newRole = currentRole === 'admin' ? 'super_admin' : 'admin'
@@ -59,6 +62,7 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
 
   return (
     <>
+      {editing && <MenuPermissionsDialog key={editing.id} account={{ id: editing.id, email: editing.email, allowedMenus: menuPermissions[editing.id] ?? null }} onClose={() => setEditing(null)} />}
       <div className="space-y-3 md:hidden">
         {accounts.map((a) => {
           const isSelf = a.id === currentUserId
@@ -77,6 +81,9 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">생성일 {new Date(a.createdAt).toLocaleDateString('ko-KR')}</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button size="sm" variant="outline" className="col-span-2 h-10" disabled={pending || a.role === 'super_admin'} onClick={() => setEditing(a)}>
+                  {a.role === 'super_admin' ? '전체 권한 · 최고관리자' : `메뉴 권한 · ${menuPermissions[a.id] == null ? '전체' : `${menuPermissions[a.id]!.length}개`}`}
+                </Button>
                 <Button size="sm" variant="outline" className="h-10" disabled={pending || isSelf} onClick={() => handleChangeRole(a.id, a.role)}>역할변경</Button>
                 <Button size="sm" variant="outline" className="h-10" disabled={pending || !isActive} onClick={() => handleReset(a.id, a.email)}>비번초기화</Button>
                 {isActive ? (
@@ -128,6 +135,9 @@ export function AccountsTable({ accounts, currentUserId }: Props) {
                 </td>
                 <td className="px-4 py-2">
                   <div className="flex gap-1 justify-end flex-wrap">
+                    <Button size="sm" variant="outline" disabled={pending || a.role === 'super_admin'} onClick={() => setEditing(a)}>
+                      {a.role === 'super_admin' ? '전체 권한' : `메뉴 권한 · ${menuPermissions[a.id] == null ? '전체' : `${menuPermissions[a.id]!.length}개`}`}
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

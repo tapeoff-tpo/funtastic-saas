@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { useMenuAccess } from './menu-access-provider'
+import { canAccessPage } from '@/lib/auth/menu-permissions'
 
 const TABS_KEY = 'funtastic-tabs'
 const FAVS_KEY = 'funtastic-favorites'
@@ -22,6 +24,8 @@ export function tabPathname(tab: { href: string }): string {
 }
 
 const ROUTE_LABELS: Record<string, string> = {
+  '/access-denied': '접근 권한 안내',
+  '/admin/accounts': '계정관리',
   '/dashboard': '대시보드',
   '/orders': '주문 관리',
   '/orders/collect': '주문 수집',
@@ -95,6 +99,7 @@ interface NavStateValue {
 const NavStateContext = createContext<NavStateValue | null>(null)
 
 export function NavStateProvider({ children }: { children: React.ReactNode }) {
+  const access = useMenuAccess()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [tabs, setTabs] = useState<OpenTab[]>([])
@@ -178,7 +183,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <NavStateContext.Provider
-      value={{ tabs, favorites, closeTab, closeOthers, closeAll, toggleFavorite, isFavorite }}
+      value={{ tabs: tabs.filter((tab) => canAccessPage(access, tab.href)), favorites: favorites.filter((href) => canAccessPage(access, href)), closeTab, closeOthers, closeAll, toggleFavorite, isFavorite }}
     >
       {children}
     </NavStateContext.Provider>

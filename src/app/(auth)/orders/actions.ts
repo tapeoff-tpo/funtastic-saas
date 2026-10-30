@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath, revalidateTag, updateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
@@ -66,6 +67,7 @@ export async function changeStatusAction(
   orderId: string,
   newStatus: OrderStatus,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/orders')
   const result = await updateOrderStatus(orderId, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
@@ -81,6 +83,7 @@ export async function holdOrderAction(
   orderId: string,
   reason: string,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/orders')
   const trimmed = reason.trim()
   if (!trimmed) {
     return { success: false, error: 'Hold reason is required' }
@@ -98,6 +101,7 @@ export async function holdOrderAction(
 export async function releaseOrderAction(
   orderId: string,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/orders')
   const result = await releaseOrder(orderId)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
@@ -113,6 +117,7 @@ export async function bulkChangeStatusAction(
   orderIds: string[],
   newStatus: OrderStatus,
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  await assertMenuAccess('/orders')
   const result = await bulkUpdateStatus(orderIds, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
@@ -129,6 +134,7 @@ export async function forceBulkChangeStatusAction(
   orderIds: string[],
   newStatus: OrderStatus,
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
@@ -156,6 +162,7 @@ export async function shipCurrentOrdersBatchAction(
   nextCursor: string | null
   hasMore: boolean
 }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -218,6 +225,7 @@ export async function forceBulkClaimStatusAction(
   orderIds: string[],
   claimType: 'return' | 'exchange',
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  await assertMenuAccess('/orders', '/orders/claims')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
@@ -289,6 +297,7 @@ export async function forceBulkClaimStatusAction(
 export async function forceBulkHoldOrdersAction(
   orderIds: string[],
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
@@ -341,6 +350,7 @@ export async function uploadInvoiceAction(
   trackingNumber: string,
   carrierId: string,
 ): Promise<{ success: boolean; error?: string }> {
+  await assertMenuAccess('/orders', '/shipping/invoice')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
@@ -357,6 +367,7 @@ export async function uploadInvoiceAction(
 export async function bulkUploadInvoiceAction(
   orders: Array<{ orderId: string; trackingNumber: string; carrierId: string }>,
 ): Promise<{ queued: number; errors: Array<{ orderId: string; error: string }> }> {
+  await assertMenuAccess('/orders', '/shipping/invoice')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -387,6 +398,7 @@ export async function bulkUploadInvoiceAction(
 export async function copyOrderAction(
   orderId: string,
 ): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
@@ -406,6 +418,7 @@ export async function copyOrderAction(
 export async function bulkDeleteOrdersAction(
   orderIds: string[],
 ): Promise<{ deleted: number; errors: string[] }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { deleted: 0, errors: ['Unauthorized'] }
@@ -428,6 +441,7 @@ export async function bulkDeleteOrdersAction(
 export async function unlockOrderSnapshotsAction(
   orderIds: string[],
 ): Promise<{ unlocked: number; error?: string }> {
+  await assertMenuAccess('/orders')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { unlocked: 0, error: 'Unauthorized' }

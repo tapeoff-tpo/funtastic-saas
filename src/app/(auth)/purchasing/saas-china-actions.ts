@@ -1,5 +1,6 @@
 'use server'
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -197,6 +198,7 @@ const removeBoxItemSchema = z.object({
 })
 
 export async function receiveSaasChinaInventoryAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/saas-china-inventory')
   return runAction(async () => {
     const value = receiveSchema.parse(input)
     const actor = await getActor()
@@ -206,6 +208,7 @@ export async function receiveSaasChinaInventoryAction(input: unknown): Promise<A
 }
 
 export async function adjustSaasChinaInventoryAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/saas-china-inventory')
   return runAction(async () => {
     const value = adjustSchema.parse(input)
     const actor = await getActor()
@@ -215,6 +218,7 @@ export async function adjustSaasChinaInventoryAction(input: unknown): Promise<Ac
 }
 
 export async function createSaasChinaOutboundWarehouseAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/saas-china-inventory', '/purchasing/china-shipments')
   return runAction(async () => {
     const value = createOutboundWarehouseSchema.parse(input)
     const actor = await getActor()
@@ -224,6 +228,7 @@ export async function createSaasChinaOutboundWarehouseAction(input: unknown): Pr
 }
 
 export async function renameSaasChinaOutboundWarehouseAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/saas-china-inventory', '/purchasing/china-shipments')
   return runAction(async () => {
     const value = renameOutboundWarehouseSchema.parse(input)
     const actor = await getActor()
@@ -233,6 +238,7 @@ export async function renameSaasChinaOutboundWarehouseAction(input: unknown): Pr
 }
 
 export async function createChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/saas-china-inventory', '/purchasing/china-shipments')
   return runAction(async () => {
     const value = createShipmentSchema.parse(input)
     const actor = await getActor()
@@ -243,6 +249,7 @@ export async function createChinaOutboundShipmentAction(input: unknown): Promise
 }
 
 export async function updateChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = updateShipmentSchema.parse(input)
     const actor = await getActor()
@@ -252,6 +259,7 @@ export async function updateChinaOutboundShipmentAction(input: unknown): Promise
 }
 
 export async function addChinaOutboundPalletAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = addPalletSchema.parse(input)
     const actor = await getActor()
@@ -261,6 +269,7 @@ export async function addChinaOutboundPalletAction(input: unknown): Promise<Acti
 }
 
 export async function addChinaOutboundBoxAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = addBoxSchema.parse(input)
     const actor = await getActor()
@@ -270,6 +279,7 @@ export async function addChinaOutboundBoxAction(input: unknown): Promise<ActionR
 }
 
 export async function configureChinaOutboundPackagingAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = configurePackagingSchema.parse(input)
     const actor = await getActor()
@@ -279,6 +289,7 @@ export async function configureChinaOutboundPackagingAction(input: unknown): Pro
 }
 
 export async function saveChinaOutboundBoxDimensionsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = saveBoxDimensionsSchema.parse(input)
     const actor = await getActor()
@@ -288,6 +299,7 @@ export async function saveChinaOutboundBoxDimensionsAction(input: unknown): Prom
 }
 
 export async function addChinaOutboundBoxItemAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = addBoxItemSchema.parse(input)
     const actor = await getActor()
@@ -297,6 +309,7 @@ export async function addChinaOutboundBoxItemAction(input: unknown): Promise<Act
 }
 
 export async function saveChinaOutboundItemPackingAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = saveItemPackingSchema.parse(input)
     const actor = await getActor()
@@ -306,6 +319,7 @@ export async function saveChinaOutboundItemPackingAction(input: unknown): Promis
 }
 
 export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = saveItemBoxSplitsSchema.parse(input)
     const actor = await getActor()
@@ -315,6 +329,7 @@ export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Prom
 }
 
 export async function saveChinaOutboundBoxCompletionStatusesAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = saveBoxCompletionStatusesSchema.parse(input)
     const actor = await getActor()
@@ -324,6 +339,7 @@ export async function saveChinaOutboundBoxCompletionStatusesAction(input: unknow
 }
 
 export async function saveChinaOutboundPalletCompletionStatusesAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = savePalletCompletionStatusesSchema.parse(input)
     const actor = await getActor()
@@ -333,6 +349,7 @@ export async function saveChinaOutboundPalletCompletionStatusesAction(input: unk
 }
 
 export async function addChinaOutboundShipmentItemsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = addShipmentItemsSchema.parse(input)
     const actor = await getActor()
@@ -342,6 +359,7 @@ export async function addChinaOutboundShipmentItemsAction(input: unknown): Promi
 }
 
 export async function assignChinaOutboundBoxesToPalletsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = assignPalletsSchema.parse(input)
     const actor = await getActor()
@@ -351,6 +369,7 @@ export async function assignChinaOutboundBoxesToPalletsAction(input: unknown): P
 }
 
 export async function removeChinaOutboundBoxItemAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = removeBoxItemSchema.parse(input)
     const actor = await getActor()
@@ -360,6 +379,7 @@ export async function removeChinaOutboundBoxItemAction(input: unknown): Promise<
 }
 
 export async function markChinaOutboundShipmentReadyAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = z.object({ shipmentId }).parse(input)
     const actor = await getActor()
@@ -369,6 +389,7 @@ export async function markChinaOutboundShipmentReadyAction(input: unknown): Prom
 }
 
 export async function dispatchChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = z.object({ shipmentId }).parse(input)
     const actor = await getActor()
@@ -378,6 +399,7 @@ export async function dispatchChinaOutboundShipmentAction(input: unknown): Promi
 }
 
 export async function cancelChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = z.object({ shipmentId }).parse(input)
     const actor = await getActor()
@@ -387,6 +409,7 @@ export async function cancelChinaOutboundShipmentAction(input: unknown): Promise
 }
 
 export async function deleteChinaOutboundShipmentAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = z.object({ shipmentId }).parse(input)
     const actor = await getActor()

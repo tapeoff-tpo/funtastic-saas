@@ -7,6 +7,7 @@
  * Each action verifies user authentication before delegating.
  */
 
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { analyticsChannelProductOverrides, inventory, products, purchaseRequestItems } from '@/lib/db/schema'
@@ -35,6 +36,7 @@ async function requireUser(): Promise<string> {
 export async function getProductsAction(
   filters: ProductFilters = {},
 ): Promise<{ items: ProductListItem[]; total: number }> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return getProducts(userId, filters)
 }
@@ -45,6 +47,7 @@ export async function getProductsAction(
 export async function getProductByIdAction(
   productId: string,
 ): Promise<ProductDetail | null> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return getProductById(userId, productId)
 }
@@ -66,6 +69,7 @@ export type ProductOperationsSummary = {
  * of truth for stock, purchasing, or channel registrations.
  */
 export async function getProductOperationsSummaryAction(productId: string): Promise<ProductOperationsSummary> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   const product = await getProductById(userId, productId)
   if (!product) throw new Error('Product not found or access denied')
@@ -119,6 +123,7 @@ export async function getProductOperationsSummaryAction(productId: string): Prom
 export async function createProductAction(
   formData: ProductFormData,
 ): Promise<ActionResult<{ productId: string }>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return createProduct(userId, formData)
 }
@@ -130,6 +135,7 @@ export async function updateProductAction(
   productId: string,
   formData: ProductFormData,
 ): Promise<ActionResult<void>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return updateProduct(userId, productId, formData)
 }
@@ -140,6 +146,7 @@ export async function updateProductAction(
 export async function deleteProductAction(
   productId: string,
 ): Promise<ActionResult<void>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return deleteProduct(userId, productId)
 }
@@ -151,6 +158,7 @@ export async function updateProductStatusAction(
   productId: string,
   status: Exclude<ProductStatus, 'deleted'>,
 ): Promise<ActionResult<void>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   return updateProductStatus(userId, productId, status)
 }
@@ -159,6 +167,7 @@ export async function updateProductStatusAction(
  * Get change logs for a product.
  */
 export async function getProductChangeLogsAction(productId: string) {
+  await assertMenuAccess('/products')
   await requireUser()
   const { getProductChangeLogs } = await import('./change-log')
   return getProductChangeLogs(productId)
@@ -170,6 +179,7 @@ export async function getProductChangeLogsAction(productId: string) {
 export async function bulkDeleteProductsAction(
   productIds: string[],
 ): Promise<ActionResult<{ deleted: number }>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   if (productIds.length === 0) return { success: true, data: { deleted: 0 } }
 
@@ -189,6 +199,7 @@ export async function bulkDeleteBySkuPrefixAction(
   prefix: string,
   exclude: boolean,
 ): Promise<ActionResult<{ deleted: number }>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   if (!prefix) return { success: false, error: '접두사를 입력해주세요.' }
 
@@ -214,6 +225,7 @@ export async function syncProductAction(
   marketplaceId: string,
   connectionId: string,
 ): Promise<ActionResult<{ marketplaceProductId?: string }>> {
+  await assertMenuAccess('/products')
   await requireUser()
   const result = await syncProductToMarketplace(productId, marketplaceId, connectionId)
   if (result.success) {
@@ -228,6 +240,7 @@ export async function syncProductAction(
 export async function syncAllAction(
   productId: string,
 ): Promise<ActionResult<{ results: Array<{ marketplaceId: string; success: boolean; error?: string }> }>> {
+  await assertMenuAccess('/products')
   await requireUser()
   const results = await syncProductToAllMarketplaces(productId)
   return {
@@ -249,6 +262,7 @@ export async function reverseCollectAction(
   connectionId: string,
   marketplaceId: string,
 ): Promise<ActionResult<ReverseCollectResult>> {
+  await assertMenuAccess('/products')
   const userId = await requireUser()
   try {
     const result = await reverseCollectProducts(userId, connectionId, marketplaceId)
@@ -265,6 +279,7 @@ export async function reverseCollectAction(
 export async function getCategoryMappingsAction(
   marketplaceId?: string,
 ): Promise<CategoryMapping[]> {
+  await assertMenuAccess('/products/marketplace-categories', '/products/categories')
   const userId = await requireUser()
   return getCategoryMappings(userId, marketplaceId)
 }
@@ -273,6 +288,7 @@ export async function getCategoryMappingsAction(
  * Get distinct internal categories used by user's products.
  */
 export async function getInternalCategoriesAction(): Promise<string[]> {
+  await assertMenuAccess('/products/marketplace-categories', '/products/categories')
   const userId = await requireUser()
   return getInternalCategories(userId)
 }
@@ -286,6 +302,7 @@ export async function saveCategoryMappingAction(input: {
   marketplaceCategoryId: string
   marketplaceCategoryName?: string
 }): Promise<ActionResult<void>> {
+  await assertMenuAccess('/products/marketplace-categories', '/products/categories')
   const userId = await requireUser()
   const result = await saveCategoryMapping(userId, input)
   if (result.success) {
@@ -300,6 +317,7 @@ export async function saveCategoryMappingAction(input: {
 export async function deleteCategoryMappingAction(
   mappingId: string,
 ): Promise<ActionResult<void>> {
+  await assertMenuAccess('/products/marketplace-categories', '/products/categories')
   await requireUser()
   const result = await deleteCategoryMapping(mappingId)
   if (result.success) {
@@ -315,6 +333,7 @@ export async function deleteCategoryMappingAction(
 export async function importExcelAction(
   formData: FormData,
 ): Promise<ActionResult<{ created: number; updated: number; errors: string[] }>> {
+  await assertMenuAccess('/products')
   await requireUser()
 
   const file = formData.get('file')

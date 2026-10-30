@@ -14,7 +14,9 @@ export type ChinaOutboundShipmentLabelDetail = Omit<ChinaOutboundPackingExportDe
 export type ChinaOutboundShipmentLabelWorkbookOptions = {
   /** Restrict box label sheets to these saved box IDs. */
   boxIds?: readonly string[]
-  /** Include pallet label sheets. Defaults to true for the bulk download. */
+  /** Include box label sheets. Defaults to true. */
+  includeBoxLabels?: boolean
+  /** Include pallet label sheets. Defaults to true. */
   includePalletLabels?: boolean
 }
 
@@ -80,7 +82,9 @@ export function createChinaOutboundShipmentLabelWorkbook(
   const boxItemsByBoxId = groupBoxItemsByBox(detail)
   const includePalletLabels = options.includePalletLabels !== false
 
-  addBoxLabelSheets(workbook, detail, itemById, boxItemsByBoxId, options.boxIds)
+  if (options.includeBoxLabels !== false) {
+    addBoxLabelSheets(workbook, detail, itemById, boxItemsByBoxId, options.boxIds)
+  }
   if (includePalletLabels) {
     addPalletLabelSheets(workbook, detail, itemById, palletById, boxItemsByBoxId)
   }
@@ -99,6 +103,11 @@ export async function exportChinaOutboundShipmentLabelWorkbook(
 
 export function chinaOutboundShipmentLabelFilename(shipmentNo: string, now = new Date()) {
   return `${safeFilenameSegment(shipmentNo, '중국출고')}_부착용쉽먼트_${labelFilenameDate(now)}.xlsx`
+}
+
+export function chinaOutboundShipmentBulkLabelFilename(shipmentNo: string, type: 'boxes' | 'pallets', now = new Date()) {
+  const label = type === 'boxes' ? '박스쉽먼트' : '파렛트쉽먼트'
+  return `${safeFilenameSegment(shipmentNo, '중국출고')}_${label}_${labelFilenameDate(now)}.xlsx`
 }
 
 export function chinaOutboundShipmentBoxLabelFilename(shipmentNo: string, boxNo: string, now = new Date()) {

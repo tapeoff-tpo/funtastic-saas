@@ -511,6 +511,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
   const cannotMarkReady = hasIncompleteBoxSplit || hasIncompleteBox || hasIncompletePallet || hasUnassignedPalletBox
   const canDownloadShipmentLabels = boxesWithItems.length > 0
+  const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
   const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
     const leftComplete = left.boxSplitStatus === 'completed'
@@ -660,7 +661,14 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
         <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
-          {canDownloadShipmentLabels ? <a href={shipmentLabelsHref} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</a> : <button type="button" disabled title="박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다." className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> 부착용 쉽먼트 일괄 다운로드</button>}
+          {[
+            { type: 'boxes', label: '박스 쉽먼트 일괄 다운로드', enabled: canDownloadShipmentLabels, reason: '박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다.' },
+            { type: 'pallets', label: '파렛트 쉽먼트 일괄 다운로드', enabled: canDownloadPalletLabels, reason: '상품이 담긴 박스를 파렛트에 배정한 뒤 다운로드할 수 있습니다.' },
+          ].map(({ type, label, enabled, reason }) => enabled ? (
+            <a key={type} href={`${shipmentLabelsHref}?type=${type}`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> {label}</a>
+          ) : (
+            <button key={type} type="button" disabled title={reason} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> {label}</button>
+          ))}
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {editable && stage === 'summary' ? <button type="button" disabled={isPending || cannotMarkReady} title={cannotMarkReady ? '품목·박스·파렛트 상태와 파렛트 배정을 확인해주세요.' : undefined} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
@@ -720,7 +728,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할 상태가 진행 중인 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같고 상태를 완료로 저장해야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
         {hasIncompleteBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">진행 중인 박스가 있습니다. 박스 상태를 완료로 저장해주세요.</p> : null}
         {hasIncompletePallet ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">진행 중인 파렛트가 있습니다. 파렛트 상태를 완료로 저장해주세요.</p> : null}
-        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 부착용 쉽먼트 엑셀은 지금 받을 수 있지만, 파렛트 쉽먼트에는 번호를 입력한 파렛트만 포함됩니다.</p> : null}
+        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 박스 쉽먼트는 지금 받을 수 있고, 파렛트 쉽먼트에는 박스가 배정된 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
       </section> : null}
     </section>

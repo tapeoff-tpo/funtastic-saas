@@ -3,6 +3,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import {
   chinaOutboundShipmentBoxLabelFilename,
+  chinaOutboundShipmentBulkLabelFilename,
   chinaOutboundShipmentLabelFilename,
   exportChinaOutboundShipmentLabelWorkbook,
 } from '@/lib/purchasing/china-outbound-shipment-labels'
@@ -21,7 +22,15 @@ export async function GET(
   const { shipmentId } = await params
   if (!isUuid(shipmentId)) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
-  const boxId = new URL(request.url).searchParams.get('boxId')
+  const searchParams = new URL(request.url).searchParams
+  const boxId = searchParams.get('boxId')
+  const labelType = searchParams.get('type')
+  if (labelType !== null && labelType !== 'boxes' && labelType !== 'pallets') {
+    return NextResponse.json({ error: '쉽먼트 종류를 확인해주세요.' }, { status: 400 })
+  }
+  if (boxId !== null && labelType === 'pallets') {
+    return NextResponse.json({ error: '박스 선택과 파렛트 다운로드를 함께 사용할 수 없습니다.' }, { status: 400 })
+  }
   if (boxId !== null && !isUuid(boxId)) {
     return NextResponse.json({ error: '박스 정보를 확인할 수 없습니다.' }, { status: 400 })
   }
@@ -57,10 +66,17 @@ export async function GET(
         boxIds: [selectedBox.id],
         includePalletLabels: false,
       })
-      : await exportChinaOutboundShipmentLabelWorkbook(labelDetail)
+      : labelType
+        ? await exportChinaOutboundShipmentLabelWorkbook(labelDetail, {
+          includeBoxLabels: labelType === 'boxes',
+          includePalletLabels: labelType === 'pallets',
+        })
+        : await exportChinaOutboundShipmentLabelWorkbook(labelDetail)
     const filename = selectedBox
       ? chinaOutboundShipmentBoxLabelFilename(detail.shipment.shipmentNo, selectedBox.boxNo)
-      : chinaOutboundShipmentLabelFilename(detail.shipment.shipmentNo)
+      : labelType
+        ? chinaOutboundShipmentBulkLabelFilename(detail.shipment.shipmentNo, labelType)
+        : chinaOutboundShipmentLabelFilename(detail.shipment.shipmentNo)
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {

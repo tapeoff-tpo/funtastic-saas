@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type ChinaOutboundShipmentLabelDetail,
   chinaOutboundShipmentBoxLabelFilename,
+  chinaOutboundShipmentBulkLabelFilename,
   chinaOutboundShipmentLabelFilename,
   exportChinaOutboundShipmentLabelWorkbook,
 } from './china-outbound-shipment-labels'
@@ -149,6 +150,20 @@ describe('China outbound shipment label workbook', () => {
       .toEqual([[2, 'A-01', 8], [2, 'B-02', 9], [2, '', 4], [2, 'A-01', 8]])
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 03')).toBeUndefined()
     expect(workbook.getWorksheet('파렛트 쉽먼트(托盘标签) 02')).toBeUndefined()
+  })
+
+  it.each(['boxes', 'pallets'] as const)('exports only %s sheets in a separate bulk workbook', async (type) => {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await exportChinaOutboundShipmentLabelWorkbook(detail, {
+      includeBoxLabels: type === 'boxes',
+      includePalletLabels: type === 'pallets',
+    }))
+    const prefix = type === 'boxes' ? '박스 쉽먼트' : '파렛트 쉽먼트'
+    expect(workbook.worksheets).toHaveLength(type === 'boxes' ? 4 : 2)
+    expect(workbook.worksheets.every((sheet) => sheet.name.startsWith(prefix))).toBe(true)
+    expect(workbook.worksheets[0].getCell('A1').value).toBe('TAPEOFF')
+    expect(chinaOutboundShipmentBulkLabelFilename('CN:10/15', type, new Date('2026-10-15T00:00:00.000Z')))
+      .toBe(`CN_10_15_${type === 'boxes' ? '박스쉽먼트' : '파렛트쉽먼트'}_20261015.xlsx`)
   })
 
   it('creates a Windows-safe attachment filename', () => {

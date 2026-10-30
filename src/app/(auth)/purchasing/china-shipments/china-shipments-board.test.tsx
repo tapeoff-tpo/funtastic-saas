@@ -434,10 +434,21 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('b')
   })
 
+  it('enables pallet download only when a saved nonempty box is assigned to a pallet', () => {
+    const detail = makeShipmentWithBox()
+    const unassigned = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: null })) }
+    const { rerender } = renderShipment(unassigned)
+    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '파렛트 쉽먼트 일괄 다운로드' })).toBeDisabled()
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="pallets" showCreate={false} />)
+    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
+  })
+
   it('shows saved box contents and lets users include empty boxes', () => {
     renderShipment(makeShipmentWithCompletionFilters())
 
-    expect(screen.getByRole('link', { name: '부착용 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels')
+    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
+    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
     expect(within(savedBoxPanel).getByText('BOX-01')).toBeInTheDocument()

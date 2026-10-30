@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getPurchasingItemLabelDataBySku: vi.fn(),
   exportChinaOutboundShipmentLabelWorkbook: vi.fn(),
   chinaOutboundShipmentBoxLabelFilename: vi.fn(),
+  chinaOutboundShipmentBulkLabelFilename: vi.fn(),
   chinaOutboundShipmentLabelFilename: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mock
 vi.mock('@/lib/purchasing/china-outbound-shipment-labels', () => ({
   exportChinaOutboundShipmentLabelWorkbook: mocks.exportChinaOutboundShipmentLabelWorkbook,
   chinaOutboundShipmentBoxLabelFilename: mocks.chinaOutboundShipmentBoxLabelFilename,
+  chinaOutboundShipmentBulkLabelFilename: mocks.chinaOutboundShipmentBulkLabelFilename,
   chinaOutboundShipmentLabelFilename: mocks.chinaOutboundShipmentLabelFilename,
 }))
 
@@ -46,6 +48,7 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     mocks.exportChinaOutboundShipmentLabelWorkbook.mockResolvedValue(Buffer.from('workbook'))
     mocks.chinaOutboundShipmentBoxLabelFilename.mockReturnValue('box-labels.xlsx')
     mocks.chinaOutboundShipmentLabelFilename.mockReturnValue('labels.xlsx')
+    mocks.chinaOutboundShipmentBulkLabelFilename.mockReturnValue('bulk-labels.xlsx')
   })
 
   it('uses the shared workspace and supplies locations for every shipment item', async () => {
@@ -63,6 +66,25 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
       ],
     }))
   })
+
+  it.each(['boxes', 'pallets'] as const)('downloads only the requested %s label type', async (type) => {
+    const response = await GET(new Request(`http://localhost/labels?type=${type}`), { params: Promise.resolve({ shipmentId }) })
+    expect(response.status).toBe(200)
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).toHaveBeenCalledWith(expect.any(Object), {
+      includeBoxLabels: type === 'boxes', includePalletLabels: type === 'pallets',
+    })
+    expect(mocks.chinaOutboundShipmentBulkLabelFilename).toHaveBeenCalledWith('OUT-1', type)
+    expect(response.headers.get('content-disposition')).toContain('bulk-labels.xlsx')
+  })
+
+  it.each(['type=unknown', 'type=', 'type=pallets&boxId=22222222-2222-4222-8222-222222222222'])(
+    'rejects an invalid label selection: %s', async (query) => {
+      const response = await GET(new Request(`http://localhost/labels?${query}`), { params: Promise.resolve({ shipmentId }) })
+      expect(response.status).toBe(400)
+      expect(mocks.getChinaOutboundShipmentDetail).not.toHaveBeenCalled()
+      expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+    },
+  )
 
   it('returns an error instead of silently exporting if the location lookup fails', async () => {
     mocks.getPurchasingItemLabelDataBySku.mockRejectedValue(new Error('database unavailable'))

@@ -269,7 +269,7 @@ function addLargePalletLabel(
   outboundDate: string | null,
   products: PalletLabelProductRow[],
 ) {
-  const widths = [8, 18, 12, 18, 55, 22, 16]
+  const widths = [8, 18, 18, 18, 55, 22, 16]
   sheet.columns = widths.map((width) => ({ width }))
   sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
   sheet.mergeCells('A1:E1')
@@ -286,7 +286,7 @@ function addLargePalletLabel(
   const headers = ['번호\n序号', '품목코드\nNO. / 编码', '박스수량\n箱数', '위치\n库位', '품명 / 品名', '옵션\n规格', '수량\n数量']
   const header = sheet.getRow(2)
   header.values = headers
-  header.height = 52
+  header.height = 60
   header.eachCell((cell, column) => {
     cell.font = { name: 'Arial', size: column === 2 ? 16 : 18 }
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
@@ -294,7 +294,7 @@ function addLargePalletLabel(
   })
 
   const count = Math.max(7, products.length)
-  const rowHeight = 388 / count
+  const rowHeight = 380 / count
   for (let index = 0; index < count; index += 1) {
     const product = products[index]
     const row = sheet.getRow(index + 3)

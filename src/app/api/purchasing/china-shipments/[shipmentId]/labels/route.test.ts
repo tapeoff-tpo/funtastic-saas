@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   chinaOutboundShipmentBoxLabelFilename: vi.fn(),
   chinaOutboundShipmentBulkLabelFilename: vi.fn(),
   chinaOutboundShipmentLabelFilename: vi.fn(),
+  renderChinaShipmentLabelPrint: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.getCurrentUser }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.getWorkspaceUserId }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.getChinaOutboundShipmentDetail }))
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mocks.getPurchasingItemLabelDataBySku }))
+vi.mock('@/lib/purchasing/china-shipment-label-print', () => ({ renderChinaShipmentLabelPrint: mocks.renderChinaShipmentLabelPrint }))
 vi.mock('@/lib/purchasing/china-outbound-shipment-labels', () => ({
   exportChinaOutboundShipmentLabelWorkbook: mocks.exportChinaOutboundShipmentLabelWorkbook,
   chinaOutboundShipmentBoxLabelFilename: mocks.chinaOutboundShipmentBoxLabelFilename,
@@ -46,9 +48,28 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
       ['SKU-2', { location: 'B-02', chineseProductName: '置物架' }],
     ]))
     mocks.exportChinaOutboundShipmentLabelWorkbook.mockResolvedValue(Buffer.from('workbook'))
+    mocks.renderChinaShipmentLabelPrint.mockReturnValue('<!doctype html><html>print</html>')
     mocks.chinaOutboundShipmentBoxLabelFilename.mockReturnValue('box-labels.xlsx')
     mocks.chinaOutboundShipmentLabelFilename.mockReturnValue('labels.xlsx')
     mocks.chinaOutboundShipmentBulkLabelFilename.mockReturnValue('bulk-labels.xlsx')
+  })
+
+  it('prints authenticated workspace labels as private HTML without downloading Excel', async () => {
+    const response = await GET(new Request('http://localhost/labels?type=boxes&format=print'), { params: Promise.resolve({ shipmentId }) })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/html')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(response.headers.get('content-security-policy')).toContain("default-src 'none'")
+    expect(mocks.getChinaOutboundShipmentDetail).toHaveBeenCalledWith({ userId: 'workspace-owner', shipmentId })
+    expect(mocks.renderChinaShipmentLabelPrint).toHaveBeenCalledWith(expect.objectContaining({ items: expect.arrayContaining([expect.objectContaining({ chineseProductName: '衣架', location: 'A-01' })]) }), { includeBoxLabels: true, includePalletLabels: false }, expect.any(String))
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown output formats and unauthenticated printing', async () => {
+    expect((await GET(new Request('http://localhost/labels?format=unknown'), { params: Promise.resolve({ shipmentId }) })).status).toBe(400)
+    mocks.getCurrentUser.mockResolvedValue(null)
+    expect((await GET(new Request('http://localhost/labels?format=print'), { params: Promise.resolve({ shipmentId }) })).status).toBe(401)
+    expect(mocks.renderChinaShipmentLabelPrint).not.toHaveBeenCalled()
   })
 
   it('uses the shared workspace and supplies locations for every shipment item', async () => {

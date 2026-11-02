@@ -28,7 +28,7 @@ export function importUnitPriceCny(data: Record<string, string | null>) {
 }
 
 export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Map<string, ImportItemMetadata>) {
-  if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 수입문서를 만들 수 없습니다.')
+  if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 인보이스·패킹리스트를 만들 수 없습니다.')
   if (!detail.items.length) throw new Error('출고상품을 먼저 등록해주세요.')
   const itemById = new Map(detail.items.map((item) => [item.id, item]))
   const boxById = new Map(detail.boxes.map((box) => [box.id, box]))
@@ -42,7 +42,7 @@ export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Ma
   }
   for (const item of detail.items) {
     if (quantityByItem.get(item.id) !== item.reservedQuantity) {
-      throw new Error(`${item.sku}: 박스에 저장된 수량이 출고수량과 같아야 수입문서를 만들 수 있습니다.`)
+      throw new Error(`${item.sku}: 박스에 저장된 수량이 출고수량과 같아야 인보이스·패킹리스트를 만들 수 있습니다.`)
     }
   }
   const packedBoxIds = new Set(detail.boxItems.map((allocation) => allocation.boxId))

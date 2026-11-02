@@ -3,11 +3,12 @@
 import { type ChangeEvent, type FormEvent, type ReactNode, useEffect, useRef, useState, useTransition } from 'react'
 import { nextAvailableBoxNumbers, planAutomaticBoxSplit, type InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Printer, Send, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import { useChinaWorkNavigation } from './china-work-navigation'
+import { TitleHelp } from './title-help'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
 import { ChinaImportDocumentDialog } from './china-import-document-dialog'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
@@ -15,11 +16,9 @@ import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './
 import {
   addChinaOutboundShipmentItemsAction,
   assignChinaOutboundBoxesToPalletsAction,
-  cancelChinaOutboundShipmentAction,
   createChinaOutboundShipmentAction,
   deleteChinaOutboundShipmentAction,
   dispatchChinaOutboundShipmentAction,
-  markChinaOutboundShipmentReadyAction,
   saveChinaOutboundBoxCompletionStatusesAction,
   saveChinaOutboundItemBoxSplitsAction,
   saveChinaOutboundPalletCompletionStatusesAction,
@@ -109,7 +108,7 @@ type BoxSplitDraftSnapshot = {
   baselineStatus?: BoxSplitStatus
 }
 type BoxSplitItemFilter = 'all' | 'incomplete' | 'complete'
-type SavedBoxFilter = 'all' | 'saved' | 'incomplete' | 'complete'
+type SavedBoxFilter = 'all' | 'saved'
 type WorkbookPreview = {
   boxSplits: Array<{ shipmentItemId: string; allocations: Array<{ boxNo: string; quantity: number }> }>
   palletAssignments: Array<{ boxNo: string; palletNo: string | null }>
@@ -300,8 +299,7 @@ function ChinaShipmentsBoardContent({
             <section className="rounded-md border bg-muted/20 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-semibold">출고 재고 위치</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">여러 창고의 재고를 하나의 중국출고요청에 함께 넣을 수 있습니다.</p>
+                  <h3 className="text-sm font-semibold">출고 재고 위치<TitleHelp title="출고 재고 위치">여러 창고의 재고를 하나의 중국출고요청에 함께 넣을 수 있습니다.</TitleHelp></h3>
                 </div>
                 <button type="button" onClick={toggleAllWarehouseSelections} disabled={warehouseOptions.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">
                   {allWarehouseSelected ? '전체 해제' : '전체 선택'}
@@ -321,8 +319,7 @@ function ChinaShipmentsBoardContent({
             <section className="rounded-md border bg-muted/20 p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold">출고할 상품과 수량</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">{selectedWarehouseInventory.length > 0 ? `선택한 ${selectedWarehouseCodes.length.toLocaleString('ko-KR')}개 창고의 작업 가능 재고입니다.` : '출고할 재고 위치를 하나 이상 체크해주세요.'}</p>
+                  <h3 className="text-sm font-semibold">출고할 상품과 수량<TitleHelp title="출고할 상품과 수량">출고할 재고 위치를 하나 이상 체크해주세요.</TitleHelp></h3>
                 </div>
                 <button type="button" onClick={fillAllOutboundQuantities} disabled={selectedWarehouseInventory.length === 0} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">보이는 상품 전체수량</button>
               </div>
@@ -446,13 +443,13 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   return (
     <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
-          <span className="text-xs font-medium text-muted-foreground">중국출고요청 선택</span>
-          <select value={selectedShipment?.id ?? ''} onChange={(event) => event.target.value && onSelect(event.target.value)} className={inputClass} disabled={isPending}>
+        <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
+          <div className="flex items-center text-xs font-medium text-muted-foreground"><label htmlFor="china-shipment-selection">중국출고요청 선택</label><TitleHelp title="중국출고요청 선택">선택한 출고작업만 화면에 표시됩니다. 저장하지 않은 내용이 있으면 이동 전에 확인합니다.</TitleHelp></div>
+          <select id="china-shipment-selection" value={selectedShipment?.id ?? ''} onChange={(event) => event.target.value && onSelect(event.target.value)} className={inputClass} disabled={isPending}>
             <option value="">{visibleShipments.length === 0 ? '등록된 중국출고요청이 없습니다.' : '중국출고요청을 선택해주세요.'}</option>
             {visibleShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
           </select>
-        </label>
+        </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <ChinaShipmentExcelDialog onApplied={(shipmentId) => {
             if (shipmentId) guard.requestNavigation(() => navigateChinaWork(shipmentHref(shipmentId, 'items')))
@@ -470,7 +467,6 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
         <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
         <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
       </form> : null}
-      <p className="mt-2 text-xs text-muted-foreground">선택한 출고작업만 화면에 표시됩니다. 저장하지 않은 내용이 있으면 이동 전에 확인합니다.</p>
       {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
     </section>
   )
@@ -509,23 +505,20 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
   const totalPackedQuantity = items.reduce((total, item) => total + item.packedQuantity, 0)
   const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
-  const hasIncompleteBoxSplit = items.some((item) => item.boxSplitStatus !== 'completed')
-  const hasIncompleteBox = boxesWithItems.some((box) => box.completionStatus === 'in_progress')
-  const usedPalletIds = new Set(boxesWithItems.flatMap((box) => box.palletId ? [box.palletId] : []))
-  const hasIncompletePallet = pallets.some((pallet) => usedPalletIds.has(pallet.id) && pallet.completionStatus === 'in_progress')
+  const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
   const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
-  const cannotMarkReady = hasIncompleteBoxSplit || hasIncompleteBox || hasIncompletePallet || hasUnassignedPalletBox
+  const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || hasUnassignedPalletBox || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadShipmentLabels = boxesWithItems.length > 0
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
   const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
-    const leftComplete = left.boxSplitStatus === 'completed'
-    const rightComplete = right.boxSplitStatus === 'completed'
+    const leftComplete = left.packedQuantity === left.reservedQuantity
+    const rightComplete = right.packedQuantity === right.reservedQuantity
     if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
     return compareShipmentItems(left, right)
   })
-  const incompleteBoxSplitItems = sortedBoxSplitItems.filter((item) => item.boxSplitStatus !== 'completed')
-  const completeBoxSplitItems = sortedBoxSplitItems.filter((item) => item.boxSplitStatus === 'completed')
+  const incompleteBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity !== item.reservedQuantity)
+  const completeBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity === item.reservedQuantity)
   const filteredBoxSplitItems = boxSplitItemFilter === 'incomplete'
     ? incompleteBoxSplitItems
     : boxSplitItemFilter === 'complete'
@@ -643,16 +636,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
     })
   }
 
-  function requestCancellation() {
-    guard.requestConfirmation({
-      title: '출고작업 취소',
-      description: '이 출고작업을 취소하고 예약 수량을 풀까요?',
-      confirmLabel: '작업 취소',
-      destructive: true,
-      onConfirm: () => run(() => cancelChinaOutboundShipmentAction({ shipmentId: shipment.id }), '출고작업을 취소하고 재고 예약을 풀었습니다.'),
-    })
-  }
-
   return (
     <section className="space-y-4 rounded-lg border bg-card p-4">
       <div className="flex flex-col gap-3 border-b pb-3 xl:flex-row xl:items-start xl:justify-between">
@@ -674,12 +657,11 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
           ) : (
             <button key={type} type="button" disabled title={reason} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> {label}</button>
           ))}
+          {[{ type: 'boxes', label: '박스 쉽먼트 바로 인쇄', enabled: canDownloadShipmentLabels }, { type: 'pallets', label: '파렛트 쉽먼트 바로 인쇄', enabled: canDownloadPalletLabels }].map(({ type, label, enabled }) => enabled ? <a key={type} href={`${shipmentLabelsHref}?type=${type}&format=print`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Printer className="size-4" />{label}</a> : <button key={type} type="button" disabled className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:opacity-50"><Printer className="size-4" />{label}</button>)}
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
           <ChinaImportDocumentDialog shipmentId={shipment.id} />
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
-          {editable && stage === 'summary' ? <button type="button" disabled={isPending || cannotMarkReady} title={cannotMarkReady ? '품목·박스·파렛트 상태와 파렛트 배정을 확인해주세요.' : undefined} onClick={() => run(() => markChinaOutboundShipmentReadyAction({ shipmentId: shipment.id }), '포장완료로 전환했습니다.')} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><Check className="size-4" /> 포장완료</button> : null}
-          {shipment.status === 'ready' ? <button type="button" disabled={isPending} onClick={requestDispatch} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
-          {shipment.status !== 'dispatched' && shipment.status !== 'cancelled' ? <button type="button" disabled={isPending} onClick={requestCancellation} className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"><Trash2 className="size-4" /> 작업 취소</button> : null}
+          {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>
       </div>
 
@@ -697,8 +679,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <div role="group" aria-label="박스분할 품목 상태 필터" className="flex flex-wrap gap-2">
               <button type="button" aria-pressed={boxSplitItemFilter === 'all'} onClick={() => changeBoxSplitItemFilter('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 품목 {sortedBoxSplitItems.length.toLocaleString('ko-KR')}</button>
-              <button type="button" aria-pressed={boxSplitItemFilter === 'incomplete'} onClick={() => changeBoxSplitItemFilter('incomplete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'incomplete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>진행 중 {incompleteBoxSplitItems.length.toLocaleString('ko-KR')}</button>
-              <button type="button" aria-pressed={boxSplitItemFilter === 'complete'} onClick={() => changeBoxSplitItemFilter('complete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'complete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>박스분할 완료 {completeBoxSplitItems.length.toLocaleString('ko-KR')}</button>
+              <button type="button" aria-pressed={boxSplitItemFilter === 'incomplete'} onClick={() => changeBoxSplitItemFilter('incomplete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'incomplete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>수량 부족 {incompleteBoxSplitItems.length.toLocaleString('ko-KR')}</button>
+              <button type="button" aria-pressed={boxSplitItemFilter === 'complete'} onClick={() => changeBoxSplitItemFilter('complete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${boxSplitItemFilter === 'complete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>수량 일치 {completeBoxSplitItems.length.toLocaleString('ko-KR')}</button>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium hover:bg-muted">
@@ -731,9 +713,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, stage, isPending, startTr
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        {hasIncompleteBoxSplit ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">아직 박스분할 상태가 진행 중인 품목이 있습니다. 모든 상품의 박스분할 수량이 출고수량과 같고 상태를 완료로 저장해야 포장완료할 수 있습니다. 부착용 쉽먼트 엑셀은 이미 저장한 박스부터 내려받을 수 있습니다.</p> : null}
-        {hasIncompleteBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">진행 중인 박스가 있습니다. 박스 상태를 완료로 저장해주세요.</p> : null}
-        {hasIncompletePallet ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">진행 중인 파렛트가 있습니다. 파렛트 상태를 완료로 저장해주세요.</p> : null}
+        {hasIncompleteBoxSplit ? <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p> : null}
         {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트 번호가 비어 있는 박스가 있습니다. 박스 쉽먼트는 지금 받을 수 있고, 파렛트 쉽먼트에는 박스가 배정된 파렛트만 포함됩니다.</p> : null}
         {palletSummaries.length > 0 ? <PalletSummaryCards summaries={palletSummaries} detailed /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
       </section> : null}
@@ -791,7 +771,7 @@ function ItemBoxSplitDialog({ detail, item, editable, isPending, onClose }: { de
     return box ? [{ allocation, box }] : []
   })
   return <dialog ref={ref} onClose={onClose} aria-label={`${item.sku} 박스분할`} onCancel={(event) => { event.preventDefault(); requestClose() }} className="fixed inset-0 m-auto max-h-[92dvh] w-[min(72rem,96vw)] overflow-y-auto rounded-xl border bg-background p-4 text-foreground shadow-xl backdrop:bg-black/40">
-    <div className="mb-3 flex items-center justify-between"><h3 className="font-semibold">출고품목 · 자동 박스분할</h3><button type="button" onClick={requestClose} disabled={guard.busy || isPending} className="h-8 rounded-md border px-3 text-sm">닫기</button></div>
+    <div className="mb-3 flex items-center justify-between"><h3 className="font-semibold">출고품목 · 자동 박스분할<TitleHelp title="자동 박스분할">박스당 수량 기준은 마지막 박스에 잔량을 담고, 총 박스 수 기준은 균등 분할합니다. 저장 전에 박스번호를 수정할 수 있습니다.</TitleHelp></h3><button type="button" onClick={requestClose} disabled={guard.busy || isPending} className="h-8 rounded-md border px-3 text-sm">닫기</button></div>
     {closeWarning && <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted p-3 text-sm"><span>저장하지 않은 박스분할이 있습니다.</span><button type="button" className="rounded border px-2 py-1" onClick={() => setCloseWarning(false)}>계속 수정</button><button type="button" className="rounded border px-2 py-1" disabled={guard.busy} onClick={async () => { const draft = guard.getDraft(`box:${item.id}`); if (draft && await guard.runTask(draft.save)) ref.current?.close() }}>저장하고 닫기</button><button type="button" className="rounded border px-2 py-1" disabled={guard.busy} onClick={() => { guard.getDraft(`box:${item.id}`)?.discard(); guard.setDraft(`box:${item.id}`, null); ref.current?.close() }}>변경 취소</button></div>}
     <ProductBoxSplitEditor shipmentId={detail.shipment.id} item={item} allocations={allocations} allBoxes={detail.boxes} allBoxItems={detail.boxItems} editable={editable} isPending={isPending || guard.busy} selected={false} onSelectedChange={() => {}} showSelection={false} onSaved={() => ref.current?.close()} />
   </dialog>
@@ -863,7 +843,7 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, editable, isPen
     })
   }
 
-  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가</h3><p className="mt-1 text-xs text-muted-foreground">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</p></div><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : setIsOpen(true)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p data-no-translate className="mt-1 truncate font-medium">{item.productName}</p><p data-no-translate className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
+  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가<TitleHelp title="출고품목 추가">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</TitleHelp></h3></div><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : setIsOpen(true)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3"><input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p data-no-translate className="mt-1 truncate font-medium">{item.productName}</p><p data-no-translate className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
 }
 
 function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], allBoxItems = [], editable, isPending, selected, onSelectedChange, onSaved, showSelection = true }: {
@@ -888,7 +868,6 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     : [createBoxSplitDraft()])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
-  const [boxSplitStatus, setBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.status ?? initialBoxSplitStatus)
   const [quantityPerBox, setQuantityPerBox] = useState('')
   const [boxCount, setBoxCount] = useState('')
   function occupiedNumbers() { return [...allBoxes.map((box) => box.boxNo), ...(guard.getBoxNumbers?.(draftId) ?? [])] }
@@ -896,26 +875,14 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     try {
       const plan = planAutomaticBoxSplit(item.reservedQuantity, quantityPerBox.trim() ? { quantityPerBox: Number(quantityPerBox), ...(boxCount.trim() ? { boxCount: Number(boxCount) } : {}) } : { boxCount: Number(boxCount) }, occupiedNumbers())
       setDrafts(plan.map((entry) => ({ ...createBoxSplitDraft(), boxNo: entry.boxNo, quantity: String(entry.quantity), autoNumber: true })))
-      setBoxSplitStatus('in_progress')
     } catch (error) { toast.error(error instanceof Error ? error.message : '박스분할 값을 확인해주세요.') }
   }
   const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)
-  // A completed status is only valid while every reserved unit has a box.
-  // The server validates this too; this keeps the selector immediately clear.
-  const currentBoxSplitStatus: BoxSplitStatus = boxSplitStatus === 'completed' && splitQuantity !== item.reservedQuantity
-    ? 'in_progress'
-    : boxSplitStatus
+  // Keep the legacy stored status consistent with quantities without a manual selector.
+  const currentBoxSplitStatus: BoxSplitStatus = splitQuantity === item.reservedQuantity ? 'completed' : 'in_progress'
 
   function patchDraft(key: string, patch: Partial<BoxSplitDraft>) {
     setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch, ...(patch.boxNo !== undefined ? { autoNumber: false } : {}) } : draft))
-  }
-
-  function changeBoxSplitStatus(nextStatus: BoxSplitStatus) {
-    if (nextStatus === 'completed' && splitQuantity !== item.reservedQuantity) {
-      toast.error('완료는 포장수량이 출고수량과 같을 때 선택할 수 있습니다.')
-      return
-    }
-    setBoxSplitStatus(nextStatus)
   }
 
   async function saveDraft(options: { quiet?: boolean; refresh?: boolean } = {}) {
@@ -951,7 +918,6 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     }
     setInitialDrafts(cloneBoxSplitDrafts(drafts))
     setInitialBoxSplitStatus(currentBoxSplitStatus)
-    setBoxSplitStatus(currentBoxSplitStatus)
     guard.setDraft(draftId, null)
     if (!options.quiet) toast.success(`${item.productName}의 박스분할을 저장했습니다.`)
     if (options.refresh !== false) router.refresh()
@@ -959,7 +925,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     return true
   }
 
-  const dirty = boxDraftValues(drafts) !== boxDraftValues(initialDrafts) || currentBoxSplitStatus !== initialBoxSplitStatus
+  const dirty = boxDraftValues(drafts) !== boxDraftValues(initialDrafts)
   useChinaWorkDraft(draftId, dirty ? {
     boxNumbers: drafts.map((draft) => draft.boxNo).filter(Boolean),
     kind: 'box', label: `${item.productName} 박스분할`, snapshot: {
@@ -977,8 +943,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     }),
     discard: () => {
       setDrafts(cloneBoxSplitDrafts(initialDrafts))
-      setBoxSplitStatus(initialBoxSplitStatus)
-    },
+      },
   } : null)
 
   function save() { void guard.runTask(saveDraft) }
@@ -989,7 +954,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p data-no-translate className="font-semibold">{item.sku}</p>
-            <ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
+            <TitleHelp title="박스분할">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</TitleHelp><ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
           </div>
           <p data-no-translate className="mt-1 truncate text-sm">{item.productName}{item.optionName ? ` · ${item.optionName}` : ''}</p>
         </div>
@@ -998,13 +963,6 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
             <input type="checkbox" aria-label={`${item.sku} 저장 선택`} checked={selected} onChange={(event) => onSelectedChange(event.target.checked)} disabled={!editable || isPending} className="size-3.5 accent-primary" />
             저장 선택
           </label>}
-          <label className="inline-flex items-center gap-1.5 text-xs font-medium">
-            <span>상태</span>
-            <select aria-label={`${item.sku} 박스분할 상태`} value={currentBoxSplitStatus} onChange={(event) => changeBoxSplitStatus(event.target.value as BoxSplitStatus)} disabled={!editable || isPending} className={`${compactInputClass} w-24`}>
-              <option value="in_progress">진행 중</option>
-              <option value="completed">완료</option>
-            </select>
-          </label>
           <p className={`text-sm tabular-nums ${splitQuantity > item.reservedQuantity ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>
             입력 중 {splitQuantity.toLocaleString('ko-KR')} / {item.reservedQuantity.toLocaleString('ko-KR')}개
           </p>
@@ -1014,7 +972,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         <label className="text-xs">총 박스 수<input aria-label={`${item.sku} 총 박스 수`} type="number" min="1" max="5000" step="1" value={boxCount} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 w-28`} onChange={(event) => { setBoxCount(event.target.value); setQuantityPerBox('') }} placeholder="자동 계산" /></label>
         <label className="text-xs">박스당 수량<input aria-label={`${item.sku} 박스당 수량`} type="number" min="1" step="1" value={quantityPerBox} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 w-28`} onChange={(event) => { setQuantityPerBox(event.target.value); const value = positiveInteger(event.target.value); setBoxCount(value ? String(Math.ceil(item.reservedQuantity / value)) : '') }} placeholder="자동 분배" /></label>
         <button type="button" disabled={!editable || isPending || guard.busy} onClick={generateSplits} className="h-8 rounded-md border bg-background px-3 text-xs font-medium">자동 분할 미리보기</button>
-        <p className="text-xs text-muted-foreground">박스당 수량 기준은 마지막 박스에 잔량을 담고, 총 박스 수 기준은 균등 분할합니다. 저장 전에 박스번호를 수정할 수 있습니다.</p>
+
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-[880px] w-full text-sm">
@@ -1114,7 +1072,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         </table>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3">
-        <p className="text-xs text-muted-foreground">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</p>
+
         <div className="flex gap-2">
           <button
             type="button"
@@ -1421,7 +1379,7 @@ function useCompletionStatusEditor(shipmentId: string, kind: 'box' | 'pallet', r
   return { status, changeStatus, selected, select, selectVisible, save, guard }
 }
 
-function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPending, onFilterChange, onEditItem }: {
+function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, onFilterChange, onEditItem }: {
   shipmentId: string
   summaries: SavedBoxSummary[]
   filter: SavedBoxFilter
@@ -1430,15 +1388,8 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPend
   onFilterChange: (filter: SavedBoxFilter) => void
   onEditItem: (itemId: string) => void
 }) {
-  const rows: CompletionRow[] = summaries.map((summary) => ({ id: summary.box.id, status: summary.box.completionStatus ?? (summary.quantity > 0 ? 'completed' : 'in_progress'), canComplete: summary.quantity > 0 }))
-  const editor = useCompletionStatusEditor(shipmentId, 'box', rows)
-  const rowById = new Map(rows.map((row) => [row.id, row]))
   const savedBoxes = summaries.filter((summary) => summary.quantity > 0)
-  const incompleteBoxes = savedBoxes.filter((summary) => editor.status(rowById.get(summary.box.id)!) === 'in_progress')
-  const completeBoxes = savedBoxes.filter((summary) => editor.status(rowById.get(summary.box.id)!) === 'completed')
-  const visibleBoxes = filter === 'saved' ? savedBoxes : filter === 'incomplete' ? incompleteBoxes : filter === 'complete' ? completeBoxes : summaries
-  const visibleIds = visibleBoxes.map((summary) => summary.box.id)
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => editor.selected.has(id))
+  const visibleBoxes = filter === 'all' ? summaries : savedBoxes
 
   return <section className="overflow-hidden rounded-lg border bg-background" aria-labelledby="saved-box-contents-title">
     <div className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-2.5 lg:flex-row lg:items-center lg:justify-between">
@@ -1446,25 +1397,15 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPend
       <div role="group" aria-label="저장된 박스 필터" className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={filter === 'saved'} onClick={() => onFilterChange('saved')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'saved' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>저장된 박스 (내용 있음) {savedBoxes.length.toLocaleString('ko-KR')}</button>
         <button type="button" aria-pressed={filter === 'all'} onClick={() => onFilterChange('all')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>전체 박스 {summaries.length.toLocaleString('ko-KR')}</button>
-        <button type="button" aria-pressed={filter === 'incomplete'} onClick={() => onFilterChange('incomplete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'incomplete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>진행 중 {incompleteBoxes.length.toLocaleString('ko-KR')}</button>
-        <button type="button" aria-pressed={filter === 'complete'} onClick={() => onFilterChange('complete')} className={`h-8 rounded-md border px-3 text-xs font-medium transition-colors ${filter === 'complete' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>완료 {completeBoxes.length.toLocaleString('ko-KR')}</button>
       </div>
-    </div>
-    <div className="flex flex-wrap items-center justify-end gap-2 border-b bg-muted/10 px-4 py-2">
-      <label className="inline-flex items-center gap-1.5 text-xs font-medium"><input type="checkbox" aria-label="표시된 박스 전체 선택" checked={allVisibleSelected} onChange={(event) => editor.selectVisible(visibleIds, event.target.checked)} disabled={!editable || isPending || editor.guard.busy || !visibleIds.length} className="size-3.5 accent-primary" /> 표시된 박스 전체 선택</label>
-      <span className="text-xs text-muted-foreground">선택 {editor.selected.size.toLocaleString('ko-KR')}개</span>
-      <button type="button" aria-label="박스 선택 저장" disabled={!editable || isPending || editor.guard.busy || !editor.selected.size} onClick={() => void editor.guard.runTask(() => editor.save([...editor.selected]))} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">선택 저장</button>
-      <button type="button" aria-label="박스 전체 저장" disabled={!editable || isPending || editor.guard.busy} onClick={() => void editor.guard.runTask(() => editor.save(rows.map((row) => row.id)))} className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">전체 저장</button>
     </div>
     {visibleBoxes.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : (
       <div className="overflow-x-auto">
         <table className="min-w-[980px] w-full text-sm">
-          <caption className="sr-only">박스별 저장 상태, 적재 상품, 수량, 파렛트 위치, 부착용 쉽먼트 다운로드 및 수정</caption>
+          <caption className="sr-only">박스별 적재 상품, 수량, 파렛트 위치, 쉽먼트 인쇄 및 다운로드</caption>
           <thead className="bg-muted/10 text-xs text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 text-center font-medium">선택</th>
               <th className="px-3 py-2 text-left font-medium">박스번호</th>
-              <th className="px-3 py-2 text-left font-medium">박스 상태</th>
               <th className="px-3 py-2 text-left font-medium">적재 상품</th>
               <th className="px-3 py-2 text-right font-medium">총수량</th>
               <th className="px-3 py-2 text-left font-medium">파렛트 위치</th>
@@ -1475,17 +1416,11 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPend
           <tbody>
             {visibleBoxes.map((summary) => {
               const hasContents = summary.quantity > 0
-              const row = rowById.get(summary.box.id)!
               const boxLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`
               const firstItem = summary.items[0]?.item
               return (
                 <tr key={summary.box.id} className="border-t align-top">
-                  <td className="px-3 py-3 text-center"><input type="checkbox" aria-label={`박스 ${summary.box.boxNo} 선택`} checked={editor.selected.has(summary.box.id)} onChange={(event) => editor.select(summary.box.id, event.target.checked)} disabled={!editable || isPending || editor.guard.busy} className="size-3.5 accent-primary" /></td>
                   <td className="px-3 py-3 font-medium">{summary.box.boxNo}</td>
-                  <td className="px-3 py-3">
-                    <select aria-label={`박스 ${summary.box.boxNo} 상태`} value={editor.status(row)} onChange={(event) => editor.changeStatus(row, event.target.value as BoxSplitStatus)} disabled={!editable || isPending || editor.guard.busy} className={`${compactInputClass} w-24`}><option value="in_progress">진행 중</option><option value="completed">완료</option></select>
-                    <span className="mt-1 block text-xs text-muted-foreground">{hasContents ? '저장됨 · 내용 있음' : '내용 없음'}</span>
-                  </td>
                   <td className="px-3 py-3 text-xs leading-5">
                     {summary.items.length > 0 ? (
                       <ul className="space-y-1">
@@ -1496,15 +1431,15 @@ function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPend
                           </li>
                         ))}
                       </ul>
-                    ) : hasContents ? <span className="text-muted-foreground">품목 정보를 찾지 못했습니다.</span> : <span className="text-muted-foreground">-</span>}
+                    ) : hasContents ? <span className="text-muted-foreground">품목 정보를 찾지 못했습니다.</span> : <span className="text-muted-foreground">내용 없음</span>}
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">{summary.quantity.toLocaleString('ko-KR')}개</td>
                   <td className="px-3 py-3 text-xs">{summary.palletNo ? `파렛트 ${summary.palletNo}` : <span className="text-muted-foreground">미배정</span>}</td>
                   <td className="px-3 py-3 text-center">
                     {hasContents ? (
-                      <a href={boxLabelsHref} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-muted">
+                      <><a href={`${boxLabelsHref}&format=print`} target="_blank" rel="noopener noreferrer" aria-label={`${summary.box.boxNo} 박스 쉽먼트 바로 인쇄`} className="mb-1 mr-1 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-muted"><Printer className="size-3.5" />바로 인쇄</a><a href={boxLabelsHref} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-muted">
                         <Download className="size-3.5" /> 박스별 다운로드
-                      </a>
+                      </a></>
                     ) : <span className="text-xs text-muted-foreground">-</span>}
                   </td>
                   <td className="px-3 py-3 text-center">
@@ -1579,7 +1514,7 @@ function buildPalletSummaries({ pallets, boxes, boxItemsByBox, itemById, palletB
 function PalletProgressPanel({ shipmentId, summaries, editable, isPending }: { shipmentId: string; summaries: PalletSummary[]; editable: boolean; isPending: boolean }) {
   const [filter, setFilter] = useState<'all' | 'incomplete' | 'complete'>('all')
   const rows: CompletionRow[] = summaries.map((summary) => {
-    const canComplete = summary.boxes.length > 0 && summary.boxes.every((box) => box.completionStatus !== 'in_progress')
+    const canComplete = summary.boxes.length > 0
     return { id: summary.pallet.id, status: summary.pallet.completionStatus ?? (canComplete ? 'completed' : 'in_progress'), canComplete }
   })
   const editor = useCompletionStatusEditor(shipmentId, 'pallet', rows)
@@ -1614,13 +1549,13 @@ function PalletProgressPanel({ shipmentId, summaries, editable, isPending }: { s
 function PalletSummaryCards({ summaries, detailed = false }: { summaries: PalletSummary[]; detailed?: boolean }) {
   if (summaries.length === 0) return null
   return <section className="space-y-3"><div className="flex items-center justify-between"><h3 className="font-semibold">사용 파렛트</h3><p className="text-sm font-medium">총 {summaries.length.toLocaleString('ko-KR')}파렛트</p></div><div className="grid gap-3 lg:grid-cols-2">{summaries.map((summary) => {
-    const complete = summary.pallet.completionStatus !== 'in_progress' && summary.boxes.every((box) => box.completionStatus !== 'in_progress')
+    const complete = summary.pallet.completionStatus !== 'in_progress'
     return <article key={summary.pallet.id} className="rounded-lg border bg-background p-4"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">파렛트 {summary.palletNo}</p><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${complete ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{complete ? '완료' : '진행 중'}</span></div><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length.toLocaleString('ko-KR')}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p></div><p className="text-right text-sm font-semibold tabular-nums">{formatChinaOutboundCbm(summary.cbm) ?? '0.0000'} CBM</p></div>{summary.boxesWithoutDimensions > 0 ? <p className="mt-2 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions.toLocaleString('ko-KR')}개는 CBM 합계에서 제외되었습니다.</p> : null}{detailed ? <div className="mt-3 space-y-2 border-t pt-3 text-xs"><p className="font-medium text-muted-foreground">적재 박스: {summary.boxes.map((box) => box.boxNo).join(', ')}</p><ul className="space-y-1">{summary.products.map((product) => <li key={`${product.sku}:${product.optionName ?? ''}`}><span data-no-translate>{product.sku} · {product.productName}{product.optionName ? ` · ${product.optionName}` : ''}</span>{' '}<span className="tabular-nums text-muted-foreground">{product.quantity.toLocaleString('ko-KR')}개</span></li>)}</ul></div> : null}</article>
   })}</div></section>
 }
 
 function EmptyStage({ title, description, onMove, moveLabel }: { title: string; description: string; onMove: () => void; moveLabel: string }) {
-  return <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{description}</p><button type="button" onClick={onMove} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">{moveLabel}</button></section>
+  return <section className="rounded-lg border border-dashed p-8 text-center"><h3 className="font-semibold">{title}<TitleHelp title={title}>{description}</TitleHelp></h3><button type="button" onClick={onMove} className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">{moveLabel}</button></section>
 }
 
 function StageButton({ active, step, title, detail, onClick }: { active: boolean; step: string; title: string; detail: string; onClick: () => void }) {
@@ -1628,7 +1563,7 @@ function StageButton({ active, step, title, detail, onClick }: { active: boolean
 }
 
 function ProgressBadge({ completed, detail }: { completed: boolean; detail: string }) {
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${completed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{completed ? '완료' : '진행'} · {detail}</span>
+  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${completed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{detail}</span>
 }
 
 function StatusBadge({ status }: { status: string }) {

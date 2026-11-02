@@ -1,5 +1,7 @@
 'use client'
 
+import { TitleHelp } from './title-help'
+
 import { type FormEvent, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, Pencil, Plus, Warehouse, X } from 'lucide-react'
@@ -132,13 +134,11 @@ export function ChinaShipmentWarehouseDialog({ warehouses }: { warehouses: China
             role="dialog"
             aria-modal="true"
             aria-labelledby="china-outbound-warehouse-title"
-            aria-describedby="china-outbound-warehouse-description"
             className="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-lg bg-background p-5 shadow-xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 id="china-outbound-warehouse-title" className="text-lg font-semibold">출고 창고 관리</h3>
-                <p id="china-outbound-warehouse-description" className="mt-1 text-sm text-muted-foreground">엑셀 기본 출고창고와 중국출고에서 사용하는 창고명을 직접 추가하거나 수정할 수 있습니다.</p>
+                <h3 className="text-lg font-semibold"><span id="china-outbound-warehouse-title">출고 창고 관리</span><TitleHelp title="출고 창고 관리">엑셀 기본 출고창고와 중국출고에서 사용하는 창고명을 직접 추가하거나 수정할 수 있습니다.</TitleHelp></h3>
               </div>
               <button type="button" onClick={closeDialog} disabled={busy} aria-label="출고 창고 관리 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
                 <X className="size-5" />
@@ -148,7 +148,7 @@ export function ChinaShipmentWarehouseDialog({ warehouses }: { warehouses: China
             <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">창고명을 바꾸면 현재 SaaS 중국재고의 해당 창고명도 함께 바뀝니다. 기존 출고 기록과 재고 이동 이력은 그대로 보존됩니다.</p>
 
             <form onSubmit={addWarehouse} className="mt-4 rounded-lg border bg-muted/20 p-3">
-              <label className="block text-sm font-medium" htmlFor="new-china-outbound-warehouse">새 출고창고명</label>
+              <div className="flex items-center"><label className="block text-sm font-medium" htmlFor="new-china-outbound-warehouse">새 출고창고명</label><TitleHelp title="새 출고창고명">새 창고는 재고가 아직 없어도 미리 등록할 수 있습니다.</TitleHelp></div>
               <div className="mt-2 flex gap-2">
                 <input
                   id="new-china-outbound-warehouse"
@@ -164,7 +164,6 @@ export function ChinaShipmentWarehouseDialog({ warehouses }: { warehouses: China
                   추가
                 </button>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">새 창고는 재고가 아직 없어도 미리 등록할 수 있습니다.</p>
             </form>
 
             <div className="mt-4 overflow-hidden rounded-lg border">

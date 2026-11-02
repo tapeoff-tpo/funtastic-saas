@@ -1,5 +1,7 @@
 'use client'
 
+import { TitleHelp } from './title-help'
+
 import { type ChangeEvent, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertCircle, Check, Download, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
@@ -141,14 +143,11 @@ export function ChinaShipmentExcelDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="china-shipment-excel-title"
-            aria-describedby="china-shipment-excel-description"
             className="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-lg bg-background p-5 shadow-xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 id="china-shipment-excel-title" className="text-lg font-semibold">중국출고 엑셀 등록</h3>
-                <p id="china-shipment-excel-description" className="mt-1 text-sm text-muted-foreground">출고상품과 박스 쉽먼트 내용을 한 파일에서 검토한 뒤 새 중국출고 작업으로 등록합니다.</p>
-                <p className="mt-1 text-xs text-muted-foreground">엑셀 검토만으로는 재고가 예약되지 않습니다. 검토 결과 반영을 눌러야 출고 재고 예약·박스·파렛트가 함께 등록됩니다.</p>
+                <h3 className="text-lg font-semibold"><span id="china-shipment-excel-title">중국출고 엑셀 등록</span><TitleHelp title="중국출고 엑셀 등록">출고상품과 박스 쉽먼트 내용을 한 파일에서 검토한 뒤 새 중국출고 작업으로 등록합니다. 엑셀 검토만으로는 재고가 예약되지 않습니다. 검토 결과 반영을 눌러야 출고 재고 예약·박스·파렛트가 함께 등록됩니다.</TitleHelp></h3>
               </div>
               <button type="button" onClick={closeDialog} disabled={isWorking} aria-label="중국출고 엑셀 등록 닫기" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
                 <X className="size-5" />
@@ -163,11 +162,7 @@ export function ChinaShipmentExcelDialog({
             </div>
 
             <div className="mt-4 rounded-lg border bg-muted/20 p-4">
-              <p className="text-sm font-medium">엑셀 파일 선택</p>
-              <p className="mt-1 text-xs text-muted-foreground">출고창고 칸은 등록된 창고 목록에서 선택할 수 있습니다. 출고상품·박스 쉽먼트의 창고를 비우면 출고정보의 기본 창고가 자동 적용됩니다.</p>
-              <p className="mt-1 text-xs text-muted-foreground">새 양식에는 다운로드 시점의 현재 중국재고를 한·중 병기한 조회 시트가 함께 들어갑니다.</p>
-              <p className="mt-1 text-xs text-muted-foreground">출고정보와 출고상품은 필수입니다. 박스 쉽먼트와 파렛트 번호는 필요한 경우 함께 입력하세요.</p>
-              <p className="mt-1 text-xs text-muted-foreground">출고창고·품목코드·옵션명은 현재 SaaS 중국재고와 대조하며, 수량이 작업 가능 재고를 넘으면 반영할 수 없습니다.</p>
+              <p className="text-sm font-medium">엑셀 파일 선택<TitleHelp title="엑셀 파일 선택">출고창고 칸은 등록된 창고 목록에서 선택할 수 있습니다. 출고상품·박스 쉽먼트의 창고를 비우면 출고정보의 기본 창고가 자동 적용됩니다. 새 양식에는 다운로드 시점의 현재 중국재고를 한·중 병기한 조회 시트가 함께 들어갑니다. 출고정보와 출고상품은 필수입니다. 박스 쉽먼트와 파렛트 번호는 필요한 경우 함께 입력하세요. 출고창고·품목코드·옵션명은 현재 SaaS 중국재고와 대조하며, 수량이 작업 가능 재고를 넘으면 반영할 수 없습니다.</TitleHelp></p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />

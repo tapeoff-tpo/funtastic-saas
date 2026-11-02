@@ -46,7 +46,7 @@ export async function GET(_request: Request, context: Context) {
     return NextResponse.json({ ...loaded.prepared, snapshot: loaded.snapshot }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('China import document preparation:', error)
-    return NextResponse.json({ error: error instanceof Error ? error.message : '수입문서 정보를 불러오지 못했습니다.' }, { status: 400 })
+    return NextResponse.json({ error: error instanceof Error ? error.message : '인보이스·패킹리스트 정보를 불러오지 못했습니다.' }, { status: 400 })
   }
 }
 
@@ -56,7 +56,7 @@ export async function POST(request: Request, context: Context) {
     if (loaded.response) return loaded.response
     const parsed = schema.safeParse(await request.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
-    if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 창을 닫고 수입문서를 다시 열어주세요.' }, { status: 409 })
+    if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 창을 닫고 인보이스·패킹리스트를 다시 열어주세요.' }, { status: 409 })
     const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data)
     const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
@@ -66,6 +66,6 @@ export async function POST(request: Request, context: Context) {
     } })
   } catch (error) {
     console.error('China import document export:', error)
-    return NextResponse.json({ error: error instanceof Error ? error.message : '수입문서를 만들지 못했습니다.' }, { status: 400 })
+    return NextResponse.json({ error: error instanceof Error ? error.message : '인보이스·패킹리스트를 만들지 못했습니다.' }, { status: 400 })
   }
 }

@@ -290,6 +290,20 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('keeps title descriptions hidden until help is clicked and translates the opened help', async () => {
+    renderShipmentWithLanguage(shipmentA, 'items')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(screen.queryByText('선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '출고품목 추가 설명 보기' }))
+    expect(screen.getByRole('note')).toHaveTextContent('선정 후에도 품목이나 추가 수량을')
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加出库品项 帮助' })).toBeInTheDocument())
+    expect(screen.getByRole('note')).toHaveTextContent('仍可在同一中国出库作业中预留品项')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it('balances by box count and asks before discarding an unsaved dialog', async () => {
     renderShipment(shipmentA, 'items')
     fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
@@ -538,76 +552,9 @@ describe('ChinaShipmentsBoard', () => {
     expect(within(emptyBoxRow).queryByRole('link', { name: /부착용 쉽먼트 다운로드/ })).not.toBeInTheDocument()
   })
 
-  it('saves only the checked box completion statuses', async () => {
-    saveBoxStatuses.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
 
-    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByLabelText('박스 BOX-01 선택'))
-    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
 
-    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
-    expect(saveBoxStatuses).toHaveBeenCalledWith({
-      shipmentId: 'a',
-      updates: [{ boxId: 'box-saved', status: 'in_progress' }],
-    })
-    expect(screen.getByLabelText('박스 BOX-02 상태')).toHaveValue('in_progress')
-  })
 
-  it('keeps an unselected box status draft after saving another box', async () => {
-    saveBoxStatuses.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
-    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByLabelText('박스 BOX-01 선택'))
-    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
-    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
-
-    selectOtherShipment()
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
-
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
-    expect(saveBoxStatuses).toHaveBeenCalledTimes(2)
-    expect(saveBoxStatuses).toHaveBeenNthCalledWith(2, { shipmentId: 'a', updates: [{ boxId: 'box-shared', status: 'in_progress' }] })
-  })
-
-  it('saves all changed box completion statuses at once', async () => {
-    saveBoxStatuses.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
-
-    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByRole('button', { name: '박스 전체 저장' }))
-
-    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
-    expect(saveBoxStatuses).toHaveBeenCalledWith({
-      shipmentId: 'a',
-      updates: [
-        { boxId: 'box-saved', status: 'in_progress' },
-        { boxId: 'box-shared', status: 'in_progress' },
-      ],
-    })
-  })
-
-  it('selects every displayed box for the selected save', async () => {
-    saveBoxStatuses.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
-    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('박스 BOX-02 상태'), { target: { value: 'in_progress' } })
-
-    fireEvent.click(screen.getByLabelText('표시된 박스 전체 선택'))
-    fireEvent.click(screen.getByRole('button', { name: '박스 선택 저장' }))
-
-    await waitFor(() => expect(saveBoxStatuses).toHaveBeenCalledTimes(1))
-    expect(saveBoxStatuses).toHaveBeenCalledWith({
-      shipmentId: 'a',
-      updates: [
-        { boxId: 'box-saved', status: 'in_progress' },
-        { boxId: 'box-shared', status: 'in_progress' },
-      ],
-    })
-  })
 
   it('saves only checked pallet statuses and keeps other changes available', async () => {
     savePalletStatuses.mockResolvedValue({ ok: true })
@@ -644,17 +591,6 @@ describe('ChinaShipmentsBoard', () => {
     })
   })
 
-  it('protects a changed box status when switching shipments', () => {
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
-    fireEvent.change(screen.getByLabelText('박스 BOX-01 상태'), { target: { value: 'in_progress' } })
-
-    selectOtherShipment()
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
-
-    expect(screen.getByLabelText('박스 BOX-01 상태')).toHaveValue('in_progress')
-    expect(saveBoxStatuses).not.toHaveBeenCalled()
-    expect(navigate).not.toHaveBeenCalled()
-  })
 
   it('saves a changed pallet status before switching shipments', async () => {
     savePalletStatuses.mockResolvedValue({ ok: true })
@@ -680,59 +616,34 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByLabelText('파렛트 P1 선택')).toBeChecked()
   })
 
-  it('does not allow an empty box to be marked complete', () => {
-    renderShipment(makeShipmentWithBoxAndPalletStatuses())
-    fireEvent.click(screen.getByRole('button', { name: /전체 박스/ }))
 
-    fireEvent.change(screen.getByLabelText('박스 BOX-03 상태'), { target: { value: 'completed' } })
-
-    expect(screen.getByLabelText('박스 BOX-03 상태')).toHaveValue('in_progress')
-    expect(toastError).toHaveBeenCalledWith('내용이 있는 박스만 완료할 수 있습니다.')
-    expect(saveBoxStatuses).not.toHaveBeenCalled()
-  })
-
-  it('does not allow a pallet to be completed while one of its boxes is in progress', () => {
+  it('lets a used pallet be recorded without changing legacy box statuses', () => {
     const detail = makeShipmentWithBoxAndPalletStatuses()
-    detail.pallets = detail.pallets.map((pallet) => pallet.id === 'pallet-1' ? { ...pallet, completionStatus: 'in_progress' } : pallet)
-    detail.boxes = detail.boxes.map((box) => box.id === 'box-saved' ? { ...box, completionStatus: 'in_progress' } : box)
+    detail.boxes[0]!.completionStatus = 'in_progress'
+    detail.pallets[0]!.completionStatus = 'in_progress'
     renderShipment(detail, 'pallets')
-
     fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'completed' } })
-
-    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('in_progress')
-    expect(toastError).toHaveBeenCalledWith('파렛트의 모든 박스를 완료한 뒤 파렛트를 완료할 수 있습니다.')
-    expect(savePalletStatuses).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('completed')
+    expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('treats existing filled boxes and used pallets without a status as complete', () => {
+  it('offers direct dispatch and removes cancellation and ready buttons', () => {
+    renderShipment(makeFullyPackedInProgressShipment(), 'summary')
+    expect(screen.queryByRole('button', { name: '포장완료' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '작업 취소' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
+  })
+
+  it('uses quantities and pallet assignment rather than legacy completion flags for dispatch', () => {
     const detail = makeFullyPackedInProgressShipment()
-    detail.items = detail.items.map((item) => ({ ...item, boxSplitStatus: 'completed' }))
-    renderShipment(detail, 'summary')
-
-    expect(screen.getByRole('button', { name: '포장완료' })).toBeEnabled()
-  })
-
-  it('requires used boxes and pallets to be completed before marking the shipment ready', () => {
-    const base = makeFullyPackedInProgressShipment()
-    const detail = {
-      ...base,
-      items: base.items.map((item) => ({ ...item, boxSplitStatus: 'completed' as const })),
-      boxes: base.boxes.map((box) => ({ ...box, completionStatus: 'in_progress' as const })),
-      pallets: base.pallets.map((pallet) => ({ ...pallet, completionStatus: 'completed' as const })),
-    }
+    detail.items[0]!.boxSplitStatus = 'in_progress'
+    detail.boxes[0]!.completionStatus = 'in_progress'
+    detail.pallets[0]!.completionStatus = 'in_progress'
     const { rerender } = renderShipment(detail, 'summary')
-    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
-
-    const palletInProgress = {
-      ...detail,
-      boxes: detail.boxes.map((box) => ({ ...box, completionStatus: 'completed' as const })),
-      pallets: detail.pallets.map((pallet) => ({ ...pallet, completionStatus: 'in_progress' as const })),
-    }
-    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={palletInProgress} selectedStep="summary" showCreate={false} />)
-    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
-
-    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...palletInProgress, pallets: detail.pallets }} selectedStep="summary" showCreate={false} />)
-    expect(screen.getByRole('button', { name: '포장완료' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...detail, items: [{ ...detail.items[0]!, packedQuantity: 3 }] }} selectedStep="summary" showCreate={false} />)
+    expect(screen.getByRole('button', { name: '출고완료' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('박스에 담긴 수량')
   })
 
   it('opens a completed saved box in its editable product editor', () => {
@@ -754,12 +665,12 @@ describe('ChinaShipmentsBoard', () => {
     const itemFilter = screen.getByRole('group', { name: '박스분할 품목 상태 필터' })
     fireEvent.change(itemEditor('WORK-01').getByPlaceholderText('0'), { target: { value: '3' } })
 
-    fireEvent.click(within(itemFilter).getByRole('button', { name: /박스분할 완료/ }))
+    fireEvent.click(within(itemFilter).getByRole('button', { name: /수량 일치/ }))
     expect(screen.getByText('DONE-01')).toBeInTheDocument()
     expect(screen.queryByText('WORK-01')).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
-    fireEvent.click(within(itemFilter).getByRole('button', { name: /진행 중/ }))
+    fireEvent.click(within(itemFilter).getByRole('button', { name: /수량 부족/ }))
     expect(screen.getByText('WORK-01')).toBeInTheDocument()
     expect(screen.getByText('WAIT-01')).toBeInTheDocument()
     expect(itemEditor('WORK-01').getByPlaceholderText('0')).toHaveValue(3)
@@ -770,7 +681,6 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment()
     editBox('10')
 
-    fireEvent.change(screen.getByLabelText('SKU-A 박스분할 상태'), { target: { value: 'completed' } })
     fireEvent.click(itemEditor('SKU-A').getByRole('button', { name: '박스분할 저장' }))
 
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({
@@ -780,21 +690,20 @@ describe('ChinaShipmentsBoard', () => {
     })))
   })
 
-  it('keeps a partially packed product in progress when complete is selected', () => {
-    renderShipment()
-    editBox('3')
-
-    fireEvent.change(screen.getByLabelText('SKU-A 박스분할 상태'), { target: { value: 'completed' } })
-
-    expect(screen.getByLabelText('SKU-A 박스분할 상태')).toHaveValue('in_progress')
-    expect(toastError).toHaveBeenCalledWith('완료는 포장수량이 출고수량과 같을 때 선택할 수 있습니다.')
+  it('removes manual box and product status controls', () => {
+    renderShipment(makeShipmentWithBoxAndPalletStatuses())
+    expect(screen.queryByRole('columnheader', { name: '박스 상태' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('박스 BOX-01 상태')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('DONE-01 박스분할 상태')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '박스 전체 저장' })).not.toBeInTheDocument()
   })
 
-  it('requires an explicitly completed box split status before marking the shipment ready', () => {
-    renderShipment(makeFullyPackedInProgressShipment(), 'summary')
-
-    expect(screen.getByText(/박스분할 상태가 진행 중인 품목/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '포장완료' })).toBeDisabled()
+  it('opens label printing in a separate tab without discarding drafts', () => {
+    renderShipment(makeShipmentWithBox())
+    const link = screen.getByRole('link', { name: '박스 쉽먼트 바로 인쇄' })
+    expect(link).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes&format=print')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(screen.getByRole('link', { name: 'A-01 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-1&format=print')
   })
 
   it('saves only the checked box split drafts', async () => {

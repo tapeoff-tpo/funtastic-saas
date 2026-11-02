@@ -7,6 +7,9 @@ import {
   chinaOutboundPallets,
   chinaOutboundShipmentItems,
   chinaOutboundShipments,
+  saasChinaInventory,
+  saasChinaInventoryMovements,
+  saasChinaShipmentPurchaseAllocations,
 } from '@/lib/db/schema'
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), transaction: vi.fn() }))
@@ -14,6 +17,7 @@ vi.mock('@/lib/db', () => ({ db: mocks }))
 
 import {
   assignChinaOutboundBoxesToPallets,
+  dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
   saveChinaOutboundBoxCompletionStatuses,
   saveChinaOutboundBoxDimensions,
@@ -30,6 +34,8 @@ let items: Row[]
 let boxes: Row[]
 let boxItems: Row[]
 let pallets: Row[]
+let inventory: Row[]
+let movements: Row[]
 let insertedSequence: number
 
 function matchingRows(rows: Row[], condition: SQL) {
@@ -49,6 +55,9 @@ function makeTransaction() {
     if (table === chinaOutboundBoxes) return boxes
     if (table === chinaOutboundBoxItems) return boxItems
     if (table === chinaOutboundPallets) return pallets
+    if (table === saasChinaInventory) return inventory
+    if (table === saasChinaInventoryMovements) return movements
+    if (table === saasChinaShipmentPurchaseAllocations) return []
     throw new Error('Unexpected table')
   }
   return {
@@ -84,13 +93,11 @@ function makeTransaction() {
       },
     })),
     insert: vi.fn().mockImplementation((table: unknown) => ({
-      values: (values: Omit<Row, 'id'>) => ({
-        returning: async () => {
-          const row = { ...values, id: `new-${++insertedSequence}` } as Row
-          rowsFor(table).push(row)
-          return [row]
-        },
-      }),
+      values: (values: Omit<Row, 'id'>) => {
+        const row = { ...values, id: `new-${++insertedSequence}` } as Row
+        rowsFor(table).push(row)
+        return { returning: async () => [row] }
+      },
     })),
   }
 }
@@ -102,7 +109,9 @@ describe('China outbound box and pallet completion', () => {
     insertedSequence = 0
     mocks.transaction.mockImplementation((callback) => callback(makeTransaction()))
     shipments = [{ id: shipmentId, userId, status: 'packing' }]
-    items = [{ id: 'item-1', userId, shipmentId, sku: 'SKU-1', reservedQuantity: 10, packedQuantity: 10, boxSplitStatus: 'completed' }]
+    items = [{ id: 'item-1', userId, shipmentId, inventoryId: 'inventory-1', sku: 'SKU-1', reservedQuantity: 10, packedQuantity: 10, boxSplitStatus: 'completed' }]
+    inventory = [{ id: 'inventory-1', userId, onHandQuantity: 20, reservedQuantity: 10, availableQuantity: 10 }]
+    movements = []
     pallets = [
       { id: 'pallet-1', userId, shipmentId, palletNo: 'P1', completionStatus: 'completed' },
       { id: 'pallet-2', userId, shipmentId, palletNo: 'P2', completionStatus: 'completed' },
@@ -141,13 +150,9 @@ describe('China outbound box and pallet completion', () => {
     expect(boxes.at(-1)).toMatchObject({ completionStatus: 'in_progress' })
   })
 
-  it('requires a used pallet with no in-progress boxes for completion', async () => {
+  it('allows recording a used pallet without legacy box completion flags', async () => {
     pallets[0]!.completionStatus = 'in_progress'
     boxes[0]!.completionStatus = 'in_progress'
-    await expect(saveChinaOutboundPalletCompletionStatuses({ userId, shipmentId, updates: [{ palletId: 'pallet-1', status: 'completed' }] })).rejects.toThrow(/진행 중인 박스/)
-    expect(pallets[0]).toMatchObject({ completionStatus: 'in_progress' })
-
-    boxes[0]!.completionStatus = null
     await saveChinaOutboundPalletCompletionStatuses({ userId, shipmentId, updates: [{ palletId: 'pallet-1', status: 'completed' }] })
     expect(pallets[0]).toMatchObject({ completionStatus: 'completed' })
   })
@@ -171,14 +176,15 @@ describe('China outbound box and pallet completion', () => {
     expect(shipments[0]).toMatchObject({ status: 'ready' })
   })
 
-  it('blocks marking ready when a filled box or used pallet is in progress', async () => {
+  it('checks actual allocations rather than legacy completion flags', async () => {
     boxes[0]!.completionStatus = 'in_progress'
-    await expect(markChinaOutboundShipmentReady({ userId, shipmentId })).rejects.toThrow(/박스 상태가 진행 중/)
-    expect(shipments[0]).toMatchObject({ status: 'packing' })
-    boxes[0]!.completionStatus = 'completed'
     pallets[0]!.completionStatus = 'in_progress'
-    await expect(markChinaOutboundShipmentReady({ userId, shipmentId })).rejects.toThrow(/파렛트 상태가 진행 중/)
-    expect(shipments[0]).toMatchObject({ status: 'packing' })
+    items[0]!.boxSplitStatus = 'in_progress'
+    await markChinaOutboundShipmentReady({ userId, shipmentId })
+    expect(shipments[0]).toMatchObject({ status: 'ready' })
+    shipments[0]!.status = 'packing'
+    boxItems[0]!.quantity = 4
+    await expect(markChinaOutboundShipmentReady({ userId, shipmentId })).rejects.toThrow(/실제 박스 수량/)
   })
 
   it('reopens a box and its pallet only when its physical dimensions change', async () => {
@@ -188,6 +194,22 @@ describe('China outbound box and pallet completion', () => {
     await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: 'box-1', lengthCm: 11, widthCm: 20, heightCm: 30 })
     expect(boxes[0]).toMatchObject({ completionStatus: 'in_progress' })
     expect(pallets[0]).toMatchObject({ completionStatus: 'in_progress' })
+  })
+
+  it('dispatches directly from packing once and validates physical quantities before deducting stock', async () => {
+    boxes[0]!.completionStatus = 'in_progress'
+    items[0]!.boxSplitStatus = 'in_progress'
+    boxItems[0]!.quantity = 4
+    await expect(dispatchChinaOutboundShipment({ userId, shipmentId, createdBy: 'admin' })).rejects.toThrow(/실제 박스 수량/)
+    expect(inventory[0]).toMatchObject({ onHandQuantity: 20, reservedQuantity: 10 })
+    expect(movements).toHaveLength(0)
+    boxItems[0]!.quantity = 5
+    await dispatchChinaOutboundShipment({ userId, shipmentId, createdBy: 'admin' })
+    expect(shipments[0]).toMatchObject({ status: 'dispatched' })
+    expect(inventory[0]).toMatchObject({ onHandQuantity: 10, reservedQuantity: 0, availableQuantity: 10 })
+    expect(movements).toHaveLength(1)
+    await expect(dispatchChinaOutboundShipment({ userId, shipmentId, createdBy: 'admin' })).rejects.toThrow(/이미 출고완료/)
+    expect(movements).toHaveLength(1)
   })
 
   it('reopens only affected boxes and pallets when a product split quantity changes', async () => {

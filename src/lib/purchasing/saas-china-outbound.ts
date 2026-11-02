@@ -2639,9 +2639,6 @@ export async function saveChinaOutboundPalletCompletionStatuses(input: {
       if (update.status !== 'completed') continue
       const filledBoxes = filledBoxesByPallet.get(pallet.id) ?? []
       if (filledBoxes.length === 0) throw new Error(`${pallet.palletNo}에 적재된 박스가 없어 완료로 표시할 수 없습니다.`)
-      if (filledBoxes.some((box) => box.completionStatus === 'in_progress')) {
-        throw new Error(`${pallet.palletNo}에 진행 중인 박스가 있습니다. 박스를 먼저 완료로 저장해주세요.`)
-      }
     }
     for (const status of CHINA_OUTBOUND_BOX_SPLIT_STATUSES) {
       const idsForStatus = input.updates.filter((update) => update.status === status).map((update) => update.palletId)
@@ -3099,8 +3096,8 @@ export async function dispatchChinaOutboundShipment(input: { userId: string; cre
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
     const shipment = await getChinaOutboundShipment(tx, input.userId, input.shipmentId)
-    if (shipment.status !== 'ready') {
-      throw new Error('포장완료 상태의 출고작업만 출고완료 처리할 수 있습니다.')
+    if (!['draft', 'packing', 'ready'].includes(shipment.status)) {
+      throw new Error('이미 출고완료 또는 취소된 작업입니다.')
     }
     const items = await tx
       .select()
@@ -3592,17 +3589,13 @@ async function assertShipmentFullyPacked(
   if (unfinished) {
     throw new Error(`${unfinished.sku}의 포장수량(${unfinished.packedQuantity.toLocaleString('ko-KR')})이 출고수량(${unfinished.reservedQuantity.toLocaleString('ko-KR')})과 다릅니다.`)
   }
-  const statusUnfinished = items.find((item) => item.boxSplitStatus === 'in_progress')
-  if (statusUnfinished) {
-    throw new Error(`${statusUnfinished.sku}의 박스분할 상태가 진행 중입니다. 박스분할을 확인한 뒤 완료로 저장해주세요.`)
-  }
   const [boxes, packedBoxItems, pallets] = await Promise.all([
     tx
       .select({ id: chinaOutboundBoxes.id, boxNo: chinaOutboundBoxes.boxNo, palletId: chinaOutboundBoxes.palletId, completionStatus: chinaOutboundBoxes.completionStatus })
       .from(chinaOutboundBoxes)
       .where(and(eq(chinaOutboundBoxes.userId, userId), eq(chinaOutboundBoxes.shipmentId, shipmentId))),
     tx
-      .select({ boxId: chinaOutboundBoxItems.boxId })
+      .select({ boxId: chinaOutboundBoxItems.boxId, shipmentItemId: chinaOutboundBoxItems.shipmentItemId, quantity: chinaOutboundBoxItems.quantity })
       .from(chinaOutboundBoxItems)
       .where(and(eq(chinaOutboundBoxItems.userId, userId), eq(chinaOutboundBoxItems.shipmentId, shipmentId))),
     tx
@@ -3612,12 +3605,21 @@ async function assertShipmentFullyPacked(
   ])
   if (boxes.length === 0) throw new Error('박스를 하나 이상 등록해주세요.')
   const packedBoxIds = new Set(packedBoxItems.map((boxItem) => boxItem.boxId))
+  // Verify persisted physical allocations as well as cached line totals.
+  // Completion flags are legacy display metadata, not a shipping prerequisite.
+  const validBoxIds = new Set(boxes.map((box) => box.id))
+  const validItemIds = new Set(items.map((item) => item.id))
+  const quantityByItem = new Map<string, number>()
+  for (const allocation of packedBoxItems) {
+    if (!validBoxIds.has(allocation.boxId) || !validItemIds.has(allocation.shipmentItemId) || !Number.isSafeInteger(allocation.quantity) || allocation.quantity <= 0) throw new Error('저장된 박스의 품목과 수량을 확인해주세요.')
+    quantityByItem.set(allocation.shipmentItemId, (quantityByItem.get(allocation.shipmentItemId) ?? 0) + allocation.quantity)
+  }
+  for (const item of items) {
+    if (quantityByItem.get(item.id) !== item.reservedQuantity) throw new Error(`${item.sku}의 실제 박스 수량이 출고수량과 다릅니다. 박스분할을 다시 확인해주세요.`)
+  }
   if (boxes.some((box) => packedBoxIds.has(box.id) && !box.palletId)) throw new Error('상품이 담긴 박스는 파렛트 번호를 지정해주세요.')
-  const unfinishedBox = boxes.find((box) => packedBoxIds.has(box.id) && box.completionStatus === 'in_progress')
-  if (unfinishedBox) throw new Error(`${unfinishedBox.boxNo} 박스 상태가 진행 중입니다. 완료로 저장해주세요.`)
   const usedPalletIds = new Set(boxes.flatMap((box) => packedBoxIds.has(box.id) && box.palletId ? [box.palletId] : []))
-  const unfinishedPallet = pallets.find((pallet) => usedPalletIds.has(pallet.id) && pallet.completionStatus === 'in_progress')
-  if (unfinishedPallet) throw new Error(`${unfinishedPallet.palletNo} 파렛트 상태가 진행 중입니다. 완료로 저장해주세요.`)
+  if ([...usedPalletIds].some((id) => !pallets.some((pallet) => pallet.id === id))) throw new Error('배정된 파렛트를 찾을 수 없습니다.')
 }
 
 async function markChinaOutboundPalletsChanged(tx: DbTransaction, userId: string, shipmentId: string, palletIds: string[]) {

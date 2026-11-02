@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { randomUUID } from 'node:crypto'
+import { renderChinaShipmentLabelPrint } from '@/lib/purchasing/china-shipment-label-print'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import {
@@ -23,6 +25,8 @@ export async function GET(
   if (!isUuid(shipmentId)) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
   const searchParams = new URL(request.url).searchParams
+  const format = searchParams.get('format')
+  if (format !== null && format !== 'print') return NextResponse.json({ error: '출력 형식을 확인해주세요.' }, { status: 400 })
   const boxId = searchParams.get('boxId')
   const labelType = searchParams.get('type')
   if (labelType !== null && labelType !== 'boxes' && labelType !== 'pallets') {
@@ -61,6 +65,20 @@ export async function GET(
       })),
     }
 
+    const options = selectedBox
+      ? { boxIds: [selectedBox.id], includePalletLabels: false }
+      : labelType ? { includeBoxLabels: labelType === 'boxes', includePalletLabels: labelType === 'pallets' } : {}
+    if (format === 'print') {
+      const nonce = randomUUID()
+      return new NextResponse(renderChinaShipmentLabelPrint(labelDetail, options, nonce), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`,
+        },
+      })
+    }
     const buffer = selectedBox
       ? await exportChinaOutboundShipmentLabelWorkbook(labelDetail, {
         boxIds: [selectedBox.id],

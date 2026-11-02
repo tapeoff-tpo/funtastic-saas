@@ -1,12 +1,71 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { resolvePurchasingProductImages } from '@/lib/purchasing/product-image-catalogue'
+import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { ensureNewProductWorkflowTables } from './workflow'
 
 const rows = <T>(result: unknown): T[] => Array.isArray(result) ? result as T[] : ((result as { rows?: T[] }).rows ?? [])
 const imageTypes: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' }
 const imageHosts = new Set(['pub-c3849cebd2dd4a1a881a36c783c3845c.r2.dev', 'funtasticb2b.com'])
 const maxImageBytes = 4 * 1024 * 1024
+
+type SavedImageMatch = { id: string; exactSku: boolean; images: string[] }
+
+function selectSavedImageUrls(matches: SavedImageMatch[]) {
+  const exact = matches.filter((match) => match.exactSku)
+  const selected = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null
+  return (selected?.images ?? []).map((id) => `/api/purchasing/product-images/files/${id}`)
+}
+
+/** Prepare just image addresses with the list, never hundreds of image binaries.
+ * One scoped query per 200 rows replaces a metadata/auth round trip on each click. */
+export async function findSavedNewProductImagesBatch(userId: string, items: Array<{ id: string; sku: string; productName: string }>): Promise<Record<string, ProductImageResult>> {
+  const result: Record<string, ProductImageResult> = {}
+  const unique = [...new Map(items.map((item) => [item.id, item])).values()]
+  for (let start = 0; start < unique.length; start += 200) {
+    const batch = unique.slice(start, start + 200)
+    const matches = rows<SavedImageMatch & { requestId: string }>(await db.execute(sql`
+      WITH requested AS (
+        SELECT * FROM jsonb_to_recordset(${JSON.stringify(batch)}::jsonb) AS r(id text, sku text, "productName" text)
+      ), source AS MATERIALIZED (
+        SELECT id, sabangnet_code, product_name, registered_product_name, metadata -> 'optionDetails' AS options
+        FROM new_product_workflow_items WHERE user_id = ${userId}::uuid
+      ), product_keys AS (
+        SELECT id, true AS "exactSku", sabangnet_code AS value FROM source
+        UNION ALL
+        SELECT item.id, true, option ->> 'sabangnetOptionCode' FROM source item
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(item.options) = 'array' THEN item.options ELSE '[]'::jsonb END) option
+        UNION ALL SELECT id, false, lower(btrim(product_name)) FROM source
+        UNION ALL SELECT id, false, lower(btrim(registered_product_name)) FROM source
+      ), requested_keys AS (
+        SELECT id, true AS "exactSku", sku AS value FROM requested
+        UNION ALL SELECT id, false, lower(btrim("productName")) FROM requested
+      ), item_matches AS (
+        SELECT requested.id AS "requestId", item.id, bool_or(item."exactSku") AS "exactSku"
+        FROM requested_keys requested JOIN product_keys item
+          ON requested."exactSku" = item."exactSku" AND requested.value = item.value AND requested.value <> ''
+        GROUP BY requested.id, item.id
+      ), matches AS (
+        SELECT item."requestId", item.id, item."exactSku",
+          jsonb_agg(attachment.id::text ORDER BY attachment.created_at) AS images
+        FROM item_matches item
+        JOIN new_product_workflow_attachments attachment ON attachment.item_id = item.id
+          AND attachment.user_id = ${userId}::uuid AND attachment.kind = 'product_image'
+        GROUP BY item."requestId", item.id, item."exactSku"
+      ), ranked AS (
+        SELECT *, row_number() OVER (PARTITION BY "requestId" ORDER BY "exactSku" DESC NULLS LAST, id) AS rank
+        FROM matches
+      ) SELECT "requestId", id, "exactSku", images FROM ranked WHERE rank <= 3
+    `))
+    const byRequest = new Map<string, SavedImageMatch[]>()
+    for (const match of matches) byRequest.set(match.requestId, [...(byRequest.get(match.requestId) ?? []), match])
+    for (const item of batch) {
+      const imageUrls = selectSavedImageUrls(byRequest.get(item.id) ?? [])
+      if (imageUrls.length) result[item.id] = { sku: item.sku, productName: item.productName, imageUrls, source: 'product-management' }
+    }
+  }
+  return result
+}
 
 export async function findSavedNewProductImages(userId: string, sku: string, productName: string) {
   // Image reads do not need stage seeding/advisory locks on each cold function.
@@ -26,9 +85,7 @@ export async function findSavedNewProductImages(userId: string, sku: string, pro
     if (cause.code === '42P01' || cause.cause?.code === '42P01') return []
     throw error
   }))
-  const exact = matches.filter((match) => match.exactSku)
-  const selected = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null
-  return (selected?.images ?? []).map((id, sortOrder) => ({ url: `/api/purchasing/product-images/files/${id}`, sortOrder }))
+  return selectSavedImageUrls(matches).map((url, sortOrder) => ({ url, sortOrder }))
 }
 
 export async function getSavedNewProductImage(userId: string, id: string) {

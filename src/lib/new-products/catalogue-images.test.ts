@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ execute: vi.fn(), transaction: vi.fn(), resolv
 vi.mock('@/lib/db', () => ({ db: mocks }))
 vi.mock('./workflow', () => ({ ensureNewProductWorkflowTables: vi.fn() }))
 vi.mock('@/lib/purchasing/product-image-catalogue', () => ({ resolvePurchasingProductImages: mocks.resolve }))
-import { downloadCatalogueImage, findSavedNewProductImages, syncNewProductCatalogueImages } from './catalogue-images'
+import { downloadCatalogueImage, findSavedNewProductImages, findSavedNewProductImagesBatch, syncNewProductCatalogueImages } from './catalogue-images'
 
 const host = 'https://pub-c3849cebd2dd4a1a881a36c783c3845c.r2.dev/one.jpg'
 const item = { id: '00000000-0000-4000-8000-000000000001', productName: '상품 A', registeredName: null, sku: 'SKU-A' }
@@ -29,6 +29,34 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('copy B2B images into product management', () => {
+  it('prepares list image addresses in one owner-scoped read while preserving ambiguous-match protection', async () => {
+    mocks.execute.mockResolvedValue([
+      { requestId: 'request-1', id: 'product-1', exactSku: true, images: ['image-1'] },
+      { requestId: 'request-1', id: 'product-2', exactSku: false, images: ['image-2'] },
+      { requestId: 'request-2', id: 'product-3', exactSku: false, images: ['image-3'] },
+      { requestId: 'request-2', id: 'product-4', exactSku: false, images: ['image-4'] },
+    ])
+    const result = await findSavedNewProductImagesBatch('workspace', [
+      { id: 'request-1', sku: 'SKU-A', productName: '상품 A' },
+      { id: 'request-2', sku: 'SKU-B', productName: '상품 B' },
+      { id: 'missing', sku: 'SKU-C', productName: '상품 C' },
+    ])
+    expect(result).toEqual({ 'request-1': { sku: 'SKU-A', productName: '상품 A', source: 'product-management', imageUrls: ['/api/purchasing/product-images/files/image-1'] } })
+    expect(mocks.execute).toHaveBeenCalledTimes(1)
+    const query = dialect.sqlToQuery(mocks.execute.mock.calls[0][0])
+    expect(query.params.filter((value) => value === 'workspace')).toHaveLength(2)
+    expect(query.sql).toContain('jsonb_to_recordset')
+    expect(query.sql).not.toContain('file_data')
+    expect(query.sql).not.toContain('INSERT')
+  })
+  it('does not query empty lists and bounds large list lookups instead of querying each product', async () => {
+    expect(await findSavedNewProductImagesBatch('workspace', [])).toEqual({})
+    expect(mocks.execute).not.toHaveBeenCalled()
+    mocks.execute.mockResolvedValue([])
+    const products = Array.from({ length: 401 }, (_, index) => ({ id: `row-${index}`, sku: `SKU-${index}`, productName: '상품' }))
+    await findSavedNewProductImagesBatch('workspace', [...products, products[0]])
+    expect(mocks.execute).toHaveBeenCalledTimes(3)
+  })
   it('stores actual image bytes in the existing attachment store and makes retries idempotent', async () => {
     const result = await syncNewProductCatalogueImages({ userId: 'workspace', actorId: 'admin' })
     expect(result.results[0]).toMatchObject({ status: 'saved', images: 1 })

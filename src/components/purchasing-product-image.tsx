@@ -4,15 +4,25 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { createProductImageLoader, type ProductImageLoader, type ProductImageReference } from '@/lib/purchasing/product-image-loader'
 
-export function PurchasingProductImageButton({ productName, ...reference }: ProductImageReference & { productName: string }) {
+export function PurchasingProductImageButton({ productName, imageData, ...reference }: ProductImageReference & { productName: string; imageData?: ProductImageResult }) {
   const [open, setOpen] = useState(false)
   const { purchaseItemId, shipmentItemId } = reference
-  const loader = useMemo(() => createProductImageLoader(purchaseItemId ? { purchaseItemId } : { shipmentItemId: shipmentItemId! }), [purchaseItemId, shipmentItemId])
+  const loader = useMemo(() => createProductImageLoader(purchaseItemId ? { purchaseItemId } : { shipmentItemId: shipmentItemId! }, imageData), [purchaseItemId, shipmentItemId, imageData])
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function cancelHover() { if (hoverTimer.current) clearTimeout(hoverTimer.current) }
   function warm() { void loader.load().catch(() => { /* A speculative failure is retried on click. */ }) }
   useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); loader.dispose() }, [loader])
-  return <><button type="button" title="상품 이미지 보기" className="max-w-full text-left font-medium text-blue-700 underline-offset-2 hover:underline"
+  useEffect(() => {
+    if (!imageData?.imageUrls.length || !buttonRef.current || typeof IntersectionObserver === 'undefined') return
+    // Only nearby visible rows download a file; offscreen rows carry addresses only.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) { loader.preload(); observer.disconnect() }
+    }, { rootMargin: '160px' })
+    observer.observe(buttonRef.current)
+    return () => observer.disconnect()
+  }, [loader, imageData])
+  return <><button ref={buttonRef} type="button" title="상품 이미지 보기" className="max-w-full text-left font-medium text-blue-700 underline-offset-2 hover:underline"
     onPointerEnter={() => { cancelHover(); hoverTimer.current = setTimeout(warm, 100) }} onPointerLeave={cancelHover}
     onFocus={warm} onPointerDown={warm} onClick={() => { cancelHover(); setOpen(true) }}><span data-no-translate>{productName}</span></button>
     {open && <ProductImageDialog key={purchaseItemId ?? shipmentItemId} loader={loader} productName={productName} onClose={() => setOpen(false)} />}</>

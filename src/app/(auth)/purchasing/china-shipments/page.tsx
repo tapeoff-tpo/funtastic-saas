@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
+import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import {
   getChinaOutboundShipmentDetail,
   getSaasChinaInventory,
@@ -37,6 +39,8 @@ export default async function ChinaShipmentsPage({
     listSaasChinaOutboundWarehouses(workspaceUserId),
   ])
 
+  const productImages: Record<string, ProductImageResult> = await findSavedNewProductImagesBatch(workspaceUserId, detail?.items ?? [])
+    .catch((error) => { console.error('outbound image address preload failed', error); return {} })
   const stockItems: ChinaShipmentStockItem[] = inventoryItems.map((item) => ({
     id: item.id,
     warehouseCode: item.warehouseCode,
@@ -74,7 +78,7 @@ export default async function ChinaShipmentsPage({
       <ChinaShipmentsBoard
         inventoryItems={stockItems}
         shipments={shipmentItems}
-        selectedShipment={detail ? toShipmentDetailView(detail) : null}
+        selectedShipment={detail ? toShipmentDetailView(detail, productImages) : null}
         selectedStep={selectedStep}
         showCreate={showCreate}
         outboundWarehouses={outboundWarehouses}
@@ -83,7 +87,7 @@ export default async function ChinaShipmentsPage({
   )
 }
 
-function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>): ChinaShipmentDetailView {
+function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>, productImages: Record<string, ProductImageResult>): ChinaShipmentDetailView {
   return {
     shipment: {
       id: detail.shipment.id,
@@ -115,6 +119,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       onHandQuantity: item.onHandQuantity,
       availableQuantity: item.availableQuantity,
       receiptPacking: item.receiptPacking,
+      productImage: productImages[item.id],
     })),
     pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({

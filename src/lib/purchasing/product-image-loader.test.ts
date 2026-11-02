@@ -1,11 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProductImageLoader } from './product-image-loader'
 
-const result = { sku: 'SKU-1', productName: '상품', source: 'product-management', imageUrls: ['/saved.jpg'] }
+const result = { sku: 'SKU-1', productName: '상품', source: 'product-management' as const, imageUrls: ['/saved.jpg'] }
 const response = () => new Response(JSON.stringify(result))
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('intent-based product image loading', () => {
+  it('opens server-prepared photos without a metadata request, but lets explicit retry refresh them', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response())
+    vi.stubGlobal('fetch', fetcher)
+    const loader = createProductImageLoader({ purchaseItemId: 'purchase' }, result)
+    expect(loader.peek()).toEqual(result)
+    loader.preload()
+    expect(await loader.load()).toEqual(result)
+    expect(fetcher).not.toHaveBeenCalled()
+    await loader.load(false, true)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
   it('shares an in-flight preload with a click and reuses completed results until expiry', async () => {
     vi.useFakeTimers()
     let complete!: (response: Response) => void

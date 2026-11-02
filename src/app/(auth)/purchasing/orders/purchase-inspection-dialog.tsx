@@ -4,14 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
+import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
 import { blankInspectionBox, inspectionSummary, type InspectionParcel, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 
 type Detail = { id: string; status: string; productName: string; sku: string; inspection: PurchaseInspection; imageUrls: string[] }
 
-export function PurchaseInspectionButton({ id, productName, mode = 'inspection' }: { id: string; productName: string; mode?: 'image' | 'inspection' }) {
+export function PurchaseInspectionButton({ id, productName, imageData, mode = 'inspection' }: { id: string; productName: string; imageData?: ProductImageResult; mode?: 'image' | 'inspection' }) {
   const [open, setOpen] = useState(false)
-  if (mode === 'image') return <PurchasingProductImageButton purchaseItemId={id} productName={productName} />
+  if (mode === 'image') return <PurchasingProductImageButton purchaseItemId={id} productName={productName} imageData={imageData} />
   return <>
     <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>송장·검수</Button>
     {open && <InspectionDialog id={id} onClose={() => setOpen(false)} />}

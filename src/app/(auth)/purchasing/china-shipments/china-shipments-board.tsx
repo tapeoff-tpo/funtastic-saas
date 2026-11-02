@@ -9,6 +9,7 @@ import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatC
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import { useChinaWorkNavigation } from './china-work-navigation'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
+import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { TitleHelp } from './title-help'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
 import { ChinaImportDocumentDialog } from './china-import-document-dialog'
@@ -82,6 +83,7 @@ export type ChinaShipmentDetailView = {
     onHandQuantity?: number | null
     availableQuantity?: number | null
     receiptPacking?: InspectionPackingPiece[]
+    productImage?: ProductImageResult
   }>
   pallets: Array<{ id: string; palletNo: string; note: string | null; completionStatus?: 'in_progress' | 'completed' | null }>
   boxes: Array<{
@@ -744,7 +746,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
         for (const allocation of allocations) quantities.set(allocation.quantity, (quantities.get(allocation.quantity) ?? 0) + 1)
         const receipts = [...new Map((item.receiptPacking ?? []).map((piece) => [piece.receiptBoxId, piece])).values()]
         return <tr key={item.id} className="border-t align-top">
-          <td data-no-translate className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
+          <td data-no-translate className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
           <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong>{item.availableQuantity != null && <div className="mt-1 text-xs text-muted-foreground">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</div>}</td>
           <td className="px-3 py-3 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
           <td className="px-3 py-3">{allocations.length ? <details><summary className="cursor-pointer text-xs">{allocations.length}박스 · {[...quantities].map(([quantity, count]) => `${quantity}개 × ${count}`).join(' / ')}</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">{allocations.map((allocation) => <p key={allocation.id}><span data-no-translate>{boxes.find((box) => box.id === allocation.boxId)?.boxNo}</span>번: {allocation.quantity}개</p>)}</div></details> : <span className="text-xs text-muted-foreground">미분할</span>}</td>
@@ -957,7 +959,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
             <p data-no-translate className="font-semibold">{item.sku}</p>
             <TitleHelp title="박스분할">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</TitleHelp><ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
           </div>
-          <p className="mt-1 truncate text-sm"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} /><span data-no-translate>{item.optionName ? ` · ${item.optionName}` : ''}</span></p>
+          <p className="mt-1 truncate text-sm"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /><span data-no-translate>{item.optionName ? ` · ${item.optionName}` : ''}</span></p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {showSelection && <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium">

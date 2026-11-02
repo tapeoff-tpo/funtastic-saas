@@ -4,6 +4,8 @@ import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
+import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
@@ -180,6 +182,10 @@ export async function PurchasingOrdersView({
     overduePurchaseCompletedCount,
     overdueTotalCount,
   } = purchaseRequestResult
+  const productImages: Record<string, ProductImageResult> = await findSavedNewProductImagesBatch(workspaceUserId,
+    items.flatMap((item: { id?: string | null; sku: string; productName: string; status: string }) => item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
+      ? [{ id: item.id, sku: item.sku, productName: item.productName }] : []),
+  ).catch((error) => { console.error('purchase image address preload failed', error); return {} })
   const purchaseStatusCounts = statusCounts as Partial<Record<PurchaseRequestStatus, number>>
   const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
     if (item.rawData.source !== 'auto_purchase_recommendation') return latest
@@ -672,7 +678,7 @@ export async function PurchasingOrdersView({
                       </td>
                       <td className="px-3 py-2 align-middle">
                         {item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
-                          ? <PurchaseInspectionButton id={item.id} productName={item.productName} mode="image" />
+                          ? <PurchaseInspectionButton id={item.id} productName={item.productName} imageData={productImages[item.id]} mode="image" />
                           : <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>}
                         <div data-no-translate className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}

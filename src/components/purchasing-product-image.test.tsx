@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PurchasingProductImageButton } from './purchasing-product-image'
 const base = { sku: 'SKU-1', productName: '유리컵', source: 'item-master', imageUrls: ['/broken.jpg'] }
@@ -7,7 +7,33 @@ beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true }
   HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new Event('close')) }
 })
+afterEach(() => vi.unstubAllGlobals())
 describe('product image popup', () => {
+  it('warms a server-prepared photo only near the viewport and renders it on the first click without fetch', async () => {
+    const fetcher = vi.fn()
+    const downloaded: string[] = []
+    let intersect!: (entries: Array<{ isIntersecting: boolean }>) => void
+    const disconnect = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    vi.stubGlobal('Image', class { set src(value: string) { downloaded.push(value) } })
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: typeof intersect) { intersect = callback }
+      observe() {}
+      disconnect = disconnect
+    })
+    render(<PurchasingProductImageButton productName="유리컵" purchaseItemId="prepared" imageData={{ ...base, source: 'product-management' }} />)
+    expect(downloaded).toEqual([])
+    intersect([{ isIntersecting: false }])
+    expect(downloaded).toEqual([])
+    intersect([{ isIntersecting: true }])
+    expect(downloaded).toEqual(['/broken.jpg'])
+    expect(disconnect).toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '유리컵' }))
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/broken.jpg')
+    expect(screen.queryByText('불러오는 중…')).not.toBeInTheDocument()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
   it('preloads on keyboard focus and opens/reopens without another metadata request', async () => {
     const fetcher = vi.fn().mockResolvedValue(response(base))
     vi.stubGlobal('fetch', fetcher)

@@ -94,7 +94,14 @@ function normalize1688TrackingNumbers(value: unknown) {
 }
 
 function stops1688TrackingBatch(message: string) {
-  return /로그인|보안\s*확인|확장프로그램|시간이\s*초과|SaaS\s*화면|다른\s*1688\s*작업/i.test(message)
+  const normalized = message.trim()
+  return normalized.startsWith('1688 로그인이 필요합니다.')
+    || normalized.startsWith('1688 보안 확인이 필요합니다.')
+    || normalized.startsWith('1688 확장프로그램 연결을 확인해주세요.')
+    || normalized.startsWith('1688 송장 조회 시간이 초과되었습니다.')
+    || normalized.startsWith('SaaS 발주 화면에서 시작해주세요.')
+    || normalized.startsWith('SaaS 화면에 송장 조회 결과를 전달하지 못했습니다:')
+    || is1688TrackingLookupHandoffInProgress(normalized)
 }
 
 function is1688TrackingLookupHandoffInProgress(message: string) {

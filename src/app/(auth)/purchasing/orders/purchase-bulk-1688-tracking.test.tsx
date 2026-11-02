@@ -188,6 +188,33 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
+  it('continues to the next order when one order has no tracking number', async () => {
+    const postMessage = vi.spyOn(window, 'postMessage')
+    renderBulkLookup()
+
+    for (const checkbox of screen.getAllByRole('checkbox').slice(0, 2)) fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: '현재 페이지 선택 2건 1688 송장 일괄조회' }))
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
+      window.location.origin,
+    ))
+
+    await act(async () => {
+      extensionMessage({
+        source: 'funtastic-1688-extension',
+        type: 'FUNTASTIC_1688_TRACKING_ERROR',
+        runId: '1688-batch-run-0-1',
+        message: '1688에서 송장번호를 찾지 못했습니다. 로그인·보안 확인 또는 주문 상태를 확인해주세요.',
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: '1688-batch-run-1-1', orderNumber: secondOrder }),
+      window.location.origin,
+    ))
+  })
+
   it('retries the same order while the extension clears the preceding lookup run', async () => {
     const postMessage = vi.spyOn(window, 'postMessage')
     renderBulkLookup()

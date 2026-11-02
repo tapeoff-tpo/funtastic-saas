@@ -12,6 +12,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
@@ -122,6 +123,49 @@ function stops1688TrackingBatch(message: string) {
 
 function is1688TrackingLookupHandoffInProgress(message: string) {
   return /다른\s*1688\s*작업이\s*진행\s*중/i.test(message)
+}
+
+type TrackingProgressPopup = {
+  window: Window
+  root: HTMLElement
+}
+
+function openTrackingProgressPopup() {
+  const popup = window.open(
+    '',
+    'funtastic-1688-tracking-progress',
+    'popup=yes,width=980,height=860,resizable=yes,scrollbars=yes',
+  )
+  if (!popup) return null
+
+  const popupDocument = popup.document
+  popupDocument.documentElement.lang = 'ko'
+  popupDocument.head.replaceChildren()
+
+  const charset = popupDocument.createElement('meta')
+  charset.setAttribute('charset', 'utf-8')
+  popupDocument.head.append(charset)
+  const viewport = popupDocument.createElement('meta')
+  viewport.name = 'viewport'
+  viewport.content = 'width=device-width, initial-scale=1'
+  popupDocument.head.append(viewport)
+  popupDocument.title = '1688 송장 일괄조회'
+
+  for (const source of document.head.querySelectorAll('link[rel="stylesheet"], style')) {
+    const copy = source.cloneNode(true)
+    if (source instanceof HTMLLinkElement && copy instanceof HTMLLinkElement) {
+      // A blank popup resolves relative paths against about:blank. Preserve the
+      // absolute Next/Tailwind stylesheet URL from the opener instead.
+      copy.href = source.href
+    }
+    popupDocument.head.append(copy)
+  }
+
+  popupDocument.body.className = 'bg-background text-foreground'
+  const root = popupDocument.createElement('div')
+  root.id = 'funtastic-1688-tracking-progress-root'
+  popupDocument.body.replaceChildren(root)
+  return { window: popup, root } satisfies TrackingProgressPopup
 }
 
 const PURCHASE_REVIEW_STATUS_OPTIONS: Array<{ value: PurchaseReviewListStatus; label: string }> = [
@@ -283,14 +327,64 @@ export function PurchaseBulk1688TrackingLookup({
   const router = useRouter()
   const routerRefreshRef = useRef(router.refresh)
   const stopRequestedRef = useRef(false)
+  const batchActiveRef = useRef(false)
+  const progressPopupRef = useRef<Window | null>(null)
   const [batch, setBatch] = useState<Purchase1688TrackingBatch | null>(null)
   const [progress, setProgress] = useState<Purchase1688TrackingProgress | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [progressPopupRoot, setProgressPopupRoot] = useState<HTMLElement | null>(null)
   const [lookupRows, setLookupRows] = useState<Purchase1688TrackingLookupRow[]>([])
 
   useEffect(() => {
     routerRefreshRef.current = router.refresh
   }, [router.refresh])
+
+  useEffect(() => {
+    batchActiveRef.current = Boolean(batch)
+  }, [batch])
+
+  useEffect(() => () => {
+    batchActiveRef.current = false
+    const popup = progressPopupRef.current
+    progressPopupRef.current = null
+    if (popup && !popup.closed) popup.close()
+  }, [])
+
+  function ensureProgressPopup() {
+    const existingPopup = progressPopupRef.current
+    if (existingPopup && !existingPopup.closed) {
+      existingPopup.focus()
+      return true
+    }
+
+    const opened = openTrackingProgressPopup()
+    if (!opened) {
+      toast.error('일괄조회 진행 창을 열 수 없습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도해주세요.')
+      return false
+    }
+
+    progressPopupRef.current = opened.window
+    setProgressPopupRoot(opened.root)
+    opened.window.addEventListener('beforeunload', () => {
+      if (progressPopupRef.current !== opened.window) return
+      progressPopupRef.current = null
+      setProgressPopupRoot(null)
+      if (!batchActiveRef.current) return
+      stopRequestedRef.current = true
+      setProgress((current) => current ? {
+        ...current,
+        stopping: true,
+        message: '진행 창이 닫혀 현재 조회·저장이 끝나면 중지합니다.',
+      } : current)
+    }, { once: true })
+    return true
+  }
+
+  function closeProgressPopup() {
+    const popup = progressPopupRef.current
+    progressPopupRef.current = null
+    setProgressPopupRoot(null)
+    if (popup && !popup.closed) popup.close()
+  }
 
   const eligibleCandidates = candidates.filter((candidate) => (
     valid1688OrderNumber(candidate.supplierOrderNumber) && !candidate.trackingNumber?.trim()
@@ -347,6 +441,7 @@ export function PurchaseBulk1688TrackingLookup({
       clearTimers()
       const didSaveAny = succeededItems > 0
       current = null
+      batchActiveRef.current = false
       setBatch(null)
       updateProgress(message, {
         currentOrder: index,
@@ -530,6 +625,7 @@ export function PurchaseBulk1688TrackingLookup({
 
   function startBatch() {
     if (batch || eligibleCandidates.length === 0) return
+    if (!ensureProgressPopup()) return
     const grouped = new Map<string, string[]>()
     for (const candidate of eligibleCandidates) {
       const orderNumber = candidate.supplierOrderNumber?.trim()
@@ -550,7 +646,6 @@ export function PurchaseBulk1688TrackingLookup({
       message: '조회 대기',
       trackingNumbers: [],
     })))
-    setDialogOpen(true)
     if (eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || jobs.length > MAX_1688_TRACKING_BATCH_ORDERS) {
       setProgress({
         totalItems: eligibleCandidates.length,
@@ -572,6 +667,7 @@ export function PurchaseBulk1688TrackingLookup({
     }
 
     stopRequestedRef.current = false
+    batchActiveRef.current = true
     setProgress({
       totalItems: eligibleCandidates.length,
       totalOrders: jobs.length,
@@ -600,14 +696,81 @@ export function PurchaseBulk1688TrackingLookup({
     } : current)
   }
 
+  const progressWindow = progressPopupRoot ? createPortal(
+    <main className="flex h-screen min-w-[680px] flex-col overflow-hidden bg-background p-5">
+      <h1 className="text-base font-semibold">1688 송장 일괄조회</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        현재 페이지의 구매완료 항목 중 주문서번호가 있고 송장이 비어 있는 {(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회합니다.
+        {(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장 또는 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm" aria-live="polite">
+        <span>{progress?.message ?? '조회 준비'}</span>
+        <span className="text-muted-foreground">성공 {(progress?.succeededItems ?? 0).toLocaleString('ko-KR')}건</span>
+        <span className="text-muted-foreground">미처리 {(progress?.failedItems ?? 0).toLocaleString('ko-KR')}건</span>
+        {progress?.skippedItems ? <span className="text-muted-foreground">건너뜀 {progress.skippedItems.toLocaleString('ko-KR')}건</span> : null}
+      </div>
+
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border">
+        {lookupRows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">조회할 주문서번호가 있는 항목이 없습니다.</p>
+        ) : (
+          <div className="divide-y">
+            {lookupRows.map((row) => {
+              const statusClassName = row.status === 'success'
+                ? 'bg-emerald-100 text-emerald-800'
+                : row.status === 'failed'
+                  ? 'bg-red-100 text-red-800'
+                  : row.status === 'saving'
+                    ? 'bg-blue-100 text-blue-800'
+                    : row.status === 'querying'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-muted text-muted-foreground'
+              const statusLabel = row.status === 'success'
+                ? '성공'
+                : row.status === 'failed'
+                  ? '미처리'
+                  : row.status === 'saving'
+                    ? '저장 중'
+                    : row.status === 'querying'
+                      ? '조회 중'
+                      : row.status === 'skipped'
+                        ? '건너뜀'
+                        : '대기'
+              return (
+                <div key={row.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p data-no-translate className="break-words text-sm font-medium">
+                      <span className="mr-1 text-muted-foreground">{row.sku}</span>
+                      {row.productName}{row.optionName ? ` · ${row.optionName}` : ''}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">주문서번호 <span data-no-translate>{row.orderNumber}</span></p>
+                    <p className="mt-1 text-xs text-muted-foreground">{row.message}</p>
+                    {row.trackingNumbers.length > 0 ? <p data-no-translate className="mt-1 break-all text-xs text-emerald-700">{row.trackingNumbers.join(', ')}</p> : null}
+                  </div>
+                  <span className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-medium ${statusClassName}`}>{statusLabel}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex justify-end gap-2">
+        {batch ? (
+          <Button type="button" variant="outline" onClick={stopAfterCurrent} disabled={progress?.stopping}>
+            중지(현재 건 이후)
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" onClick={closeProgressPopup}>닫기</Button>
+        )}
+      </div>
+    </main>,
+    progressPopupRoot,
+  ) : null
+
   return (
-    <Dialog.Root
-      open={dialogOpen}
-      onOpenChange={(nextOpen) => {
-        if (batch && !nextOpen) return
-        setDialogOpen(nextOpen)
-      }}
-    >
+    <>
       <Button
         type="button"
         size="sm"
@@ -619,79 +782,8 @@ export function PurchaseBulk1688TrackingLookup({
         {batch ? <Loader2 className="animate-spin" /> : <Search />}
         1688 송장 일괄조회
       </Button>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[min(920px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-background p-5 shadow-xl">
-          <Dialog.Title className="text-base font-semibold">1688 송장 일괄조회</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-            현재 페이지의 구매완료 항목 중 주문서번호가 있고 송장이 비어 있는 {(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회합니다.
-            {(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장 또는 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}
-          </Dialog.Description>
-
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm" aria-live="polite">
-            <span>{progress?.message ?? '조회 준비'}</span>
-            <span className="text-muted-foreground">성공 {(progress?.succeededItems ?? 0).toLocaleString('ko-KR')}건</span>
-            <span className="text-muted-foreground">미처리 {(progress?.failedItems ?? 0).toLocaleString('ko-KR')}건</span>
-            {progress?.skippedItems ? <span className="text-muted-foreground">건너뜀 {progress.skippedItems.toLocaleString('ko-KR')}건</span> : null}
-          </div>
-
-          <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border">
-            {lookupRows.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-muted-foreground">조회할 주문서번호가 있는 항목이 없습니다.</p>
-            ) : (
-              <div className="divide-y">
-                {lookupRows.map((row) => {
-                  const statusClassName = row.status === 'success'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : row.status === 'failed'
-                      ? 'bg-red-100 text-red-800'
-                      : row.status === 'saving'
-                        ? 'bg-blue-100 text-blue-800'
-                        : row.status === 'querying'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-muted text-muted-foreground'
-                  const statusLabel = row.status === 'success'
-                    ? '성공'
-                    : row.status === 'failed'
-                      ? '미처리'
-                      : row.status === 'saving'
-                        ? '저장 중'
-                        : row.status === 'querying'
-                          ? '조회 중'
-                          : row.status === 'skipped'
-                            ? '건너뜀'
-                            : '대기'
-                  return (
-                    <div key={row.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p data-no-translate className="break-words text-sm font-medium">
-                          <span className="mr-1 text-muted-foreground">{row.sku}</span>
-                          {row.productName}{row.optionName ? ` · ${row.optionName}` : ''}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">주문서번호 <span data-no-translate>{row.orderNumber}</span></p>
-                        <p className="mt-1 text-xs text-muted-foreground">{row.message}</p>
-                        {row.trackingNumbers.length > 0 ? <p data-no-translate className="mt-1 break-all text-xs text-emerald-700">{row.trackingNumbers.join(', ')}</p> : null}
-                      </div>
-                      <span className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-medium ${statusClassName}`}>{statusLabel}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            {batch ? (
-              <Button type="button" variant="outline" onClick={stopAfterCurrent} disabled={progress?.stopping}>
-                중지(현재 건 이후)
-              </Button>
-            ) : (
-              <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">닫기</Button>} />
-            )}
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {progressWindow}
+    </>
   )
 }
 

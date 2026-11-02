@@ -870,22 +870,19 @@ async function startTrackingLookupRun(message, sourceTabId) {
     return { ok: false, error: '1688 주문번호 형식을 확인해주세요.' }
   }
 
-  const collectorWindow = await chrome.windows.create({
+  // Keep the actual 1688 order detail in an ordinary browser tab. Batch
+  // lookups stay inactive so their loading/closing never pulls focus away
+  // from the SaaS progress window; a manually requested lookup opens active.
+  const collectorTab = await chrome.tabs.create({
     url: trackingLookupUrl(orderNumber),
-    type: 'popup',
-    focused: !background,
-    width: 1180,
-    height: 860,
+    active: !background,
   })
-  const collectorTab = collectorWindow?.tabs?.[0]
-    || (collectorWindow?.id ? (await chrome.tabs.query({ windowId: collectorWindow.id }))[0] : null)
   if (!collectorTab?.id) throw new Error('1688 송장 조회 창을 열지 못했습니다.')
 
   const run = {
     runId,
     sourceTabId,
     collectorTabId: collectorTab.id,
-    collectorWindowId: collectorWindow?.id ?? null,
     orderNumber,
     status: 'running',
     collecting: false,
@@ -956,11 +953,7 @@ async function failTrackingLookupRun(run, message, keepCollectorTab) {
   }).catch(() => {})
   await clearTrackingLookupRun(run, !keepCollectorTab)
   if (keepCollectorTab) {
-    if (run.collectorWindowId) {
-      await chrome.windows.update(run.collectorWindowId, { focused: true }).catch(() => {})
-    } else {
-      await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
-    }
+    await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
   }
 }
 
@@ -975,9 +968,7 @@ async function clearTrackingLookupRun(run, closeCollectorTab) {
     chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM),
     chrome.storage.session.remove(TRACKING_LOOKUP_STATE_KEY),
   ])
-  if (closeCollectorTab && run.collectorWindowId) {
-    await chrome.windows.remove(run.collectorWindowId).catch(() => {})
-  } else if (closeCollectorTab && run.collectorTabId) {
+  if (closeCollectorTab && run.collectorTabId) {
     await chrome.tabs.remove(run.collectorTabId).catch(() => {})
   }
 }

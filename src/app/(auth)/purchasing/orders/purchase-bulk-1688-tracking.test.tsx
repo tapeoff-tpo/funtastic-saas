@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PurchaseBulk1688TrackingLookup,
@@ -30,6 +30,22 @@ const existingTrackingId = '33333333-3333-4333-8333-333333333333'
 const invalidOrderId = '44444444-4444-4444-8444-444444444444'
 const firstOrder = '3317159640039018761'
 const secondOrder = '3317159640039018762'
+let progressPopupDocument: Document
+
+function progressPopup() {
+  return within(progressPopupDocument.body)
+}
+
+function createProgressPopup() {
+  progressPopupDocument = document.implementation.createHTMLDocument('1688 송장 일괄조회')
+  return {
+    document: progressPopupDocument,
+    closed: false,
+    focus: vi.fn(),
+    close: vi.fn(),
+    addEventListener: vi.fn(),
+  } as unknown as Window
+}
 
 function renderBulkLookup() {
   render(
@@ -88,6 +104,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     toastError.mockReset()
     vi.restoreAllMocks()
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('1688-batch-run')
+    vi.spyOn(window, 'open').mockReturnValue(createProgressPopup())
   })
 
   it('opens one progress popup, queries all eligible rows, and skips existing/manual rows automatically', async () => {
@@ -104,9 +121,10 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     expect(screen.getByRole('button', { name: '1688 송장 일괄조회' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
 
-    expect(screen.getByText(/111555-0001/)).toBeInTheDocument()
-    expect(screen.getByText(/CABOSS 자갈 지압매트 150cm/)).toBeInTheDocument()
-    expect(screen.getByText(/기존 송장 또는 주문서번호가 없는 2건은 자동으로 건너뜁니다/)).toBeInTheDocument()
+    expect(window.open).toHaveBeenCalledWith('', 'funtastic-1688-tracking-progress', expect.stringContaining('popup=yes'))
+    expect(progressPopup().getByText(/111555-0001/)).toBeTruthy()
+    expect(progressPopup().getByText(/CABOSS 자갈 지압매트 150cm/)).toBeTruthy()
+    expect(progressPopup().getByText(/기존 송장 또는 주문서번호가 없는 2건은 자동으로 건너뜁니다/)).toBeTruthy()
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'funtastic-saas',
@@ -198,8 +216,8 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       await Promise.resolve()
     })
 
-    await waitFor(() => expect(screen.getByText(/남은 항목은 확인 후 다시 일괄조회해주세요/)).toBeInTheDocument())
-    expect(screen.getByText('남은 항목은 조회하지 않았습니다.')).toBeInTheDocument()
+    await waitFor(() => expect(progressPopup().getByText(/남은 항목은 확인 후 다시 일괄조회해주세요/)).toBeTruthy())
+    expect(progressPopup().getByText('남은 항목은 조회하지 않았습니다.')).toBeTruthy()
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-1-1' }),
       window.location.origin,

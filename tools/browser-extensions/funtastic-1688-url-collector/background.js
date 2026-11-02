@@ -949,6 +949,10 @@ async function completeTrackingLookupRun(run, trackingNumbers) {
       // `运单号码` field. This blocks an outdated extension from storing a
       // nearby `物流编号` value by mistake.
       trackingSource: 'waybill_number',
+      trackingEvidence: {
+        label: '运单号码',
+        extractionVersion: 2,
+      },
     })
   } catch (error) {
     await failTrackingLookupRun(run, `SaaS 화면에 송장 조회 결과를 전달하지 못했습니다: ${errorMessage(error)}`, false)
@@ -1023,8 +1027,7 @@ async function collect1688TrackingInPage() {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   // 1688 shows other logistics identifiers alongside the real waybill. Only
   // `运单号码` is the carrier tracking number for this purchasing flow.
-  const trackingLabel = /运单号码/i
-  const trackingLabelSource = '运单号码'
+  const trackingLabelPattern = '运\\s*单\\s*号\\s*码'
   const trackingValue = '[A-Za-z0-9][A-Za-z0-9-]{4,99}'
   const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ').slice(0, 100_000)
   const textOf = (element) => (element?.innerText || element?.textContent || '').replace(/\s+/g, ' ').trim()
@@ -1039,8 +1042,8 @@ async function collect1688TrackingInPage() {
   const collect = (text) => {
     const numbers = new Map()
     const patterns = [
-      new RegExp(`${trackingLabelSource}\\s*[：:]\\s*(${trackingValue})`, 'gi'),
-      new RegExp(`${trackingLabelSource}\\s+(${trackingValue})`, 'gi'),
+      new RegExp(`${trackingLabelPattern}\\s*[：:]\\s*(${trackingValue})`, 'gi'),
+      new RegExp(`${trackingLabelPattern}\\s+(${trackingValue})`, 'gi'),
     ]
     for (const pattern of patterns) {
       for (const match of text.matchAll(pattern)) {
@@ -1075,54 +1078,18 @@ async function collect1688TrackingInPage() {
     const roots = [document]
     const seenRoots = new Set()
     let scannedElements = 0
-    let scannedTextNodes = 0
 
     while (roots.length > 0 && scannedElements < 6_000) {
       const root = roots.shift()
       if (!root || seenRoots.has(root)) continue
       seenRoots.add(root)
 
-      // `document.body.innerText` covers the normal page. Open shadow roots and
-      // copy controls are the cases it commonly misses on the 1688 order page.
-      if (root !== document) addSource(root.textContent || '')
-
-      const copyTargets = root.querySelectorAll?.(
-        '[data-clipboard-text], [data-clipboard], [data-copy-text], [data-copy], [data-copy-value], [data-clipboard-content]',
-      ) || []
-      for (const element of copyTargets) {
-        const clipboardValue = [
-          element.getAttribute('data-clipboard-text'),
-          element.getAttribute('data-clipboard'),
-          element.getAttribute('data-copy-text'),
-          element.getAttribute('data-copy'),
-          element.getAttribute('data-copy-value'),
-          element.getAttribute('data-clipboard-content'),
-        ].filter(Boolean).join(' ')
-        addSource(`${textOf(element)} ${textOf(element.parentElement)} ${clipboardValue}`)
-      }
-
-      const namedTargets = root.querySelectorAll?.(
-        '[aria-label*="运单"], [aria-label*="物流"], [title*="运单"], [title*="物流"]',
-      ) || []
-      for (const element of namedTargets) {
-        addSource(`${textOf(element)} ${textOf(element.parentElement)} ${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`)
-      }
-
-      const textWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      let textNode = textWalker.nextNode()
-      while (textNode && scannedTextNodes < 4_000) {
-        scannedTextNodes += 1
-        const directText = (textNode.nodeValue || '').replace(/\s+/g, ' ').trim()
-        if (trackingLabel.test(directText)) {
-          const element = textNode.parentElement
-          addSource(directText)
-          addSource(textOf(element))
-          addSource(textOf(element?.parentElement))
-          addSource(textOf(element?.previousElementSibling))
-          addSource(textOf(element?.nextElementSibling))
-        }
-        textNode = textWalker.nextNode()
-      }
+      // Read each rendering root as-is. Do not concatenate a label from one
+      // element with a copied value from another: that was able to turn a
+      // neighbouring `物流编号` into the value of `运单号码`.
+      addSource(root === document
+        ? (document.body?.innerText || document.documentElement?.innerText || '')
+        : (root.textContent || ''))
 
       const elements = root.querySelectorAll?.('*') || []
       for (const element of elements) {

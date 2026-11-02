@@ -30,6 +30,7 @@ const existingTrackingId = '33333333-3333-4333-8333-333333333333'
 const invalidOrderId = '44444444-4444-4444-8444-444444444444'
 const firstOrder = '3317159640039018761'
 const secondOrder = '3317159640039018762'
+const exactWaybillEvidence = { label: '运单号码', extractionVersion: 2 }
 let progressPopupDocument: Document
 
 function progressPopup() {
@@ -84,6 +85,22 @@ function renderBulkLookup() {
           trackingNumber: null,
         },
       ]}
+    />,
+  )
+}
+
+function renderCorrectionLookup() {
+  render(
+    <PurchaseBulk1688TrackingLookup
+      mode="correction"
+      candidates={[{
+        id: firstId,
+        sku: '111555-0001',
+        productName: 'CABOSS 자갈 지압매트 150cm',
+        optionName: null,
+        supplierOrderNumber: firstOrder,
+        trackingNumber: 'LP00850611544129',
+      }]}
     />,
   )
 }
@@ -149,6 +166,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         orderNumber: firstOrder,
         trackingNumbers: ['S71268668516'],
         trackingSource: 'waybill_number',
+        trackingEvidence: exactWaybillEvidence,
       })
       await Promise.resolve()
     })
@@ -156,7 +174,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       `/api/purchasing/purchase-requests/${firstId}/1688-tracking`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ orderNumber: firstOrder, trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }),
+        body: JSON.stringify({ orderNumber: firstOrder, trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence, replaceUninspectedInspection: false }),
       }),
     ))
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
@@ -175,6 +193,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         orderNumber: secondOrder,
         trackingNumbers: ['S71268668517'],
         trackingSource: 'waybill_number',
+        trackingEvidence: exactWaybillEvidence,
       })
       await Promise.resolve()
     })
@@ -182,7 +201,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       `/api/purchasing/purchase-requests/${secondId}/1688-tracking`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ orderNumber: secondOrder, trackingNumbers: ['S71268668517'], trackingSource: 'waybill_number' }),
+        body: JSON.stringify({ orderNumber: secondOrder, trackingNumbers: ['S71268668517'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence, replaceUninspectedInspection: false }),
       }),
     ))
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
@@ -196,6 +215,48 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       expect.anything(),
     )
     expect(toastSuccess).toHaveBeenCalledWith('1688 송장 2건을 등록하고 검수로 이동했습니다.')
+  })
+
+  it('re-queries LP legacy records in a separate batch and asks the API to replace only untouched inspections', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: firstId, trackingCount: 1 }) } as Response)
+    const postMessage = vi.spyOn(window, 'postMessage')
+    renderCorrectionLookup()
+
+    expect(screen.getByRole('button', { name: '1688 송장 일괄정정' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄정정' }))
+    expect(progressPopup().getByText('1688 송장 일괄정정')).toBeTruthy()
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
+      window.location.origin,
+    ))
+
+    await act(async () => {
+      extensionMessage({
+        source: 'funtastic-1688-extension',
+        type: 'FUNTASTIC_1688_TRACKING_RESULT',
+        runId: '1688-batch-run-0-1',
+        orderNumber: firstOrder,
+        trackingNumbers: ['9823528519765'],
+        trackingSource: 'waybill_number',
+        trackingEvidence: exactWaybillEvidence,
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/purchasing/purchase-requests/${firstId}/1688-tracking`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          orderNumber: firstOrder,
+          trackingNumbers: ['9823528519765'],
+          trackingSource: 'waybill_number',
+          trackingEvidence: exactWaybillEvidence,
+          replaceUninspectedInspection: true,
+        }),
+      }),
+    ))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 실제 운송장으로 정정했습니다.'))
   })
 
   it('stops the queue when 1688 requires a login instead of starting the next order', async () => {
@@ -275,7 +336,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       await Promise.resolve()
     })
 
-    await waitFor(() => expect(progressPopup().getAllByText(/확장프로그램을 1.9.0 이상으로 업데이트/).length).toBeGreaterThan(0))
+    await waitFor(() => expect(progressPopup().getAllByText(/확장프로그램을 1.10.0 이상으로 업데이트/).length).toBeGreaterThan(0))
     expect(fetch).not.toHaveBeenCalled()
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-1-1' }),

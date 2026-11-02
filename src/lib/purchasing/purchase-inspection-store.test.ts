@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { savePurchaseInspection, updatePurchaseRequestPlanFields, updatePurchaseRequestStatus } from './purchase-requests'
+import { applyPurchaseRequest1688TrackingLookup, savePurchaseInspection, updatePurchaseRequestPlanFields, updatePurchaseRequestStatus } from './purchase-requests'
 import { type PurchaseInspection } from './purchase-inspection'
 
 const fixture = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ const inspection: PurchaseInspection = { version: 1, revision: 1, expectedQuanti
 describe('inspection persistence and arrival safety', () => {
   beforeEach(() => {
     vi.clearAllMocks(); fixture.writes = []
-    fixture.current = { id: 'purchase-id', userId: 'workspace-id', status: 'purchase_completed', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: null, trackingNumber: null, rawData: { saasChinaMode: true }, purchaseInspection: null, costExchangeRateKrw: '200', sku: 'SKU-A', productName: '상품A' }
+    fixture.current = { id: 'purchase-id', userId: 'workspace-id', status: 'purchase_completed', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: null, supplierOrderNumber: '3317159640039018761', trackingNumber: null, rawData: { saasChinaMode: true }, purchaseInspection: null, costExchangeRateKrw: '200', sku: 'SKU-A', productName: '상품A' }
   })
   it('moves tracking entry into inspection and saves each parcel without receiving stock', async () => {
     await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel] } })
@@ -60,5 +60,53 @@ describe('inspection persistence and arrival safety', () => {
     await expect(updatePurchaseRequestPlanFields({ userId: 'workspace-id', id: 'purchase-id', chinaReceivedQuantity: 100 })).rejects.toThrow('검수 화면')
     expect(fixture.adjust).not.toHaveBeenCalled()
     await expect(updatePurchaseRequestStatus({ userId: 'workspace-id', id: 'purchase-id', status: 'purchase_completed' })).rejects.toThrow('이전 단계')
+  })
+  it('replaces an untouched legacy logistics-id inspection with exact waybills only', async () => {
+    fixture.current = {
+      ...fixture.current,
+      status: 'inspecting',
+      trackingNumber: 'LP00850611544129',
+      purchaseInspection: {
+        version: 1,
+        revision: 3,
+        expectedQuantity: 100,
+        checkedAt: null,
+        checkedBy: null,
+        resolutionNote: '',
+        parcels: [
+          { id: '00000000-0000-4000-8000-000000000011', trackingNumber: 'LP00850611544129', boxes: [{ id: '00000000-0000-4000-8000-000000000012', quantity: null, lengthCm: null, widthCm: null, heightCm: null, weightKg: null }] },
+          { id: '00000000-0000-4000-8000-000000000013', trackingNumber: '750735732', boxes: [{ id: '00000000-0000-4000-8000-000000000014', quantity: null, lengthCm: null, widthCm: null, heightCm: null, weightKg: null }] },
+        ],
+      },
+    }
+
+    await applyPurchaseRequest1688TrackingLookup({
+      userId: 'workspace-id',
+      id: 'purchase-id',
+      supplierOrderNumber: '3317159640039018761',
+      trackingNumbers: ['9823528519765'],
+      replaceUninspectedInspection: true,
+    })
+
+    expect(fixture.writes[0]).toMatchObject({
+      trackingNumber: '9823528519765',
+      chinaReceivedQuantity: null,
+      purchaseInspection: {
+        revision: 4,
+        expectedQuantity: 100,
+        parcels: [expect.objectContaining({ trackingNumber: '9823528519765' })],
+      },
+    })
+  })
+  it('does not replace a legacy inspection after boxes or quantities were entered', async () => {
+    fixture.current = { ...fixture.current, status: 'inspecting', trackingNumber: 'LP00850611544129', purchaseInspection: inspection }
+    await expect(applyPurchaseRequest1688TrackingLookup({
+      userId: 'workspace-id',
+      id: 'purchase-id',
+      supplierOrderNumber: '3317159640039018761',
+      trackingNumbers: ['9823528519765'],
+      replaceUninspectedInspection: true,
+    })).rejects.toThrow('이미 검수 수량·박스 정보를 입력한')
+    expect(fixture.writes).toHaveLength(0)
   })
 })

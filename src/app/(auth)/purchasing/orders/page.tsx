@@ -497,7 +497,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
               {isRequestedStatus ? null : <PurchaseBulkPaymentDialog />}
-              {status === 'purchase_completed' ? (
+              {status === 'purchase_completed' || status === 'inspecting' ? (
                 <PurchaseBulk1688TrackingLookup
                   candidates={items.flatMap((item) => item.id ? [{
                     id: item.id,
@@ -507,6 +507,7 @@ export async function PurchasingOrdersView({
                     supplierOrderNumber: item.supplierOrderNumber,
                     trackingNumber: item.trackingNumber,
                   }] : [])}
+                  mode={status === 'inspecting' ? 'correction' : 'initial'}
                 />
               ) : null}
               <PurchaseBulkDeleteButton />
@@ -788,11 +789,9 @@ export async function PurchasingOrdersView({
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
                                 allow1688TrackingLookup={item.status === 'purchase_completed'}
+                                allow1688TrackingCorrection={item.status === 'inspecting'}
                               />
-                              {['purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed'].includes(item.status) && <div className="mt-2 space-y-1 text-xs">
-                                {(receipt?.parcels.map((parcel) => parcel.trackingNumber) ?? (item.trackingNumber ? [item.trackingNumber] : [])).map((number) => <div key={number} data-no-translate className="break-all"><a className="text-blue-700 underline" href={`https://www.baidu.com/s?wd=${encodeURIComponent(number)}`} target="_blank" rel="noreferrer">{number}</a></div>)}
-                                {item.status === 'china_arrived' && <PurchaseInspectionButton id={item.id} productName={item.productName} />}
-                              </div>}
+                              {item.status === 'china_arrived' ? <div className="mt-2"><PurchaseInspectionButton id={item.id} productName={item.productName} /></div> : null}
                             </>
                           ) : '-'}
                         </td>

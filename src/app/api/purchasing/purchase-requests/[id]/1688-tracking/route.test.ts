@@ -30,6 +30,8 @@ function postRequest(body: unknown) {
   return { json: async () => body }
 }
 
+const exactWaybillEvidence = { label: '运单号码', extractionVersion: 2 }
+
 describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -45,6 +47,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
         orderNumber: '3317159640039018761',
         trackingNumbers: ['S71268668516', 'S71268668517'],
         trackingSource: 'waybill_number',
+        trackingEvidence: exactWaybillEvidence,
       }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
@@ -55,6 +58,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
       id: 'purchase-item',
       supplierOrderNumber: '3317159640039018761',
       trackingNumbers: ['S71268668516', 'S71268668517'],
+      replaceUninspectedInspection: false,
     })
     await expect(response.json()).resolves.toEqual({ id: 'purchase-item', trackingCount: 2 })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/purchasing/orders')
@@ -64,7 +68,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     const { POST } = await import('./route')
 
     const response = await POST(
-      postRequest({ orderNumber: 'not-an-order', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }) as never,
+      postRequest({ orderNumber: 'not-an-order', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
 
@@ -77,12 +81,12 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     const { POST } = await import('./route')
 
     const response = await POST(
-      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['LP00850611544129'] }) as never,
+      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['LP00850611544129'], trackingSource: 'waybill_number' }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
 
     expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: '운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' })
+    await expect(response.json()).resolves.toEqual({ error: '운송장번호 추출 확장프로그램을 1.10.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' })
     expect(mocks.applyPurchaseRequest1688TrackingLookup).not.toHaveBeenCalled()
   })
 
@@ -93,7 +97,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     const { POST } = await import('./route')
 
     const response = await POST(
-      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }) as never,
+      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
 
@@ -102,5 +106,27 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
       error: '이미 등록된 송장 또는 검수 정보가 있어 1688 조회 결과를 덮어쓰지 않았습니다.',
     })
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('passes an explicit untouched-inspection correction through to the guarded service', async () => {
+    mocks.applyPurchaseRequest1688TrackingLookup.mockResolvedValue({ id: 'purchase-item' })
+    const { POST } = await import('./route')
+
+    const response = await POST(
+      postRequest({
+        orderNumber: '3317159640039018761',
+        trackingNumbers: ['9823528519765'],
+        trackingSource: 'waybill_number',
+        trackingEvidence: exactWaybillEvidence,
+        replaceUninspectedInspection: true,
+      }) as never,
+      { params: Promise.resolve({ id: 'purchase-item' }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.applyPurchaseRequest1688TrackingLookup).toHaveBeenCalledWith(expect.objectContaining({
+      replaceUninspectedInspection: true,
+      trackingNumbers: ['9823528519765'],
+    }))
   })
 })

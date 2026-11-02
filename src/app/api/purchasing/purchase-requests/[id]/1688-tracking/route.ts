@@ -11,6 +11,11 @@ const lookupResultSchema = z.object({
   // Only the extension's exact `运单号码` extraction path may populate the
   // automatic purchase tracking flow. Older builds could include `物流编号`.
   trackingSource: z.literal('waybill_number'),
+  trackingEvidence: z.object({
+    label: z.literal('运单号码'),
+    extractionVersion: z.literal(2),
+  }).strict(),
+  replaceUninspectedInspection: z.boolean().optional().default(false),
 }).strict()
 
 /**
@@ -32,8 +37,16 @@ export async function POST(
     const trackingSource = rawBody && typeof rawBody === 'object'
       ? (rawBody as { trackingSource?: unknown }).trackingSource
       : null
-    if (trackingSource !== 'waybill_number') {
-      return NextResponse.json({ error: '운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' }, { status: 400 })
+    const trackingEvidence = rawBody && typeof rawBody === 'object'
+      ? (rawBody as { trackingEvidence?: unknown }).trackingEvidence
+      : null
+    const hasExactWaybillEvidence = trackingSource === 'waybill_number'
+      && typeof trackingEvidence === 'object'
+      && trackingEvidence !== null
+      && (trackingEvidence as { label?: unknown }).label === '运单号码'
+      && (trackingEvidence as { extractionVersion?: unknown }).extractionVersion === 2
+    if (!hasExactWaybillEvidence) {
+      return NextResponse.json({ error: '운송장번호 추출 확장프로그램을 1.10.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' }, { status: 400 })
     }
     return NextResponse.json({ error: '1688 송장 조회 결과가 올바르지 않습니다.' }, { status: 400 })
   }
@@ -46,6 +59,7 @@ export async function POST(
       id,
       supplierOrderNumber: body.data.orderNumber,
       trackingNumbers: body.data.trackingNumbers,
+      replaceUninspectedInspection: body.data.replaceUninspectedInspection,
     })
   } catch (error) {
     return NextResponse.json(

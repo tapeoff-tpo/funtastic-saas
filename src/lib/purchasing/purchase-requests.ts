@@ -2364,6 +2364,8 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
   id: string
   supplierOrderNumber: string
   trackingNumbers: string[]
+  /** User-requested recovery for a legacy auto-collected logistics identifier. */
+  replaceUninspectedInspection?: boolean
 }) {
   const supplierOrderNumber = input.supplierOrderNumber.trim()
   if (!/^\d{10,40}$/.test(supplierOrderNumber)) {
@@ -2380,6 +2382,51 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
   const trackingNumbers = Array.from(trackingByNormalizedValue.values())
   if (trackingNumbers.length === 0 || trackingNumbers.length > 100) {
     throw new Error('1688에서 유효한 송장번호를 찾지 못했습니다.')
+  }
+
+  if (input.replaceUninspectedInspection) {
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+      const [current] = await tx.select().from(purchaseRequestItems)
+        .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
+        .for('update')
+      if (!current) return null
+      if (emptyToNull(current.supplierOrderNumber) !== emptyToNull(supplierOrderNumber)) {
+        throw new Error('주문서번호가 변경되어 1688 송장 조회 결과를 저장하지 않았습니다.')
+      }
+      if (current.status !== 'inspecting' || !current.purchaseInspection) {
+        throw new Error('검수를 시작하기 전의 검수 항목만 1688 송장으로 정정할 수 있습니다.')
+      }
+
+      const previousInspection = current.purchaseInspection
+      const isUntouchedInspection = !previousInspection.checkedAt
+        && !previousInspection.checkedBy
+        && !previousInspection.resolutionNote.trim()
+        && current.chinaReceivedQuantity === null
+        && previousInspection.parcels.every((parcel) => parcel.boxes.every((box) => (
+          box.quantity === null
+          && box.lengthCm === null
+          && box.widthCm === null
+          && box.heightCm === null
+          && box.weightKg === null
+        )))
+      if (!isUntouchedInspection) {
+        throw new Error('이미 검수 수량·박스 정보를 입력한 항목입니다. 송장·검수에서 직접 확인해주세요.')
+      }
+
+      const replacementInspection: PurchaseInspection = {
+        ...createPurchaseInspection(previousInspection.expectedQuantity, trackingNumbers.join('\n')),
+        revision: previousInspection.revision + 1,
+      }
+      const trackingNumber = replacementInspection.parcels[0]?.trackingNumber ?? null
+      await tx.update(purchaseRequestItems).set({
+        trackingNumber,
+        purchaseInspection: replacementInspection,
+        chinaReceivedQuantity: null,
+        updatedAt: new Date(),
+      }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
+      return { ...current, trackingNumber, purchaseInspection: replacementInspection }
+    })
   }
 
   return updatePurchaseRequestPlanFields({

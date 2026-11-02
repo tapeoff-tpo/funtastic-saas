@@ -22,11 +22,13 @@ vi.mock('sonner', () => ({
 
 const itemId = '11111111-1111-4111-8111-111111111111'
 const orderNumber = '3317159640039018761'
+const exactWaybillEvidence = { label: '运单号码', extractionVersion: 2 }
 
 function renderFields(
   trackingNumber: string | null = null,
   showTrackingNumber = false,
   trackingSaveMode: 'plan' | 'inspection' = 'plan',
+  allow1688TrackingCorrection = false,
 ) {
   render(
     <PurchasePlanFieldsV2
@@ -39,6 +41,7 @@ function renderFields(
       dateLabel="구매날짜"
       purchaseMethod="개인"
       allow1688TrackingLookup
+      allow1688TrackingCorrection={allow1688TrackingCorrection}
       trackingSaveMode={trackingSaveMode}
     />,
   )
@@ -107,6 +110,7 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
       orderNumber,
       trackingNumbers: ['S71268668516', 'S71268668517'],
       trackingSource: 'waybill_number',
+      trackingEvidence: exactWaybillEvidence,
     })
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
@@ -117,6 +121,8 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
           orderNumber,
           trackingNumbers: ['S71268668516', 'S71268668517'],
           trackingSource: 'waybill_number',
+          trackingEvidence: exactWaybillEvidence,
+          replaceUninspectedInspection: false,
         }),
       }),
     ))
@@ -127,6 +133,11 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
   it('keeps a pre-existing manual tracking number untouched', () => {
     renderFields('MANUAL-TRACKING')
     expect(screen.getByRole('button', { name: '1688 송장조회' })).toBeDisabled()
+  })
+
+  it('does not render duplicate Baidu tracking links below the input', () => {
+    renderFields('9823528519765', true)
+    expect(screen.queryByTitle('바이두에서 송장번호 조회')).toBeNull()
   })
 
   it('lets the user save a manual tracking number beside the supplier order number', async () => {
@@ -181,5 +192,55 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
       }),
     ))
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+  })
+
+  it('re-queries an untouched inspection and replaces its legacy tracking list only after exact-waybill evidence arrives', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === `/api/purchasing/purchase-requests/${itemId}/1688-tracking`) {
+        return { ok: true, json: async () => ({ id: itemId, trackingCount: 1 }) } as Response
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    render(
+      <PurchasePlanFieldsV2
+        id={itemId}
+        supplierOrderNumber={orderNumber}
+        trackingNumber="LP00850611544129"
+        showTrackingNumber
+        dateValue="2026-11-02"
+        dateField="outboundExpectedDate"
+        dateLabel="구매날짜"
+        purchaseMethod="개인"
+        allow1688TrackingCorrection
+        trackingSaveMode="inspection"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 정정' }))
+    extensionMessage({
+      source: 'funtastic-1688-extension',
+      type: 'FUNTASTIC_1688_TRACKING_RESULT',
+      runId: '1688-tracking-run',
+      orderNumber,
+      trackingNumbers: ['9823528519765'],
+      trackingSource: 'waybill_number',
+      trackingEvidence: exactWaybillEvidence,
+    })
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/purchasing/purchase-requests/${itemId}/1688-tracking`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          orderNumber,
+          trackingNumbers: ['9823528519765'],
+          trackingSource: 'waybill_number',
+          trackingEvidence: exactWaybillEvidence,
+          replaceUninspectedInspection: true,
+        }),
+      }),
+    ))
+    expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 실제 운송장으로 정정했습니다.')
   })
 })

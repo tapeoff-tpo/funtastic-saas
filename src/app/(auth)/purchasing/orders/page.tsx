@@ -507,7 +507,7 @@ export async function PurchasingOrdersView({
                     supplierOrderNumber: item.supplierOrderNumber,
                     trackingNumber: item.trackingNumber,
                   }] : [])}
-                  mode={status === 'inspecting' ? 'correction' : 'initial'}
+                  mode={status === 'inspecting' ? 'recollect' : 'initial'}
                 />
               ) : null}
               <PurchaseBulkDeleteButton />
@@ -789,7 +789,7 @@ export async function PurchasingOrdersView({
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
                                 allow1688TrackingLookup={item.status === 'purchase_completed'}
-                                allow1688TrackingCorrection={item.status === 'inspecting'}
+                                allow1688TrackingRecollect={item.status === 'inspecting'}
                               />
                               {item.status === 'china_arrived' ? <div className="mt-2"><PurchaseInspectionButton id={item.id} productName={item.productName} /></div> : null}
                             </>

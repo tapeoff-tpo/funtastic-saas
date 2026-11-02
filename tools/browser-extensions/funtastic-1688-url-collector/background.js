@@ -876,10 +876,6 @@ async function startTrackingLookupRun(message, sourceTabId) {
   const collectorTab = await chrome.tabs.create({
     url: trackingLookupUrl(orderNumber),
     active: !background,
-    // 1688 can defer a newly-created inactive tab. Keep the short-lived
-    // lookup tab eligible to finish its logistics request while the SaaS
-    // progress window remains focused.
-    autoDiscardable: false,
   })
   if (!collectorTab?.id) throw new Error('1688 송장 조회 창을 열지 못했습니다.')
 

@@ -86,7 +86,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     )
 
     expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: '운송장번호 추출 확장프로그램을 1.10.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' })
+    await expect(response.json()).resolves.toEqual({ error: '운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.' })
     expect(mocks.applyPurchaseRequest1688TrackingLookup).not.toHaveBeenCalled()
   })
 

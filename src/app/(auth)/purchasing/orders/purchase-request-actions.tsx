@@ -332,7 +332,7 @@ export function PurchaseBulk1688TrackingLookup({
   mode = 'initial',
 }: {
   candidates: Purchase1688TrackingLookupCandidate[]
-  mode?: 'initial' | 'correction'
+  mode?: 'initial' | 'recollect'
 }) {
   const router = useRouter()
   const routerRefreshRef = useRef(router.refresh)
@@ -343,7 +343,7 @@ export function PurchaseBulk1688TrackingLookup({
   const [progress, setProgress] = useState<Purchase1688TrackingProgress | null>(null)
   const [progressPopupRoot, setProgressPopupRoot] = useState<HTMLElement | null>(null)
   const [lookupRows, setLookupRows] = useState<Purchase1688TrackingLookupRow[]>([])
-  const isCorrectionBatch = mode === 'correction'
+  const isRecollectBatch = mode === 'recollect'
 
   useEffect(() => {
     routerRefreshRef.current = router.refresh
@@ -399,7 +399,7 @@ export function PurchaseBulk1688TrackingLookup({
 
   const eligibleCandidates = candidates.filter((candidate) => (
     valid1688OrderNumber(candidate.supplierOrderNumber)
-      && (isCorrectionBatch ? /^LP/i.test(candidate.trackingNumber?.trim() ?? '') : !candidate.trackingNumber?.trim())
+      && (isRecollectBatch ? /^LP/i.test(candidate.trackingNumber?.trim() ?? '') : !candidate.trackingNumber?.trim())
   ))
   const skippedCandidateCount = candidates.length - eligibleCandidates.length
 
@@ -471,15 +471,15 @@ export function PurchaseBulk1688TrackingLookup({
         )))
       }
       if (succeededItems > 0 && failedItems === 0 && !stopRequestedRef.current) {
-        toast.success(isCorrectionBatch
-          ? `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 실제 운송장으로 정정했습니다.`
+        toast.success(isRecollectBatch
+          ? `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 다시 수집했습니다.`
           : `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
       } else if (succeededItems > 0) {
-        toast.warning(isCorrectionBatch
-          ? `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건 정정 · ${failedItems.toLocaleString('ko-KR')}건 미처리`
+        toast.warning(isRecollectBatch
+          ? `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건 다시 수집 · ${failedItems.toLocaleString('ko-KR')}건 미처리`
           : `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건 등록 · ${failedItems.toLocaleString('ko-KR')}건 미처리`)
       } else if (failedItems > 0) {
-        toast.error(isCorrectionBatch ? '1688 송장 일괄정정에서 저장된 항목이 없습니다.' : '1688 송장 일괄조회에서 저장된 항목이 없습니다.')
+        toast.error(isRecollectBatch ? '1688 송장 다시 수집에서 저장된 항목이 없습니다.' : '1688 송장 일괄조회에서 저장된 항목이 없습니다.')
       }
     }
 
@@ -566,7 +566,7 @@ export function PurchaseBulk1688TrackingLookup({
               trackingNumbers,
               trackingSource: 'waybill_number',
               trackingEvidence: EXACT_WAYBILL_EVIDENCE,
-              replaceUninspectedInspection: isCorrectionBatch,
+              replaceUninspectedInspection: isRecollectBatch,
             }),
           })
           const body = await response.json().catch(() => ({}))
@@ -586,10 +586,10 @@ export function PurchaseBulk1688TrackingLookup({
       current = null
       index += 1
       currentStartAttempts = 0
-      if (savedIds.length > 0) updateLookupRows(savedIds, 'success', isCorrectionBatch ? `송장 ${trackingNumbers.join(', ')} 정정 완료` : `송장 ${trackingNumbers.join(', ')} 등록 완료`, trackingNumbers)
+      if (savedIds.length > 0) updateLookupRows(savedIds, 'success', isRecollectBatch ? `송장 ${trackingNumbers.join(', ')} 다시 수집 완료` : `송장 ${trackingNumbers.join(', ')} 등록 완료`, trackingNumbers)
       if (failedIds.length > 0) updateLookupRows(failedIds, 'failed', lastError)
-      updateProgress(lastError || (isCorrectionBatch
-        ? `송장 ${savedForJob.toLocaleString('ko-KR')}건 실제 운송장으로 정정됨`
+      updateProgress(lastError || (isRecollectBatch
+        ? `송장 ${savedForJob.toLocaleString('ko-KR')}건 실제 운송장으로 다시 수집됨`
         : `송장 ${savedForJob.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`))
       scheduleNextJob()
     }
@@ -624,7 +624,7 @@ export function PurchaseBulk1688TrackingLookup({
 
       if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== current.job.orderNumber || current.saving) return
       if (data.trackingSource !== 'waybill_number' || !hasExact1688WaybillEvidence(data.trackingEvidence)) {
-        failCurrentJob('운송장번호 추출 확장프로그램을 1.10.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
+        failCurrentJob('운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
         return
       }
 
@@ -643,7 +643,7 @@ export function PurchaseBulk1688TrackingLookup({
     }
 
     window.addEventListener('message', onMessage)
-    updateProgress(`${isCorrectionBatch ? '1688 송장 일괄정정' : '1688 송장 일괄조회'} 준비 · ${batch.jobs.length.toLocaleString('ko-KR')}개 주문`)
+    updateProgress(`${isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'} 준비 · ${batch.jobs.length.toLocaleString('ko-KR')}개 주문`)
     scheduleNextJob()
 
     return () => {
@@ -651,7 +651,7 @@ export function PurchaseBulk1688TrackingLookup({
       clearTimers()
       window.removeEventListener('message', onMessage)
     }
-  }, [batch, isCorrectionBatch])
+  }, [batch, isRecollectBatch])
 
   function startBatch() {
     if (batch || eligibleCandidates.length === 0) return
@@ -706,7 +706,7 @@ export function PurchaseBulk1688TrackingLookup({
       failedItems: 0,
       currentOrder: 0,
       currentOrderNumber: null,
-      message: isCorrectionBatch ? '1688 송장 일괄정정 시작' : '1688 송장 일괄조회 시작',
+      message: isRecollectBatch ? '1688 송장 다시 수집 시작' : '1688 송장 일괄조회 시작',
     })
     setBatch({
       id: crypto.randomUUID(),
@@ -728,9 +728,9 @@ export function PurchaseBulk1688TrackingLookup({
 
   const progressWindow = progressPopupRoot ? createPortal(
     <main className="flex h-screen min-w-[680px] flex-col overflow-hidden bg-background p-5">
-      <h1 className="text-base font-semibold">{isCorrectionBatch ? '1688 송장 일괄정정' : '1688 송장 일괄조회'}</h1>
+      <h1 className="text-base font-semibold">{isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        {isCorrectionBatch
+        {isRecollectBatch
           ? `현재 페이지의 검수 항목 중 기존 물류번호(LP)로 저장된 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회해 실제 운송장으로 교체합니다. 박스·수량 검수가 시작된 항목은 바꾸지 않습니다.`
           : `현재 페이지의 구매완료 항목 중 주문서번호가 있고 송장이 비어 있는 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회합니다.${(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장 또는 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}`}
       </p>
@@ -808,12 +808,12 @@ export function PurchaseBulk1688TrackingLookup({
         variant="outline"
         onClick={startBatch}
         disabled={Boolean(batch) || eligibleCandidates.length === 0}
-        title={isCorrectionBatch
-          ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码 결과로 정정합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
+        title={isRecollectBatch
+          ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
           : '현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}
       >
         {batch ? <Loader2 className="animate-spin" /> : <Search />}
-        {isCorrectionBatch ? '1688 송장 일괄정정' : '1688 송장 일괄조회'}
+        {isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}
       </Button>
       {progressWindow}
     </>
@@ -2484,7 +2484,7 @@ export function PurchasePlanFieldsV2({
   dateLabel,
   purchaseMethod,
   allow1688TrackingLookup = false,
-  allow1688TrackingCorrection = false,
+  allow1688TrackingRecollect = false,
   trackingSaveMode = 'plan',
 }: {
   id: string
@@ -2496,8 +2496,8 @@ export function PurchasePlanFieldsV2({
   dateLabel: string
   purchaseMethod: string | null
   allow1688TrackingLookup?: boolean
-  /** Replaces an untouched legacy inspection with a fresh exact-waybill lookup. */
-  allow1688TrackingCorrection?: boolean
+  /** Re-collects exact waybills for an untouched legacy inspection. */
+  allow1688TrackingRecollect?: boolean
   /** Inspection rows update their primary parcel through the inspection API. */
   trackingSaveMode?: 'plan' | 'inspection'
 }) {
@@ -2514,7 +2514,7 @@ export function PurchasePlanFieldsV2({
   const [savedDateValue, setSavedDateValue] = useState(() => formatDateInput(dateValue))
   const [savedPurchaseMethod, setSavedPurchaseMethod] = useState(() => purchaseMethod?.trim() ?? '')
   const [is1688TrackingLookupPending, setIs1688TrackingLookupPending] = useState(false)
-  const can1688TrackingLookup = allow1688TrackingLookup || allow1688TrackingCorrection
+  const can1688TrackingLookup = allow1688TrackingLookup || allow1688TrackingRecollect
   const trackingLookupRef = useRef<{ runId: string; orderNumber: string; replaceUninspectedInspection: boolean } | null>(null)
   const trackingLookupTimeoutRef = useRef<number | null>(null)
 
@@ -2562,7 +2562,7 @@ export function PurchasePlanFieldsV2({
         clearTrackingLookupTimeout()
         trackingLookupRef.current = null
         setIs1688TrackingLookupPending(false)
-        setMessage('운송장번호 추출 확장프로그램을 1.10.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
+        setMessage('운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
         return
       }
 
@@ -2599,10 +2599,10 @@ export function PurchasePlanFieldsV2({
 
           setSavedTrackingNumber(trackingNumbers[0] ?? '')
           setMessage(lookup.replaceUninspectedInspection
-            ? `송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건 정정 완료`
+            ? `송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건 다시 수집 완료`
             : `송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`)
           toast.success(lookup.replaceUninspectedInspection
-            ? `1688 송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건을 실제 운송장으로 정정했습니다.`
+            ? `1688 송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건을 다시 수집했습니다.`
             : `1688 송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
           router.refresh()
         } catch (error) {
@@ -2720,7 +2720,7 @@ export function PurchasePlanFieldsV2({
   }
 
   async function saveAndLookup1688Tracking() {
-    if (!can1688TrackingLookup || is1688TrackingLookupPending || (savedTrackingNumber && !allow1688TrackingCorrection)) return
+    if (!can1688TrackingLookup || is1688TrackingLookupPending || (savedTrackingNumber && !allow1688TrackingRecollect)) return
     const form = formRef.current
     if (!form) return
 
@@ -2752,7 +2752,7 @@ export function PurchasePlanFieldsV2({
     trackingLookupRef.current = {
       runId,
       orderNumber: nextSupplierOrderNumber,
-      replaceUninspectedInspection: allow1688TrackingCorrection,
+      replaceUninspectedInspection: allow1688TrackingRecollect,
     }
     setIs1688TrackingLookupPending(true)
     setMessage('1688에서 송장번호 조회 중')
@@ -2850,15 +2850,15 @@ export function PurchasePlanFieldsV2({
             type="button"
             size="sm"
             variant="outline"
-            disabled={isPending || is1688TrackingLookupPending || (Boolean(savedTrackingNumber) && !allow1688TrackingCorrection)}
+            disabled={isPending || is1688TrackingLookupPending || (Boolean(savedTrackingNumber) && !allow1688TrackingRecollect)}
             onClick={() => void saveAndLookup1688Tracking()}
-            title={allow1688TrackingCorrection
-              ? '검수 수량·박스 정보를 입력하기 전의 기존 송장을 실제 运单号码 결과로 교체합니다.'
+            title={allow1688TrackingRecollect
+              ? '검수 수량·박스 정보를 입력하기 전의 기존 송장을 1688에서 다시 수집합니다.'
               : '1688 주문서번호를 저장하고 로그인된 1688에서 송장번호를 조회합니다. 조회되면 검수 단계로 이동합니다.'}
             className="px-2"
           >
             {is1688TrackingLookupPending ? <Loader2 className="animate-spin" /> : <Search />}
-            {allow1688TrackingCorrection ? '1688 송장 정정' : '1688 송장조회'}
+            {allow1688TrackingRecollect ? '1688 송장 다시 수집' : '1688 송장조회'}
           </Button>
         ) : null}
       </div>

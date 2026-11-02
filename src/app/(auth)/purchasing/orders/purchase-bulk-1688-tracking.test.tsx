@@ -89,10 +89,10 @@ function renderBulkLookup() {
   )
 }
 
-function renderCorrectionLookup() {
+function renderRecollectLookup() {
   render(
     <PurchaseBulk1688TrackingLookup
-      mode="correction"
+      mode="recollect"
       candidates={[{
         id: firstId,
         sku: '111555-0001',
@@ -220,11 +220,11 @@ describe('PurchaseBulk1688TrackingLookup', () => {
   it('re-queries LP legacy records in a separate batch and asks the API to replace only untouched inspections', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: firstId, trackingCount: 1 }) } as Response)
     const postMessage = vi.spyOn(window, 'postMessage')
-    renderCorrectionLookup()
+    renderRecollectLookup()
 
-    expect(screen.getByRole('button', { name: '1688 송장 일괄정정' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄정정' }))
-    expect(progressPopup().getByText('1688 송장 일괄정정')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '1688 송장 다시 수집' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 다시 수집' }))
+    expect(progressPopup().getByText('1688 송장 다시 수집')).toBeTruthy()
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
       window.location.origin,
@@ -256,7 +256,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         }),
       }),
     ))
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 실제 운송장으로 정정했습니다.'))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 다시 수집했습니다.'))
   })
 
   it('stops the queue when 1688 requires a login instead of starting the next order', async () => {
@@ -336,7 +336,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       await Promise.resolve()
     })
 
-    await waitFor(() => expect(progressPopup().getAllByText(/확장프로그램을 1.10.0 이상으로 업데이트/).length).toBeGreaterThan(0))
+    await waitFor(() => expect(progressPopup().getAllByText(/확장프로그램을 1.10.1 이상으로 업데이트/).length).toBeGreaterThan(0))
     expect(fetch).not.toHaveBeenCalled()
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-1-1' }),

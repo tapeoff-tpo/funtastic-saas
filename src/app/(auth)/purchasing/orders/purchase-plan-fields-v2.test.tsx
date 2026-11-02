@@ -28,7 +28,7 @@ function renderFields(
   trackingNumber: string | null = null,
   showTrackingNumber = false,
   trackingSaveMode: 'plan' | 'inspection' = 'plan',
-  allow1688TrackingCorrection = false,
+  allow1688TrackingRecollect = false,
 ) {
   render(
     <PurchasePlanFieldsV2
@@ -41,7 +41,7 @@ function renderFields(
       dateLabel="구매날짜"
       purchaseMethod="개인"
       allow1688TrackingLookup
-      allow1688TrackingCorrection={allow1688TrackingCorrection}
+      allow1688TrackingRecollect={allow1688TrackingRecollect}
       trackingSaveMode={trackingSaveMode}
     />,
   )
@@ -212,12 +212,12 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
         dateField="outboundExpectedDate"
         dateLabel="구매날짜"
         purchaseMethod="개인"
-        allow1688TrackingCorrection
+        allow1688TrackingRecollect
         trackingSaveMode="inspection"
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '1688 송장 정정' }))
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 다시 수집' }))
     extensionMessage({
       source: 'funtastic-1688-extension',
       type: 'FUNTASTIC_1688_TRACKING_RESULT',
@@ -241,6 +241,6 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
         }),
       }),
     ))
-    expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 실제 운송장으로 정정했습니다.')
+    expect(toastSuccess).toHaveBeenCalledWith('1688 송장 1건을 다시 수집했습니다.')
   })
 })

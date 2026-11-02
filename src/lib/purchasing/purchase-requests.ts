@@ -2395,7 +2395,7 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
         throw new Error('주문서번호가 변경되어 1688 송장 조회 결과를 저장하지 않았습니다.')
       }
       if (current.status !== 'inspecting' || !current.purchaseInspection) {
-        throw new Error('검수를 시작하기 전의 검수 항목만 1688 송장으로 정정할 수 있습니다.')
+        throw new Error('검수를 시작하기 전의 검수 항목만 1688 송장을 다시 수집할 수 있습니다.')
       }
 
       const previousInspection = current.purchaseInspection

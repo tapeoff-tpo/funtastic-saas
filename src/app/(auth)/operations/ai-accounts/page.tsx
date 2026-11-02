@@ -35,9 +35,6 @@ export default async function AiAccountsPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">AI 계정공유</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            공용 GPT/Codex 계정의 로그인 정보와 사용자를 관리합니다.
-          </p>
         </div>
         <AiAccountForm userCandidates={mappedUsers} />
       </header>

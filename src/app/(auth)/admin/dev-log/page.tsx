@@ -39,9 +39,6 @@ export default async function DevLogPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">개발로그</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          상철 · 기환 · 지은 — 날짜별 작업 기록
-        </p>
       </div>
 
       <DevLogForm />

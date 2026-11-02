@@ -25,9 +25,6 @@ export default async function SplitShippingPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">분리출고</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          하나의 주문을 여러 송장으로 나눠서 출고합니다. (예: 박스가 2개로 나뉘거나 합포장이 한 박스에 안 들어갈 때)
-        </p>
       </div>
 
       <SplitShippingClient />

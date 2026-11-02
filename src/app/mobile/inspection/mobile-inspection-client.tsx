@@ -325,7 +325,6 @@ export function MobileInspectionClient() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-semibold">상품검수</h1>
-              <p className="text-xs text-gray-400">스캔, 사진/동영상, CS 메모 저장</p>
             </div>
             <PackageCheck className="h-6 w-6 text-blue-300" />
           </div>

@@ -80,9 +80,6 @@ function OrderImportForm() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">엑셀 주문 업로드</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            엑셀 파일로 주문을 일괄 등록합니다.
-          </p>
         </div>
         <Link
           href="/orders"

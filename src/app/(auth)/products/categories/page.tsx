@@ -102,9 +102,6 @@ export default function CategoryMappingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">카테고리 매핑</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            내부 카테고리를 마켓플레이스 카테고리에 매핑합니다.
-          </p>
         </div>
         <button
           type="button"

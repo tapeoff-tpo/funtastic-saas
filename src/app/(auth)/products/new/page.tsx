@@ -91,9 +91,6 @@ export default function NewProductPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">상품등록</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          새 상품을 등록합니다. 옵션(변형)을 추가하여 사이즈/색상 등을 관리할 수 있습니다.
-        </p>
       </div>
 
       {error && (

@@ -41,9 +41,6 @@ export default async function MarketplaceRegistrationPage({
             <ClipboardPenLine className="size-6" />
             상품 등록 관리
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Funtastic B2B 상품을 기준으로 옵션과 이미지를 불러오고, 몰별 등록에 필요한 정보만 보완합니다.
-          </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-4 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5"><Database className="size-4" /> 상품 {rows.length.toLocaleString('ko-KR')}개</span>

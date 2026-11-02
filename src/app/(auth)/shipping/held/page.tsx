@@ -67,9 +67,6 @@ export default async function HeldShipmentsPage() {
               </span>
             )}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            운송장이 등록됐으나 출고 처리되지 않은 주문입니다
-          </p>
         </div>
       </div>
 

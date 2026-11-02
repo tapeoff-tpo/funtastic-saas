@@ -76,7 +76,6 @@ export default async function CsInquiriesPage({
         basePath="/cs/inquiries"
         fixedSource="inquiry"
         title="문의"
-        description="마켓 1:1문의와 고객문의 게시판에서 수집한 미답변 문의를 확인합니다."
         showBarcodeLookup={false}
         showInspectionTools={false}
         filters={{

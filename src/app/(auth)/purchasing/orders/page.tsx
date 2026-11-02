@@ -80,7 +80,6 @@ export default async function PurchasingOrdersPage({
       allowedStatuses={ORDER_STATUSES}
       basePath="/purchasing/orders"
       title="발주"
-      description="발주요청부터 구매완료, 검수, 중국창고도착, 중국출고요청, 중국출고완료까지 한 화면에서 관리합니다."
     />
   )
 }
@@ -91,7 +90,6 @@ export async function PurchasingOrdersView({
   allowedStatuses,
   basePath,
   title,
-  description,
   showRecommendationGenerator = false,
   overdueOnly = false,
   showStatusTabs = true,
@@ -101,7 +99,6 @@ export async function PurchasingOrdersView({
   allowedStatuses: readonly PurchaseRequestStatus[]
   basePath: string
   title: string
-  description: string
   showRecommendationGenerator?: boolean
   overdueOnly?: boolean
   showStatusTabs?: boolean
@@ -268,9 +265,6 @@ export async function PurchasingOrdersView({
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {description}
-          </p>
         </div>
         <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}

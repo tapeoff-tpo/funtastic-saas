@@ -81,9 +81,6 @@ export default async function PriceTablePage({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">판매가 테이블</h1>
-          <p className="text-sm text-muted-foreground">
-            상품별 판매가와 배송비를 플랫폼 단위로 비교합니다.
-          </p>
         </div>
         <div className="flex w-fit gap-2">
           <Link href="/operations/marketplace-registration" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">

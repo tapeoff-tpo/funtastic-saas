@@ -33,7 +33,6 @@ export default async function PurchasingRawDataPage() {
       <ProductFlowNav />
       <header>
         <h1 className="text-2xl font-semibold">발주 로우데이터</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Ecount 원본과 국내재고, 단종상품 파일을 검증한 뒤 발주·중국재고 진행 현황에 반영합니다.</p>
       </header>
       <PurchasingRawDataUpload
         today={today}

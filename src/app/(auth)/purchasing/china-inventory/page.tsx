@@ -37,9 +37,6 @@ export default async function ChinaInventoryPage({
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">중국재고</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ecount 중국재고 원본의 합계와 창고별 수량을 나누어 조회합니다. 중국출고 후 국내 입고 전 수량은 발주 탭의 중국출고요청으로 관리합니다.
-          </p>
         </div>
         <form className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center" action="/purchasing/china-inventory">
           <input

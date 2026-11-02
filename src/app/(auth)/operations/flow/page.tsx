@@ -168,9 +168,6 @@ export default async function OperationsFlowPage() {
     <div className="space-y-5">
       <header className="flex flex-col gap-2 border-b pb-4">
         <h1 className="text-2xl font-semibold">업무 구조 참고</h1>
-        <p className="text-sm text-muted-foreground">
-          담당자별 업무를 순서대로 강제하지 않습니다. 주문·출고, 재고·발주, 상품 운영, 매출·정산 화면이 같은 품목코드로 연결되는 구조를 참고합니다.
-        </p>
       </header>
 
       <FlowGroup title="매일 처리" description="사방넷 주문을 올리고, 매핑·송장·출고까지 처리합니다." stages={orderStages} />

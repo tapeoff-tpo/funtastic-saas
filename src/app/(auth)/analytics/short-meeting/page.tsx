@@ -21,7 +21,7 @@ export default async function ShortMeetingPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold">숏미팅</h1>
-        <p className="text-sm text-muted-foreground">{data.dateLabel} 주문 상품별 출고·재고 현황</p>
+        <p className="text-sm text-muted-foreground">{data.dateLabel}</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

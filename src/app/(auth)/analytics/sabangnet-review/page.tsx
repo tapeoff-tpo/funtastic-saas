@@ -93,9 +93,6 @@ export default async function SabangnetReviewPage({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">사방넷 주문 검수</h1>
-          <p className="text-sm text-muted-foreground">
-            사방넷 주문 파일을 업로드한 뒤 보류건을 검수하고, 정상 주문만 주문관리와 매출분석에 확정 반영합니다.
-          </p>
         </div>
         <Link href="/analytics" className="w-fit rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
           매출분석으로

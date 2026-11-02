@@ -29,9 +29,6 @@ export default async function AccountsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">계정관리</h1>
-          <p className="text-sm text-muted-foreground">
-            관리자 계정 생성/역할 변경/비활성화
-          </p>
         </div>
         <CreateAccountDialog />
       </div>

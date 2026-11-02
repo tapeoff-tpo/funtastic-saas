@@ -82,9 +82,6 @@ export default async function MarketSettingsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold">마켓설정</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          주문관리·매출분석·매출확인용 엑셀에서 사용할 마켓 표시명, 아이디, 수수료율을 관리합니다.
-        </p>
       </div>
       <MarketSettingsList connections={rows} />
     </div>

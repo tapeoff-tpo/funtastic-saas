@@ -79,9 +79,6 @@ export default async function OutboundReflectionPage({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">출고반영</h1>
-          <p className="text-sm text-muted-foreground">
-            사방넷 검수 파일의 출고완료 행을 주문 단계 없이 재고와 매출에 바로 반영합니다.
-          </p>
         </div>
         <Link href="/inventory" className="w-fit rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">재고관리로</Link>
       </div>

@@ -35,9 +35,6 @@ export default function InvoicePage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">운송장 관리</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          CJ 발주서 내보내기 → CJ 웹 등록 → 운송장 엑셀 가져오기
-        </p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">

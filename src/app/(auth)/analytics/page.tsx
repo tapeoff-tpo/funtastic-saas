@@ -130,9 +130,6 @@ export default async function AnalyticsPage({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">매출분석</h1>
-          <p className="text-sm text-muted-foreground">
-            {selectedMonthLabel(month)} 기준 매출과 이익을 계산합니다.
-          </p>
         </div>
         <div className="flex w-fit flex-wrap rounded-lg border bg-background p-1 text-sm">
           <TabLink href={analyticsHref('dashboard', month)} active={tab === 'dashboard'}>대시보드</TabLink>
@@ -1167,11 +1164,6 @@ function analyticsHref(tab: AnalyticsTab, month: string, issue?: ProfitMissingIs
   if (issue && issue !== 'all') params.set('issue', issue)
   if (view) params.set('view', '1')
   return `/analytics?${params.toString()}`
-}
-
-function selectedMonthLabel(month: string): string {
-  const [year, monthNumber] = month.split('-')
-  return `${year}년 ${Number(monthNumber)}월`
 }
 
 function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {

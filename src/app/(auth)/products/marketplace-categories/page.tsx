@@ -90,10 +90,6 @@ export default function MarketplaceCategoriesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">마켓 카테고리 매핑</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          엑셀 업로드로 수집된 마켓별 카테고리 목록입니다. 중복 없이 고유 카테고리만 표시되며,
-          각 카테고리에 연결된 상품 수를 확인할 수 있습니다.
-        </p>
       </div>
 
       {/* Filters — manual submit, 검색 버튼 누르기 전엔 fetch 안 함 */}

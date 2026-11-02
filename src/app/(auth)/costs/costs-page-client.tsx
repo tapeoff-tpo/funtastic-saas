@@ -131,7 +131,7 @@ export function CostsPageClient({
         <div>
           <h1 className="text-xl font-bold">품목</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            ESA009M 전체 항목 · {total.toLocaleString('ko-KR')}개 품목
+            {total.toLocaleString('ko-KR')}개 품목
           </p>
         </div>
         <div className="flex flex-wrap items-start justify-end gap-2">

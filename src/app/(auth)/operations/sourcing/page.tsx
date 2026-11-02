@@ -38,9 +38,6 @@ export default async function SourcingPage() {
           <Search className="h-6 w-6" />
           소싱
         </h1>
-        <p className="text-sm text-muted-foreground">
-          수요일 소싱회의를 날짜별로 만들고, 등록자별 입력 시트에서 여러 상품을 한 번에 관리합니다.
-        </p>
       </header>
 
       <SourcingBoard

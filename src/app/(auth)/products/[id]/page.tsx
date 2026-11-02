@@ -237,9 +237,6 @@ export default function EditProductPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">상품 수정</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          품목 기준정보를 수정하고 재고, 판매가, 채널 등록 정보를 함께 확인합니다.
-        </p>
       </div>
 
       <ProductOperationsLinks

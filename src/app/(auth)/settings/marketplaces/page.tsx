@@ -95,9 +95,6 @@ export default async function MarketplaceSettingsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">마켓플레이스 연동 설정</h1>
-        <p className="mt-1 text-muted-foreground">
-          자동 연동과 엑셀 업로드몰을 등록하고 연결 상태를 관리합니다.
-        </p>
       </div>
 
       <IntegrationForms

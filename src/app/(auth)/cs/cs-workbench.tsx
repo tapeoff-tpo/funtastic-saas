@@ -56,7 +56,6 @@ interface CsWorkbenchProps {
   basePath?: string
   fixedSource?: CsTicketSource
   title?: string
-  description?: string
   showBarcodeLookup?: boolean
   showInspectionTools?: boolean
   filters: {
@@ -227,7 +226,6 @@ export function CsWorkbench({
   basePath = '/cs',
   fixedSource,
   title = '상품검수 / CS 작업함',
-  description = '물류팀은 반품 상품을 확인하고, CS는 검수 결과를 바탕으로 최종 안내와 마켓 처리를 진행합니다.',
   showBarcodeLookup = true,
   showInspectionTools = true,
   filters,
@@ -356,9 +354,6 @@ export function CsWorkbench({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-gray-950">{title}</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              {description}
-            </p>
           </div>
           <div className="overflow-hidden rounded border bg-white">
             <div className="grid grid-cols-5">

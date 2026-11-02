@@ -69,7 +69,6 @@ export default function FigmaImageReplacementPage() {
     <main className="mx-auto max-w-2xl space-y-6 py-8">
       <header>
         <h1 className="flex items-center gap-2 text-xl font-bold"><ImagePlus className="size-5" /> Figma 이미지 교체</h1>
-        <p className="mt-1 text-sm text-muted-foreground">연결된 Figma 플러그인이 지정 레이어의 이미지만 교체합니다.</p>
       </header>
       <div className="grid gap-5 rounded-lg border bg-card p-6">
         <div className="grid gap-2">

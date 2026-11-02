@@ -20,9 +20,6 @@ export default async function CompanySettingsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">회사 정보 설정</h1>
-        <p className="mt-1 text-muted-foreground">
-          발송자 정보를 설정합니다. CJ대한통운 발주서 등에서 사용됩니다.
-        </p>
       </div>
 
       <CompanySettingsForm

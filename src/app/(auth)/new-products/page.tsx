@@ -31,9 +31,6 @@ export default async function NewProductsPage() {
           <Sparkles className="h-6 w-6 text-violet-600" />
           상품관리
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          1차 통과부터 등록 완료까지, 상품별 정보와 샘플·품질표시 자료를 한곳에서 관리합니다.
-        </p>
       </header>
       <CatalogueImageSyncButton />
       <NewProductBoard

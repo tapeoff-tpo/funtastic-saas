@@ -48,7 +48,6 @@ export default async function DealCalendarPage() {
     <div className="space-y-4">
       <header>
         <h1 className="flex items-center gap-2 text-2xl font-semibold"><CalendarDays className="h-6 w-6" />광고·딜 캘린더</h1>
-        <p className="mt-1 text-sm text-muted-foreground">신청 마감과 행사 일정을 월간 흐름으로 확인합니다.</p>
       </header>
       <DealCalendarGrid events={calendarEvents} />
     </div>

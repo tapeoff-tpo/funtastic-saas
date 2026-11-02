@@ -90,9 +90,6 @@ export default async function PurchasePaymentFlowPage({
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">발주금액</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            금액 항목을 누르면 해당 금액에 포함된 발주 건을 바로 확인할 수 있습니다.
-          </p>
         </div>
         <Link
           href="/purchasing/orders"

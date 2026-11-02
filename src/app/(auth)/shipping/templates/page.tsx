@@ -97,9 +97,6 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">엑셀 양식 관리</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          주문 엑셀 다운로드용 양식을 자유롭게 만들고 관리합니다. 헤더 텍스트와 너비를 원하는 대로 지정하세요.
-        </p>
       </div>
 
       {templates.length === 0 ? (

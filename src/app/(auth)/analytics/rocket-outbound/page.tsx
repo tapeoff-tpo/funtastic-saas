@@ -31,9 +31,6 @@ export default async function RocketOutboundPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">로켓배송/대량 매출</h1>
-          <p className="text-sm text-muted-foreground">
-            사방넷검수와 별도로 받은 로켓배송·대량 매출 파일을 분석에 반영합니다.
-          </p>
         </div>
         <Link href="/analytics" className="w-fit rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
           매출분석으로

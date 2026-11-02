@@ -66,9 +66,6 @@ export default async function CombinedShippingPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">합포장 관리</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            동일 구매자/배송지 주문을 합포장으로 묶어 처리합니다
-          </p>
         </div>
         <CombinedShippingClient />
       </div>

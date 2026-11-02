@@ -9,12 +9,9 @@ const imageHosts = new Set(['pub-c3849cebd2dd4a1a881a36c783c3845c.r2.dev', 'funt
 const maxImageBytes = 4 * 1024 * 1024
 
 export async function findSavedNewProductImages(userId: string, sku: string, productName: string) {
-  await ensureNewProductWorkflowTables(userId)
-  const exactSku = sql`(item.sabangnet_code = ${sku} OR EXISTS (
-    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(item.metadata -> 'optionDetails') = 'array'
-      THEN item.metadata -> 'optionDetails' ELSE '[]'::jsonb END) option
-    WHERE option ->> 'sabangnetOptionCode' = ${sku}
-  ))`
+  // Image reads do not need stage seeding/advisory locks on each cold function.
+  const exactSku = sql`(item.sabangnet_code = ${sku} OR
+    item.metadata -> 'optionDetails' @> jsonb_build_array(jsonb_build_object('sabangnetOptionCode', ${sku}::text)))`
   const matches = rows<{ id: string; exactSku: boolean; images: string[] }>(await db.execute(sql`
     SELECT item.id, ${exactSku} AS "exactSku", jsonb_agg(attachment.id::text ORDER BY attachment.created_at) AS images
     FROM new_product_workflow_items item
@@ -23,7 +20,12 @@ export async function findSavedNewProductImages(userId: string, sku: string, pro
       OR lower(btrim(item.product_name)) = lower(btrim(${productName}))
       OR lower(btrim(item.registered_product_name)) = lower(btrim(${productName})))
     GROUP BY item.id ORDER BY "exactSku" DESC NULLS LAST LIMIT 3
-  `))
+  `).catch((error: unknown) => {
+    // A workspace that has never opened product management can use other sources.
+    const cause = error as { code?: string; cause?: { code?: string } }
+    if (cause.code === '42P01' || cause.cause?.code === '42P01') return []
+    throw error
+  }))
   const exact = matches.filter((match) => match.exactSku)
   const selected = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : null
   return (selected?.images ?? []).map((id, sortOrder) => ({ url: `/api/purchasing/product-images/files/${id}`, sortOrder }))

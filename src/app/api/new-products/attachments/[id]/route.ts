@@ -24,6 +24,7 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
       'Content-Type': attachment.contentType,
       'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,
       'Cache-Control': 'private, max-age=300',
+      Vary: 'Cookie',
       'X-Content-Type-Options': 'nosniff',
     },
   })

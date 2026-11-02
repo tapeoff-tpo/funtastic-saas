@@ -12,5 +12,5 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!id.success) return NextResponse.json({ error: '이미지를 찾을 수 없습니다.' }, { status: 404 })
   const image = await getSavedNewProductImage(await getWorkspaceUserId(user.id), id.data)
   if (!image) return NextResponse.json({ error: '이미지를 찾을 수 없습니다.' }, { status: 404 })
-  return new NextResponse(Buffer.from(image.fileData, 'base64'), { headers: { 'Content-Type': image.contentType, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' } })
+  return new NextResponse(Buffer.from(image.fileData, 'base64'), { headers: { 'Content-Type': image.contentType, 'Cache-Control': 'private, max-age=300', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' } })
 }

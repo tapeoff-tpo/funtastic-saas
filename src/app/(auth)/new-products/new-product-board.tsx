@@ -1758,7 +1758,7 @@ function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDelete
                     <div className="flex h-20 flex-col items-center justify-center px-2"><FileText className="h-6 w-6 text-red-500" /><span className="mt-1 line-clamp-1 max-w-full text-[10px]">{attachment.fileName}</span></div>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} className="h-24 w-full object-cover" />
+                    <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} loading="lazy" decoding="async" className="h-24 w-full object-cover" />
                   )}
                 </a>
                 <button type="button" aria-label="첨부 삭제" disabled={busy || disabled} onClick={() => queueRemoval([attachment])} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed"><Trash2 className="h-3 w-3" /></button>

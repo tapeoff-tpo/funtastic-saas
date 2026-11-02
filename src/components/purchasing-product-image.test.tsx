@@ -8,6 +8,21 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new Event('close')) }
 })
 describe('product image popup', () => {
+  it('preloads on keyboard focus and opens/reopens without another metadata request', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(base))
+    vi.stubGlobal('fetch', fetcher)
+    render(<PurchasingProductImageButton productName="유리컵" purchaseItemId="cached-id" />)
+    const button = screen.getByRole('button', { name: '유리컵' })
+    fireEvent.focus(button)
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(button)
+    expect(await screen.findByRole('img')).toHaveAttribute('src', '/broken.jpg')
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }))
+    fireEvent.click(button)
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/broken.jpg')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
   it('falls back from a broken saved image to B2B without altering the item', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response(base)).mockResolvedValueOnce(response({ ...base, source: 'funtasticb2b', imageUrls: ['https://images.example/cup.jpg'] }))
     vi.stubGlobal('fetch', fetcher)

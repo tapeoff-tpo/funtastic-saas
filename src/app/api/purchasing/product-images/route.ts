@@ -9,6 +9,7 @@ import { resolvePurchasingProductImages } from '@/lib/purchasing/product-image-c
 import { findSavedNewProductImages } from '@/lib/new-products/catalogue-images'
 
 export const runtime = 'nodejs'
+const imageHeaders = { 'Cache-Control': 'private, max-age=60', Vary: 'Cookie' }
 
 const querySchema = z.object({ purchaseItemId: z.string().uuid().optional(), shipmentItemId: z.string().uuid().optional(), catalogue: z.enum(['1']).optional() })
   .refine((query) => Boolean(query.purchaseItemId) !== Boolean(query.shipmentItemId))
@@ -24,15 +25,25 @@ export async function GET(request: Request) {
     .where(and(eq(table.userId, userId), eq(table.id, (parsed.data.purchaseItemId ?? parsed.data.shipmentItemId)!))).limit(1)
   if (!item) return NextResponse.json({ error: '해당 품목을 찾을 수 없습니다.' }, { status: 404 })
   const savedImages = parsed.data.catalogue === '1' ? [] : await findSavedNewProductImages(userId, item.sku, item.productName)
-  if (savedImages.length) return NextResponse.json({ ...item, imageUrls: savedImages.map((image) => image.url), source: 'product-management' }, { headers: { 'Cache-Control': 'private, no-store' } })
-  const [product] = await db.select({ images: products.images }).from(products)
-    .where(and(eq(products.userId, userId), eq(products.internalSku, item.sku))).limit(1)
-  const [variantProduct] = product?.images?.length ? [] : await db.select({ images: products.images }).from(productVariants)
-    .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.userId, userId)))
-    .where(eq(productVariants.sku, item.sku)).limit(1)
+  if (savedImages.length) return NextResponse.json({ ...item, imageUrls: savedImages.map((image) => image.url), source: 'product-management' }, { headers: imageHeaders })
   try {
-    const result = await resolvePurchasingProductImages({ ...item, localImages: product?.images?.length ? product.images : variantProduct?.images ?? null, catalogueOnly: parsed.data.catalogue === '1' })
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } })
+    let localImages = null
+    if (parsed.data.catalogue !== '1') {
+      // Both SKU namespaces can be checked together instead of serial DB trips.
+      const local = await Promise.allSettled([
+        db.select({ images: products.images }).from(products)
+          .where(and(eq(products.userId, userId), eq(products.internalSku, item.sku))).limit(1),
+        db.select({ images: products.images }).from(productVariants)
+          .innerJoin(products, and(eq(products.id, productVariants.productId), eq(products.userId, userId)))
+          .where(eq(productVariants.sku, item.sku)).limit(1),
+      ])
+      for (const lookup of local) { if (lookup.status === 'rejected') throw lookup.reason }
+      const product = local[0].status === 'fulfilled' ? local[0].value[0] : null
+      const variant = local[1].status === 'fulfilled' ? local[1].value[0] : null
+      localImages = product?.images?.length ? product.images : variant?.images ?? null
+    }
+    const result = await resolvePurchasingProductImages({ ...item, localImages, catalogueOnly: parsed.data.catalogue === '1' })
+    return NextResponse.json(result, { headers: result.imageUrls.length ? imageHeaders : { 'Cache-Control': 'private, no-store' } })
   } catch {
     return NextResponse.json({ error: '상품 이미지를 불러오지 못했습니다. 다시 불러오기를 눌러주세요.' }, { status: 502, headers: { 'Cache-Control': 'private, no-store' } })
   }

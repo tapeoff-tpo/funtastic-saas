@@ -41,6 +41,65 @@ const TRACKING_LOOKUP_START = 'FUNTASTIC_1688_TRACKING_START'
 const TRACKING_LOOKUP_ACK = 'FUNTASTIC_1688_TRACKING_ACK'
 const TRACKING_LOOKUP_RESULT = 'FUNTASTIC_1688_TRACKING_RESULT'
 const TRACKING_LOOKUP_ERROR = 'FUNTASTIC_1688_TRACKING_ERROR'
+const MAX_1688_TRACKING_BATCH_ORDERS = 50
+const MAX_1688_TRACKING_BATCH_ITEMS = 100
+const TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS = 750
+const TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS = 4
+
+export type Purchase1688TrackingLookupCandidate = {
+  id: string
+  supplierOrderNumber: string | null
+  trackingNumber: string | null
+}
+
+type Purchase1688TrackingLookupJob = {
+  orderNumber: string
+  ids: string[]
+}
+
+type Purchase1688TrackingBatch = {
+  id: string
+  jobs: Purchase1688TrackingLookupJob[]
+  totalItems: number
+  skippedItems: number
+}
+
+type Purchase1688TrackingProgress = {
+  totalItems: number
+  totalOrders: number
+  skippedItems: number
+  succeededItems: number
+  failedItems: number
+  currentOrder: number
+  currentOrderNumber: string | null
+  message: string
+  stopping?: boolean
+  complete?: boolean
+}
+
+function valid1688OrderNumber(value: string | null | undefined) {
+  return /^\d{10,40}$/.test(value?.trim() ?? '')
+}
+
+function normalize1688TrackingNumbers(value: unknown) {
+  const numbers = new Map<string, string>()
+  for (const item of Array.isArray(value) ? value : []) {
+    if (typeof item !== 'string') continue
+    const number = item.trim()
+    if (!number) continue
+    const key = number.toUpperCase()
+    if (!numbers.has(key)) numbers.set(key, number)
+  }
+  return Array.from(numbers.values())
+}
+
+function stops1688TrackingBatch(message: string) {
+  return /로그인|보안\s*확인|확장프로그램|시간이\s*초과|SaaS\s*화면|다른\s*1688\s*작업/i.test(message)
+}
+
+function is1688TrackingLookupHandoffInProgress(message: string) {
+  return /다른\s*1688\s*작업이\s*진행\s*중/i.test(message)
+}
 
 const PURCHASE_REVIEW_STATUS_OPTIONS: Array<{ value: PurchaseReviewListStatus; label: string }> = [
   { value: 'review', label: '발주검토' },
@@ -183,6 +242,338 @@ export function PurchaseBulkStatusButton() {
         선택 {selectedCount.toLocaleString('ko-KR')}건 {PURCHASE_REQUEST_STATUS_LABELS[context.nextStatus]}로 이동
       </Button>
       {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
+/**
+ * Runs selected purchase-completed rows through the existing one-at-a-time
+ * extension message. Keeping the queue in the page means an already-loaded
+ * extension never has to hold purchase ids or write SaaS data itself.
+ */
+export function PurchaseBulk1688TrackingLookup({
+  candidates,
+}: {
+  candidates: Purchase1688TrackingLookupCandidate[]
+}) {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const clearSelectionRef = useRef(context.clear)
+  const routerRefreshRef = useRef(router.refresh)
+  const stopRequestedRef = useRef(false)
+  const [batch, setBatch] = useState<Purchase1688TrackingBatch | null>(null)
+  const [progress, setProgress] = useState<Purchase1688TrackingProgress | null>(null)
+
+  useEffect(() => {
+    clearSelectionRef.current = context.clear
+  }, [context.clear])
+
+  useEffect(() => {
+    routerRefreshRef.current = router.refresh
+  }, [router.refresh])
+
+  const selectedCandidates = candidates.filter((candidate) => context.selectedIds.has(candidate.id))
+  const eligibleCandidates = selectedCandidates.filter((candidate) => (
+    valid1688OrderNumber(candidate.supplierOrderNumber) && !candidate.trackingNumber?.trim()
+  ))
+  const eligibleOrderCount = new Set(eligibleCandidates.map((candidate) => candidate.supplierOrderNumber?.trim())).size
+  const selectedCount = context.selectedIds.size
+
+  useEffect(() => {
+    if (!batch) return
+
+    let disposed = false
+    let bridgeTimeout: number | null = null
+    let nextJobTimer: number | null = null
+    let index = 0
+    let succeededItems = 0
+    let failedItems = 0
+    let currentStartAttempts = 0
+    let current: { runId: string; job: Purchase1688TrackingLookupJob; saving: boolean } | null = null
+
+    const clearTimers = () => {
+      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
+      if (nextJobTimer !== null) window.clearTimeout(nextJobTimer)
+      bridgeTimeout = null
+      nextJobTimer = null
+    }
+
+    const updateProgress = (message: string, overrides: Partial<Purchase1688TrackingProgress> = {}) => {
+      setProgress({
+        totalItems: batch.totalItems,
+        totalOrders: batch.jobs.length,
+        skippedItems: batch.skippedItems,
+        succeededItems,
+        failedItems,
+        currentOrder: Math.min(index + (current ? 1 : 0), batch.jobs.length),
+        currentOrderNumber: current?.job.orderNumber ?? null,
+        message,
+        ...overrides,
+      })
+    }
+
+    const finish = (message: string) => {
+      if (disposed) return
+      clearTimers()
+      const didSaveAny = succeededItems > 0
+      current = null
+      setBatch(null)
+      updateProgress(message, {
+        currentOrder: index,
+        currentOrderNumber: null,
+        complete: true,
+      })
+      if (didSaveAny) {
+        clearSelectionRef.current()
+        routerRefreshRef.current()
+      }
+      if (succeededItems > 0 && failedItems === 0 && !stopRequestedRef.current) {
+        toast.success(`1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
+      } else if (succeededItems > 0) {
+        toast.warning(`1688 송장 ${succeededItems.toLocaleString('ko-KR')}건 등록 · ${failedItems.toLocaleString('ko-KR')}건 미처리`)
+      } else if (failedItems > 0) {
+        toast.error('1688 송장 일괄조회에서 저장된 항목이 없습니다.')
+      }
+    }
+
+    const scheduleNextJob = (delayMs = 150) => {
+      nextJobTimer = window.setTimeout(() => {
+        if (disposed) return
+        if (stopRequestedRef.current) {
+          finish(`현재 건까지 처리했습니다. 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
+          return
+        }
+        if (index >= batch.jobs.length) {
+          finish(`일괄조회 완료 · 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
+          return
+        }
+
+        const job = batch.jobs[index]
+        currentStartAttempts += 1
+        const runId = `${batch.id}-${index}-${currentStartAttempts}`
+        current = { runId, job, saving: false }
+        updateProgress(`1688 주문 ${index + 1}/${batch.jobs.length} 조회 중`)
+        bridgeTimeout = window.setTimeout(() => {
+          if (disposed || current?.runId !== runId) return
+          current = null
+          failedItems += job.ids.length
+          index += 1
+          finish('1688 확장프로그램 연결을 확인해주세요.')
+        }, 5_000)
+        window.postMessage({
+          source: PAGE_SOURCE,
+          type: TRACKING_LOOKUP_START,
+          runId,
+          orderNumber: job.orderNumber,
+        }, window.location.origin)
+      }, delayMs)
+    }
+
+    const failCurrentJob = (message: string) => {
+      if (!current) return
+      const failedJob = current.job
+      current = null
+      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
+      bridgeTimeout = null
+      if (is1688TrackingLookupHandoffInProgress(message) && currentStartAttempts < TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS) {
+        updateProgress('이전 1688 조회를 정리한 뒤 같은 주문을 다시 시도합니다.', {
+          currentOrder: index + 1,
+          currentOrderNumber: failedJob.orderNumber,
+        })
+        scheduleNextJob(TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS)
+        return
+      }
+      failedItems += failedJob.ids.length
+      index += 1
+      currentStartAttempts = 0
+      updateProgress(message)
+      if (stops1688TrackingBatch(message)) {
+        finish(`${message} · 남은 항목은 확인 후 다시 일괄조회해주세요.`)
+        return
+      }
+      scheduleNextJob()
+    }
+
+    const saveCurrentJob = async (runId: string, trackingNumbers: string[]) => {
+      if (!current || current.runId !== runId) return
+      const job = current.job
+      let savedForJob = 0
+      let failedForJob = 0
+      let lastError = ''
+
+      for (const id of job.ids) {
+        try {
+          const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderNumber: job.orderNumber, trackingNumbers }),
+          })
+          const body = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
+          savedForJob += 1
+        } catch (error) {
+          failedForJob += 1
+          lastError = error instanceof Error ? error.message : '1688 송장번호를 저장하지 못했습니다.'
+        }
+      }
+
+      if (disposed || current?.runId !== runId) return
+      succeededItems += savedForJob
+      failedItems += failedForJob
+      current = null
+      index += 1
+      currentStartAttempts = 0
+      updateProgress(lastError || `송장 ${savedForJob.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`)
+      scheduleNextJob()
+    }
+
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const message = event.data
+      if (!message || typeof message !== 'object') return
+      const data = message as {
+        source?: unknown
+        type?: unknown
+        runId?: unknown
+        orderNumber?: unknown
+        trackingNumbers?: unknown
+        message?: unknown
+      }
+      if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string') return
+      if (!current || data.runId !== current.runId) return
+
+      if (data.type === TRACKING_LOOKUP_ACK) {
+        if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
+        bridgeTimeout = null
+        return
+      }
+
+      if (data.type === TRACKING_LOOKUP_ERROR) {
+        failCurrentJob(typeof data.message === 'string' ? data.message : '1688 송장 조회에 실패했습니다.')
+        return
+      }
+
+      if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== current.job.orderNumber || current.saving) return
+
+      const trackingNumbers = normalize1688TrackingNumbers(data.trackingNumbers)
+      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
+      bridgeTimeout = null
+      if (trackingNumbers.length === 0) {
+        failCurrentJob('1688에서 유효한 송장번호를 찾지 못했습니다.')
+        return
+      }
+
+      current.saving = true
+      updateProgress(`주문 ${index + 1}/${batch.jobs.length} 송장 저장 중`)
+      void saveCurrentJob(current.runId, trackingNumbers)
+    }
+
+    window.addEventListener('message', onMessage)
+    updateProgress(`1688 송장 일괄조회 준비 · ${batch.jobs.length.toLocaleString('ko-KR')}개 주문`)
+    scheduleNextJob()
+
+    return () => {
+      disposed = true
+      clearTimers()
+      window.removeEventListener('message', onMessage)
+    }
+  }, [batch])
+
+  function startBatch() {
+    if (batch || eligibleCandidates.length === 0) return
+    const grouped = new Map<string, string[]>()
+    for (const candidate of eligibleCandidates) {
+      const orderNumber = candidate.supplierOrderNumber?.trim()
+      if (!orderNumber) continue
+      const ids = grouped.get(orderNumber) ?? []
+      ids.push(candidate.id)
+      grouped.set(orderNumber, ids)
+    }
+    const jobs = Array.from(grouped, ([orderNumber, ids]) => ({ orderNumber, ids }))
+    const skippedItems = selectedCount - eligibleCandidates.length
+    if (eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || jobs.length > MAX_1688_TRACKING_BATCH_ORDERS) {
+      setProgress({
+        totalItems: eligibleCandidates.length,
+        totalOrders: jobs.length,
+        skippedItems,
+        succeededItems: 0,
+        failedItems: 0,
+        currentOrder: 0,
+        currentOrderNumber: null,
+        message: `한 번에 최대 ${MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 1688 주문 또는 ${MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}개 발주 항목만 조회할 수 있습니다. 선택을 나눠주세요.`,
+        complete: true,
+      })
+      return
+    }
+    if (!window.confirm(`선택한 ${eligibleCandidates.length.toLocaleString('ko-KR')}건(${jobs.length.toLocaleString('ko-KR')}개 1688 주문)의 송장을 순차 조회합니다. 조회 성공 건은 검수로 이동합니다.`)) return
+
+    stopRequestedRef.current = false
+    setProgress({
+      totalItems: eligibleCandidates.length,
+      totalOrders: jobs.length,
+      skippedItems,
+      succeededItems: 0,
+      failedItems: 0,
+      currentOrder: 0,
+      currentOrderNumber: null,
+      message: '1688 송장 일괄조회 시작',
+    })
+    setBatch({
+      id: crypto.randomUUID(),
+      jobs,
+      totalItems: eligibleCandidates.length,
+      skippedItems,
+    })
+  }
+
+  function stopAfterCurrent() {
+    if (!batch) return
+    stopRequestedRef.current = true
+    setProgress((current) => current ? {
+      ...current,
+      stopping: true,
+      message: '현재 조회·저장이 끝나면 중지합니다.',
+    } : current)
+  }
+
+  const actionLabel = selectedCount === 0
+    ? '현재 페이지 선택 0건 1688 송장 일괄조회'
+    : selectedCount === eligibleCandidates.length
+      ? `현재 페이지 선택 ${eligibleCandidates.length.toLocaleString('ko-KR')}건 1688 송장 일괄조회`
+      : `현재 페이지 선택 ${selectedCount.toLocaleString('ko-KR')}건 중 ${eligibleCandidates.length.toLocaleString('ko-KR')}건 일괄조회`
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={startBatch}
+        disabled={Boolean(batch) || eligibleCandidates.length === 0 || eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || eligibleOrderCount > MAX_1688_TRACKING_BATCH_ORDERS}
+        title="현재 페이지에서 선택한 구매완료 항목의 1688 송장번호를 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 제외합니다."
+      >
+        {batch ? <Loader2 className="animate-spin" /> : <Search />}
+        {batch
+          ? `1688 조회 ${progress?.currentOrder ?? 0}/${progress?.totalOrders ?? 0}`
+          : actionLabel}
+      </Button>
+      {batch ? (
+        <Button type="button" size="sm" variant="ghost" onClick={stopAfterCurrent} disabled={progress?.stopping}>
+          중지(현재 건 이후)
+        </Button>
+      ) : null}
+      {selectedCount > 0 && eligibleCandidates.length > 0 && eligibleCandidates.length !== selectedCount ? (
+        <span className="text-xs text-muted-foreground">송장이 있거나 주문번호가 없는 {Math.max(0, selectedCount - eligibleCandidates.length).toLocaleString('ko-KR')}건은 제외</span>
+      ) : null}
+      {eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || eligibleOrderCount > MAX_1688_TRACKING_BATCH_ORDERS ? (
+        <span className="text-xs text-amber-700">한 번에 최대 {MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 주문 / {MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}건</span>
+      ) : null}
+      {progress ? (
+        <span className="text-xs text-muted-foreground" aria-live="polite">
+          {progress.message} · 성공 {progress.succeededItems.toLocaleString('ko-KR')}건 · 미처리 {progress.failedItems.toLocaleString('ko-KR')}건
+          {progress.skippedItems > 0 ? ` · 제외 ${progress.skippedItems.toLocaleString('ko-KR')}건` : ''}
+        </span>
+      ) : null}
     </div>
   )
 }

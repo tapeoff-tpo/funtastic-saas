@@ -39,6 +39,7 @@ import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/pur
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
+  PurchaseBulk1688TrackingLookup,
   PurchaseBulkInventoryReflectedButton,
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
@@ -496,6 +497,15 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
               {isRequestedStatus ? null : <PurchaseBulkPaymentDialog />}
+              {status === 'purchase_completed' ? (
+                <PurchaseBulk1688TrackingLookup
+                  candidates={items.flatMap((item) => item.id ? [{
+                    id: item.id,
+                    supplierOrderNumber: item.supplierOrderNumber,
+                    trackingNumber: item.trackingNumber,
+                  }] : [])}
+                />
+              ) : null}
               <PurchaseBulkDeleteButton />
               {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
               {overdueOnly || status === 'purchase_completed' || status === 'inspecting' ? null : <PurchaseBulkStatusButton />}
@@ -773,7 +783,7 @@ export async function PurchasingOrdersView({
                                     ? '출고날짜'
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
-                                allow1688TrackingLookup={item.status === 'purchase_completed'}
+                                allow1688TrackingLookup={false}
                               />
                               {['purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed'].includes(item.status) && <div className="mt-2 space-y-1 text-xs">
                                 {(receipt?.parcels.map((parcel) => parcel.trackingNumber) ?? (item.trackingNumber ? [item.trackingNumber] : [])).map((number) => <div key={number} data-no-translate className="break-all"><a className="text-blue-700 underline" href={`https://www.baidu.com/s?wd=${encodeURIComponent(number)}`} target="_blank" rel="noreferrer">{number}</a></div>)}

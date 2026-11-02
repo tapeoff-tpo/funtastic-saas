@@ -44,6 +44,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
       postRequest({
         orderNumber: '3317159640039018761',
         trackingNumbers: ['S71268668516', 'S71268668517'],
+        trackingSource: 'waybill_number',
       }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
@@ -63,11 +64,25 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     const { POST } = await import('./route')
 
     const response = await POST(
-      postRequest({ orderNumber: 'not-an-order', trackingNumbers: ['S71268668516'] }) as never,
+      postRequest({ orderNumber: 'not-an-order', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
 
     expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: '1688 송장 조회 결과가 올바르지 않습니다.' })
+    expect(mocks.applyPurchaseRequest1688TrackingLookup).not.toHaveBeenCalled()
+  })
+
+  it('rejects a legacy extension result that cannot attest to the 运单号码 source', async () => {
+    const { POST } = await import('./route')
+
+    const response = await POST(
+      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['LP00850611544129'] }) as never,
+      { params: Promise.resolve({ id: 'purchase-item' }) },
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: '운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' })
     expect(mocks.applyPurchaseRequest1688TrackingLookup).not.toHaveBeenCalled()
   })
 
@@ -78,7 +93,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
     const { POST } = await import('./route')
 
     const response = await POST(
-      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'] }) as never,
+      postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) },
     )
 

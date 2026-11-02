@@ -148,6 +148,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         runId: '1688-batch-run-0-1',
         orderNumber: firstOrder,
         trackingNumbers: ['S71268668516'],
+        trackingSource: 'waybill_number',
       })
       await Promise.resolve()
     })
@@ -155,7 +156,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       `/api/purchasing/purchase-requests/${firstId}/1688-tracking`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ orderNumber: firstOrder, trackingNumbers: ['S71268668516'] }),
+        body: JSON.stringify({ orderNumber: firstOrder, trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number' }),
       }),
     ))
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
@@ -173,6 +174,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         runId: '1688-batch-run-1-1',
         orderNumber: secondOrder,
         trackingNumbers: ['S71268668517'],
+        trackingSource: 'waybill_number',
       })
       await Promise.resolve()
     })
@@ -180,7 +182,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       `/api/purchasing/purchase-requests/${secondId}/1688-tracking`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ orderNumber: secondOrder, trackingNumbers: ['S71268668517'] }),
+        body: JSON.stringify({ orderNumber: secondOrder, trackingNumbers: ['S71268668517'], trackingSource: 'waybill_number' }),
       }),
     ))
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
@@ -249,6 +251,36 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       expect.objectContaining({ runId: '1688-batch-run-1-1', orderNumber: secondOrder }),
       window.location.origin,
     ))
+  })
+
+  it('does not save a legacy extension result without the 运单号码 source marker', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+    const postMessage = vi.spyOn(window, 'postMessage')
+    renderBulkLookup()
+
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
+      window.location.origin,
+    ))
+
+    await act(async () => {
+      extensionMessage({
+        source: 'funtastic-1688-extension',
+        type: 'FUNTASTIC_1688_TRACKING_RESULT',
+        runId: '1688-batch-run-0-1',
+        orderNumber: firstOrder,
+        trackingNumbers: ['LP00850611544129'],
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(progressPopup().getAllByText(/확장프로그램을 1.9.0 이상으로 업데이트/).length).toBeGreaterThan(0))
+    expect(fetch).not.toHaveBeenCalled()
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ runId: '1688-batch-run-1-1' }),
+      window.location.origin,
+    )
   })
 
   it('retries the same order while the extension clears the preceding lookup run', async () => {

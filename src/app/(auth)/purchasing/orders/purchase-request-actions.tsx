@@ -115,6 +115,7 @@ function stops1688TrackingBatch(message: string) {
   return normalized.startsWith('1688 로그인이 필요합니다.')
     || normalized.startsWith('1688 보안 확인이 필요합니다.')
     || normalized.startsWith('1688 확장프로그램 연결을 확인해주세요.')
+    || normalized.startsWith('운송장번호 추출 확장프로그램을')
     || normalized.startsWith('1688 송장 조회 시간이 초과되었습니다.')
     || normalized.startsWith('SaaS 발주 화면에서 시작해주세요.')
     || normalized.startsWith('SaaS 화면에 송장 조회 결과를 전달하지 못했습니다:')
@@ -545,7 +546,7 @@ export function PurchaseBulk1688TrackingLookup({
           const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderNumber: job.orderNumber, trackingNumbers }),
+            body: JSON.stringify({ orderNumber: job.orderNumber, trackingNumbers, trackingSource: 'waybill_number' }),
           })
           const body = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
@@ -580,6 +581,7 @@ export function PurchaseBulk1688TrackingLookup({
         runId?: unknown
         orderNumber?: unknown
         trackingNumbers?: unknown
+        trackingSource?: unknown
         message?: unknown
       }
       if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string') return
@@ -597,6 +599,10 @@ export function PurchaseBulk1688TrackingLookup({
       }
 
       if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== current.job.orderNumber || current.saving) return
+      if (data.trackingSource !== 'waybill_number') {
+        failCurrentJob('운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
+        return
+      }
 
       const trackingNumbers = normalize1688TrackingNumbers(data.trackingNumbers)
       if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
@@ -2451,6 +2457,7 @@ export function PurchasePlanFieldsV2({
   dateLabel,
   purchaseMethod,
   allow1688TrackingLookup = false,
+  trackingSaveMode = 'plan',
 }: {
   id: string
   supplierOrderNumber: string | null
@@ -2461,6 +2468,8 @@ export function PurchasePlanFieldsV2({
   dateLabel: string
   purchaseMethod: string | null
   allow1688TrackingLookup?: boolean
+  /** Inspection rows update their primary parcel through the inspection API. */
+  trackingSaveMode?: 'plan' | 'inspection'
 }) {
   const router = useRouter()
   const formRef = useRef<HTMLFormElement>(null)
@@ -2498,6 +2507,7 @@ export function PurchasePlanFieldsV2({
         runId?: unknown
         orderNumber?: unknown
         trackingNumbers?: unknown
+        trackingSource?: unknown
         message?: unknown
       }
       if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string') return
@@ -2519,6 +2529,13 @@ export function PurchasePlanFieldsV2({
       }
 
       if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== lookup.orderNumber) return
+      if (data.trackingSource !== 'waybill_number') {
+        clearTrackingLookupTimeout()
+        trackingLookupRef.current = null
+        setIs1688TrackingLookupPending(false)
+        setMessage('운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
+        return
+      }
 
       const trackingNumbers = Array.from(new Set(
         (Array.isArray(data.trackingNumbers) ? data.trackingNumbers : [])
@@ -2540,7 +2557,7 @@ export function PurchasePlanFieldsV2({
           const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderNumber: lookup.orderNumber, trackingNumbers }),
+            body: JSON.stringify({ orderNumber: lookup.orderNumber, trackingNumbers, trackingSource: 'waybill_number' }),
           })
           const body = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
@@ -2565,6 +2582,40 @@ export function PurchasePlanFieldsV2({
     }
   }, [clearTrackingLookupTimeout, id, router])
 
+  async function saveInspectionTrackingNumber(nextTrackingNumber: string) {
+    if (!nextTrackingNumber) {
+      throw new Error('검수 단계의 운송장번호는 비워둘 수 없습니다. 삭제는 송장·검수에서 처리해주세요.')
+    }
+    const detailResponse = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, { cache: 'no-store' })
+    const detail = await detailResponse.json().catch(() => ({}))
+    if (!detailResponse.ok) throw new Error(detail.error ?? '검수 정보를 불러오지 못했습니다.')
+    const inspection = detail.inspection as {
+      revision?: unknown
+      parcels?: Array<{ trackingNumber?: unknown; [key: string]: unknown }>
+      resolutionNote?: unknown
+    } | undefined
+    if (!inspection || !Number.isInteger(inspection.revision) || !Array.isArray(inspection.parcels) || inspection.parcels.length === 0) {
+      throw new Error('검수 운송장번호를 준비하지 못했습니다. 송장·검수에서 다시 확인해주세요.')
+    }
+
+    const parcels = inspection.parcels.map((parcel, index) => index === 0
+      ? { ...parcel, trackingNumber: nextTrackingNumber }
+      : parcel)
+    const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        revision: inspection.revision,
+        parcels,
+        complete: false,
+        acknowledgeMismatch: false,
+        resolutionNote: typeof inspection.resolutionNote === 'string' ? inspection.resolutionNote : '',
+      }),
+    })
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(body.error ?? '검수 운송장번호를 저장하지 못했습니다.')
+  }
+
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -2573,11 +2624,12 @@ export function PurchasePlanFieldsV2({
     const nextDateValue = String(formData.get(dateField) ?? '')
     const nextPurchaseMethod = (methodMode === '직접입력' ? customMethod : methodMode).trim()
     const values: Record<string, string | null> = {}
+    const trackingChanged = showTrackingNumber && nextTrackingNumber !== savedTrackingNumber
 
     if (nextSupplierOrderNumber !== savedSupplierOrderNumber) {
       values.supplierOrderNumber = nextSupplierOrderNumber || null
     }
-    if (showTrackingNumber && nextTrackingNumber !== savedTrackingNumber) {
+    if (trackingChanged && trackingSaveMode === 'plan') {
       values.trackingNumber = nextTrackingNumber || null
     }
     if (nextDateValue !== savedDateValue) {
@@ -2586,22 +2638,36 @@ export function PurchasePlanFieldsV2({
     if (purchaseMethodDirty && nextPurchaseMethod !== savedPurchaseMethod) {
       values.purchaseMethod = nextPurchaseMethod || null
     }
-    if (Object.keys(values).length === 0) {
+    if (Object.keys(values).length === 0 && !trackingChanged) {
       setMessage('변경사항 없음')
+      return
+    }
+    if (trackingChanged && trackingSaveMode === 'inspection' && !nextTrackingNumber) {
+      setMessage('검수 단계의 운송장번호는 비워둘 수 없습니다. 삭제는 송장·검수에서 처리해주세요.')
       return
     }
 
     setMessage(null)
     startTransition(async () => {
-      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        setMessage(body.error ?? '저장 실패')
-        return
+      if (Object.keys(values).length > 0) {
+        const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values),
+        })
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}))
+          setMessage(body.error ?? '저장 실패')
+          return
+        }
+      }
+      if (trackingChanged && trackingSaveMode === 'inspection') {
+        try {
+          await saveInspectionTrackingNumber(nextTrackingNumber)
+        } catch (error) {
+          setMessage(error instanceof Error ? error.message : '검수 운송장번호를 저장하지 못했습니다.')
+          return
+        }
       }
 
       setSavedSupplierOrderNumber(nextSupplierOrderNumber)
@@ -2610,7 +2676,7 @@ export function PurchasePlanFieldsV2({
       setSavedPurchaseMethod(nextPurchaseMethod)
       setPurchaseMethodDirty(false)
       setMessage('저장됨')
-      if (values.trackingNumber !== undefined) router.refresh()
+      if (trackingChanged) router.refresh()
     })
   }
 

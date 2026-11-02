@@ -8,6 +8,9 @@ import { createClient } from '@/lib/supabase/server'
 const lookupResultSchema = z.object({
   orderNumber: z.string().trim().regex(/^\d{10,40}$/),
   trackingNumbers: z.array(z.string().trim().min(1).max(100)).min(1).max(100),
+  // Only the extension's exact `运单号码` extraction path may populate the
+  // automatic purchase tracking flow. Older builds could include `物流编号`.
+  trackingSource: z.literal('waybill_number'),
 }).strict()
 
 /**
@@ -23,8 +26,15 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
 
-  const body = lookupResultSchema.safeParse(await request.json().catch(() => null))
+  const rawBody = await request.json().catch(() => null)
+  const body = lookupResultSchema.safeParse(rawBody)
   if (!body.success) {
+    const trackingSource = rawBody && typeof rawBody === 'object'
+      ? (rawBody as { trackingSource?: unknown }).trackingSource
+      : null
+    if (trackingSource !== 'waybill_number') {
+      return NextResponse.json({ error: '운송장번호 추출 확장프로그램을 1.9.0 이상으로 업데이트해주세요. 运单号码만 저장합니다.' }, { status: 400 })
+    }
     return NextResponse.json({ error: '1688 송장 조회 결과가 올바르지 않습니다.' }, { status: 400 })
   }
 

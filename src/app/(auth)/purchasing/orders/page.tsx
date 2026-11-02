@@ -775,7 +775,8 @@ export async function PurchasingOrdersView({
                                 id={item.id}
                                 supplierOrderNumber={item.supplierOrderNumber}
                                 trackingNumber={item.trackingNumber}
-                                showTrackingNumber={item.status === 'purchase_completed'}
+                                showTrackingNumber={item.status === 'purchase_completed' || item.status === 'inspecting'}
+                                trackingSaveMode={item.status === 'inspecting' ? 'inspection' : 'plan'}
                                 dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
                                 dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
                                 dateLabel={item.status === 'china_arrived'

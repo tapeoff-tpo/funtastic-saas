@@ -95,7 +95,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         <fieldset disabled={pending || !editable} className="space-y-4">
           {inspection.parcels.map((parcel, parcelIndex) => <section key={parcel.id} className="space-y-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-48 flex-1 text-sm">송장번호<input aria-label={`송장번호 ${parcelIndex + 1}`} value={parcel.trackingNumber} maxLength={100} className="mt-1 block w-full rounded border bg-background p-2"
+              <label className="min-w-48 flex-1 text-sm">운송장번호<input aria-label={`운송장번호 ${parcelIndex + 1}`} value={parcel.trackingNumber} maxLength={100} className="mt-1 block w-full rounded border bg-background p-2"
                 onChange={(event) => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, trackingNumber: event.target.value } : row))} /></label>
               <span className="pb-2 text-sm">송장별 입고수량: <strong>{parcel.boxes.reduce((sum, box) => sum + (box.quantity ?? 0), 0)}</strong>개</span>
               {parcel.trackingNumber && <a href={`https://www.baidu.com/s?wd=${encodeURIComponent(parcel.trackingNumber)}`} target="_blank" rel="noreferrer" className="pb-2 text-sm text-blue-700 underline">송장 조회</a>}

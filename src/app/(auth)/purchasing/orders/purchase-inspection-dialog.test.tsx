@@ -50,7 +50,7 @@ describe('purchase tracking and inspection editor', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...detail, status: 'china_arrived' })))
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
-    expect(await screen.findByLabelText('송장번호 1')).toBeDisabled()
+    expect(await screen.findByLabelText('운송장번호 1')).toBeDisabled()
     expect(screen.queryByRole('button', { name: '검수완료 · 중국창고도착' })).not.toBeInTheDocument()
   })
 })

@@ -876,6 +876,10 @@ async function startTrackingLookupRun(message, sourceTabId) {
   const collectorTab = await chrome.tabs.create({
     url: trackingLookupUrl(orderNumber),
     active: !background,
+    // 1688 can defer a newly-created inactive tab. Keep the short-lived
+    // lookup tab eligible to finish its logistics request while the SaaS
+    // progress window remains focused.
+    autoDiscardable: false,
   })
   if (!collectorTab?.id) throw new Error('1688 송장 조회 창을 열지 못했습니다.')
 
@@ -917,8 +921,13 @@ async function collectTrackingLookupFromTab(tabId) {
 
     const trackingNumbers = uniqueTrackingNumbers(results.flatMap((result) => result.result?.trackingNumbers || []))
     if (trackingNumbers.length === 0) {
-      const error = typeof topResult?.error === 'string'
-        ? topResult.error
+      const frameResult = results
+        .map((result) => result.result)
+        .find((result) => typeof result?.error === 'string' && /물류 탭은 열렸지만|발송 전|주문을 찾을 수 없/.test(result.error))
+      const error = typeof frameResult?.error === 'string'
+        ? frameResult.error
+        : typeof topResult?.error === 'string'
+          ? topResult.error
         : '1688에서 송장번호를 찾지 못했습니다.'
       await failTrackingLookupRun(run, error, false)
       return
@@ -936,6 +945,10 @@ async function completeTrackingLookupRun(run, trackingNumbers) {
       type: 'FUNTASTIC_1688_TRACKING_RESULT',
       orderNumber: run.orderNumber,
       trackingNumbers,
+      // The SaaS only accepts results explicitly produced from the 1688
+      // `运单号码` field. This blocks an outdated extension from storing a
+      // nearby `物流编号` value by mistake.
+      trackingSource: 'waybill_number',
     })
   } catch (error) {
     await failTrackingLookupRun(run, `SaaS 화면에 송장 조회 결과를 전달하지 못했습니다: ${errorMessage(error)}`, false)
@@ -1122,12 +1135,68 @@ async function collect1688TrackingInPage() {
     return mergeTrackingNumbers(...sources.map((source) => collect(source)))
   }
 
+  const getOpenRoots = () => {
+    const roots = [document]
+    const result = []
+    const seen = new Set()
+    let scannedElements = 0
+    for (let index = 0; index < roots.length && scannedElements < 6_000; index += 1) {
+      const root = roots[index]
+      if (!root || seen.has(root)) continue
+      seen.add(root)
+      result.push(root)
+      const elements = root.querySelectorAll?.('*') || []
+      for (const element of elements) {
+        scannedElements += 1
+        if (scannedElements > 6_000) break
+        if (element.shadowRoot) roots.push(element.shadowRoot)
+      }
+    }
+    return result
+  }
+
   const activateLogisticsTab = () => {
-    const tabPattern = /^(?:物流信息|物流详情|查看物流|物流跟踪|物流状态)$/
-    const candidates = Array.from(document.querySelectorAll(
-      'button, a, [role="tab"], [role="button"], [role="link"], [tabindex], [class*="tab"], [class*="Tab"]',
-    ))
-    const target = candidates.find((element) => tabPattern.test(textOf(element)))
+    const clickableSelector = 'button, a, [role="tab"], [role="button"], [role="link"], [tabindex]'
+    const candidateSelector = `${clickableSelector}, [class*="tab"], [class*="Tab"], span`
+    const normalizeLabel = (value) => String(value || '')
+      .replace(/\s+/g, ' ')
+      .replace(/[>＞›»]+$/g, '')
+      .trim()
+    // 1688 renders this tab with several equivalent labels depending on the
+    // order-page version: `物流`, `物流信息(1)`, `查看物流详情`, and so on.
+    // Deliberately exclude `物流编号`: it is an identifier, not a tab.
+    const logisticsLabel = /^(?:查看|查询)?(?:物流|配送|快递)(?:信息|详情|跟踪|状态|服务)?(?:\s*[（(]?\d+[）)]?)?$/
+    const closestClickable = (element) => {
+      let current = element
+      while (current) {
+        if (current.matches?.(clickableSelector)) return current
+        if (current.parentElement) {
+          current = current.parentElement
+          continue
+        }
+        const root = current.getRootNode?.()
+        current = root instanceof ShadowRoot ? root.host : null
+      }
+      return element
+    }
+
+    let target = null
+    let targetScore = -1
+    for (const root of getOpenRoots()) {
+      const candidates = root.querySelectorAll?.(candidateSelector) || []
+      for (const element of candidates) {
+        const labels = [textOf(element), element.getAttribute?.('aria-label'), element.getAttribute?.('title')]
+        const matched = labels.some((label) => logisticsLabel.test(normalizeLabel(label)))
+        if (!matched) continue
+        const clickable = closestClickable(element)
+        const score = (clickable.matches?.('[role="tab"]') ? 20 : 0)
+          + (clickable.matches?.('button, a, [role="button"], [role="link"]') ? 10 : 0)
+          + (element === clickable ? 2 : 0)
+        if (score <= targetScore) continue
+        target = clickable
+        targetScore = score
+      }
+    }
     if (!target) return false
     try {
       target.scrollIntoView?.({ block: 'center', inline: 'nearest' })
@@ -1141,11 +1210,11 @@ async function collect1688TrackingInPage() {
   let consecutiveNotShipped = 0
   let consecutiveUnavailableOrder = 0
   let sawLogisticsTab = false
-  const maxAttempts = 12
+  const maxAttempts = 18
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     // The order-detail URL normally selects this tab itself, but some 1688 page
     // variants ignore the URL fragment until the tab is clicked once.
-    if (attempt === 0 || (attempt === 3 && !sawLogisticsTab)) {
+    if (attempt === 0 || attempt === 2 || attempt === 5 || attempt === 9 || attempt === 13) {
       sawLogisticsTab ||= activateLogisticsTab()
     }
     const text = pageText()

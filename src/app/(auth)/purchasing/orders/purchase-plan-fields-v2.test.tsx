@@ -23,7 +23,11 @@ vi.mock('sonner', () => ({
 const itemId = '11111111-1111-4111-8111-111111111111'
 const orderNumber = '3317159640039018761'
 
-function renderFields(trackingNumber: string | null = null, showTrackingNumber = false) {
+function renderFields(
+  trackingNumber: string | null = null,
+  showTrackingNumber = false,
+  trackingSaveMode: 'plan' | 'inspection' = 'plan',
+) {
   render(
     <PurchasePlanFieldsV2
       id={itemId}
@@ -35,6 +39,7 @@ function renderFields(trackingNumber: string | null = null, showTrackingNumber =
       dateLabel="구매날짜"
       purchaseMethod="개인"
       allow1688TrackingLookup
+      trackingSaveMode={trackingSaveMode}
     />,
   )
 }
@@ -101,6 +106,7 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
       runId: '1688-tracking-run',
       orderNumber,
       trackingNumbers: ['S71268668516', 'S71268668517'],
+      trackingSource: 'waybill_number',
     })
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
@@ -110,6 +116,7 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
         body: JSON.stringify({
           orderNumber,
           trackingNumbers: ['S71268668516', 'S71268668517'],
+          trackingSource: 'waybill_number',
         }),
       }),
     ))
@@ -126,7 +133,7 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: itemId }) } as Response)
     renderFields(null, true)
 
-    fireEvent.change(screen.getByRole('textbox', { name: '운송장번호' }), { target: { value: '9823528519765' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /^운송장번호/ }), { target: { value: '9823528519765' } })
     fireEvent.click(screen.getByRole('button', { name: '저장' }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
@@ -134,6 +141,43 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ trackingNumber: '9823528519765' }),
+      }),
+    ))
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+  })
+
+  it('saves the visible inspection tracking field through the inspection record', async () => {
+    const inspection = {
+      revision: 3,
+      resolutionNote: '',
+      parcels: [{ id: 'parcel-1', trackingNumber: 'LP00850611544129', boxes: [{ id: 'box-1', quantity: null, lengthCm: null, widthCm: null, heightCm: null, weightKg: null }] }],
+    }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url === `/api/purchasing/purchase-requests/${itemId}/inspection` && !init?.method) {
+        return { ok: true, json: async () => ({ inspection }) } as Response
+      }
+      if (url === `/api/purchasing/purchase-requests/${itemId}/inspection` && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ inspection: { ...inspection, revision: 4 } }) } as Response
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    renderFields('LP00850611544129', true, 'inspection')
+
+    fireEvent.change(screen.getByRole('textbox', { name: /^운송장번호/ }), { target: { value: '9823528519765' } })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/purchasing/purchase-requests/${itemId}/inspection`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          revision: 3,
+          parcels: [{ ...inspection.parcels[0], trackingNumber: '9823528519765' }],
+          complete: false,
+          acknowledgeMismatch: false,
+          resolutionNote: '',
+        }),
       }),
     ))
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())

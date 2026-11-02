@@ -106,6 +106,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
     items: detail.items.map((item) => ({
       id: item.id,
       inventoryId: item.inventoryId,
+      itemCategory: item.itemCategory,
       warehouseCode: item.warehouseCode,
       sku: item.sku,
       productName: item.productName,
@@ -121,7 +122,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       receiptPacking: item.receiptPacking,
       productImage: productImages[item.id],
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
+    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,

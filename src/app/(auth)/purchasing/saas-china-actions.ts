@@ -7,6 +7,8 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import {
+  addChinaOutboundSample,
+  saveChinaOutboundPalletDimensions,
   addChinaOutboundShipmentItems,
   addChinaOutboundBox,
   addChinaOutboundBoxItem,
@@ -74,7 +76,7 @@ const createShipmentSchema = z.object({
   lines: z.array(z.object({
     inventoryId,
     quantity: z.coerce.number().int().positive('출고 수량은 1 이상의 정수여야 합니다.'),
-  })).min(1, '출고할 상품을 하나 이상 선택해주세요.'),
+  })),
 })
 
 const addShipmentItemsSchema = z.object({
@@ -244,7 +246,7 @@ export async function createChinaOutboundShipmentAction(input: unknown): Promise
   return runAction(async () => {
     const value = createShipmentSchema.parse(input)
     const actor = await getActor()
-    const shipment = await createChinaOutboundShipment({ ...value, ...actor })
+    const shipment = await createChinaOutboundShipment({ ...value, ...actor }, { allowEmpty: true })
     revalidateSaasChinaPaths()
     return { shipmentId: shipment.id }
   })
@@ -356,6 +358,31 @@ export async function addChinaOutboundShipmentItemsAction(input: unknown): Promi
     const value = addShipmentItemsSchema.parse(input)
     const actor = await getActor()
     await addChinaOutboundShipmentItems({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function addChinaOutboundSampleAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({
+      shipmentId, requestId: z.string().uuid(), productName: text('상품명', 1_000),
+      optionName: optionalText(200), warehouseCode: text('출고창고', 100),
+      quantity: z.coerce.number().int().positive(), note: optionalText(),
+    }).parse(input)
+    const actor = await getActor()
+    await addChinaOutboundSample({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundPalletDimensionsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const dimension = z.coerce.number().finite().positive().max(9_999_999.99)
+    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: dimension, widthCm: dimension, heightCm: dimension }).parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundPalletDimensions({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

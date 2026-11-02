@@ -5,6 +5,7 @@ import { TitleHelp } from './title-help'
 import { useRef, useState, type FormEvent } from 'react'
 import { Download, FileSpreadsheet, Loader2, X } from 'lucide-react'
 import type { prepareImportDocument } from '@/lib/purchasing/china-import-document'
+import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 
 type Prepared = ReturnType<typeof prepareImportDocument> & { snapshot: string }
 const inputClass = 'h-9 w-full rounded-md border bg-background px-2 text-sm'
@@ -68,7 +69,7 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
         body: JSON.stringify({
           ...settings, snapshot: data.snapshot,
           palletTareKg: data.palletCount ? Number(settings.palletTareKg) : 0,
-          palletExtraCbm: data.palletCount ? Number(settings.palletExtraCbm) : 0,
+          palletExtraCbm: data.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
           items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: Number(value.unitPriceCny) }])),
           boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: Number(value.grossWeightKg), cbm: Number(value.cbm) }])),
         }),
@@ -102,7 +103,8 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
         </fieldset>
         <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">박스 중량·부피 / 箱子重量和体积</legend>
           <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['박스 / 箱号', '파렛트 / 托盘', '총중량(kg) / 毛重', 'CBM / 体积'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.boxes.map((box) => <tr key={box.id} className="border-t"><td className="p-2">{box.boxNo}</td><td className="p-2">{box.palletNo ?? 'BOX'}</td>{(['grossWeightKg', 'cbm'] as const).map((key) => <td key={key} className="p-2"><input required type="number" min="0.000001" step="any" aria-label={`${box.boxNo} ${key}`} className={inputClass} value={boxes[box.id]?.[key] ?? ''} onChange={(event) => setBoxes((current) => ({ ...current, [box.id]: { ...current[box.id], [key]: event.target.value } }))} /></td>)}</tr>)}</tbody></table></div>
-          {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{[['palletTareKg', '파렛트 1개당 추가중량(kg) / 每托盘包装重量'], ['palletExtraCbm', '파렛트 1개당 추가부피(CBM) / 每托盘额外体积']].map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
+          {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{[['palletTareKg', '파렛트 1개당 추가중량(kg) / 每托盘包装重量'], ...(data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? [['palletExtraCbm', '미실측 파렛트 1개당 추가부피(CBM) / 未测量托盘的额外体积']] : [])].map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
+          {data.pallets.map((pallet) => <p key={pallet.id} className="text-sm">{pallet.palletNo} · 최종 파렛트 CBM / 最终托盘体积: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(pallet)) ?? '실측 규격 미입력 / 未填写实测尺寸'}</p>)}
         </fieldset>
         <button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}인보이스·패킹리스트 다운로드 / 下载发票和装箱单</button>
       </form> : null}

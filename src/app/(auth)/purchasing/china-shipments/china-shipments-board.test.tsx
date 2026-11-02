@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+const { addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+  addSample: vi.fn(),
+  savePalletDimensions: vi.fn(),
   createShipment: vi.fn(),
   updateShipment: vi.fn(),
   saveBoxSplits: vi.fn(),
@@ -27,6 +29,8 @@ vi.mock('next/navigation', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => navigate }))
 vi.mock('../saas-china-actions', () => ({
+  addChinaOutboundSampleAction: addSample,
+  saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
   addChinaOutboundShipmentItemsAction: addShipmentItems,
   assignChinaOutboundBoxesToPalletsAction: savePalletAssignments,
   cancelChinaOutboundShipmentAction: vi.fn(),
@@ -127,6 +131,8 @@ function visibleKoreanUi(root: Element) {
 }
 
 function selectOtherShipment() {
+  const assignment = screen.queryByRole('dialog', { name: '파렛트 배정 수정' })
+  if (assignment) fireEvent.click(within(assignment).getByRole('button', { name: '닫기' }))
   parkEditor()
   fireEvent.change(screen.getByLabelText('중국출고요청 선택'), { target: { value: 'b' } })
 }
@@ -254,6 +260,7 @@ function parkEditor() {
 }
 
 function palletAssignmentRow(boxNo: string) {
+  if (!screen.queryByRole('dialog', { name: '파렛트 배정 수정' })) fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 수정' }))
   const row = screen.getByLabelText(`박스 ${boxNo} 파렛트 배정 선택`).closest('tr')
   if (!row) throw new Error(`파렛트 배정 행을 찾을 수 없습니다: ${boxNo}`)
   return within(row)
@@ -277,6 +284,8 @@ describe('ChinaShipmentsBoard', () => {
     saveBoxStatuses.mockReset()
     savePalletStatuses.mockReset()
     addShipmentItems.mockReset()
+    addSample.mockReset()
+    savePalletDimensions.mockReset()
     toastError.mockReset()
     navigate.mockReset()
   })
@@ -602,75 +611,102 @@ describe('ChinaShipmentsBoard', () => {
 
 
 
-  it('saves only checked pallet statuses and keeps other changes available', async () => {
-    savePalletStatuses.mockResolvedValue({ ok: true })
+  it('shows only used pallets and expands boxes and their products independently', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-
-    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('파렛트 P2 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByLabelText('파렛트 P1 선택'))
-    fireEvent.click(screen.getByRole('button', { name: '파렛트 선택 저장' }))
-
-    await waitFor(() => expect(savePalletStatuses).toHaveBeenCalledTimes(1))
-    expect(savePalletStatuses).toHaveBeenCalledWith({
-      shipmentId: 'a',
-      updates: [{ palletId: 'pallet-1', status: 'in_progress' }],
-    })
-    expect(screen.getByLabelText('파렛트 P2 상태')).toHaveValue('in_progress')
+    expect(screen.getAllByRole('heading', { name: '사용 파렛트' })).toHaveLength(1)
+    expect(screen.queryByRole('heading', { name: '파렛트 상태' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'BOX-01 박스 상품 펼치기' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    const article = screen.getByRole('button', { name: '파렛트 P1 접기' }).closest('article')!
+    const boxButton = within(article).getByRole('button', { name: /박스 상품 펼치기/ })
+    expect(within(article).queryByText(/DONE-01 · 완료 상품/)).not.toBeInTheDocument()
+    fireEvent.click(boxButton)
+    expect(within(article).getByText(/DONE-01 · 완료 상품/)).toBeInTheDocument()
+    fireEvent.click(within(article).getByRole('button', { name: /박스 상품 접기/ }))
+    expect(within(article).queryByText(/DONE-01 · 완료 상품/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 접기' }))
+    expect(screen.queryByRole('button', { name: /박스 상품 펼치기/ })).not.toBeInTheDocument()
   })
 
-  it('saves all changed pallet completion statuses at once', async () => {
-    savePalletStatuses.mockResolvedValue({ ok: true })
+  it('calculates final CBM from measured pallet dimensions independently of product CBM', async () => {
+    savePalletDimensions.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-
-    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
-    fireEvent.change(screen.getByLabelText('파렛트 P2 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByRole('button', { name: '파렛트 전체 저장' }))
-
-    await waitFor(() => expect(savePalletStatuses).toHaveBeenCalledTimes(1))
-    expect(savePalletStatuses).toHaveBeenCalledWith({
-      shipmentId: 'a',
-      updates: [
-        { palletId: 'pallet-1', status: 'in_progress' },
-        { palletId: 'pallet-2', status: 'in_progress' },
-      ],
-    })
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    fireEvent.change(screen.getByLabelText('파렛트 P1 가로(cm)'), { target: { value: '120' } })
+    fireEvent.change(screen.getByLabelText('파렛트 P1 세로(cm)'), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText('파렛트 P1 높이(cm)'), { target: { value: '150' } })
+    expect(screen.getByText('최종 파렛트 CBM: 1.8000 CBM')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 규격 저장' }))
+    await waitFor(() => expect(savePalletDimensions).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: 120, widthCm: 100, heightCm: 150 }))
   })
 
-
-  it('saves a changed pallet status before switching shipments', async () => {
-    savePalletStatuses.mockResolvedValue({ ok: true })
+  it('retains pallet dimension edits after collapsing and reopening', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
-
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    fireEvent.change(screen.getByLabelText('파렛트 P1 가로(cm)'), { target: { value: '120' } })
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 접기' }))
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toHaveValue(120)
     selectOtherShipment()
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
-
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
-    expect(savePalletStatuses).toHaveBeenCalledWith({ shipmentId: 'a', updates: [{ palletId: 'pallet-1', status: 'in_progress' }] })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('keeps a failed pallet status save available for retry', async () => {
-    savePalletStatuses.mockResolvedValue({ ok: false, error: '파렛트 상태 저장 실패' })
+  it('opens pallet assignment editing on demand', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'in_progress' } })
-    fireEvent.click(screen.getByLabelText('파렛트 P1 선택'))
-    fireEvent.click(screen.getByRole('button', { name: '파렛트 선택 저장' }))
-
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('in_progress')
-    expect(screen.getByLabelText('파렛트 P1 선택')).toBeChecked()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 수정' }))
+    expect(screen.getByRole('dialog', { name: '파렛트 배정 수정' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('adds samples by hand without selecting existing stock', async () => {
+    addSample.mockResolvedValue({ ok: true })
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: '샘플 수기 추가' }))
+    fireEvent.change(screen.getByLabelText('상품명'), { target: { value: '신규 샘플' } })
+    fireEvent.change(screen.getByLabelText('수량'), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: '샘플 추가 저장' }))
+    await waitFor(() => expect(addSample).toHaveBeenCalledWith(expect.objectContaining({ shipmentId: 'a', productName: '신규 샘플', quantity: 3, warehouseCode: '중국창고', requestId: expect.any(String) })))
+    expect(addShipmentItems).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '샘플 추가 저장' })).not.toBeInTheDocument()
+  })
 
-  it('lets a used pallet be recorded without changing legacy box statuses', () => {
+  it('retries an ambiguous sample save with the same id and unchanged payload', async () => {
+    addSample.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({ ok: true })
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: '샘플 수기 추가' }))
+    fireEvent.change(screen.getByLabelText('상품명'), { target: { value: '샘플' } })
+    fireEvent.change(screen.getByLabelText('수량'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: '샘플 추가 저장' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('등록 결과를 확인하지 못했습니다. 다시 저장하면 중복 없이 확인합니다.'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '샘플 추가 저장' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '샘플 추가 저장' }))
+    await waitFor(() => expect(addSample).toHaveBeenCalledTimes(2))
+    expect(addSample.mock.calls[1]![0]).toEqual(addSample.mock.calls[0]![0])
+  })
+
+  it('translates expanded pallet controls and manual samples while keeping product identities', async () => {
     const detail = makeShipmentWithBoxAndPalletStatuses()
-    detail.boxes[0]!.completionStatus = 'in_progress'
-    detail.pallets[0]!.completionStatus = 'in_progress'
-    renderShipment(detail, 'pallets')
-    fireEvent.change(screen.getByLabelText('파렛트 P1 상태'), { target: { value: 'completed' } })
-    expect(screen.getByLabelText('파렛트 P1 상태')).toHaveValue('completed')
-    expect(toastError).not.toHaveBeenCalled()
+    const { rerender } = renderShipmentWithLanguage(detail, 'pallets')
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    fireEvent.click(await screen.findByRole('button', { name: '托盘 P1 展开/收起' }))
+    const root = document.querySelector('[data-purchasing-translate]')!
+    await waitFor(() => expect(visibleKoreanUi(root)).toEqual([]))
+    fireEvent.click(screen.getByRole('button', { name: /箱 BOX-01 商品/ }))
+    await waitFor(() => expect(visibleKoreanUi(root)).toEqual([]))
+    expect(screen.getByText(/DONE-01 · 완료 상품/)).toBeInTheDocument()
+    rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="items" showCreate={false} /></>)
+    fireEvent.click(await screen.findByRole('button', { name: '手动添加样品' }))
+    await waitFor(() => expect(visibleKoreanUi(root)).toEqual([]))
+  })
+
+  it('allows a sample-only shipment to be created with no existing stock', async () => {
+    createShipment.mockResolvedValue({ ok: false, error: 'test' })
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
+    fireEvent.change(screen.getByLabelText('도착지'), { target: { value: '인천' } })
+    fireEvent.click(screen.getByRole('button', { name: '중국출고요청 만들기' }))
+    await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [], destinationName: '인천' })))
   })
 
   it('offers direct dispatch and removes cancellation and ready buttons', () => {

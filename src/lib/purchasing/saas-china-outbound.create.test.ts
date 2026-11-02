@@ -3,6 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import {
   chinaOutboundShipmentItems,
+  chinaOutboundPallets,
   chinaOutboundBoxes,
   chinaOutboundBoxItems,
   chinaOutboundShipments,
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
-import { addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment } from './saas-china-outbound'
+import { addChinaOutboundSample, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
 
@@ -35,6 +36,7 @@ let allocations: Row[]
 let purchaseItems: Row[]
 let boxes: Row[]
 let boxItems: Row[]
+let pallets: Row[]
 let sequence: number
 
 function paramsFor(condition: SQL) {
@@ -43,6 +45,7 @@ function paramsFor(condition: SQL) {
 
 function queryRows(rows: Row[], condition: SQL) {
   const query = dialect.sqlToQuery(condition)
+  if (query.sql.includes('false')) return []
   return rows.filter((row) => (
     (!query.sql.includes('"user_id"') || query.params.includes(row.userId))
     && (!query.sql.includes('"inventory_id"') || query.params.includes(row.inventoryId))
@@ -65,7 +68,7 @@ function makeTransaction() {
                 : table === purchaseRequestItems ? purchaseItems
                   : table === chinaOutboundShipments ? shipments
                     : table === chinaOutboundShipmentItems ? shipmentItems
-                      : table === chinaOutboundBoxes ? boxes : table === chinaOutboundBoxItems ? boxItems : null
+                      : table === chinaOutboundPallets ? pallets : table === chinaOutboundBoxes ? boxes : table === chinaOutboundBoxItems ? boxItems : null
           if (!rows) throw new Error('Unexpected select table')
           const result = Promise.resolve(queryRows(rows, condition))
           return Object.assign(result, {
@@ -77,7 +80,7 @@ function makeTransaction() {
     })),
     insert: vi.fn().mockImplementation((table: unknown) => ({
       values: (values: Omit<Row, 'id'>) => {
-        const rows = table === chinaOutboundShipments ? shipments
+        const rows = table === saasChinaInventory ? inventories : table === chinaOutboundShipments ? shipments
           : table === chinaOutboundShipmentItems ? shipmentItems
             : table === saasChinaInventoryMovements ? movements
               : table === saasChinaShipmentPurchaseAllocations ? allocations
@@ -99,7 +102,7 @@ function makeTransaction() {
               : table === purchaseRequestItems ? purchaseItems
                 : table === chinaOutboundShipments ? shipments
                   : table === saasChinaShipmentPurchaseAllocations ? allocations
-                    : table === chinaOutboundShipmentItems ? shipmentItems : table === chinaOutboundBoxes ? boxes : null
+                    : table === chinaOutboundShipmentItems ? shipmentItems : table === chinaOutboundPallets ? pallets : table === chinaOutboundBoxes ? boxes : null
           if (!rows) throw new Error('Unexpected update table')
           const matchingRows = queryRows(rows, condition)
           for (const match of matchingRows) {
@@ -128,8 +131,51 @@ describe('createChinaOutboundShipment', () => {
     purchaseLinks = []
     allocations = []
     purchaseItems = []
-    boxes = []; boxItems = []
+    boxes = []; boxItems = []; pallets = [{ id: 'pallet-1', userId: workspaceUserId, shipmentId: 'existing-shipment', palletNo: 'P1' }]
     mocks.execute.mockResolvedValue(undefined)
+  })
+
+  it('receives and reserves manual samples without modifying purchased stock or purchase links', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    const original = JSON.stringify(inventories)
+    const input = { userId: workspaceUserId, createdBy: 'admin', shipmentId: 'existing-shipment', requestId: '11111111-1111-4111-8111-111111111111', productName: '수기 샘플', quantity: 3, warehouseCode: '중국창고' }
+    const first = await addChinaOutboundSample(input)
+    const retry = await addChinaOutboundSample(input)
+    expect(retry.id).toBe(first.id)
+    expect(shipmentItems).toHaveLength(1)
+    expect(shipmentItems[0]).toMatchObject({ itemCategory: '샘플', reservedQuantity: 3, packedQuantity: 0 })
+    expect(inventories).toHaveLength(2)
+    expect(JSON.stringify(inventories.slice(0, 1))).toBe(original)
+    expect(inventories[1]).toMatchObject({ itemCategory: '샘플', onHandQuantity: 3, reservedQuantity: 3, availableQuantity: 0 })
+    expect(movements.map((row) => [row.movementType, row.onHandDelta, row.reservedDelta])).toEqual([['arrival', 3, 0], ['shipment_reservation', 0, 3]])
+    expect(purchaseLinks).toHaveLength(0); expect(allocations).toHaveLength(0)
+  })
+
+  it('rejects manual samples in closed work and validates quantity before writing', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    const input = { userId: workspaceUserId, createdBy: 'admin', shipmentId: 'existing-shipment', requestId: '11111111-1111-4111-8111-111111111111', productName: '샘플', quantity: 3, warehouseCode: '중국창고' }
+    shipments[0]!.status = 'dispatched'
+    await expect(addChinaOutboundSample(input)).rejects.toThrow('초안 또는 포장중')
+    await expect(addChinaOutboundSample({ ...input, quantity: 0 })).rejects.toThrow()
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('supports an explicit empty draft for samples while retaining normal creation validation', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    await expect(createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [] })).rejects.toThrow('하나 이상')
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [] }, { allowEmpty: true })
+    expect(shipment.status).toBe('draft'); expect(shipmentItems).toHaveLength(0); expect(movements).toHaveLength(0)
+  })
+
+  it('saves all measured pallet dimensions and rejects invalid, foreign, and closed updates', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    const input = { userId: workspaceUserId, shipmentId: 'existing-shipment', palletId: 'pallet-1', lengthCm: 120, widthCm: 100, heightCm: 150 }
+    await saveChinaOutboundPalletDimensions(input)
+    expect(pallets[0]).toMatchObject({ lengthCm: '120', widthCm: '100', heightCm: '150' })
+    await expect(saveChinaOutboundPalletDimensions({ ...input, heightCm: 0 })).rejects.toThrow('모두 입력')
+    await expect(saveChinaOutboundPalletDimensions({ ...input, userId: 'foreign' })).rejects.toThrow('찾을 수 없습니다')
+    shipments[0]!.status = 'dispatched'
+    await expect(saveChinaOutboundPalletDimensions(input)).rejects.toThrow('초안 또는 포장중')
   })
 
   it.each(['draft', 'packing', 'ready'])(

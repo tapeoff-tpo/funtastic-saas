@@ -167,7 +167,11 @@ export async function exportChinaImportDocument(
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
   const grossWeight = prepared.boxes.reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0) + prepared.palletCount * options.palletTareKg
-  const totalCbm = prepared.boxes.reduce((sum, box) => sum + options.boxes[box.id].cbm, 0) + prepared.palletCount * options.palletExtraCbm
+  // A measured loaded pallet is one external package. Never add its inner
+  // boxes again. Unmeasured legacy pallets retain their document override.
+  const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].cbm, 0)
+    + prepared.pallets.reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet)
+      ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + options.boxes[box.id].cbm, options.palletExtraCbm)), 0)
   const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, V: grossWeight }
   for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = { formula: `SUM(${column}20:${column}${totalRow - 1})`, result }
   sheet.getCell(`A${totalRow}`).value = 'TOTAL'

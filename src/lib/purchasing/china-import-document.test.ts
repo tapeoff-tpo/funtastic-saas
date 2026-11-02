@@ -45,6 +45,13 @@ describe('China import documents', () => {
     expect(prepared).toMatchObject({ boxCount: 2, palletCount: 1, looseBoxCount: 1, packageCount: 2 })
     expect(prepared.items.map((item) => item.quantity)).toEqual([20, 5])
   })
+  it('uses the measured loaded pallet volume once plus loose boxes in final CBM', async () => {
+    const measured = { ...detail, pallets: [{ ...detail.pallets[0]!, lengthCm: 120, widthCm: 100, heightCm: 150 }] }
+    const buffer = await exportChinaImportDocument(measured, metadata, options)
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('sheet')!.getCell('X112').value).toBeCloseTo(1.82)
+  })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
     expect(() => prepareImportDocument({ ...detail, boxItems: detail.boxItems.slice(0, 2) }, metadata)).toThrow('출고수량')
   })

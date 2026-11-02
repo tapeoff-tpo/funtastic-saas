@@ -27,6 +27,9 @@ export type ChinaOutboundPackingExportDetail = {
   pallets: Array<{
     id: string
     palletNo: string
+    lengthCm?: number | string | null
+    widthCm?: number | string | null
+    heightCm?: number | string | null
   }>
   boxes: Array<{
     id: string
@@ -175,7 +178,7 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '파렛트',
     '파렛트 박스 수',
     '파렛트 총 적재수량',
-    '파렛트 총 CBM',
+    '제품 적재 CBM',
     '박스',
     '박스 규격 (cm)',
     '박스 CBM',
@@ -183,7 +186,9 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '상품명',
     '옵션명',
     '박스 적재수량',
-  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16])
+    '최종 파렛트 CBM',
+    '파렛트 실측 규격 (cm)',
+  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26])
 
   let palletRowNo = 1
   for (const pallet of detail.pallets) {
@@ -212,6 +217,8 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
           item?.productName ?? '',
           item?.optionName ?? '',
           packedItem?.quantity ?? 0,
+          calculateChinaOutboundBoxCbm(pallet) ?? '',
+          formatChinaOutboundBoxDimensions(pallet) ?? '',
         ])
       }
     }
@@ -291,6 +298,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackin
     ['총 CBM', totalCbm],
     ['등록일', formatDateTime(detail.shipment.createdAt)],
     ['내보낸 시각', formatDateTime(new Date())],
+    ['최종 파렛트 CBM 합계', detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? '미입력' : detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet) ?? 0), 0)],
   ]
 
   for (const [label, value] of rows) {

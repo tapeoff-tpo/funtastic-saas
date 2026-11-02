@@ -308,6 +308,7 @@ type ChinaOutboundBoxItemRow = typeof chinaOutboundBoxItems.$inferSelect
 type SaasChinaPurchaseLinkRow = typeof saasChinaPurchaseLinks.$inferSelect
 
 type ChinaOutboundShipmentCreationOptions = {
+  allowEmpty?: boolean
   initializeInspectionPacking?: boolean
   /**
    * Workbook uploads have a stable import key. A retry must return the first
@@ -532,6 +533,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     CONSTRAINT china_outbound_shipment_items_sort_nonnegative CHECK (sort_order >= 0)
   );
 
+  ALTER TABLE china_outbound_shipment_items
+    ADD COLUMN IF NOT EXISTS item_category varchar(100);
   ALTER TABLE china_outbound_shipment_items
     ADD COLUMN IF NOT EXISTS box_split_status varchar(20);
   ALTER TABLE china_outbound_shipment_items
@@ -1792,7 +1795,7 @@ export async function createChinaOutboundShipment(
   options: ChinaOutboundShipmentCreationOptions = {},
 ) {
   await ensureSaasChinaOutboundSchema()
-  const normalizedLines = normalizeShipmentLines(input.lines)
+  const normalizedLines = options.allowEmpty && input.lines.length === 0 ? [] : normalizeShipmentLines(input.lines)
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
     const shipmentNo = optionalText(input.shipmentNo) ?? createShipmentNo()
@@ -1863,6 +1866,7 @@ export async function createChinaOutboundShipment(
           userId: input.userId,
           sku: inventory.sku,
           productName: inventory.productName,
+          itemCategory: inventory.itemCategory,
           optionKey: inventory.optionKey,
           optionName: inventory.optionName,
           originWarehouseCode: inventory.warehouseCode,
@@ -2267,6 +2271,7 @@ export async function addChinaOutboundShipmentItems(input: {
             userId: input.userId,
             sku: inventory.sku,
             productName: inventory.productName,
+            itemCategory: inventory.itemCategory,
             optionKey: inventory.optionKey,
             optionName: inventory.optionName,
             originWarehouseCode: inventory.warehouseCode,
@@ -2324,6 +2329,79 @@ export async function addChinaOutboundShipmentItems(input: {
 
     await reconcileSaasChinaPurchaseLinks(tx, input.userId, [...affectedPurchaseLinkIds])
     return shipment
+  })
+}
+
+/** Manual samples are received and reserved atomically, without touching purchase lots. */
+export async function addChinaOutboundSample(input: {
+  userId: string; createdBy: string; shipmentId: string; requestId: string
+  productName: string; optionName?: string | null; quantity: number; warehouseCode: string; note?: string | null
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const quantity = positiveInteger(input.quantity, '샘플 수량')
+  const productName = requiredText(input.productName, '상품명')
+  const warehouseCode = requiredText(input.warehouseCode, '출고창고')
+  const optionName = optionalText(input.optionName)
+  if (!/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new Error('샘플 등록번호를 확인해주세요.')
+  const sku = `SAMPLE-${input.requestId}`
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const existing = await tx.select().from(chinaOutboundShipmentItems).where(and(
+      eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
+    ))
+    // A network retry must not receive or reserve the sample twice.
+    const previous = existing.find((item) => item.sku === sku)
+    if (previous) return previous
+    const [inventory] = await tx.insert(saasChinaInventory).values({
+      userId: input.userId, createdBy: input.createdBy, warehouseCode, sku, productName,
+      itemCategory: '샘플', optionKey: optionName ?? '', optionName,
+      onHandQuantity: quantity, reservedQuantity: quantity, availableQuantity: 0, lastReceivedAt: new Date(),
+    }).returning()
+    if (!inventory) throw new Error('샘플 재고를 저장하지 못했습니다.')
+    const [item] = await tx.insert(chinaOutboundShipmentItems).values({
+      userId: input.userId, shipmentId: shipment.id, inventoryId: inventory.id, sku, productName,
+      itemCategory: '샘플', optionKey: optionName ?? '', optionName, originWarehouseCode: warehouseCode,
+      reservedQuantity: quantity, boxSplitStatus: 'in_progress',
+      sortOrder: existing.reduce((maximum, row) => Math.max(maximum, row.sortOrder), -1) + 1,
+      note: optionalText(input.note),
+    }).returning()
+    if (!item) throw new Error('샘플 출고품목을 저장하지 못했습니다.')
+    await insertSaasChinaInventoryMovement(tx, {
+      userId: input.userId, createdBy: input.createdBy, inventoryId: inventory.id, movementType: 'arrival',
+      onHandDelta: quantity, reservedDelta: 0, onHandBefore: 0, reservedBefore: 0,
+      onHandAfter: quantity, reservedAfter: 0, sourceKey: `sample-receipt:${inventory.id}`,
+      note: optionalText(input.note) ?? '샘플 수기 입고',
+    })
+    await insertSaasChinaInventoryMovement(tx, {
+      userId: input.userId, createdBy: input.createdBy, inventoryId: inventory.id, movementType: 'shipment_reservation',
+      onHandDelta: 0, reservedDelta: quantity, onHandBefore: quantity, reservedBefore: 0,
+      onHandAfter: quantity, reservedAfter: quantity, sourceKey: `sample-reservation:${item.id}`, note: shipment.shipmentNo,
+    })
+    await tx.update(chinaOutboundShipments).set({
+      originWarehouseCode: getChinaOutboundOriginWarehouseCode([...existing.map((row) => row.originWarehouseCode), warehouseCode]), updatedAt: new Date(),
+    }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, shipment.id)))
+    return item
+  })
+}
+
+export async function saveChinaOutboundPalletDimensions(input: {
+  userId: string; shipmentId: string; palletId: string
+  lengthCm: number; widthCm: number; heightCm: number
+}) {
+  await ensureSaasChinaOutboundSchema()
+  const dimensions = { lengthCm: input.lengthCm, widthCm: input.widthCm, heightCm: input.heightCm }
+  for (const value of Object.values(dimensions)) {
+    if (!Number.isFinite(value) || value <= 0 || value > 9_999_999.99) throw new Error('파렛트 가로·세로·높이는 0보다 큰 숫자로 모두 입력해주세요.')
+  }
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    const [pallet] = await tx.update(chinaOutboundPallets).set({
+      lengthCm: String(input.lengthCm), widthCm: String(input.widthCm), heightCm: String(input.heightCm), updatedAt: new Date(),
+    }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
+    return pallet
   })
 }
 

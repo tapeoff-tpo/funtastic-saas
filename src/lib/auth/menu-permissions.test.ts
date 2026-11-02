@@ -5,6 +5,13 @@ import { canAccessApi, canAccessPage, canUseMenu, MENU_PATHS, type MenuAccess } 
 
 const restricted: MenuAccess = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] }
 describe('menu authorization policy', () => {
+  it('allows image reads for purchasing users while reserving catalogue copying for product management', () => {
+    expect(canAccessApi(restricted, '/api/purchasing/product-images')).toBe(true)
+    expect(canAccessApi(restricted, '/api/purchasing/product-images/files/1')).toBe(true)
+    expect(canAccessApi(restricted, '/api/new-products/catalogue-images', 'POST')).toBe(false)
+    expect(canAccessApi({ superAdmin: false, allowedMenus: ['/new-products'] }, '/api/new-products/catalogue-images', 'POST')).toBe(true)
+    expect(canAccessApi({ superAdmin: false, allowedMenus: ['/orders'] }, '/api/purchasing/product-images')).toBe(false)
+  })
   it('preserves existing admin business access and reserves account administration for super admins', () => {
     expect(MENU_PATHS.every((path) => canAccessPage({ superAdmin: false, allowedMenus: null }, path))).toBe(true)
     expect(canAccessPage({ superAdmin: false, allowedMenus: null }, '/admin/accounts')).toBe(false)

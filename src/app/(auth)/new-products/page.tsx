@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductPageSetup } from '@/lib/new-products/workflow'
 import { NewProductBoard } from './new-product-board'
+import { CatalogueImageSyncButton } from './catalogue-image-sync-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,7 @@ export default async function NewProductsPage() {
           1차 통과부터 등록 완료까지, 상품별 정보와 샘플·품질표시 자료를 한곳에서 관리합니다.
         </p>
       </header>
+      <CatalogueImageSyncButton />
       <NewProductBoard
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}

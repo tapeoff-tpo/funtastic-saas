@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import { Button } from '@/components/ui/button'
 import { blankInspectionBox, inspectionSummary, type InspectionParcel, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 
@@ -10,14 +11,14 @@ type Detail = { id: string; status: string; productName: string; sku: string; in
 
 export function PurchaseInspectionButton({ id, productName, mode = 'inspection' }: { id: string; productName: string; mode?: 'image' | 'inspection' }) {
   const [open, setOpen] = useState(false)
+  if (mode === 'image') return <PurchasingProductImageButton purchaseItemId={id} productName={productName} />
   return <>
-    {mode === 'image' ? <button type="button" data-no-translate title="상품 이미지 보기" className="block w-full truncate text-left font-medium text-blue-700 underline-offset-2 hover:underline" onClick={() => setOpen(true)}>{productName}</button>
-      : <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>송장·검수</Button>}
-    {open && <InspectionDialog id={id} mode={mode} onClose={() => setOpen(false)} />}
+    <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>송장·검수</Button>
+    {open && <InspectionDialog id={id} onClose={() => setOpen(false)} />}
   </>
 }
 
-function InspectionDialog({ id, mode, onClose }: { id: string; mode: 'image' | 'inspection'; onClose: () => void }) {
+function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
   const router = useRouter()
   const [data, setData] = useState<Detail | null>(null)
@@ -80,19 +81,12 @@ function InspectionDialog({ id, mode, onClose }: { id: string; mode: 'image' | '
     onCancel={(event) => { event.preventDefault(); if (!pending) close() }}
     className="fixed inset-0 m-auto max-h-[92dvh] w-[min(64rem,96vw)] rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/40">
     <div className="sticky top-0 z-10 border-b bg-background p-4">
-      <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">{mode === 'image' ? '상품 이미지' : '송장·검수'}</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
+      <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
       {data && <p className="mt-2 text-sm" data-no-translate>{data.sku} · {data.productName}</p>}
     </div>
     <div className="space-y-4 p-4">
       {error ? <div role="alert" className="text-sm text-red-700">{error}<Button type="button" variant="outline" className="ml-3" onClick={() => setAttempt((value) => value + 1)}>다시 불러오기</Button></div> : !data ? <p>불러오는 중…</p> : null}
-      {data && mode === 'image' && <div className="grid gap-4 sm:grid-cols-2">
-        {data.imageUrls.length ? data.imageUrls.map((url) => <div key={url} className="rounded-lg border p-2">
-          {/* Product images come from the authenticated item master and may use external hosts. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={data.productName} className="max-h-[65dvh] w-full object-contain" />
-        </div>) : <p className="text-sm text-muted-foreground">등록된 상품 이미지가 없습니다.</p>}
-      </div>}
-      {data && mode === 'inspection' && inspection && summary && <>
+      {data && inspection && summary && <>
         <div className={`rounded-lg border p-3 text-sm ${summary.hasError && inspection.parcels.length ? 'border-red-300 bg-red-50 text-red-800' : 'bg-muted/30'}`}>
           <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
           {inspection.parcels.length && summary.hasError ? <p role="status" className="mt-1 font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p className="mt-1">입고수량 미입력</p> : null}
@@ -129,7 +123,7 @@ function InspectionDialog({ id, mode, onClose }: { id: string; mode: 'image' | '
         {!editable && <p className="text-sm text-muted-foreground">검수가 완료된 입고 기록입니다.</p>}
       </>}
     </div>
-    {mode === 'inspection' && data && editable && <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background p-4">
+    {data && editable && <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background p-4">
       <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장 · 검수로 이동</Button>
       <Button type="button" disabled={pending} onClick={() => void save(true)}>{pending ? '저장 중…' : '검수완료 · 중국창고도착'}</Button>
     </div>}

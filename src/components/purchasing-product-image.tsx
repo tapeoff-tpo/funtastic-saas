@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { createProductImageLoader, type ProductImageLoader, type ProductImageReference } from '@/lib/purchasing/product-image-loader'
 
@@ -28,7 +28,18 @@ export function PurchasingProductImageButton({ productName, imageData, ...refere
     {open && <ProductImageDialog key={purchaseItemId ?? shipmentItemId} loader={loader} productName={productName} onClose={() => setOpen(false)} />}</>
 }
 
-function ProductImageDialog({ loader, productName, onClose }: { loader: ProductImageLoader; productName: string; onClose: () => void }) {
+/** Existing attachment addresses can use the same gallery without a lookup API. */
+export function ProductImageGalleryButton({ productName, imageUrls, children, className }: { productName: string; imageUrls: string[]; children: ReactNode; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const loader = useMemo<ProductImageLoader>(() => {
+    const data: ProductImageResult = { sku: '', productName, imageUrls, source: 'product-management' }
+    return { peek: () => data, load: async () => data, preload() {}, dispose() {} }
+  }, [productName, imageUrls])
+  return <><button type="button" title="상품 이미지 보기" className={className} onClick={() => setOpen(true)}>{children}</button>
+    {open && <ProductImageDialog loader={loader} productName={productName} catalogueFallback={false} onClose={() => setOpen(false)} />}</>
+}
+
+function ProductImageDialog({ loader, productName, onClose, catalogueFallback = true }: { loader: ProductImageLoader; productName: string; onClose: () => void; catalogueFallback?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const [data, setData] = useState<ProductImageResult | null>(() => loader.peek())
@@ -54,7 +65,7 @@ function ProductImageDialog({ loader, productName, onClose }: { loader: ProductI
   function imageFailed(url: string) {
     failed.current.add(url)
     setFailedImages([...failed.current])
-    if ((data?.source === 'item-master' || data?.source === 'product-management') && failed.current.size >= data.imageUrls.length && !catalogueOnly) { reset(); setCatalogueOnly(true) }
+    if (catalogueFallback && (data?.source === 'item-master' || data?.source === 'product-management') && failed.current.size >= data.imageUrls.length && !catalogueOnly) { reset(); setCatalogueOnly(true) }
   }
   return <dialog ref={ref} data-purchasing-translate aria-labelledby={titleId} onClose={(event) => { event.stopPropagation(); onClose() }} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); ref.current?.close() }} className={`fixed inset-0 m-auto max-h-[92dvh] ${images.length > 1 ? 'w-[min(64rem,96vw)]' : 'w-[min(32rem,96vw)]'} overflow-y-auto rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/40`}>
     <div className="sticky top-0 z-10 border-b bg-background p-4"><div className="flex items-center justify-between gap-3"><h2 id={titleId} className="text-lg font-semibold">상품 이미지</h2><button type="button" onClick={() => ref.current?.close()} className="h-9 rounded-md border px-3 text-sm">닫기</button></div><p className="mt-2 text-sm" data-no-translate>{data?.sku ? `${data.sku} · ` : ''}{productName}</p></div>

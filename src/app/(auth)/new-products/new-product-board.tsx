@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
@@ -28,6 +28,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
 import { cn } from '@/lib/utils'
+import { ProductImageGalleryButton } from '@/components/purchasing-product-image'
+import { createNewProductDetailLoader } from '@/lib/new-products/detail-loader'
 import type { CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import type { DaouWorksSourceData } from '@/lib/new-products/daou-works-import'
 import { calculateSalesPrices } from '@/lib/new-products/price-calculator'
@@ -105,12 +107,19 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   const [pageSize, setPageSize] = useState(50)
   const [sortBy, setSortBy] = useState<NewProductSummarySort>('updatedAt')
   const [sortDirection, setSortDirection] = useState<NewProductSummarySortDirection>('desc')
+  const detailLoader = useMemo(() => createNewProductDetailLoader(), [])
+  const detailIntentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (detailIntentTimer.current) clearTimeout(detailIntentTimer.current); detailLoader.clear() }, [detailLoader])
+  function prepareProduct(id: string) {
+    if (detailIntentTimer.current) clearTimeout(detailIntentTimer.current)
+    detailIntentTimer.current = setTimeout(() => { void detailLoader.load(id).catch(() => {}) }, 120)
+  }
 
-  function showProduct(id: string) {
+  const showProduct = useCallback((id: string) => {
     setMode('view')
     setSelectedId(id)
-    setItem((current) => current?.id === id ? current : null)
-  }
+    setItem((current) => current?.id === id ? current : detailLoader.peek(id))
+  }, [detailLoader])
 
   function showProductList() {
     setMode('view')
@@ -130,7 +139,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
+  }, [showProduct])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -184,18 +193,14 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
   useEffect(() => {
     if (mode !== 'view' || !selectedId) return
-    const controller = new AbortController()
-    void fetch(`/api/new-products/items/${selectedId}`, { signal: controller.signal, cache: 'no-store' })
-      .then(async (response) => {
-        const result = await response.json() as { item?: NewProductItem; error?: string }
-        if (!response.ok || !result.item) throw new Error(result.error || '상품 상세를 불러오지 못했습니다.')
-        setItem(result.item)
-      })
+    let active = true
+    void detailLoader.load(selectedId)
+      .then((item) => { if (active) setItem(item) })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '상품 상세를 불러오지 못했습니다.')
+        if (active) toast.error(error instanceof Error ? error.message : '상품 상세를 불러오지 못했습니다.')
       })
-    return () => controller.abort()
-  }, [dataRevision, mode, selectedId])
+    return () => { active = false }
+  }, [dataRevision, mode, selectedId, detailLoader])
 
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
   const hasSearchQuery = Boolean(query.trim())
@@ -209,6 +214,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
   function selectProduct(id: string) {
     if (!id) return
+    if (detailIntentTimer.current) clearTimeout(detailIntentTimer.current)
     window.history.pushState(
       { ...window.history.state, newProductItemId: id },
       '',
@@ -244,6 +250,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }
 
   function reloadItem(id: string) {
+    detailLoader.clear()
     setMode('view')
     setSelectedId(id)
     setItem(null)
@@ -252,6 +259,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }
 
   function handleDeleted() {
+    detailLoader.clear()
     setMode('view')
     setSelectedId(null)
     setItem(null)
@@ -260,6 +268,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }
 
   function handleSummaryStageChanged(itemId: string, stageId: string) {
+    detailLoader.clear()
     const stage = initialStages.find((candidate) => candidate.id === stageId)
     if (!stage) return
 
@@ -319,6 +328,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
             {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
             {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
             {canManageSettings && <DaouWorksImportDialog stages={initialStages} onImported={() => {
+              detailLoader.clear()
               setSelectedStageIds([])
               setQuery('')
               setPage(1)
@@ -373,6 +383,8 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           sortBy={sortBy}
           sortDirection={sortDirection}
           onSelect={selectProduct}
+          onPrepare={prepareProduct}
+          onWarmImage={detailLoader.warm}
           onDeleted={handleDeleted}
           onStageChanged={handleSummaryStageChanged}
           onPageChange={setPage}
@@ -398,6 +410,8 @@ function ProductSummaryList({
   sortBy,
   sortDirection,
   onSelect,
+  onPrepare,
+  onWarmImage,
   onDeleted,
   onStageChanged,
   onPageChange,
@@ -414,12 +428,28 @@ function ProductSummaryList({
   sortBy: NewProductSummarySort
   sortDirection: NewProductSummarySortDirection
   onSelect: (id: string) => void
+  onPrepare: (id: string) => void
+  onWarmImage: (url: string) => void
   onDeleted: () => void
   onStageChanged: (itemId: string, stageId: string) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
   onSortChange: (sort: NewProductSummarySort) => void
 }) {
+  const tableRef = useRef<HTMLTableElement>(null)
+  useEffect(() => {
+    if (!tableRef.current || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        const url = (entry.target as HTMLElement).dataset.productImage
+        if (url) onWarmImage(url)
+        observer.unobserve(entry.target)
+      }
+    }, { rootMargin: '100px' })
+    tableRef.current.querySelectorAll('[data-product-image]').forEach((row) => observer.observe(row))
+    return () => observer.disconnect()
+  }, [summaries, loading, onWarmImage])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [changingStageIds, setChangingStageIds] = useState<string[]>([])
   const [pendingStageIds, setPendingStageIds] = useState<Record<string, string>>({})
@@ -504,7 +534,7 @@ function ProductSummaryList({
         <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />상품 목록을 불러오는 중입니다.</div>
       ) : summaries.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[940px] table-fixed text-sm">
+          <table ref={tableRef} className="w-full min-w-[940px] table-fixed text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr className="border-b">
                 <th className="w-12 px-3 py-2.5 text-center">
@@ -530,6 +560,8 @@ function ProductSummaryList({
                 return (
                   <tr
                     key={summary.id}
+                    data-product-image={summary.productImageId ? `/api/new-products/attachments/${summary.productImageId}` : undefined}
+                    onPointerEnter={() => onPrepare(summary.id)}
                     onClick={(event) => {
                       if ((event.target as HTMLElement).closest('button, input, label, select')) return
                       onSelect(summary.id)
@@ -564,7 +596,7 @@ function ProductSummaryList({
                       {summary.sampleCode || summary.productNumber || '미입력'}
                     </td>
                     <td className="w-[280px] px-3 py-3 align-middle">
-                      <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <button type="button" onFocus={() => onPrepare(summary.id)} onClick={() => onSelect(summary.id)} className="block w-full text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <span data-no-translate title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
                       </button>
                     </td>
@@ -901,6 +933,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
               kind={kind}
               label={label}
               attachments={item?.attachments ?? []}
+              productName={item?.productName ?? label}
               pendingFiles={pendingAttachments[kind] ?? []}
               pendingDeleteIds={pendingAttachmentDeletes}
               disabled={pending || (Boolean(item) && !editing)}
@@ -1636,9 +1669,10 @@ function OptionTableInput({ value, onChange, disabled, inputMode, numeric = fals
   return <Input value={displayValue} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onChange={(event) => onChange(numeric ? normalizeMoneyInput(event.target.value) : event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-center text-[11px]" />
 }
 
-function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {
+function AttachmentPanel({ kind, label, productName, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {
   kind: NewProductAttachment['kind']
   label: string
+  productName: string
   attachments: NewProductAttachment[]
   pendingFiles: File[]
   pendingDeleteIds: string[]
@@ -1753,14 +1787,15 @@ function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDelete
                     <input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment.id)} disabled={busy || disabled} aria-label={`${attachment.fileName} 선택`} className="size-3.5 accent-foreground" />
                   </label>
                 ) : null}
-                <a href={`/api/new-products/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="block">
-                  {isPdf ? (
+                {isPdf ? <a href={`/api/new-products/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="block">
                     <div className="flex h-20 flex-col items-center justify-center px-2"><FileText className="h-6 w-6 text-red-500" /><span className="mt-1 line-clamp-1 max-w-full text-[10px]">{attachment.fileName}</span></div>
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} loading="lazy" decoding="async" className="h-24 w-full object-cover" />
-                  )}
-                </a>
+                  </a> : <ProductImageGalleryButton productName={productName} imageUrls={[
+                    `/api/new-products/attachments/${attachment.id}`,
+                    ...files.filter((file) => file.id !== attachment.id).map((file) => `/api/new-products/attachments/${file.id}`),
+                  ]} className="block w-full">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} loading={files[0]?.id === attachment.id ? 'eager' : 'lazy'} fetchPriority={files[0]?.id === attachment.id ? 'high' : 'auto'} decoding="async" className="h-24 w-full object-cover" />
+                  </ProductImageGalleryButton>}
                 <button type="button" aria-label="첨부 삭제" disabled={busy || disabled} onClick={() => queueRemoval([attachment])} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed"><Trash2 className="h-3 w-3" /></button>
               </div>
             ))}

@@ -239,6 +239,7 @@ export type ItemMasterSyncResult = {
 
 export type NewProductSummary = {
   id: string
+  productImageId?: string | null
   productNumber: number
   stageId: string
   stageName: string
@@ -719,7 +720,10 @@ export async function listNewProductSummaries(input: {
         item.product_name AS "productName",
         item.sample_code AS "sampleCode",
         item.created_at::text AS "createdAt",
-        item.updated_at::text AS "updatedAt"
+        item.updated_at::text AS "updatedAt",
+        (SELECT attachment.id::text FROM new_product_workflow_attachments attachment
+          WHERE attachment.item_id = item.id AND attachment.user_id = item.user_id AND attachment.kind = 'product_image'
+          ORDER BY attachment.created_at LIMIT 1) AS "productImageId"
       FROM new_product_workflow_items item
       JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
       LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
@@ -1915,7 +1919,7 @@ export async function addNewProductAttachment(input: {
 }
 
 export async function getNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
-  await ensureNewProductWorkflowTables(input.userId)
+  // Reading an existing attachment needs no stage initialization or cold-start seed lock.
   const [attachment] = resultRows<{
     fileName: string
     contentType: string

@@ -34,6 +34,7 @@ window.addEventListener('message', (event) => {
     && message.type !== 'FUNTASTIC_1688_VERIFY_CANCEL'
     && message.type !== 'FUNTASTIC_1688_VERIFY_RESULT_SAVED'
     && message.type !== 'FUNTASTIC_1688_DETAIL_IMAGES_START'
+    && message.type !== 'FUNTASTIC_1688_TRACKING_START'
   ) return
   try {
     if (!chrome.runtime?.id) return
@@ -43,6 +44,8 @@ window.addEventListener('message', (event) => {
         source: EXTENSION_SOURCE,
         type: message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_START'
           ? 'FUNTASTIC_1688_DETAIL_IMAGES_ERROR'
+          : message.type === 'FUNTASTIC_1688_TRACKING_START'
+            ? 'FUNTASTIC_1688_TRACKING_ERROR'
           : 'FUNTASTIC_1688_ERROR',
         runId: message.runId,
         message: response?.error || chrome.runtime.lastError?.message || '확장프로그램 작업을 시작하지 못했습니다.',

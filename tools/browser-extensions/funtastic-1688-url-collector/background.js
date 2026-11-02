@@ -12,6 +12,8 @@ const VERIFY_TIMEOUT_ALARM = 'funtastic-1688-verify-timeout'
 const VERIFY_SAVE_TIMEOUT_ALARM = 'funtastic-1688-verify-save-timeout'
 const DETAIL_IMAGES_STATE_KEY = 'funtastic1688DetailImagesRun'
 const DETAIL_IMAGES_TIMEOUT_ALARM = 'funtastic-1688-detail-images-timeout'
+const TRACKING_LOOKUP_STATE_KEY = 'funtastic1688TrackingLookupRun'
+const TRACKING_LOOKUP_TIMEOUT_ALARM = 'funtastic-1688-tracking-lookup-timeout'
 const VERIFICATION_ISSUE_LIMIT = 100
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
@@ -26,6 +28,7 @@ const VERIFY_PAGE_TIMEOUT_MS = 30_000
 const VERIFY_SAVE_TIMEOUT_MS = 30_000
 const MAX_VERIFY_LINKS = 2_000
 const DETAIL_IMAGES_PAGE_TIMEOUT_MS = 60_000
+const TRACKING_LOOKUP_PAGE_TIMEOUT_MS = 45_000
 
 let resultInFlight = false
 let checkpointCache = null
@@ -47,6 +50,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === VERIFY_TIMEOUT_ALARM) void handleVerificationPageTimeout()
   if (alarm.name === VERIFY_SAVE_TIMEOUT_ALARM) void handleVerificationSaveTimeout()
   if (alarm.name === DETAIL_IMAGES_TIMEOUT_ALARM) void handleDetailImagesTimeout()
+  if (alarm.name === TRACKING_LOOKUP_TIMEOUT_ALARM) void handleTrackingLookupTimeout()
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -57,10 +61,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const url = changeInfo.url || tab.url
   if (url) void captureDetailNavigation(tabId, url, tab.openerTabId)
   if (changeInfo.status === 'complete') void collectDetailImagesFromTab(tabId)
+  if (changeInfo.status === 'complete') void collectTrackingLookupFromTab(tabId)
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void Promise.all([getRun(), getVerificationRun(), getDetailImagesRun()]).then(([run, verificationRun, detailImagesRun]) => {
+  void Promise.all([getRun(), getVerificationRun(), getDetailImagesRun(), getTrackingLookupRun()]).then(([run, verificationRun, detailImagesRun, trackingLookupRun]) => {
     if (run?.collectorTabId === tabId && run.status === 'running') {
       return failRun(run, '1688 주문조회 탭이 닫혀 수집을 중단했습니다.', false)
     }
@@ -69,6 +74,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     }
     if (detailImagesRun?.collectorTabId === tabId && detailImagesRun.status === 'running') {
       return failDetailImagesRun(detailImagesRun, '1688 이미지 수집 탭이 닫혀 수집을 중단했습니다.')
+    }
+    if (trackingLookupRun?.collectorTabId === tabId && trackingLookupRun.status === 'running') {
+      return failTrackingLookupRun(trackingLookupRun, '1688 송장 조회 탭이 닫혀 조회를 중단했습니다.', false)
     }
   })
 })
@@ -80,8 +88,13 @@ async function handleMessage(message, sender) {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
     }
-    if (await getVerificationRun()) {
-      return { ok: false, error: 'URL 검증이 진행 중입니다. 먼저 검증을 중단해주세요.' }
+    const [verificationRun, detailImagesRun, trackingLookupRun] = await Promise.all([
+      getVerificationRun(),
+      getDetailImagesRun(),
+      getTrackingLookupRun(),
+    ])
+    if (verificationRun || detailImagesRun || trackingLookupRun) {
+      return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
     }
     return startRun(message, sender.tab.id)
   }
@@ -90,8 +103,13 @@ async function handleMessage(message, sender) {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
     }
-    if (await getRun()) {
-      return { ok: false, error: '구매 URL 수집이 진행 중입니다. 먼저 수집을 중단해주세요.' }
+    const [run, detailImagesRun, trackingLookupRun] = await Promise.all([
+      getRun(),
+      getDetailImagesRun(),
+      getTrackingLookupRun(),
+    ])
+    if (run || detailImagesRun || trackingLookupRun) {
+      return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
     }
     return startVerificationRun(message, sender.tab.id)
   }
@@ -100,11 +118,27 @@ async function handleMessage(message, sender) {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 상세페이지 제작 화면에서 시작해주세요.' }
     }
-    const [run, verificationRun] = await Promise.all([getRun(), getVerificationRun()])
-    if (run || verificationRun) {
+    const [run, verificationRun, trackingLookupRun] = await Promise.all([getRun(), getVerificationRun(), getTrackingLookupRun()])
+    if (run || verificationRun || trackingLookupRun) {
       return { ok: false, error: '진행 중인 1688 URL 작업이 있습니다. 해당 작업을 먼저 마친 뒤 이미지 수집을 시작해주세요.' }
     }
     return startDetailImagesRun(message, sender.tab.id)
+  }
+
+  if (message.type === 'FUNTASTIC_1688_TRACKING_START') {
+    if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
+      return { ok: false, error: 'SaaS 발주 화면에서 시작해주세요.' }
+    }
+    const [run, verificationRun, detailImagesRun, trackingLookupRun] = await Promise.all([
+      getRun(),
+      getVerificationRun(),
+      getDetailImagesRun(),
+      getTrackingLookupRun(),
+    ])
+    if (run || verificationRun || detailImagesRun || trackingLookupRun) {
+      return { ok: false, error: '다른 1688 작업이 진행 중입니다. 완료된 뒤 다시 조회해주세요.' }
+    }
+    return startTrackingLookupRun(message, sender.tab.id)
   }
 
   if (message.type === 'FUNTASTIC_1688_CANCEL') {
@@ -821,6 +855,202 @@ async function collect1688DetailImagesInPage() {
 }
 
 async function sendDetailImagesToSaas(run, payload) {
+  await chrome.tabs.sendMessage(run.sourceTabId, {
+    source: EXTENSION_SOURCE,
+    runId: run.runId,
+    ...payload,
+  })
+}
+
+async function startTrackingLookupRun(message, sourceTabId) {
+  const orderNumber = typeof message.orderNumber === 'string' ? message.orderNumber.trim() : ''
+  const runId = typeof message.runId === 'string' ? message.runId.trim() : ''
+  if (!runId || runId.length > 120 || !/^\d{10,40}$/.test(orderNumber)) {
+    return { ok: false, error: '1688 주문번호 형식을 확인해주세요.' }
+  }
+
+  const collectorTab = await chrome.tabs.create({ url: trackingLookupUrl(orderNumber), active: true })
+  if (!collectorTab.id) throw new Error('1688 송장 조회 탭을 열지 못했습니다.')
+
+  const run = {
+    runId,
+    sourceTabId,
+    collectorTabId: collectorTab.id,
+    orderNumber,
+    status: 'running',
+    collecting: false,
+  }
+  await setTrackingLookupRun(run)
+  await scheduleTrackingLookupTimeout()
+  await sendTrackingLookupToSaas(run, {
+    type: 'FUNTASTIC_1688_TRACKING_ACK',
+    orderNumber,
+  })
+  const latestTab = await chrome.tabs.get(collectorTab.id).catch(() => null)
+  if (latestTab?.status === 'complete') void collectTrackingLookupFromTab(collectorTab.id)
+  return { ok: true }
+}
+
+async function collectTrackingLookupFromTab(tabId) {
+  const run = await getTrackingLookupRun()
+  if (!run || run.status !== 'running' || run.collecting || run.collectorTabId !== tabId) return
+
+  run.collecting = true
+  await setTrackingLookupRun(run)
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: collect1688TrackingInPage,
+    })
+    const topResult = results.find((result) => result.frameId === 0)?.result
+    if (topResult?.fatal) {
+      await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
+      return
+    }
+
+    const trackingNumbers = uniqueTrackingNumbers(results.flatMap((result) => result.result?.trackingNumbers || []))
+    if (trackingNumbers.length === 0) {
+      const error = typeof topResult?.error === 'string'
+        ? topResult.error
+        : '1688에서 송장번호를 찾지 못했습니다.'
+      await failTrackingLookupRun(run, error, false)
+      return
+    }
+    await completeTrackingLookupRun(run, trackingNumbers)
+  } catch (error) {
+    await failTrackingLookupRun(run, `1688 송장 조회를 실행하지 못했습니다: ${errorMessage(error)}`, false)
+  }
+}
+
+async function completeTrackingLookupRun(run, trackingNumbers) {
+  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
+  try {
+    await sendTrackingLookupToSaas(run, {
+      type: 'FUNTASTIC_1688_TRACKING_RESULT',
+      orderNumber: run.orderNumber,
+      trackingNumbers,
+    })
+  } catch (error) {
+    await failTrackingLookupRun(run, `SaaS 화면에 송장 조회 결과를 전달하지 못했습니다: ${errorMessage(error)}`, false)
+    return
+  }
+  await clearTrackingLookupRun(run, true)
+  await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+}
+
+async function failTrackingLookupRun(run, message, keepCollectorTab) {
+  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
+  await sendTrackingLookupToSaas(run, {
+    type: 'FUNTASTIC_1688_TRACKING_ERROR',
+    orderNumber: run.orderNumber,
+    message,
+  }).catch(() => {})
+  await clearTrackingLookupRun(run, !keepCollectorTab)
+  if (!keepCollectorTab) {
+    await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+  }
+}
+
+async function handleTrackingLookupTimeout() {
+  const run = await getTrackingLookupRun()
+  if (!run || run.status !== 'running') return
+  await failTrackingLookupRun(run, '1688 송장 조회 시간이 초과되었습니다. 로그인 또는 보안 확인 상태를 확인해주세요.', false)
+}
+
+async function clearTrackingLookupRun(run, closeCollectorTab) {
+  await Promise.all([
+    chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM),
+    chrome.storage.session.remove(TRACKING_LOOKUP_STATE_KEY),
+  ])
+  if (closeCollectorTab && run.collectorTabId) {
+    await chrome.tabs.remove(run.collectorTabId).catch(() => {})
+  }
+}
+
+async function getTrackingLookupRun() {
+  const stored = await chrome.storage.session.get(TRACKING_LOOKUP_STATE_KEY)
+  return stored[TRACKING_LOOKUP_STATE_KEY] || null
+}
+
+async function setTrackingLookupRun(run) {
+  await chrome.storage.session.set({ [TRACKING_LOOKUP_STATE_KEY]: run })
+}
+
+async function scheduleTrackingLookupTimeout() {
+  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
+  await chrome.alarms.create(TRACKING_LOOKUP_TIMEOUT_ALARM, { when: Date.now() + TRACKING_LOOKUP_PAGE_TIMEOUT_MS })
+}
+
+function trackingLookupUrl(orderNumber) {
+  const url = new URL('https://air.1688.com/app/ctf-page/trade-order-detail/index.html')
+  url.searchParams.set('orderId', orderNumber)
+  url.searchParams.set('to', 'logisticsTabTitle')
+  return url.toString()
+}
+
+function uniqueTrackingNumbers(values) {
+  const numbers = new Map()
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const number = value.trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{4,99}$/.test(number)) continue
+    const key = number.toUpperCase()
+    if (!numbers.has(key)) numbers.set(key, number)
+  }
+  return Array.from(numbers.values())
+}
+
+async function collect1688TrackingInPage() {
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ').slice(0, 100_000)
+  const isLoginPage = () => {
+    const host = window.location.hostname.toLowerCase()
+    return host.includes('login.1688.com') || host.includes('passport.1688.com')
+  }
+  const looksLikeLogin = (text) => /请登录|登录后|账号登录|扫码登录/i.test(text)
+  const looksLikeSecurityChallenge = (text) => /访问过于频繁|安全验证|请完成验证|滑动验证|请输入验证码|系统繁忙，请稍后再试/i.test(text)
+  const looksLikeNotShipped = (text) => /待发货|未发货|等待卖家发货/i.test(text)
+  const collect = (text) => {
+    const numbers = new Map()
+    const patterns = [
+      /(?:运单号码|运单号|物流单号|快递单号|物流编号|运单编号)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9-]{4,99})/gi,
+      /(?:运单号码|运单号|物流单号|快递单号|物流编号|运单编号)\s+([A-Za-z0-9][A-Za-z0-9-]{4,99})/gi,
+    ]
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const number = match[1]?.trim()
+        if (!number) continue
+        const key = number.toUpperCase()
+        if (!numbers.has(key)) numbers.set(key, number)
+      }
+    }
+    return Array.from(numbers.values())
+  }
+
+  let sawNotShipped = false
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const text = pageText()
+    if (isLoginPage() || looksLikeLogin(text)) {
+      return { trackingNumbers: [], fatal: true, error: '1688 로그인이 필요합니다. 로그인 후 다시 조회해주세요.' }
+    }
+    if (looksLikeSecurityChallenge(text)) {
+      return { trackingNumbers: [], fatal: true, error: '1688 보안 확인이 필요합니다. 화면에서 확인을 마친 뒤 다시 조회해주세요.' }
+    }
+    const trackingNumbers = collect(text)
+    if (trackingNumbers.length > 0) return { trackingNumbers }
+    sawNotShipped ||= looksLikeNotShipped(text)
+    await delay(700)
+  }
+
+  return {
+    trackingNumbers: [],
+    error: sawNotShipped
+      ? '1688에서 아직 발송 전으로 표시되어 송장번호가 없습니다.'
+      : '1688에서 송장번호를 찾지 못했습니다. 로그인·보안 확인 또는 주문 상태를 확인해주세요.',
+  }
+}
+
+async function sendTrackingLookupToSaas(run, payload) {
   await chrome.tabs.sendMessage(run.sourceTabId, {
     source: EXTENSION_SOURCE,
     runId: run.runId,

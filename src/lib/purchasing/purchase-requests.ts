@@ -2112,6 +2112,10 @@ export async function updatePurchaseRequestPlanFields(input: {
   delayNote?: string | null
   applyDelayReasonToItem?: boolean
   saasChinaMode?: boolean
+  /** Internal optimistic-concurrency guard for browser-assisted 1688 lookups. */
+  expectedSupplierOrderNumber?: string
+  /** Never let an asynchronous lookup replace an existing manual inspection. */
+  requireEmptyTrackingNumber?: boolean
 }) {
   await ensurePurchasePaymentTrackingSchema()
   if (input.saasChinaMode !== undefined || input.chinaReceivedQuantity !== undefined || input.outboundRequestedQuantity !== undefined) {
@@ -2194,6 +2198,21 @@ export async function updatePurchaseRequestPlanFields(input: {
       .limit(1)
 
     if (!current) return null
+
+    if (
+      input.expectedSupplierOrderNumber !== undefined
+      && emptyToNull(current.supplierOrderNumber) !== emptyToNull(input.expectedSupplierOrderNumber)
+    ) {
+      throw new Error('주문서번호가 변경되어 1688 송장 조회 결과를 저장하지 않았습니다.')
+    }
+    if (input.requireEmptyTrackingNumber) {
+      if (current.status !== 'purchase_completed') {
+        throw new Error('구매완료 상태의 항목에만 1688 송장을 자동 등록할 수 있습니다.')
+      }
+      if (current.trackingNumber?.trim() || current.purchaseInspection?.parcels.length) {
+        throw new Error('이미 등록된 송장 또는 검수 정보가 있어 1688 조회 결과를 덮어쓰지 않았습니다.')
+      }
+    }
 
     const effectiveBulkPaymentPending = input.bulkPaymentPending ?? current.bulkPaymentPending
     if (current.purchaseInspection) {
@@ -2332,6 +2351,43 @@ export async function updatePurchaseRequestPlanFields(input: {
     }
 
     return { ...row, excludedRecommendationCount }
+  })
+}
+
+/**
+ * Stores tracking numbers received from the user's authenticated 1688 browser
+ * session. The existing plan-field service still owns the status transition and
+ * inspection setup; the guards only make an asynchronous browser result safe.
+ */
+export async function applyPurchaseRequest1688TrackingLookup(input: {
+  userId: string
+  id: string
+  supplierOrderNumber: string
+  trackingNumbers: string[]
+}) {
+  const supplierOrderNumber = input.supplierOrderNumber.trim()
+  if (!/^\d{10,40}$/.test(supplierOrderNumber)) {
+    throw new Error('1688 주문번호 형식을 확인해주세요.')
+  }
+
+  const trackingByNormalizedValue = new Map<string, string>()
+  for (const value of input.trackingNumbers) {
+    const trackingNumber = value.trim()
+    if (!trackingNumber || trackingNumber.length > 100) continue
+    const key = trackingNumber.toUpperCase()
+    if (!trackingByNormalizedValue.has(key)) trackingByNormalizedValue.set(key, trackingNumber)
+  }
+  const trackingNumbers = Array.from(trackingByNormalizedValue.values())
+  if (trackingNumbers.length === 0 || trackingNumbers.length > 100) {
+    throw new Error('1688에서 유효한 송장번호를 찾지 못했습니다.')
+  }
+
+  return updatePurchaseRequestPlanFields({
+    userId: input.userId,
+    id: input.id,
+    expectedSupplierOrderNumber: supplierOrderNumber,
+    requireEmptyTrackingNumber: true,
+    trackingNumber: trackingNumbers.join('\n'),
   })
 }
 

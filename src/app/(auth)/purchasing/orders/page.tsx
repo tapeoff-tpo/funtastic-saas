@@ -773,6 +773,7 @@ export async function PurchasingOrdersView({
                                     ? '출고날짜'
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
+                                allow1688TrackingLookup={item.status === 'purchase_completed'}
                               />
                               {['purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed'].includes(item.status) && <div className="mt-2 space-y-1 text-xs">
                                 {(receipt?.parcels.map((parcel) => parcel.trackingNumber) ?? (item.trackingNumber ? [item.trackingNumber] : [])).map((number) => <div key={number} data-no-translate className="break-all"><a className="text-blue-700 underline" href={`https://www.baidu.com/s?wd=${encodeURIComponent(number)}`} target="_blank" rel="noreferrer">{number}</a></div>)}

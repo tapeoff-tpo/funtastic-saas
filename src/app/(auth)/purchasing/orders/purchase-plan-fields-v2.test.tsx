@@ -85,6 +85,7 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
         type: 'FUNTASTIC_1688_TRACKING_START',
         runId: '1688-tracking-run',
         orderNumber,
+        background: false,
       }),
       window.location.origin,
     ))

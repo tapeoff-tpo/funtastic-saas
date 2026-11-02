@@ -113,6 +113,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
         type: 'FUNTASTIC_1688_TRACKING_START',
         runId: '1688-batch-run-0-1',
         orderNumber: firstOrder,
+        background: true,
       }),
       window.location.origin,
     ))

@@ -865,17 +865,27 @@ async function sendDetailImagesToSaas(run, payload) {
 async function startTrackingLookupRun(message, sourceTabId) {
   const orderNumber = typeof message.orderNumber === 'string' ? message.orderNumber.trim() : ''
   const runId = typeof message.runId === 'string' ? message.runId.trim() : ''
+  const background = message.background === true
   if (!runId || runId.length > 120 || !/^\d{10,40}$/.test(orderNumber)) {
     return { ok: false, error: '1688 주문번호 형식을 확인해주세요.' }
   }
 
-  const collectorTab = await chrome.tabs.create({ url: trackingLookupUrl(orderNumber), active: true })
-  if (!collectorTab.id) throw new Error('1688 송장 조회 탭을 열지 못했습니다.')
+  const collectorWindow = await chrome.windows.create({
+    url: trackingLookupUrl(orderNumber),
+    type: 'popup',
+    focused: !background,
+    width: 1180,
+    height: 860,
+  })
+  const collectorTab = collectorWindow?.tabs?.[0]
+    || (collectorWindow?.id ? (await chrome.tabs.query({ windowId: collectorWindow.id }))[0] : null)
+  if (!collectorTab?.id) throw new Error('1688 송장 조회 창을 열지 못했습니다.')
 
   const run = {
     runId,
     sourceTabId,
     collectorTabId: collectorTab.id,
+    collectorWindowId: collectorWindow?.id ?? null,
     orderNumber,
     status: 'running',
     collecting: false,
@@ -935,7 +945,6 @@ async function completeTrackingLookupRun(run, trackingNumbers) {
     return
   }
   await clearTrackingLookupRun(run, true)
-  await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
 }
 
 async function failTrackingLookupRun(run, message, keepCollectorTab) {
@@ -946,8 +955,12 @@ async function failTrackingLookupRun(run, message, keepCollectorTab) {
     message,
   }).catch(() => {})
   await clearTrackingLookupRun(run, !keepCollectorTab)
-  if (!keepCollectorTab) {
-    await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+  if (keepCollectorTab) {
+    if (run.collectorWindowId) {
+      await chrome.windows.update(run.collectorWindowId, { focused: true }).catch(() => {})
+    } else {
+      await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
+    }
   }
 }
 
@@ -962,7 +975,9 @@ async function clearTrackingLookupRun(run, closeCollectorTab) {
     chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM),
     chrome.storage.session.remove(TRACKING_LOOKUP_STATE_KEY),
   ])
-  if (closeCollectorTab && run.collectorTabId) {
+  if (closeCollectorTab && run.collectorWindowId) {
+    await chrome.windows.remove(run.collectorWindowId).catch(() => {})
+  } else if (closeCollectorTab && run.collectorTabId) {
     await chrome.tabs.remove(run.collectorTabId).catch(() => {})
   }
 }

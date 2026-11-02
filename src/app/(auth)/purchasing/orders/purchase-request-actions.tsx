@@ -404,6 +404,7 @@ export function PurchaseBulk1688TrackingLookup({
           type: TRACKING_LOOKUP_START,
           runId,
           orderNumber: job.orderNumber,
+          background: true,
         }, window.location.origin)
       }, delayMs)
     }
@@ -2564,6 +2565,7 @@ export function PurchasePlanFieldsV2({
       type: TRACKING_LOOKUP_START,
       runId,
       orderNumber: nextSupplierOrderNumber,
+      background: false,
     }, window.location.origin)
   }
 

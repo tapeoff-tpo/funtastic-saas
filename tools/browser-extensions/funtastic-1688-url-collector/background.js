@@ -1002,19 +1002,24 @@ function uniqueTrackingNumbers(values) {
 
 async function collect1688TrackingInPage() {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const trackingLabel = /(?:物流运单号|快递运单号|物流单号|快递单号|货运单号|运输单号|运单号码|运单编号|运单编码|运单号|物流编号)/i
+  const trackingLabelSource = '(?:物流运单号|快递运单号|物流单号|快递单号|货运单号|运输单号|运单号码|运单编号|运单编码|运单号|物流编号)'
+  const trackingValue = '[A-Za-z0-9][A-Za-z0-9-]{4,99}'
   const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ').slice(0, 100_000)
+  const textOf = (element) => (element?.innerText || element?.textContent || '').replace(/\s+/g, ' ').trim()
   const isLoginPage = () => {
     const host = window.location.hostname.toLowerCase()
     return host.includes('login.1688.com') || host.includes('passport.1688.com')
   }
   const looksLikeLogin = (text) => /请登录|登录后|账号登录|扫码登录/i.test(text)
   const looksLikeSecurityChallenge = (text) => /访问过于频繁|安全验证|请完成验证|滑动验证|请输入验证码|系统繁忙，请稍后再试/i.test(text)
-  const looksLikeNotShipped = (text) => /待发货|未发货|等待卖家发货/i.test(text)
+  const looksLikeNotShipped = (text) => /待发货|未发货|等待卖家发货|卖家尚未发货|尚未发货/i.test(text)
+  const looksLikeUnavailableOrder = (text) => /订单不存在|未找到(?:相关)?订单|订单已删除|订单已关闭|订单已取消|无权(?:查看|访问)|没有权限(?:查看|访问)/i.test(text)
   const collect = (text) => {
     const numbers = new Map()
     const patterns = [
-      /(?:运单号码|运单号|物流单号|快递单号|物流编号|运单编号)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9-]{4,99})/gi,
-      /(?:运单号码|运单号|物流单号|快递单号|物流编号|运单编号)\s+([A-Za-z0-9][A-Za-z0-9-]{4,99})/gi,
+      new RegExp(`${trackingLabelSource}\\s*[：:]\\s*(${trackingValue})`, 'gi'),
+      new RegExp(`${trackingLabelSource}\\s+(${trackingValue})`, 'gi'),
     ]
     for (const pattern of patterns) {
       for (const match of text.matchAll(pattern)) {
@@ -1027,8 +1032,114 @@ async function collect1688TrackingInPage() {
     return Array.from(numbers.values())
   }
 
-  let sawNotShipped = false
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  const mergeTrackingNumbers = (...groups) => {
+    const numbers = new Map()
+    for (const group of groups) {
+      for (const number of group || []) {
+        const normalized = typeof number === 'string' ? number.trim() : ''
+        if (!/^[A-Za-z0-9][A-Za-z0-9-]{4,99}$/.test(normalized)) continue
+        const key = normalized.toUpperCase()
+        if (!numbers.has(key)) numbers.set(key, normalized)
+      }
+    }
+    return Array.from(numbers.values())
+  }
+
+  const collectStructuredTracking = () => {
+    const sources = []
+    const addSource = (value) => {
+      const normalized = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+      if (normalized) sources.push(normalized.slice(0, 20_000))
+    }
+    const roots = [document]
+    const seenRoots = new Set()
+    let scannedElements = 0
+    let scannedTextNodes = 0
+
+    while (roots.length > 0 && scannedElements < 6_000) {
+      const root = roots.shift()
+      if (!root || seenRoots.has(root)) continue
+      seenRoots.add(root)
+
+      // `document.body.innerText` covers the normal page. Open shadow roots and
+      // copy controls are the cases it commonly misses on the 1688 order page.
+      if (root !== document) addSource(root.textContent || '')
+
+      const copyTargets = root.querySelectorAll?.(
+        '[data-clipboard-text], [data-clipboard], [data-copy-text], [data-copy], [data-copy-value], [data-clipboard-content]',
+      ) || []
+      for (const element of copyTargets) {
+        const clipboardValue = [
+          element.getAttribute('data-clipboard-text'),
+          element.getAttribute('data-clipboard'),
+          element.getAttribute('data-copy-text'),
+          element.getAttribute('data-copy'),
+          element.getAttribute('data-copy-value'),
+          element.getAttribute('data-clipboard-content'),
+        ].filter(Boolean).join(' ')
+        addSource(`${textOf(element)} ${textOf(element.parentElement)} ${clipboardValue}`)
+      }
+
+      const namedTargets = root.querySelectorAll?.(
+        '[aria-label*="运单"], [aria-label*="物流"], [title*="运单"], [title*="物流"]',
+      ) || []
+      for (const element of namedTargets) {
+        addSource(`${textOf(element)} ${textOf(element.parentElement)} ${element.getAttribute('aria-label') || ''} ${element.getAttribute('title') || ''}`)
+      }
+
+      const textWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let textNode = textWalker.nextNode()
+      while (textNode && scannedTextNodes < 4_000) {
+        scannedTextNodes += 1
+        const directText = (textNode.nodeValue || '').replace(/\s+/g, ' ').trim()
+        if (trackingLabel.test(directText)) {
+          const element = textNode.parentElement
+          addSource(directText)
+          addSource(textOf(element))
+          addSource(textOf(element?.parentElement))
+          addSource(textOf(element?.previousElementSibling))
+          addSource(textOf(element?.nextElementSibling))
+        }
+        textNode = textWalker.nextNode()
+      }
+
+      const elements = root.querySelectorAll?.('*') || []
+      for (const element of elements) {
+        scannedElements += 1
+        if (scannedElements > 6_000) break
+        if (element.shadowRoot) roots.push(element.shadowRoot)
+      }
+    }
+
+    return mergeTrackingNumbers(...sources.map((source) => collect(source)))
+  }
+
+  const activateLogisticsTab = () => {
+    const tabPattern = /^(?:物流信息|物流详情|查看物流|物流跟踪|物流状态)$/
+    const candidates = Array.from(document.querySelectorAll(
+      'button, a, [role="tab"], [role="button"], [role="link"], [tabindex], [class*="tab"], [class*="Tab"]',
+    ))
+    const target = candidates.find((element) => tabPattern.test(textOf(element)))
+    if (!target) return false
+    try {
+      target.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+      target.click()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  let consecutiveNotShipped = 0
+  let consecutiveUnavailableOrder = 0
+  let sawLogisticsTab = false
+  const maxAttempts = 12
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    // The order-detail URL normally selects this tab itself, but some 1688 page
+    // variants ignore the URL fragment until the tab is clicked once.
+    if (attempt === 0 || (attempt === 3 && !sawLogisticsTab)) {
+      sawLogisticsTab ||= activateLogisticsTab()
+    }
     const text = pageText()
     if (isLoginPage() || looksLikeLogin(text)) {
       return { trackingNumbers: [], fatal: true, error: '1688 로그인이 필요합니다. 로그인 후 다시 조회해주세요.' }
@@ -1036,17 +1147,27 @@ async function collect1688TrackingInPage() {
     if (looksLikeSecurityChallenge(text)) {
       return { trackingNumbers: [], fatal: true, error: '1688 보안 확인이 필요합니다. 화면에서 확인을 마친 뒤 다시 조회해주세요.' }
     }
-    const trackingNumbers = collect(text)
+    const structuredTracking = attempt === 0 || attempt === 2 || attempt === 5 || attempt === maxAttempts - 1
+      ? collectStructuredTracking()
+      : []
+    const trackingNumbers = mergeTrackingNumbers(collect(text), structuredTracking)
     if (trackingNumbers.length > 0) return { trackingNumbers }
-    sawNotShipped ||= looksLikeNotShipped(text)
-    await delay(700)
+    consecutiveNotShipped = looksLikeNotShipped(text) ? consecutiveNotShipped + 1 : 0
+    consecutiveUnavailableOrder = looksLikeUnavailableOrder(text) ? consecutiveUnavailableOrder + 1 : 0
+    if (consecutiveNotShipped >= 2) {
+      return { trackingNumbers: [], error: '1688에서 아직 발송 전으로 표시되어 송장번호가 없습니다.' }
+    }
+    if (consecutiveUnavailableOrder >= 2) {
+      return { trackingNumbers: [], error: '1688에서 해당 주문을 찾을 수 없거나 현재 계정으로 볼 수 없습니다. 주문번호와 로그인 계정을 확인해주세요.' }
+    }
+    await delay(650)
   }
 
   return {
     trackingNumbers: [],
-    error: sawNotShipped
-      ? '1688에서 아직 발송 전으로 표시되어 송장번호가 없습니다.'
-      : '1688에서 송장번호를 찾지 못했습니다. 로그인·보안 확인 또는 주문 상태를 확인해주세요.',
+    error: sawLogisticsTab
+      ? '1688 물류 탭은 열렸지만 송장번호 형식을 읽지 못했습니다. 물류정보가 실제로 표시되는지 확인해주세요.'
+      : '1688 물류 정보를 불러오지 못했습니다. 주문 상태 또는 1688 화면을 확인해주세요.',
   }
 }
 

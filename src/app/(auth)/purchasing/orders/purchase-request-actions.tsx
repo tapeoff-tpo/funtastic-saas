@@ -48,6 +48,9 @@ const TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS = 4
 
 export type Purchase1688TrackingLookupCandidate = {
   id: string
+  sku: string
+  productName: string
+  optionName: string | null
   supplierOrderNumber: string | null
   trackingNumber: string | null
 }
@@ -75,6 +78,19 @@ type Purchase1688TrackingProgress = {
   message: string
   stopping?: boolean
   complete?: boolean
+}
+
+type Purchase1688TrackingRowStatus = 'queued' | 'querying' | 'saving' | 'success' | 'failed' | 'skipped'
+
+type Purchase1688TrackingLookupRow = {
+  id: string
+  sku: string
+  productName: string
+  optionName: string | null
+  orderNumber: string
+  status: Purchase1688TrackingRowStatus
+  message: string
+  trackingNumbers: string[]
 }
 
 function valid1688OrderNumber(value: string | null | undefined) {
@@ -254,9 +270,10 @@ export function PurchaseBulkStatusButton() {
 }
 
 /**
- * Runs selected purchase-completed rows through the existing one-at-a-time
- * extension message. Keeping the queue in the page means an already-loaded
- * extension never has to hold purchase ids or write SaaS data itself.
+ * Runs every eligible purchase-completed row on the current page through the
+ * existing one-at-a-time extension message. Keeping the queue in the page
+ * means an already-loaded extension never has to hold purchase ids or write
+ * SaaS data itself.
  */
 export function PurchaseBulk1688TrackingLookup({
   candidates,
@@ -264,27 +281,21 @@ export function PurchaseBulk1688TrackingLookup({
   candidates: Purchase1688TrackingLookupCandidate[]
 }) {
   const router = useRouter()
-  const context = useBulkSelection()
-  const clearSelectionRef = useRef(context.clear)
   const routerRefreshRef = useRef(router.refresh)
   const stopRequestedRef = useRef(false)
   const [batch, setBatch] = useState<Purchase1688TrackingBatch | null>(null)
   const [progress, setProgress] = useState<Purchase1688TrackingProgress | null>(null)
-
-  useEffect(() => {
-    clearSelectionRef.current = context.clear
-  }, [context.clear])
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [lookupRows, setLookupRows] = useState<Purchase1688TrackingLookupRow[]>([])
 
   useEffect(() => {
     routerRefreshRef.current = router.refresh
   }, [router.refresh])
 
-  const selectedCandidates = candidates.filter((candidate) => context.selectedIds.has(candidate.id))
-  const eligibleCandidates = selectedCandidates.filter((candidate) => (
+  const eligibleCandidates = candidates.filter((candidate) => (
     valid1688OrderNumber(candidate.supplierOrderNumber) && !candidate.trackingNumber?.trim()
   ))
-  const eligibleOrderCount = new Set(eligibleCandidates.map((candidate) => candidate.supplierOrderNumber?.trim())).size
-  const selectedCount = context.selectedIds.size
+  const skippedCandidateCount = candidates.length - eligibleCandidates.length
 
   useEffect(() => {
     if (!batch) return
@@ -297,6 +308,18 @@ export function PurchaseBulk1688TrackingLookup({
     let failedItems = 0
     let currentStartAttempts = 0
     let current: { runId: string; job: Purchase1688TrackingLookupJob; saving: boolean } | null = null
+
+    const updateLookupRows = (
+      ids: string[],
+      status: Purchase1688TrackingRowStatus,
+      message: string,
+      trackingNumbers: string[] = [],
+    ) => {
+      const idSet = new Set(ids)
+      setLookupRows((rows) => rows.map((row) => idSet.has(row.id)
+        ? { ...row, status, message, trackingNumbers }
+        : row))
+    }
 
     const clearTimers = () => {
       if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
@@ -331,8 +354,14 @@ export function PurchaseBulk1688TrackingLookup({
         complete: true,
       })
       if (didSaveAny) {
-        clearSelectionRef.current()
         routerRefreshRef.current()
+      }
+      if (stopRequestedRef.current || stops1688TrackingBatch(message)) {
+        setLookupRows((rows) => rows.map((row) => (
+          row.status === 'queued' || row.status === 'querying'
+            ? { ...row, status: 'skipped', message: '남은 항목은 조회하지 않았습니다.', trackingNumbers: [] }
+            : row
+        )))
       }
       if (succeededItems > 0 && failedItems === 0 && !stopRequestedRef.current) {
         toast.success(`1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
@@ -359,13 +388,16 @@ export function PurchaseBulk1688TrackingLookup({
         currentStartAttempts += 1
         const runId = `${batch.id}-${index}-${currentStartAttempts}`
         current = { runId, job, saving: false }
+        updateLookupRows(job.ids, 'querying', '1688 주문서번호 조회 중')
         updateProgress(`1688 주문 ${index + 1}/${batch.jobs.length} 조회 중`)
         bridgeTimeout = window.setTimeout(() => {
           if (disposed || current?.runId !== runId) return
           current = null
           failedItems += job.ids.length
           index += 1
-          finish('1688 확장프로그램 연결을 확인해주세요.')
+          const message = '1688 확장프로그램 연결을 확인해주세요.'
+          updateLookupRows(job.ids, 'failed', message)
+          finish(message)
         }, 5_000)
         window.postMessage({
           source: PAGE_SOURCE,
@@ -383,6 +415,7 @@ export function PurchaseBulk1688TrackingLookup({
       if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
       bridgeTimeout = null
       if (is1688TrackingLookupHandoffInProgress(message) && currentStartAttempts < TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS) {
+        updateLookupRows(failedJob.ids, 'querying', '이전 1688 조회를 정리한 뒤 재시도 중')
         updateProgress('이전 1688 조회를 정리한 뒤 같은 주문을 다시 시도합니다.', {
           currentOrder: index + 1,
           currentOrderNumber: failedJob.orderNumber,
@@ -393,6 +426,7 @@ export function PurchaseBulk1688TrackingLookup({
       failedItems += failedJob.ids.length
       index += 1
       currentStartAttempts = 0
+      updateLookupRows(failedJob.ids, 'failed', message)
       updateProgress(message)
       if (stops1688TrackingBatch(message)) {
         finish(`${message} · 남은 항목은 확인 후 다시 일괄조회해주세요.`)
@@ -407,6 +441,8 @@ export function PurchaseBulk1688TrackingLookup({
       let savedForJob = 0
       let failedForJob = 0
       let lastError = ''
+      const savedIds: string[] = []
+      const failedIds: string[] = []
 
       for (const id of job.ids) {
         try {
@@ -418,8 +454,10 @@ export function PurchaseBulk1688TrackingLookup({
           const body = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
           savedForJob += 1
+          savedIds.push(id)
         } catch (error) {
           failedForJob += 1
+          failedIds.push(id)
           lastError = error instanceof Error ? error.message : '1688 송장번호를 저장하지 못했습니다.'
         }
       }
@@ -430,6 +468,8 @@ export function PurchaseBulk1688TrackingLookup({
       current = null
       index += 1
       currentStartAttempts = 0
+      if (savedIds.length > 0) updateLookupRows(savedIds, 'success', `송장 ${trackingNumbers.join(', ')} 등록 완료`, trackingNumbers)
+      if (failedIds.length > 0) updateLookupRows(failedIds, 'failed', lastError)
       updateProgress(lastError || `송장 ${savedForJob.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`)
       scheduleNextJob()
     }
@@ -471,6 +511,7 @@ export function PurchaseBulk1688TrackingLookup({
       }
 
       current.saving = true
+      updateLookupRows(current.job.ids, 'saving', '송장번호 저장 중', trackingNumbers)
       updateProgress(`주문 ${index + 1}/${batch.jobs.length} 송장 저장 중`)
       void saveCurrentJob(current.runId, trackingNumbers)
     }
@@ -497,7 +538,18 @@ export function PurchaseBulk1688TrackingLookup({
       grouped.set(orderNumber, ids)
     }
     const jobs = Array.from(grouped, ([orderNumber, ids]) => ({ orderNumber, ids }))
-    const skippedItems = selectedCount - eligibleCandidates.length
+    const skippedItems = skippedCandidateCount
+    setLookupRows(eligibleCandidates.map((candidate) => ({
+      id: candidate.id,
+      sku: candidate.sku,
+      productName: candidate.productName,
+      optionName: candidate.optionName,
+      orderNumber: candidate.supplierOrderNumber?.trim() ?? '',
+      status: 'queued',
+      message: '조회 대기',
+      trackingNumbers: [],
+    })))
+    setDialogOpen(true)
     if (eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || jobs.length > MAX_1688_TRACKING_BATCH_ORDERS) {
       setProgress({
         totalItems: eligibleCandidates.length,
@@ -507,12 +559,16 @@ export function PurchaseBulk1688TrackingLookup({
         failedItems: 0,
         currentOrder: 0,
         currentOrderNumber: null,
-        message: `한 번에 최대 ${MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 1688 주문 또는 ${MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}개 발주 항목만 조회할 수 있습니다. 선택을 나눠주세요.`,
+        message: `한 번에 최대 ${MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 1688 주문 또는 ${MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}개 발주 항목만 조회할 수 있습니다. 현재 페이지 표시 수를 줄인 뒤 다시 조회해주세요.`,
         complete: true,
       })
+      setLookupRows((rows) => rows.map((row) => ({
+        ...row,
+        status: 'skipped',
+        message: '한 번에 처리할 수 있는 건수를 초과했습니다.',
+      })))
       return
     }
-    if (!window.confirm(`선택한 ${eligibleCandidates.length.toLocaleString('ko-KR')}건(${jobs.length.toLocaleString('ko-KR')}개 1688 주문)의 송장을 순차 조회합니다. 조회 성공 건은 검수로 이동합니다.`)) return
 
     stopRequestedRef.current = false
     setProgress({
@@ -543,45 +599,98 @@ export function PurchaseBulk1688TrackingLookup({
     } : current)
   }
 
-  const actionLabel = selectedCount === 0
-    ? '현재 페이지 선택 0건 1688 송장 일괄조회'
-    : selectedCount === eligibleCandidates.length
-      ? `현재 페이지 선택 ${eligibleCandidates.length.toLocaleString('ko-KR')}건 1688 송장 일괄조회`
-      : `현재 페이지 선택 ${selectedCount.toLocaleString('ko-KR')}건 중 ${eligibleCandidates.length.toLocaleString('ko-KR')}건 일괄조회`
-
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <Dialog.Root
+      open={dialogOpen}
+      onOpenChange={(nextOpen) => {
+        if (batch && !nextOpen) return
+        setDialogOpen(nextOpen)
+      }}
+    >
       <Button
         type="button"
         size="sm"
         variant="outline"
         onClick={startBatch}
-        disabled={Boolean(batch) || eligibleCandidates.length === 0 || eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || eligibleOrderCount > MAX_1688_TRACKING_BATCH_ORDERS}
-        title="현재 페이지에서 선택한 구매완료 항목의 1688 송장번호를 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 제외합니다."
+        disabled={Boolean(batch) || eligibleCandidates.length === 0}
+        title="현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다."
       >
         {batch ? <Loader2 className="animate-spin" /> : <Search />}
-        {batch
-          ? `1688 조회 ${progress?.currentOrder ?? 0}/${progress?.totalOrders ?? 0}`
-          : actionLabel}
+        1688 송장 일괄조회
       </Button>
-      {batch ? (
-        <Button type="button" size="sm" variant="ghost" onClick={stopAfterCurrent} disabled={progress?.stopping}>
-          중지(현재 건 이후)
-        </Button>
-      ) : null}
-      {selectedCount > 0 && eligibleCandidates.length > 0 && eligibleCandidates.length !== selectedCount ? (
-        <span className="text-xs text-muted-foreground">송장이 있거나 주문번호가 없는 {Math.max(0, selectedCount - eligibleCandidates.length).toLocaleString('ko-KR')}건은 제외</span>
-      ) : null}
-      {eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || eligibleOrderCount > MAX_1688_TRACKING_BATCH_ORDERS ? (
-        <span className="text-xs text-amber-700">한 번에 최대 {MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 주문 / {MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}건</span>
-      ) : null}
-      {progress ? (
-        <span className="text-xs text-muted-foreground" aria-live="polite">
-          {progress.message} · 성공 {progress.succeededItems.toLocaleString('ko-KR')}건 · 미처리 {progress.failedItems.toLocaleString('ko-KR')}건
-          {progress.skippedItems > 0 ? ` · 제외 ${progress.skippedItems.toLocaleString('ko-KR')}건` : ''}
-        </span>
-      ) : null}
-    </div>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[min(920px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border bg-background p-5 shadow-xl">
+          <Dialog.Title className="text-base font-semibold">1688 송장 일괄조회</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+            현재 페이지의 구매완료 항목 중 주문서번호가 있고 송장이 비어 있는 {(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회합니다.
+            {(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장 또는 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}
+          </Dialog.Description>
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm" aria-live="polite">
+            <span>{progress?.message ?? '조회 준비'}</span>
+            <span className="text-muted-foreground">성공 {(progress?.succeededItems ?? 0).toLocaleString('ko-KR')}건</span>
+            <span className="text-muted-foreground">미처리 {(progress?.failedItems ?? 0).toLocaleString('ko-KR')}건</span>
+            {progress?.skippedItems ? <span className="text-muted-foreground">건너뜀 {progress.skippedItems.toLocaleString('ko-KR')}건</span> : null}
+          </div>
+
+          <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border">
+            {lookupRows.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground">조회할 주문서번호가 있는 항목이 없습니다.</p>
+            ) : (
+              <div className="divide-y">
+                {lookupRows.map((row) => {
+                  const statusClassName = row.status === 'success'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : row.status === 'failed'
+                      ? 'bg-red-100 text-red-800'
+                      : row.status === 'saving'
+                        ? 'bg-blue-100 text-blue-800'
+                        : row.status === 'querying'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-muted text-muted-foreground'
+                  const statusLabel = row.status === 'success'
+                    ? '성공'
+                    : row.status === 'failed'
+                      ? '미처리'
+                      : row.status === 'saving'
+                        ? '저장 중'
+                        : row.status === 'querying'
+                          ? '조회 중'
+                          : row.status === 'skipped'
+                            ? '건너뜀'
+                            : '대기'
+                  return (
+                    <div key={row.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p data-no-translate className="break-words text-sm font-medium">
+                          <span className="mr-1 text-muted-foreground">{row.sku}</span>
+                          {row.productName}{row.optionName ? ` · ${row.optionName}` : ''}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">주문서번호 <span data-no-translate>{row.orderNumber}</span></p>
+                        <p className="mt-1 text-xs text-muted-foreground">{row.message}</p>
+                        {row.trackingNumbers.length > 0 ? <p data-no-translate className="mt-1 break-all text-xs text-emerald-700">{row.trackingNumbers.join(', ')}</p> : null}
+                      </div>
+                      <span className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-medium ${statusClassName}`}>{statusLabel}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end gap-2">
+            {batch ? (
+              <Button type="button" variant="outline" onClick={stopAfterCurrent} disabled={progress?.stopping}>
+                중지(현재 건 이후)
+              </Button>
+            ) : (
+              <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">닫기</Button>} />
+            )}
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

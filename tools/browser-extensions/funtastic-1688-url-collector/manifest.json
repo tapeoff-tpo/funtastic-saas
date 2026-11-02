@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
   "description": "1688 구매 URL·상세페이지 이미지와 발주 송장번호를 로그인된 브라우저에서 조회합니다.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "permissions": [
     "alarms",
     "storage",

@@ -501,6 +501,9 @@ export async function PurchasingOrdersView({
                 <PurchaseBulk1688TrackingLookup
                   candidates={items.flatMap((item) => item.id ? [{
                     id: item.id,
+                    sku: item.sku,
+                    productName: item.productName,
+                    optionName: item.optionName,
                     supplierOrderNumber: item.supplierOrderNumber,
                     trackingNumber: item.trackingNumber,
                   }] : [])}

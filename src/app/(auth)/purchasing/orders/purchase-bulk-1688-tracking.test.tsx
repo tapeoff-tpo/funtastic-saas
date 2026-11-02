@@ -2,8 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PurchaseBulk1688TrackingLookup,
-  PurchaseBulkSelectionProvider,
-  PurchaseRowCheckbox,
 } from './purchase-request-actions'
 
 const refresh = vi.hoisted(() => vi.fn())
@@ -35,23 +33,42 @@ const secondOrder = '3317159640039018762'
 
 function renderBulkLookup() {
   render(
-    <PurchaseBulkSelectionProvider
-      ids={[firstId, secondId, existingTrackingId, invalidOrderId]}
-      nextStatus={null}
-    >
-      <PurchaseRowCheckbox id={firstId} />
-      <PurchaseRowCheckbox id={secondId} />
-      <PurchaseRowCheckbox id={existingTrackingId} />
-      <PurchaseRowCheckbox id={invalidOrderId} />
-      <PurchaseBulk1688TrackingLookup
-        candidates={[
-          { id: firstId, supplierOrderNumber: firstOrder, trackingNumber: null },
-          { id: secondId, supplierOrderNumber: secondOrder, trackingNumber: null },
-          { id: existingTrackingId, supplierOrderNumber: firstOrder, trackingNumber: 'MANUAL-TRACKING' },
-          { id: invalidOrderId, supplierOrderNumber: 'not-an-order', trackingNumber: null },
-        ]}
-      />
-    </PurchaseBulkSelectionProvider>,
+    <PurchaseBulk1688TrackingLookup
+      candidates={[
+        {
+          id: firstId,
+          sku: '111555-0001',
+          productName: 'CABOSS 자갈 지압매트 150cm',
+          optionName: null,
+          supplierOrderNumber: firstOrder,
+          trackingNumber: null,
+        },
+        {
+          id: secondId,
+          sku: '111555-0002',
+          productName: '두 번째 상품',
+          optionName: '블랙',
+          supplierOrderNumber: secondOrder,
+          trackingNumber: null,
+        },
+        {
+          id: existingTrackingId,
+          sku: '111555-0003',
+          productName: '수동 송장 등록 상품',
+          optionName: null,
+          supplierOrderNumber: firstOrder,
+          trackingNumber: 'MANUAL-TRACKING',
+        },
+        {
+          id: invalidOrderId,
+          sku: '111555-0004',
+          productName: '주문번호 없는 상품',
+          optionName: null,
+          supplierOrderNumber: 'not-an-order',
+          trackingNumber: null,
+        },
+      ]}
+    />,
   )
 }
 
@@ -70,11 +87,10 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     toastWarning.mockReset()
     toastError.mockReset()
     vi.restoreAllMocks()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('1688-batch-run')
   })
 
-  it('queries selected valid rows one at a time and excludes existing/manual rows', async () => {
+  it('opens one progress popup, queries all eligible rows, and skips existing/manual rows automatically', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input)
       if (url === `/api/purchasing/purchase-requests/${firstId}/1688-tracking` || url === `/api/purchasing/purchase-requests/${secondId}/1688-tracking`) {
@@ -85,10 +101,12 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     const postMessage = vi.spyOn(window, 'postMessage')
     renderBulkLookup()
 
-    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox)
-    expect(screen.getByRole('button', { name: '현재 페이지 선택 4건 중 2건 일괄조회' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '1688 송장 일괄조회' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '현재 페이지 선택 4건 중 2건 일괄조회' }))
+    expect(screen.getByText(/111555-0001/)).toBeInTheDocument()
+    expect(screen.getByText(/CABOSS 자갈 지압매트 150cm/)).toBeInTheDocument()
+    expect(screen.getByText(/기존 송장 또는 주문서번호가 없는 2건은 자동으로 건너뜁니다/)).toBeInTheDocument()
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'funtastic-saas',
@@ -163,8 +181,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     const postMessage = vi.spyOn(window, 'postMessage')
     renderBulkLookup()
 
-    for (const checkbox of screen.getAllByRole('checkbox').slice(0, 2)) fireEvent.click(checkbox)
-    fireEvent.click(screen.getByRole('button', { name: '현재 페이지 선택 2건 1688 송장 일괄조회' }))
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
       window.location.origin,
@@ -181,6 +198,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     })
 
     await waitFor(() => expect(screen.getByText(/남은 항목은 확인 후 다시 일괄조회해주세요/)).toBeInTheDocument())
+    expect(screen.getByText('남은 항목은 조회하지 않았습니다.')).toBeInTheDocument()
     expect(postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-1-1' }),
       window.location.origin,
@@ -192,8 +210,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     const postMessage = vi.spyOn(window, 'postMessage')
     renderBulkLookup()
 
-    for (const checkbox of screen.getAllByRole('checkbox').slice(0, 2)) fireEvent.click(checkbox)
-    fireEvent.click(screen.getByRole('button', { name: '현재 페이지 선택 2건 1688 송장 일괄조회' }))
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
       window.location.origin,
@@ -219,8 +236,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     const postMessage = vi.spyOn(window, 'postMessage')
     renderBulkLookup()
 
-    fireEvent.click(screen.getAllByRole('checkbox')[0])
-    fireEvent.click(screen.getByRole('button', { name: '현재 페이지 선택 1건 1688 송장 일괄조회' }))
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ runId: '1688-batch-run-0-1', orderNumber: firstOrder }),
       window.location.origin,

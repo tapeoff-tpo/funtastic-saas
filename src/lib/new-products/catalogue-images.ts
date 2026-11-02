@@ -10,11 +10,16 @@ const maxImageBytes = 4 * 1024 * 1024
 
 export async function findSavedNewProductImages(userId: string, sku: string, productName: string) {
   await ensureNewProductWorkflowTables(userId)
+  const exactSku = sql`(item.sabangnet_code = ${sku} OR EXISTS (
+    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(item.metadata -> 'optionDetails') = 'array'
+      THEN item.metadata -> 'optionDetails' ELSE '[]'::jsonb END) option
+    WHERE option ->> 'sabangnetOptionCode' = ${sku}
+  ))`
   const matches = rows<{ id: string; exactSku: boolean; images: string[] }>(await db.execute(sql`
-    SELECT item.id, (item.sabangnet_code = ${sku}) AS "exactSku", jsonb_agg(attachment.id::text ORDER BY attachment.created_at) AS images
+    SELECT item.id, ${exactSku} AS "exactSku", jsonb_agg(attachment.id::text ORDER BY attachment.created_at) AS images
     FROM new_product_workflow_items item
     JOIN new_product_workflow_attachments attachment ON attachment.item_id = item.id AND attachment.user_id = item.user_id AND attachment.kind = 'product_image'
-    WHERE item.user_id = ${userId}::uuid AND (item.sabangnet_code = ${sku}
+    WHERE item.user_id = ${userId}::uuid AND (${exactSku}
       OR lower(btrim(item.product_name)) = lower(btrim(${productName}))
       OR lower(btrim(item.registered_product_name)) = lower(btrim(${productName})))
     GROUP BY item.id ORDER BY "exactSku" DESC NULLS LAST LIMIT 3

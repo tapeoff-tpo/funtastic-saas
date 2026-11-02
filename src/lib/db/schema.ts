@@ -18,6 +18,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import type { PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import type { InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
 
 // ─── Phase 1: Marketplace Connections ───────────────────────────
 
@@ -1241,6 +1242,7 @@ export const saasChinaShipmentPurchaseAllocations = pgTable(
     reservedQuantity: integer('reserved_quantity').notNull(),
     dispatchedQuantity: integer('dispatched_quantity').notNull().default(0),
     releasedQuantity: integer('released_quantity').notNull().default(0),
+    inspectionBoxes: jsonb('inspection_boxes').$type<InspectionPackingPiece[]>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

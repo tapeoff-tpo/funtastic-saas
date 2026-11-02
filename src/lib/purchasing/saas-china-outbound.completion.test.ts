@@ -214,6 +214,35 @@ describe('China outbound box and pallet completion', () => {
     expect(pallets.map((pallet) => pallet.completionStatus)).toEqual(['completed', 'completed'])
   })
 
+  it('renumbers an exclusive box without losing its measurements or pallet', async () => {
+    Object.assign(boxes[0]!, { grossWeightKg: '8.5', note: 'SF001' })
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ existingBoxId: 'box-1', boxNo: 'CUSTOM-7', quantity: 5 }, { boxNo: '2', quantity: 5 }],
+    })
+    expect(boxes[0]).toMatchObject({ id: 'box-1', boxNo: 'CUSTOM-7', palletId: 'pallet-1', lengthCm: '10', widthCm: '20', heightCm: '30', grossWeightKg: '8.5', note: 'SF001' })
+    expect(boxItems.find((row) => row.boxId === 'box-1')).toMatchObject({ quantity: 5 })
+  })
+
+  it('rejects an automatic number occupied by another product instead of merging boxes', async () => {
+    boxItems.push({ id: 'other-allocation', userId, shipmentId, boxId: 'empty', shipmentItemId: 'other-item', quantity: 2 })
+    await expect(saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '3', quantity: 10, autoNumber: true }],
+    })).rejects.toThrow(/자동/)
+    expect(boxItems.find((row) => row.id === 'other-allocation')).toMatchObject({ quantity: 2 })
+  })
+
+  it('rejects renaming a shared box or another item’s box', async () => {
+    boxItems.push({ id: 'other-allocation', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'other-item', quantity: 2 })
+    await expect(saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ existingBoxId: 'box-1', boxNo: 'CUSTOM', quantity: 10 }],
+    })).rejects.toThrow(/혼합박스/)
+    await expect(saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ existingBoxId: 'empty', boxNo: 'CUSTOM', quantity: 10 }],
+    })).rejects.toThrow()
+    expect(boxes[0]).toMatchObject({ boxNo: '1' })
+  })
+
   it('reopens both old and new pallets when a box is reassigned', async () => {
     await assignChinaOutboundBoxesToPallets({ userId, shipmentId, assignments: [{ boxNo: '1', palletNo: 'P2' }] })
     expect(boxes[0]).toMatchObject({ palletId: 'pallet-2' })

@@ -3,6 +3,8 @@ import type { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import {
   chinaOutboundShipmentItems,
+  chinaOutboundBoxes,
+  chinaOutboundBoxItems,
   chinaOutboundShipments,
   purchaseRequestItems,
   saasChinaInventory,
@@ -18,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
-import { cancelChinaOutboundShipment, createChinaOutboundShipment } from './saas-china-outbound'
+import { addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
 
@@ -31,6 +33,8 @@ let movements: Row[]
 let purchaseLinks: Row[]
 let allocations: Row[]
 let purchaseItems: Row[]
+let boxes: Row[]
+let boxItems: Row[]
 let sequence: number
 
 function paramsFor(condition: SQL) {
@@ -61,7 +65,7 @@ function makeTransaction() {
                 : table === purchaseRequestItems ? purchaseItems
                   : table === chinaOutboundShipments ? shipments
                     : table === chinaOutboundShipmentItems ? shipmentItems
-                      : null
+                      : table === chinaOutboundBoxes ? boxes : table === chinaOutboundBoxItems ? boxItems : null
           if (!rows) throw new Error('Unexpected select table')
           const result = Promise.resolve(queryRows(rows, condition))
           return Object.assign(result, {
@@ -77,11 +81,11 @@ function makeTransaction() {
           : table === chinaOutboundShipmentItems ? shipmentItems
             : table === saasChinaInventoryMovements ? movements
               : table === saasChinaShipmentPurchaseAllocations ? allocations
-                : null
+                : table === chinaOutboundBoxes ? boxes : table === chinaOutboundBoxItems ? boxItems : null
         if (!rows) throw new Error('Unexpected insert table')
         const defaults = table === saasChinaShipmentPurchaseAllocations
           ? { dispatchedQuantity: 0, releasedQuantity: 0 }
-          : {}
+          : table === chinaOutboundShipmentItems ? { packedQuantity: 0, dispatchedQuantity: 0, boxSplitStatus: 'in_progress' } : {}
         const row = { ...defaults, ...values, id: `created-${++sequence}` } as Row
         rows.push(row)
         return { returning: async () => [row] }
@@ -95,7 +99,7 @@ function makeTransaction() {
               : table === purchaseRequestItems ? purchaseItems
                 : table === chinaOutboundShipments ? shipments
                   : table === saasChinaShipmentPurchaseAllocations ? allocations
-                    : null
+                    : table === chinaOutboundShipmentItems ? shipmentItems : table === chinaOutboundBoxes ? boxes : null
           if (!rows) throw new Error('Unexpected update table')
           const matchingRows = queryRows(rows, condition)
           for (const match of matchingRows) {
@@ -124,6 +128,7 @@ describe('createChinaOutboundShipment', () => {
     purchaseLinks = []
     allocations = []
     purchaseItems = []
+    boxes = []; boxItems = []
     mocks.execute.mockResolvedValue(undefined)
   })
 
@@ -172,6 +177,49 @@ describe('createChinaOutboundShipment', () => {
     })).rejects.toThrow('SaaS 중국재고에서 찾을 수 없는 출고 품목이 있습니다.')
     expect(shipments).toHaveLength(1)
     expect(inventories[0]).toMatchObject({ reservedQuantity: 4, availableQuantity: 6 })
+  })
+
+  function inspectedLot() {
+    inventories[0]!.reservedQuantity = 0; inventories[0]!.availableQuantity = 10
+    purchaseLinks = [{ id: 'lot-a', userId: workspaceUserId, inventoryId: 'inventory-a', purchaseRequestItemId: 'purchase-a', receivedQuantity: 10, reservedQuantity: 0, dispatchedQuantity: 0 }]
+    purchaseItems = [{ id: 'purchase-a', userId: workspaceUserId, rawData: {}, purchaseInspection: {
+      version: 1, revision: 1, expectedQuantity: 10, checkedAt: '2026-11-02T01:00:00Z', checkedBy: 'staff', resolutionNote: '', parcels: [
+        { id: 'parcel-a', trackingNumber: 'SF001', boxes: [{ id: 'receipt-a', quantity: 6, lengthCm: 50, widthCm: 40, heightCm: 30, weightKg: 3 }] },
+        { id: 'parcel-b', trackingNumber: 'YT002', boxes: [{ id: 'receipt-b', quantity: 4, lengthCm: 20, widthCm: 20, heightCm: 10, weightKg: 2 }] },
+      ],
+    } }]
+    mocks.transaction.mockImplementation((callback) => callback(makeTransaction()))
+  }
+
+  it('creates initial boxes from the exact reserved receipt and leaves physical stock unchanged', async () => {
+    inspectedLot()
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 10 }] })
+    expect(boxItems.map((row) => row.quantity)).toEqual([6, 4])
+    expect(boxes.map((row) => [row.boxNo, row.lengthCm, row.grossWeightKg])).toEqual([['1', '50', '3'], ['2', '20', '2']])
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 10, packedQuantity: 10 })
+    expect(allocations[0]).toMatchObject({ inspectionBoxes: [expect.objectContaining({ trackingNumber: 'SF001', quantity: 6 }), expect.objectContaining({ trackingNumber: 'YT002', quantity: 4 })] })
+    expect(inventories[0]!.onHandQuantity).toBe(10)
+  })
+
+  it('adds only new boxes when adding stock and preserves the existing box IDs and edits', async () => {
+    inspectedLot()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 6 }] })
+    const firstId = boxes[0]!.id; boxes[0]!.boxNo = 'CUSTOM-7'
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 4 }] })
+    expect(boxes[0]).toMatchObject({ id: firstId, boxNo: 'CUSTOM-7' })
+    expect(boxItems.map((row) => row.quantity)).toEqual([6, 4])
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 10, packedQuantity: 10 })
+  })
+
+  it('reuses a cancelled receipt allocation while retaining another shipment reservation', async () => {
+    inspectedLot()
+    const first = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 6 }] })
+    const second = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 4 }] })
+    await cancelChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentId: first.id })
+    const third = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 6 }] })
+    expect(allocations.find((row) => row.shipmentId === third.id)?.inspectionBoxes).toEqual([expect.objectContaining({ receiptBoxId: 'receipt-a', quantity: 6 })])
+    expect(allocations.find((row) => row.shipmentId === second.id)?.releasedQuantity).toBe(0)
+    expect(purchaseLinks[0]!.reservedQuantity).toBe(10)
   })
 
   it('keeps linked purchase-lot reservations in sync across different active shipments', async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { nextAvailableBoxNumbers, planInspectionPacking, type InspectionPackingPiece } from './china-outbound-auto-packing'
 import {
   isSaasChinaInventoryExcludedWarehouseCode,
   SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR,
@@ -240,6 +241,8 @@ export type ChinaOutboundPackingAllocationInput = {
  */
 export type ChinaOutboundBoxSplitInput = {
   boxNo: string
+  existingBoxId?: string
+  autoNumber?: boolean
   quantity: number
   lengthCm?: number | null
   widthCm?: number | null
@@ -305,6 +308,7 @@ type ChinaOutboundBoxItemRow = typeof chinaOutboundBoxItems.$inferSelect
 type SaasChinaPurchaseLinkRow = typeof saasChinaPurchaseLinks.$inferSelect
 
 type ChinaOutboundShipmentCreationOptions = {
+  initializeInspectionPacking?: boolean
   /**
    * Workbook uploads have a stable import key. A retry must return the first
    * created shipment instead of reserving the same stock again.
@@ -778,6 +782,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     reserved_quantity integer NOT NULL,
     dispatched_quantity integer NOT NULL DEFAULT 0,
     released_quantity integer NOT NULL DEFAULT 0,
+    inspection_boxes jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT saas_china_shipment_purchase_allocations_shipment_workspace_fkey
@@ -804,6 +809,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
 
   CREATE UNIQUE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_item_link
     ON saas_china_shipment_purchase_allocations(shipment_item_id, purchase_link_id);
+  ALTER TABLE saas_china_shipment_purchase_allocations ADD COLUMN IF NOT EXISTS inspection_boxes jsonb NOT NULL DEFAULT '[]'::jsonb;
   CREATE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_user_shipment
     ON saas_china_shipment_purchase_allocations(user_id, shipment_id);
   CREATE INDEX IF NOT EXISTS saas_china_shipment_purchase_allocations_purchase_link
@@ -1066,19 +1072,20 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
   // New shipment rows carry their warehouse snapshot. Keep the inventory
   // lookup only as a compatibility fallback for rows created before that
   // column was introduced.
-  const inventoryIds = [...new Set(items
-    .filter((item) => !item.originWarehouseCode)
-    .map((item) => item.inventoryId))]
+  const inventoryIds = [...new Set(items.map((item) => item.inventoryId))]
   const inventoryRows = inventoryIds.length === 0
     ? []
     : await db
-      .select({ id: saasChinaInventory.id, warehouseCode: saasChinaInventory.warehouseCode })
+      .select({ id: saasChinaInventory.id, warehouseCode: saasChinaInventory.warehouseCode, onHandQuantity: saasChinaInventory.onHandQuantity, availableQuantity: saasChinaInventory.availableQuantity })
       .from(saasChinaInventory)
       .where(and(
         eq(saasChinaInventory.userId, input.userId),
         inArray(saasChinaInventory.id, inventoryIds),
       ))
   const warehouseCodeByInventoryId = new Map(inventoryRows.map((inventory) => [inventory.id, inventory.warehouseCode]))
+  const stockById = new Map(inventoryRows.map((inventory) => [inventory.id, inventory]))
+  const packingAllocations = await db.select({ shipmentItemId: saasChinaShipmentPurchaseAllocations.shipmentItemId, inspectionBoxes: saasChinaShipmentPurchaseAllocations.inspectionBoxes })
+    .from(saasChinaShipmentPurchaseAllocations).where(and(eq(saasChinaShipmentPurchaseAllocations.userId, input.userId), eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipment.id)))
   const boxIds = boxes.map((box) => box.id)
   const itemIds = items.map((item) => item.id)
   const boxItems = boxIds.length === 0 || itemIds.length === 0
@@ -1098,6 +1105,9 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
     shipment,
     items: items.map((item) => ({
       ...item,
+      onHandQuantity: stockById.get(item.inventoryId)?.onHandQuantity ?? null,
+      availableQuantity: stockById.get(item.inventoryId)?.availableQuantity ?? null,
+      receiptPacking: packingAllocations.filter((allocation) => allocation.shipmentItemId === item.id).flatMap((allocation) => allocation.inspectionBoxes ?? []),
       warehouseCode: item.originWarehouseCode
         || warehouseCodeByInventoryId.get(item.inventoryId)
         || shipment.originWarehouseCode,
@@ -1869,6 +1879,7 @@ export async function createChinaOutboundShipment(
         shipmentItemId: shipmentItem.id,
         inventoryId: inventory.id,
         quantity: line.quantity,
+        initializeInspectionPacking: options.initializeInspectionPacking !== false,
       })
       allocatedPurchaseLinkIds.forEach((id) => affectedPurchaseLinkIds.add(id))
 
@@ -1993,6 +2004,7 @@ export async function applyChinaOutboundRegistrationWorkbook(input: {
     })),
   }, {
     idempotentShipmentNo: true,
+    initializeInspectionPacking: input.workbook.boxAllocations.length === 0,
     idempotencyFingerprint: fingerprint,
     afterCreateInTransaction: async (context) => {
       created = true
@@ -3289,6 +3301,7 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
     shipmentItemId: string
     inventoryId: string
     quantity: number
+    initializeInspectionPacking?: boolean
   },
 ) {
   const links = await tx
@@ -3316,20 +3329,26 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
       .returning()
     if (!updatedLink) throw new Error('발주 연동 출고예약을 저장하지 못했습니다.')
 
-    const [existingAllocation] = await tx
+    const priorAllocations = await tx
       .select()
       .from(saasChinaShipmentPurchaseAllocations)
       .where(and(
         eq(saasChinaShipmentPurchaseAllocations.userId, input.userId),
-        eq(saasChinaShipmentPurchaseAllocations.shipmentItemId, input.shipmentItemId),
         eq(saasChinaShipmentPurchaseAllocations.purchaseLinkId, link.id),
       ))
-      .limit(1)
+    const existingAllocation = priorAllocations.find((row) => row.shipmentItemId === input.shipmentItemId)
+    const [purchase] = await tx.select({ purchaseInspection: purchaseRequestItems.purchaseInspection })
+      .from(purchaseRequestItems).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, link.purchaseRequestItemId))).limit(1)
+    const planned = planInspectionPacking({ inspection: purchase?.purchaseInspection, receivedQuantity: link.receivedQuantity, quantity: allocation.reservedQuantity, previous: priorAllocations })
+    const inspectionBoxes = planned.length && input.initializeInspectionPacking !== false
+      ? await appendInspectionPackingInTransaction(tx, input, planned)
+      : planned
     if (existingAllocation) {
       await tx
         .update(saasChinaShipmentPurchaseAllocations)
         .set({
           reservedQuantity: existingAllocation.reservedQuantity + allocation.reservedQuantity,
+          inspectionBoxes: [...(existingAllocation.inspectionBoxes ?? []), ...inspectionBoxes],
           updatedAt: new Date(),
         })
         .where(eq(saasChinaShipmentPurchaseAllocations.id, existingAllocation.id))
@@ -3340,6 +3359,7 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
         shipmentItemId: input.shipmentItemId,
         purchaseLinkId: link.id,
         reservedQuantity: allocation.reservedQuantity,
+        inspectionBoxes,
       })
     }
     affectedLinkIds.push(link.id)
@@ -3348,6 +3368,34 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
   // Any remaining quantity comes from a manually received/opening SaaS stock
   // balance, which intentionally has no purchase-request link.
   return affectedLinkIds
+}
+
+async function appendInspectionPackingInTransaction(
+  tx: DbTransaction,
+  input: { userId: string; shipmentId: string; shipmentItemId: string },
+  pieces: InspectionPackingPiece[],
+) {
+  const boxes = await tx.select().from(chinaOutboundBoxes).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId)))
+  const numbers = nextAvailableBoxNumbers(pieces.length, boxes.map((box) => box.boxNo))
+  const item = await getChinaOutboundShipmentItem(tx, input.userId, input.shipmentId, input.shipmentItemId)
+  const packedQuantity = item.packedQuantity + pieces.reduce((sum, piece) => sum + piece.quantity, 0)
+  if (packedQuantity > item.reservedQuantity) throw new Error('자동 박스분할 수량이 실제 출고수량을 초과합니다.')
+  const nextSort = boxes.reduce((maximum, box) => Math.max(maximum, box.sortOrder), -1) + 1
+  const result: InspectionPackingPiece[] = []
+  for (const [index, piece] of pieces.entries()) {
+    const [box] = await tx.insert(chinaOutboundBoxes).values({
+      userId: input.userId, shipmentId: input.shipmentId, boxNo: numbers[index], sortOrder: nextSort + index,
+      lengthCm: String(piece.lengthCm), widthCm: String(piece.widthCm), heightCm: String(piece.heightCm),
+      grossWeightKg: piece.weightKg === null ? null : String(piece.weightKg),
+      note: `송장 ${piece.trackingNumber} · 입고 ${piece.receivedQuantity}개${piece.quantity < piece.receivedQuantity ? ' · 부분 출고: 무게 재확인' : ''}`,
+    }).returning()
+    if (!box) throw new Error('검수 포장정보로 박스를 만들지 못했습니다.')
+    await tx.insert(chinaOutboundBoxItems).values({ userId: input.userId, shipmentId: input.shipmentId, shipmentItemId: input.shipmentItemId, boxId: box.id, quantity: piece.quantity })
+    result.push({ ...piece, outboundBoxId: box.id })
+  }
+  await tx.update(chinaOutboundShipmentItems).set({ packedQuantity, boxSplitStatus: 'in_progress', updatedAt: new Date() }).where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.id, item.id)))
+  await tx.update(chinaOutboundShipments).set({ status: 'packing', updatedAt: new Date() }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, input.shipmentId), eq(chinaOutboundShipments.status, 'draft')))
+  return result
 }
 
 async function dispatchSaasChinaPurchaseAllocationsForShipment(
@@ -4289,18 +4337,21 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
     const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
     const current = allocationsByBoxNo.get(boxNo)
     if (current) {
+      if (current.existingBoxId && allocation.existingBoxId && current.existingBoxId !== allocation.existingBoxId) throw new Error('서로 다른 박스를 같은 번호로 변경할 수 없습니다.')
       const currentDimensions = normalizeOptionalChinaOutboundBoxDimensions(current)
       if (dimensions && currentDimensions && !sameChinaOutboundBoxDimensions(dimensions, currentDimensions)) {
         throw new Error(`${boxNo}의 가로·세로·높이가 서로 다릅니다.`)
       }
       allocationsByBoxNo.set(boxNo, {
         boxNo,
+        ...(current.existingBoxId || allocation.existingBoxId ? { existingBoxId: current.existingBoxId ?? allocation.existingBoxId } : {}),
+        ...(current.autoNumber || allocation.autoNumber ? { autoNumber: true } : {}),
         quantity: current.quantity + quantity,
         ...(currentDimensions ?? dimensions ?? {}),
       })
       continue
     }
-    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(dimensions ?? {}) })
+    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(allocation.existingBoxId ? { existingBoxId: allocation.existingBoxId } : {}), ...(allocation.autoNumber ? { autoNumber: true } : {}), ...(dimensions ?? {}) })
   }
   return [...allocationsByBoxNo.values()]
 }
@@ -4367,9 +4418,25 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     ? 'in_progress'
     : input.boxSplitStatus ?? normalizeChinaOutboundBoxSplitStatus(input.shipmentItem.boxSplitStatus)
 
+  const renamedBoxIds: string[] = []
+  for (const allocation of input.allocations) {
+    if (!allocation.existingBoxId) continue
+    const box = input.boxes.find((candidate) => candidate.id === allocation.existingBoxId)
+    if (!box || !input.boxItems.some((entry) => entry.boxId === box.id && entry.shipmentItemId === input.shipmentItem.id)) throw new Error('번호를 변경할 기존 박스를 확인해주세요.')
+    if (box.status === 'sealed') throw new Error('봉인된 박스의 번호는 변경할 수 없습니다.')
+    if (input.boxItems.some((entry) => entry.boxId === box.id && entry.shipmentItemId !== input.shipmentItem.id)) throw new Error('혼합박스의 번호는 품목별 분할에서 변경할 수 없습니다.')
+    if (input.boxes.some((candidate) => candidate.id !== box.id && candidate.boxNo === allocation.boxNo)) throw new Error(`${allocation.boxNo} 박스번호가 이미 사용 중입니다.`)
+    if (box.boxNo === allocation.boxNo) continue
+    const [updated] = await input.tx.update(chinaOutboundBoxes).set({ boxNo: allocation.boxNo, updatedAt: new Date() })
+      .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipment.id), eq(chinaOutboundBoxes.id, box.id))).returning()
+    if (!updated) throw new Error('박스번호를 변경하지 못했습니다.')
+    input.boxes[input.boxes.findIndex((candidate) => candidate.id === box.id)] = updated
+    renamedBoxIds.push(box.id)
+  }
   const boxesByNo = new Map(input.boxes.map((box) => [box.boxNo, box]))
   for (const allocation of input.allocations) {
     const box = boxesByNo.get(allocation.boxNo)
+    if (allocation.autoNumber && box && !input.boxItems.some((entry) => entry.boxId === box.id && entry.shipmentItemId === input.shipmentItem.id)) throw new Error(`${box.boxNo} 박스번호가 다른 작업에 사용되었습니다. 새로고침 후 자동 분할을 다시 실행해주세요.`)
     if (box?.status === 'sealed') throw new Error(`${box.boxNo}은(는) 봉인되어 수정할 수 없습니다.`)
   }
 
@@ -4377,7 +4444,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   const previousQuantitiesByBox = new Map(previousBoxItems.map((boxItem) => [boxItem.boxId, boxItem.quantity]))
   const allocationsByBoxNo = new Map(input.allocations.map((allocation) => [allocation.boxNo, allocation]))
   const boxesById = new Map(input.boxes.map((box) => [box.id, box]))
-  const changedBoxIds = new Set<string>()
+  const changedBoxIds = new Set<string>(renamedBoxIds)
   for (const previous of previousBoxItems) {
     const box = boxesById.get(previous.boxId)
     if (!box || allocationsByBoxNo.get(box.boxNo)?.quantity !== previous.quantity) changedBoxIds.add(previous.boxId)

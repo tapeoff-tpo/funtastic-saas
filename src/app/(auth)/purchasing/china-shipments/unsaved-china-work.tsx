@@ -13,6 +13,7 @@ type Draft = {
   // Completion statuses are saved after the content they describe.
   savePriority?: number
   boxDimensions?: Array<{ boxNo: string; dimensions: string }>
+  boxNumbers?: string[]
   save: () => Promise<boolean>
   saveQuietly?: () => Promise<boolean>
   discard: () => void
@@ -30,6 +31,7 @@ type Guard = {
   busy: boolean
   setDraft: (id: string, draft: Draft | null) => void
   getDraft: (id: string) => Draft | undefined
+  getBoxNumbers: (excludingDraftId?: string) => string[]
   hasDraftKind: (kind: DraftKind) => boolean
   requestNavigation: (navigate: () => void, kinds?: DraftKind[]) => void
   requestConfirmation: (confirmation: Confirmation) => void
@@ -66,6 +68,7 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     else drafts.current.delete(id)
   }, [])
   const getDraft = useCallback((id: string) => drafts.current.get(id), [])
+  const getBoxNumbers = useCallback((excludingDraftId?: string) => [...drafts.current.entries()].flatMap(([id, draft]) => id === excludingDraftId ? [] : draft.boxNumbers ?? []), [])
   const hasDraftKind = useCallback((kind: DraftKind) => [...drafts.current.values()].some((draft) => draft.kind === kind), [])
 
   const runTask = useCallback(async (task: () => Promise<boolean>) => {
@@ -212,7 +215,7 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     confirmation.onConfirm()
   }
 
-  return <GuardContext.Provider value={{ busy, setDraft, getDraft, hasDraftKind, requestNavigation, requestConfirmation, runTask }}>
+  return <GuardContext.Provider value={{ busy, setDraft, getDraft, getBoxNumbers, hasDraftKind, requestNavigation, requestConfirmation, runTask }}>
     {children}
     {pendingNavigation ? <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
       <div ref={dialogRef} data-purchasing-translate role="dialog" aria-modal="true" aria-labelledby="china-unsaved-title" aria-describedby="china-unsaved-description" className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-xl">

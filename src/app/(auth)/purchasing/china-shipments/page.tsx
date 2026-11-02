@@ -112,6 +112,9 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       boxSplitStatus: item.boxSplitStatus === 'completed' || item.boxSplitStatus === 'in_progress'
         ? item.boxSplitStatus
         : item.packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress',
+      onHandQuantity: item.onHandQuantity,
+      availableQuantity: item.availableQuantity,
+      receiptPacking: item.receiptPacking,
     })),
     pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({

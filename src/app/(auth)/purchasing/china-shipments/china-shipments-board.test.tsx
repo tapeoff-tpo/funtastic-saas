@@ -250,6 +250,8 @@ describe('ChinaShipmentsBoard', () => {
       replaceHistoryState(...args)
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
+    HTMLDialogElement.prototype.showModal = function () { this.open = true }
+    HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new Event('close')) }
     window.localStorage.clear()
     createShipment.mockReset()
     updateShipment.mockReset()
@@ -260,6 +262,73 @@ describe('ChinaShipmentsBoard', () => {
     addShipmentItems.mockReset()
     toastError.mockReset()
     navigate.mockReset()
+  })
+
+  it('splits the actual outbound quantity from the items dialog and supports manual numbering', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail: ChinaShipmentDetailView = { ...shipmentA, items: [{ ...shipmentA.items[0], onHandQuantity: 1000, availableQuantity: 900, reservedQuantity: 100 }] }
+    renderShipment(detail, 'items')
+    expect(screen.getByRole('columnheader', { name: '현재고' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '실제 출고수량' })).toBeInTheDocument()
+    expect(screen.getByText('1,000개')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '자동 분할 미리보기' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('SKU-A 박스당 수량'), { target: { value: '10' } })
+    expect(dialog.getByLabelText('SKU-A 총 박스 수')).toHaveValue(10)
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    const rows = dialog.getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(10)
+    fireEvent.change(within(rows[0]!).getAllByRole('textbox')[0]!, { target: { value: 'CUSTOM-9' } })
+    fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    const allocations = saveBoxSplits.mock.calls[0]![0].allocations
+    expect(allocations).toHaveLength(10)
+    expect(allocations[0]).toMatchObject({ boxNo: 'CUSTOM-9', quantity: 10 })
+    expect(allocations[0].autoNumber).toBeUndefined()
+    expect(allocations[1]).toMatchObject({ boxNo: '2', quantity: 10, autoNumber: true })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('balances by box count and asks before discarding an unsaved dialog', async () => {
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('SKU-A 총 박스 수'), { target: { value: '3' } })
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    expect(dialog.getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('spinbutton')[0])).toEqual([
+      expect.objectContaining({ value: '4' }), expect.objectContaining({ value: '3' }), expect.objectContaining({ value: '3' }),
+    ])
+    fireEvent.click(dialog.getByRole('button', { name: '닫기' }))
+    expect(dialog.getByRole('alert')).toHaveTextContent('저장하지 않은 박스분할')
+    fireEvent.click(dialog.getByRole('button', { name: '변경 취소' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(saveBoxSplits).not.toHaveBeenCalled()
+  })
+
+  it('shows verified receipt packing and translates the dynamically opened split dialog', async () => {
+    const detail: ChinaShipmentDetailView = { ...shipmentA, items: [{ ...shipmentA.items[0], receiptPacking: [{ receiptBoxId: 'receipt-1', trackingNumber: 'SF001', receivedQuantity: 20, quantity: 10, lengthCm: 10, widthCm: 20, heightCm: 30, weightKg: null }] }] }
+    renderShipmentWithLanguage(detail, 'items')
+    expect(screen.getByText('SF001')).toBeInTheDocument()
+    expect(screen.getByText(/입고 20개\/박스/)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'SKU-A 编辑装箱拆分' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 编辑装箱拆分' }))
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'SKU-A 装箱拆分' })).toBeInTheDocument())
+    const root = document.querySelector('[data-purchasing-translate]')!
+    expect(visibleKoreanUi(root)).toEqual([])
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '预览自动拆分' })).toBeInTheDocument()
+  })
+
+  it('keeps automatic box numbers distinct across unsaved product editors', () => {
+    renderShipment({ ...shipmentA, items: [shipmentA.items[0], { ...shipmentA.items[0], id: 'other-item', sku: 'SKU-B' }] })
+    for (const sku of ['SKU-A', 'SKU-B']) {
+      const editor = itemEditor(sku)
+      fireEvent.change(editor.getByLabelText(`${sku} 박스당 수량`), { target: { value: '5' } })
+      fireEvent.click(editor.getByRole('button', { name: '자동 분할 미리보기' }))
+    }
+    expect(itemEditor('SKU-A').getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['1', '2'])
+    expect(itemEditor('SKU-B').getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['3', '4'])
   })
 
   it('translates every visible stage 1 and 2 control while preserving product identity data', async () => {
@@ -279,7 +348,7 @@ describe('ChinaShipmentsBoard', () => {
 
     await waitFor(() => expect(screen.getByText('第1步 · 确认出库品项')).toBeInTheDocument())
     expect(screen.getByRole('columnheader', { name: '商品名' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '出库数量' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '实际出库数量' })).toBeInTheDocument()
     expect(screen.getByText('添加出库品项')).toBeInTheDocument()
     expect(screen.getByText('SKU-KEEP')).toBeInTheDocument()
     expect(screen.getByText(/번역 제외 상품명/)).toBeInTheDocument()

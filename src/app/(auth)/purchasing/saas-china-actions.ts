@@ -134,6 +134,8 @@ const saveItemBoxSplitsSchema = z.object({
   boxSplitStatus: z.enum(['in_progress', 'completed']).optional(),
   allocations: z.array(z.object({
     boxNo: text('박스 번호', 100),
+    existingBoxId: z.string().uuid('기존 박스를 확인해주세요.').optional(),
+    autoNumber: z.boolean().optional(),
     quantity: z.coerce.number().int().positive('박스 적재 수량은 1 이상의 정수여야 합니다.'),
     lengthCm: splitDimension,
     widthCm: splitDimension,

@@ -2518,6 +2518,7 @@ export function PurchasePlanFieldsV2({
       setSavedPurchaseMethod(nextPurchaseMethod)
       setPurchaseMethodDirty(false)
       setMessage('저장됨')
+      if (values.trackingNumber !== undefined) router.refresh()
     })
   }
 
@@ -2574,7 +2575,9 @@ export function PurchasePlanFieldsV2({
       ref={formRef}
       onSubmit={save}
       className={`grid min-w-0 items-end gap-1.5 ${showTrackingNumber
-        ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
+        ? allow1688TrackingLookup
+          ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_minmax(146px,max-content)]'
+          : 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
         : allow1688TrackingLookup
           ? 'grid-cols-[minmax(120px,1fr)_126px_148px_minmax(146px,max-content)]'
           : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}
@@ -2590,11 +2593,11 @@ export function PurchasePlanFieldsV2({
       </label>
       {showTrackingNumber ? (
         <label className="space-y-1">
-          <span className="block text-[11px] font-medium text-muted-foreground">송장번호</span>
+          <span className="block text-[11px] font-medium text-muted-foreground">운송장번호</span>
           <Input
             name="trackingNumber"
             defaultValue={trackingNumber ?? ''}
-            placeholder="송장번호"
+            placeholder="운송장번호"
             className="h-7 text-xs"
           />
           {baiduTrackingHref ? (

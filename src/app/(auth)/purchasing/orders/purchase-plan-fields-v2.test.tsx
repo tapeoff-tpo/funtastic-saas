@@ -23,13 +23,13 @@ vi.mock('sonner', () => ({
 const itemId = '11111111-1111-4111-8111-111111111111'
 const orderNumber = '3317159640039018761'
 
-function renderFields(trackingNumber: string | null = null) {
+function renderFields(trackingNumber: string | null = null, showTrackingNumber = false) {
   render(
     <PurchasePlanFieldsV2
       id={itemId}
       supplierOrderNumber={null}
       trackingNumber={trackingNumber}
-      showTrackingNumber={false}
+      showTrackingNumber={showTrackingNumber}
       dateValue="2026-11-02"
       dateField="outboundExpectedDate"
       dateLabel="구매날짜"
@@ -120,5 +120,22 @@ describe('PurchasePlanFieldsV2 1688 tracking lookup', () => {
   it('keeps a pre-existing manual tracking number untouched', () => {
     renderFields('MANUAL-TRACKING')
     expect(screen.getByRole('button', { name: '1688 송장조회' })).toBeDisabled()
+  })
+
+  it('lets the user save a manual tracking number beside the supplier order number', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: itemId }) } as Response)
+    renderFields(null, true)
+
+    fireEvent.change(screen.getByRole('textbox', { name: '운송장번호' }), { target: { value: '9823528519765' } })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/purchasing/purchase-requests/${itemId}`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ trackingNumber: '9823528519765' }),
+      }),
+    ))
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
   })
 })

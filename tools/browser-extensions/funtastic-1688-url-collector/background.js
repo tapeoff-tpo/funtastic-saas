@@ -1017,8 +1017,10 @@ function uniqueTrackingNumbers(values) {
 
 async function collect1688TrackingInPage() {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-  const trackingLabel = /(?:物流运单号|快递运单号|物流单号|快递单号|货运单号|运输单号|运单号码|运单编号|运单编码|运单号|物流编号)/i
-  const trackingLabelSource = '(?:物流运单号|快递运单号|物流单号|快递单号|货运单号|运输单号|运单号码|运单编号|运单编码|运单号|物流编号)'
+  // 1688 shows other logistics identifiers alongside the real waybill. Only
+  // `运单号码` is the carrier tracking number for this purchasing flow.
+  const trackingLabel = /运单号码/i
+  const trackingLabelSource = '运单号码'
   const trackingValue = '[A-Za-z0-9][A-Za-z0-9-]{4,99}'
   const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ').slice(0, 100_000)
   const textOf = (element) => (element?.innerText || element?.textContent || '').replace(/\s+/g, ' ').trim()

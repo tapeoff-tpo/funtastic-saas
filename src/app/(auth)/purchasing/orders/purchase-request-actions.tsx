@@ -637,7 +637,9 @@ function Purchase1688TrackingProgressRunner({
           failedItems: 0,
           currentOrder: 0,
           currentOrderNumber: null,
-          message: '이 작업 창에서 조회할 주문서번호가 있는 항목을 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
+          message: isRecollectBatch
+            ? '현재 페이지에서 다시 수집할 LP로 시작하는 기존 물류번호를 찾지 못했습니다. 실제 운송장번호가 저장된 항목은 건너뜁니다.'
+            : '이 작업 창에서 조회할 주문서번호가 있는 항목을 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
           complete: true,
         })
       }
@@ -805,10 +807,6 @@ export function PurchaseBulk1688TrackingLookup({
   const router = useRouter()
   const progressPopupRef = useRef<Window | null>(null)
   const isRecollectBatch = mode === 'recollect'
-  const eligibleCandidates = candidates.filter((candidate) => (
-    valid1688OrderNumber(candidate.supplierOrderNumber)
-      && (isRecollectBatch ? /^LP/i.test(candidate.trackingNumber?.trim() ?? '') : !candidate.trackingNumber?.trim())
-  ))
 
   useEffect(() => {
     const refreshOriginatingList = (event: MessageEvent<unknown>) => {
@@ -825,8 +823,6 @@ export function PurchaseBulk1688TrackingLookup({
   }, [router])
 
   function startBatch() {
-    if (eligibleCandidates.length === 0) return
-
     const existingPopup = progressPopupRef.current
     if (existingPopup && !existingPopup.closed) {
       existingPopup.focus()
@@ -877,7 +873,6 @@ export function PurchaseBulk1688TrackingLookup({
       size="sm"
       variant="outline"
       onClick={startBatch}
-      disabled={eligibleCandidates.length === 0}
       title={isRecollectBatch
         ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
         : '현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}

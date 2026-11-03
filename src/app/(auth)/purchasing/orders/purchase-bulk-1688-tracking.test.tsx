@@ -166,6 +166,26 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     })
   })
 
+  it('keeps the re-collect launcher active when the visible list has no LP legacy tracking number', () => {
+    const popup = popupWindow()
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    render(<PurchaseBulk1688TrackingLookup candidates={initialCandidates} mode="recollect" />)
+
+    const button = screen.getByRole('button', { name: '1688 송장 다시 수집' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+
+    expect(window.open).toHaveBeenCalledWith(
+      `${window.location.origin}/purchasing/orders/1688-tracking-run?runId=${runId}`,
+      'funtastic-1688-tracking-progress',
+      expect.stringContaining('popup=yes'),
+    )
+    expect(JSON.parse(window.localStorage.getItem(purchase1688TrackingPopupStorageKey(runId)) ?? '{}')).toMatchObject({
+      mode: 'recollect',
+      candidates: initialCandidates,
+    })
+  })
+
   it('runs the independent popup queue, saves exact waybills, and skips existing/manual rows', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input)

@@ -84,21 +84,35 @@ function AddMarketplaceForm() {
   }, [router, state])
 
   return (
-    <form action={formAction} className="flex flex-col gap-2 rounded-md border bg-white p-3 sm:flex-row sm:items-end">
+    <form action={formAction} className="grid gap-2 rounded-md border bg-white p-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end">
       <div className="min-w-0 flex-1 space-y-1">
-        <Label htmlFor="custom-marketplace-name">마켓 추가</Label>
+        <Label htmlFor="custom-marketplace-name">신규 몰 추가</Label>
         <Input
           id="custom-marketplace-name"
           name="marketplace_name"
-          placeholder="추가할 마켓명"
+          placeholder="예: 무신사, 오늘의집"
           maxLength={100}
           required
           autoComplete="off"
         />
       </div>
+      <div className="space-y-1">
+        <Label htmlFor="custom-marketplace-fee">기본 수수료율(%)</Label>
+        <Input
+          id="custom-marketplace-fee"
+          name="sales_fee_percent"
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          inputMode="decimal"
+          placeholder="예: 12.5"
+          autoComplete="off"
+        />
+      </div>
       <Button type="submit" disabled={isPending}>
         <Plus className="h-4 w-4" />
-        {isPending ? '추가 중...' : '추가'}
+        {isPending ? '등록 중...' : '등록'}
       </Button>
     </form>
   )

@@ -33,6 +33,23 @@ function GlobalTranslationFixture({
   )
 }
 
+function InspectionTranslationFixture() {
+  return (
+    <div data-app-translate>
+      <PurchasingLanguageSwitcher />
+      <div role="dialog" aria-label="송장·검수">
+        <label htmlFor="inspection-tracking">운송장번호</label>
+        <a href="https://www.baidu.com" title="바이두에서 송장번호 조회" aria-label="바이두에서 송장번호 조회">조회</a>
+        <p>구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.</p>
+        <p>실제 입고수량이 구매수량과 다르면 아래 비고를 입력해주세요.</p>
+        <label htmlFor="inspection-note">수량 차이 비고</label>
+        <textarea id="inspection-note" placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" />
+        <p>수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p>
+      </div>
+    </div>
+  )
+}
+
 describe('PurchasingLanguageSwitcher', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -130,5 +147,22 @@ describe('PurchasingLanguageSwitcher', () => {
     await waitFor(() => {
       expect(screen.getByTestId('dynamic-label')).toHaveTextContent('空白或 0 数量的 2 格会按无库存处理。')
     })
+  })
+
+  it('translates all inspection labels, guidance, and placeholders added after the Chinese switch is active', async () => {
+    render(<InspectionTranslationFixture />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: '运单·验货' })).toBeInTheDocument()
+      expect(screen.getByText('运单号')).toBeInTheDocument()
+      expect(screen.getByText('已将采购完成数量填为临时默认值。请确认实际收货数量后再保存。')).toBeInTheDocument()
+      expect(screen.getByText('实际收货数量与采购数量不一致时，请在下方填写备注。')).toBeInTheDocument()
+      expect(screen.getByText('数量差异备注')).toBeInTheDocument()
+      expect(screen.getByText('数量不一致时，只有勾选确认并填写备注后才能完成验货。')).toBeInTheDocument()
+    })
+    expect(screen.getByPlaceholderText('例如：供应商漏发 10 个，下次发货补齐。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '在百度查询运单号' })).toHaveAttribute('title', '在百度查询运单号')
   })
 })

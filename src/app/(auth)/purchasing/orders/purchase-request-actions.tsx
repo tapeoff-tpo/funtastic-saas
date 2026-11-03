@@ -14,7 +14,7 @@ import {
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronDown, Download, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { Check, ChevronDown, Download, ExternalLink, Loader2, Plus, Save, Search, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -2765,15 +2765,30 @@ export function PurchasePlanFieldsV2({
         />
       </label>
       {showTrackingNumber ? (
-        <label className="space-y-1">
-          <span className="block text-[11px] font-medium text-muted-foreground">운송장번호</span>
+        <div className="space-y-1">
+          <div className="flex items-center gap-1">
+            <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
+            {savedTrackingNumber ? (
+              <a
+                href={`https://www.baidu.com/s?wd=${encodeURIComponent(savedTrackingNumber)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="바이두에서 송장번호 조회"
+                aria-label="바이두에서 송장번호 조회"
+                className="inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+              >
+                <ExternalLink className="size-3" />
+              </a>
+            ) : null}
+          </div>
           <Input
+            id={`purchase-tracking-${id}`}
             name="trackingNumber"
             defaultValue={trackingNumber ?? ''}
             placeholder="운송장번호"
             className="h-7 text-xs"
           />
-        </label>
+        </div>
       ) : null}
       <label className="space-y-1">
         <span className="block text-[11px] font-medium text-muted-foreground">{dateLabel}</span>

@@ -52,9 +52,12 @@ describe('PurchasePlanFieldsV2 manual tracking fields', () => {
     expect(screen.queryByRole('button', { name: /1688 송장/ })).toBeNull()
   })
 
-  it('does not render duplicate Baidu tracking links below the input', () => {
+  it('renders a Baidu tracking link beside the saved tracking-number label', () => {
     renderFields('9823528519765', true)
-    expect(screen.queryByTitle('바이두에서 송장번호 조회')).toBeNull()
+    expect(screen.getByTitle('바이두에서 송장번호 조회')).toHaveAttribute(
+      'href',
+      'https://www.baidu.com/s?wd=9823528519765',
+    )
   })
 
   it('lets the user save a manual tracking number beside the supplier order number', async () => {

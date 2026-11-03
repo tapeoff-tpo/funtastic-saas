@@ -22,6 +22,29 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '유리컵' }))
     expect(await screen.findByRole('img', { name: '유리컵' })).toHaveAttribute('src', 'https://images.example/cup.png')
   })
+  it('prefills a single blank inspection box with the purchase quantity without persisting it first', async () => {
+    const blankInspection = {
+      ...inspection,
+      parcels: [{ ...inspection.parcels[0], boxes: [{ ...box, quantity: null }] }],
+    }
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ ...detail, inspection: blankInspection }))
+      .mockResolvedValueOnce(json({ inspection: { ...blankInspection, revision: 1 } }))
+    vi.stubGlobal('fetch', fetcher)
+
+    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
+    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
+
+    expect(await screen.findByLabelText('1번 송장 1번 박스 quantity')).toHaveValue(100)
+    expect(screen.getByText('구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({
+      complete: false,
+      parcels: [{ boxes: [{ quantity: 100 }] }],
+    })
+  })
   it('shows the shortage in inspection and completes in save-then-arrival order', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ inspection: { ...inspection, revision: 1 } })).mockResolvedValueOnce(json({ id, status: 'china_arrived' }))
     vi.stubGlobal('fetch', fetcher)
@@ -29,7 +52,7 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     expect(await screen.findByRole('status')).toHaveTextContent('입고오류 · 부족 10개')
     fireEvent.click(screen.getByRole('checkbox', { name: '구매수량과 실제 입고수량의 차이를 확인했습니다.' }))
-    fireEvent.change(screen.getByLabelText('입고오류 처리 사유'), { target: { value: '공급처와 부족수량 확인' } })
+    fireEvent.change(screen.getByLabelText('수량 차이 비고'), { target: { value: '공급처와 부족수량 확인' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료 · 중국창고도착' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
     expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ complete: true, acknowledgeMismatch: true, resolutionNote: '공급처와 부족수량 확인' })

@@ -195,6 +195,7 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const showPaymentControls = status === 'purchased' || status === 'purchase_completed'
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
     : []
@@ -210,7 +211,7 @@ export async function PurchasingOrdersView({
     (isRequestedStatus ? 1 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
-    (isRequestedStatus ? 0 : 3) +
+    (isRequestedStatus ? 0 : (showPaymentControls ? 3 : 2)) +
     (overdueOnly ? 1 : 0)
   const listLabel = isPurchaseReviewList
     ? '발주검토'
@@ -461,12 +462,12 @@ export async function PurchasingOrdersView({
 
       <PurchaseBulkSelectionProvider ids={items.flatMap((item) => item.id ? [item.id] : [])} nextStatus={nextStatus}>
         <section className="min-w-0 overflow-hidden rounded-md border bg-background">
-          <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
-            <div>
+          <div className="flex min-w-0 flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
+            <div className="shrink-0">
               <h2 className="text-sm font-semibold">{isPurchaseReviewList ? '전상품 발주검토' : listLabel} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
-            <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
+            <div className="flex min-w-0 w-full flex-wrap items-center gap-2 md:flex-1 md:justify-end">
               {status === 'completed' ? (
                 <CompletedOutboundDateFilter
                   dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
@@ -496,7 +497,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? <EyeOff /> : <Eye />}
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
-              {isRequestedStatus ? null : <PurchaseBulkPaymentDialog />}
+              {showPaymentControls ? <PurchaseBulkPaymentDialog /> : null}
               {status === 'purchase_completed' || status === 'inspecting' ? (
                 <PurchaseBulk1688TrackingLookup
                   candidates={items.flatMap((item) => item.id ? [{
@@ -586,7 +587,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
-                  {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th>}
+                  {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" {...sortHeaderProps} align="center" />
@@ -713,7 +714,10 @@ export async function PurchasingOrdersView({
                             <p className="mt-0.5 text-[11px] font-normal leading-tight text-sky-700">중국출고 작업 기준</p>
                           </div>
                         ) : item.status === 'inspecting' || (receipt && item.status === 'china_arrived') ? (
-                          <span className="inline-block py-1 font-medium">{item.status === 'inspecting' && item.chinaReceivedQuantity === null ? '미입력' : formatNumber(stageQuantity)}</span>
+                          <span className="inline-block py-1 font-medium">
+                            {formatNumber(stageQuantity)}
+                            {item.status === 'inspecting' && item.chinaReceivedQuantity === null ? <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">구매수량 기준</span> : null}
+                          </span>
                         ) : item.id ? (
                           <PurchaseQuantityField
                             id={item.id}
@@ -794,7 +798,7 @@ export async function PurchasingOrdersView({
                           ) : '-'}
                         </td>
                       )}
-                      {isRequestedStatus ? null : (
+                      {showPaymentControls ? (
                         <td className="px-2 py-2 text-center align-middle">
                           {item.id ? (
                             <PurchasePaymentStatusField
@@ -808,7 +812,7 @@ export async function PurchasingOrdersView({
                             />
                           ) : '-'}
                         </td>
-                      )}
+                      ) : null}
                       {overdueOnly ? (
                         <td className="px-3 py-2 align-middle">
                           {item.id ? (
@@ -1033,7 +1037,7 @@ function SortHeader({
 }
 
 function getStageQuantityColumn(status: PurchaseRequestStatus) {
-  if (status === 'inspecting') return { label: '실제 입고수량', field: 'chinaReceivedQuantity' as const }
+  if (status === 'inspecting') return { label: '검수 입고수량', field: 'chinaReceivedQuantity' as const }
   if (status === 'purchased' || status === 'purchase_completed') {
     return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
   }
@@ -1059,7 +1063,7 @@ function getStageQuantity(
   status: PurchaseRequestStatus,
   outboundRequestedQuantity: number,
 ) {
-  if (status === 'inspecting') return item.chinaReceivedQuantity ?? 0
+  if (status === 'inspecting') return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
   if (status === 'purchased' || status === 'purchase_completed') return item.actualPurchaseQuantity ?? item.requestedQuantity
   if (status === 'china_arrived') {
     return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity

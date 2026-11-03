@@ -3,12 +3,37 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { ExternalLink } from 'lucide-react'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
 import { blankInspectionBox, inspectionSummary, type InspectionParcel, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 
 type Detail = { id: string; status: string; productName: string; sku: string; inspection: PurchaseInspection; imageUrls: string[] }
+
+function withSingleParcelQuantityDefault(detail: Detail) {
+  const inspection = detail.inspection
+  const [parcel] = inspection.parcels
+  const [box] = parcel?.boxes ?? []
+  const editable = detail.status === 'purchase_completed' || detail.status === 'inspecting'
+  if (!editable || inspection.parcels.length !== 1 || !parcel || parcel.boxes.length !== 1 || !box || box.quantity !== null) {
+    return { detail, prefilled: false }
+  }
+
+  return {
+    detail: {
+      ...detail,
+      inspection: {
+        ...inspection,
+        parcels: [{
+          ...parcel,
+          boxes: [{ ...box, quantity: inspection.expectedQuantity }],
+        }],
+      },
+    },
+    prefilled: true,
+  }
+}
 
 export function PurchaseInspectionButton({ id, productName, imageData, mode = 'inspection' }: { id: string; productName: string; imageData?: ProductImageResult; mode?: 'image' | 'inspection' }) {
   const [open, setOpen] = useState(false)
@@ -27,6 +52,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const [pending, setPending] = useState(false)
   const [acknowledgeMismatch, setAcknowledgeMismatch] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [quantityPrefilled, setQuantityPrefilled] = useState(false)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => { ref.current?.showModal() }, [])
   useEffect(() => {
@@ -36,7 +62,14 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, { cache: 'no-store', signal: controller.signal })
         const body = await response.json()
         if (!response.ok) throw new Error(body.error || '검수 정보를 불러오지 못했습니다.')
-        if (!controller.signal.aborted) { setData(body); setAcknowledgeMismatch(Boolean(body.inspection.checkedAt)); setError(''); setDirty(false) }
+        if (!controller.signal.aborted) {
+          const initial = withSingleParcelQuantityDefault(body as Detail)
+          setData(initial.detail)
+          setQuantityPrefilled(initial.prefilled)
+          setAcknowledgeMismatch(Boolean(initial.detail.inspection.checkedAt))
+          setError('')
+          setDirty(false)
+        }
       } catch (failure) { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : '불러오기에 실패했습니다.') }
     })()
     return () => controller.abort()
@@ -47,7 +80,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const summary = inspection ? inspectionSummary(inspection) : null
   function changeParcels(parcels: InspectionParcel[]) {
     setData((current) => current ? { ...current, inspection: { ...current.inspection, parcels, checkedAt: null } } : current)
-    setDirty(true); setAcknowledgeMismatch(false)
+    setDirty(true); setQuantityPrefilled(false); setAcknowledgeMismatch(false)
   }
   function close() {
     if (dirty && !confirm('저장하지 않은 검수 입력을 닫으시겠습니까?')) return
@@ -64,7 +97,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || '검수 저장에 실패했습니다.')
       setData((current) => current ? { ...current, status: 'inspecting', inspection: body.inspection } : current)
-      setDirty(false)
+      setDirty(false); setQuantityPrefilled(false)
       if (complete) {
         const moved = await fetch(`/api/purchasing/purchase-requests/${id}/status`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'china_arrived' }),
@@ -91,14 +124,31 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         <div className={`rounded-lg border p-3 text-sm ${summary.hasError && inspection.parcels.length ? 'border-red-300 bg-red-50 text-red-800' : 'bg-muted/30'}`}>
           <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
           {inspection.parcels.length && summary.hasError ? <p role="status" className="mt-1 font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p className="mt-1">입고수량 미입력</p> : null}
+          {quantityPrefilled ? <p className="mt-1 text-muted-foreground">구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.</p> : null}
         </div>
         <fieldset disabled={pending || !editable} className="space-y-4">
           {inspection.parcels.map((parcel, parcelIndex) => <section key={parcel.id} className="space-y-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-48 flex-1 text-sm">운송장번호<input aria-label={`운송장번호 ${parcelIndex + 1}`} value={parcel.trackingNumber} maxLength={100} className="mt-1 block w-full rounded border bg-background p-2"
-                onChange={(event) => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, trackingNumber: event.target.value } : row))} /></label>
+              <div className="min-w-48 flex-1 text-sm">
+                <div className="flex items-center gap-1">
+                  <label htmlFor={`inspection-tracking-${parcel.id}`}>운송장번호</label>
+                  {parcel.trackingNumber.trim() ? (
+                    <a
+                      href={`https://www.baidu.com/s?wd=${encodeURIComponent(parcel.trackingNumber.trim())}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="바이두에서 송장번호 조회"
+                      aria-label="바이두에서 송장번호 조회"
+                      className="inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                    >
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  ) : null}
+                </div>
+                <input id={`inspection-tracking-${parcel.id}`} aria-label={`운송장번호 ${parcelIndex + 1}`} value={parcel.trackingNumber} maxLength={100} className="mt-1 block w-full rounded border bg-background p-2"
+                onChange={(event) => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, trackingNumber: event.target.value } : row))} />
+              </div>
               <span className="pb-2 text-sm">송장별 입고수량: <strong>{parcel.boxes.reduce((sum, box) => sum + (box.quantity ?? 0), 0)}</strong>개</span>
-              {parcel.trackingNumber && <a href={`https://www.baidu.com/s?wd=${encodeURIComponent(parcel.trackingNumber)}`} target="_blank" rel="noreferrer" className="pb-2 text-sm text-blue-700 underline">송장 조회</a>}
               <Button type="button" variant="outline" size="sm" onClick={() => changeParcels(inspection.parcels.filter((row) => row.id !== parcel.id))}>송장 삭제</Button>
             </div>
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-sm">
@@ -116,9 +166,10 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
             <Button type="button" variant="outline" size="sm" onClick={() => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: [...row.boxes, blankInspectionBox(crypto.randomUUID())] } : row))}>박스 추가</Button>
           </section>)}
           <Button type="button" variant="outline" onClick={() => changeParcels([...inspection.parcels, { id: crypto.randomUUID(), trackingNumber: '', boxes: [blankInspectionBox(crypto.randomUUID())] }])}>송장 추가</Button>
-          {summary.hasError && inspection.parcels.length > 0 && <div className="space-y-2 rounded-lg border border-red-200 p-3">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledgeMismatch} onChange={(event) => setAcknowledgeMismatch(event.target.checked)} />구매수량과 실제 입고수량의 차이를 확인했습니다.</label>
-            <label className="block text-sm">입고오류 처리 사유<textarea value={inspection.resolutionNote} maxLength={2_000} className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
+          {inspection.parcels.length > 0 && <div className={`space-y-2 rounded-lg border p-3 ${summary.hasError ? 'border-red-200 bg-red-50/50' : 'bg-muted/20'}`}>
+            {summary.hasError ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledgeMismatch} onChange={(event) => setAcknowledgeMismatch(event.target.checked)} />구매수량과 실제 입고수량의 차이를 확인했습니다.</label> : <p className="text-sm text-muted-foreground">실제 입고수량이 구매수량과 다르면 아래 비고를 입력해주세요.</p>}
+            <label className="block text-sm">수량 차이 비고<textarea value={inspection.resolutionNote} maxLength={2_000} placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
+            {summary.hasError ? <p className="text-xs text-red-700">수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p> : null}
           </div>}
         </fieldset>
         {!editable && <p className="text-sm text-muted-foreground">검수가 완료된 입고 기록입니다.</p>}

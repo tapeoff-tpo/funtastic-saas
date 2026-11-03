@@ -19,6 +19,7 @@ const STORAGE_KEY = 'funtastic-sidebar-collapsed'
 
 export function AppShell({ children, menuAccess = UNRESTRICTED_MENU_ACCESS }: AppShellProps) {
   const pathname = usePathname()
+  const is1688TrackingPopup = pathname === '/purchasing/orders/1688-tracking-run'
   const mainRef = useRef<HTMLElement>(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [mobileMenuPath, setMobileMenuPath] = useState<string | null>(null)
@@ -51,6 +52,16 @@ export function AppShell({ children, menuAccess = UNRESTRICTED_MENU_ACCESS }: Ap
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [mobileMenuOpen])
+
+  if (is1688TrackingPopup) {
+    return (
+      <MenuAccessProvider initialAccess={menuAccess}><NavStateProvider>
+        <div data-app-translate className="h-dvh overflow-hidden bg-background">
+          {children}
+        </div>
+      </NavStateProvider></MenuAccessProvider>
+    )
+  }
 
   return (
     <MenuAccessProvider initialAccess={menuAccess}><NavStateProvider>

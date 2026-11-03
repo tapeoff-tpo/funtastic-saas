@@ -12,7 +12,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { createPortal } from 'react-dom'
 import { Dialog } from '@base-ui/react/dialog'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
@@ -42,11 +41,15 @@ const TRACKING_LOOKUP_START = 'FUNTASTIC_1688_TRACKING_START'
 const TRACKING_LOOKUP_ACK = 'FUNTASTIC_1688_TRACKING_ACK'
 const TRACKING_LOOKUP_RESULT = 'FUNTASTIC_1688_TRACKING_RESULT'
 const TRACKING_LOOKUP_ERROR = 'FUNTASTIC_1688_TRACKING_ERROR'
+const TRACKING_LOOKUP_COMPLETE = 'FUNTASTIC_1688_TRACKING_COMPLETE'
 const EXACT_WAYBILL_EVIDENCE = { label: '运单号码', extractionVersion: 2 } as const
 const MAX_1688_TRACKING_BATCH_ORDERS = 50
 const MAX_1688_TRACKING_BATCH_ITEMS = 100
 const TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS = 750
 const TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS = 4
+const TRACKING_POPUP_ROUTE = '/purchasing/orders/1688-tracking-run'
+export const PURCHASE_1688_TRACKING_POPUP_STORAGE_PREFIX = 'funtastic-1688-tracking-popup:'
+const TRACKING_POPUP_PAYLOAD_MAX_AGE_MS = 30 * 60 * 1_000
 
 export type Purchase1688TrackingLookupCandidate = {
   id: string
@@ -55,6 +58,14 @@ export type Purchase1688TrackingLookupCandidate = {
   optionName: string | null
   supplierOrderNumber: string | null
   trackingNumber: string | null
+}
+
+type Purchase1688TrackingMode = 'initial' | 'recollect'
+
+type Purchase1688TrackingPopupPayload = {
+  createdAt: number
+  mode: Purchase1688TrackingMode
+  candidates: Purchase1688TrackingLookupCandidate[]
 }
 
 type Purchase1688TrackingLookupJob = {
@@ -99,6 +110,38 @@ function valid1688OrderNumber(value: string | null | undefined) {
   return /^\d{10,40}$/.test(value?.trim() ?? '')
 }
 
+export function purchase1688TrackingPopupStorageKey(runId: string) {
+  return `${PURCHASE_1688_TRACKING_POPUP_STORAGE_PREFIX}${runId}`
+}
+
+function isPurchase1688TrackingCandidate(value: unknown): value is Purchase1688TrackingLookupCandidate {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.id === 'string'
+    && typeof candidate.sku === 'string'
+    && typeof candidate.productName === 'string'
+    && (typeof candidate.optionName === 'string' || candidate.optionName === null)
+    && (typeof candidate.supplierOrderNumber === 'string' || candidate.supplierOrderNumber === null)
+    && (typeof candidate.trackingNumber === 'string' || candidate.trackingNumber === null)
+}
+
+function parsePurchase1688TrackingPopupPayload(value: string | null): Purchase1688TrackingPopupPayload | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    if (parsed.mode !== 'initial' && parsed.mode !== 'recollect') return null
+    if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) return null
+    if (!Array.isArray(parsed.candidates) || !parsed.candidates.every(isPurchase1688TrackingCandidate)) return null
+    return {
+      createdAt: parsed.createdAt,
+      mode: parsed.mode,
+      candidates: parsed.candidates,
+    }
+  } catch {
+    return null
+  }
+}
+
 function normalize1688TrackingNumbers(value: unknown) {
   const numbers = new Map<string, string>()
   for (const item of Array.isArray(value) ? value : []) {
@@ -132,49 +175,6 @@ function stops1688TrackingBatch(message: string) {
 
 function is1688TrackingLookupHandoffInProgress(message: string) {
   return /다른\s*1688\s*작업이\s*진행\s*중/i.test(message)
-}
-
-type TrackingProgressPopup = {
-  window: Window
-  root: HTMLElement
-}
-
-function openTrackingProgressPopup() {
-  const popup = window.open(
-    '',
-    'funtastic-1688-tracking-progress',
-    'popup=yes,width=980,height=860,resizable=yes,scrollbars=yes',
-  )
-  if (!popup) return null
-
-  const popupDocument = popup.document
-  popupDocument.documentElement.lang = 'ko'
-  popupDocument.head.replaceChildren()
-
-  const charset = popupDocument.createElement('meta')
-  charset.setAttribute('charset', 'utf-8')
-  popupDocument.head.append(charset)
-  const viewport = popupDocument.createElement('meta')
-  viewport.name = 'viewport'
-  viewport.content = 'width=device-width, initial-scale=1'
-  popupDocument.head.append(viewport)
-  popupDocument.title = '1688 송장 일괄조회'
-
-  for (const source of document.head.querySelectorAll('link[rel="stylesheet"], style')) {
-    const copy = source.cloneNode(true)
-    if (source instanceof HTMLLinkElement && copy instanceof HTMLLinkElement) {
-      // A blank popup resolves relative paths against about:blank. Preserve the
-      // absolute Next/Tailwind stylesheet URL from the opener instead.
-      copy.href = source.href
-    }
-    popupDocument.head.append(copy)
-  }
-
-  popupDocument.body.className = 'bg-background text-foreground'
-  const root = popupDocument.createElement('div')
-  root.id = 'funtastic-1688-tracking-progress-root'
-  popupDocument.body.replaceChildren(root)
-  return { window: popup, root } satisfies TrackingProgressPopup
 }
 
 const PURCHASE_REVIEW_STATUS_OPTIONS: Array<{ value: PurchaseReviewListStatus; label: string }> = [
@@ -323,31 +323,28 @@ export function PurchaseBulkStatusButton() {
 }
 
 /**
- * Runs eligible rows through the existing one-at-a-time extension message.
- * Keeping the queue in the page means an already-loaded extension never has
- * to hold purchase ids or write SaaS data itself.
+ * Owns a tracking run in the dedicated same-origin popup. Keeping the queue,
+ * extension listener, and saving work in this window lets the user leave the
+ * originating purchase list without cancelling an in-progress batch.
  */
-export function PurchaseBulk1688TrackingLookup({
+function Purchase1688TrackingProgressRunner({
   candidates,
-  mode = 'initial',
+  mode,
+  runId,
+  storageKey,
 }: {
   candidates: Purchase1688TrackingLookupCandidate[]
-  mode?: 'initial' | 'recollect'
+  mode: Purchase1688TrackingMode
+  runId: string
+  storageKey: string
 }) {
-  const router = useRouter()
-  const routerRefreshRef = useRef(router.refresh)
   const stopRequestedRef = useRef(false)
   const batchActiveRef = useRef(false)
-  const progressPopupRef = useRef<Window | null>(null)
+  const startedRef = useRef(false)
   const [batch, setBatch] = useState<Purchase1688TrackingBatch | null>(null)
   const [progress, setProgress] = useState<Purchase1688TrackingProgress | null>(null)
-  const [progressPopupRoot, setProgressPopupRoot] = useState<HTMLElement | null>(null)
   const [lookupRows, setLookupRows] = useState<Purchase1688TrackingLookupRow[]>([])
   const isRecollectBatch = mode === 'recollect'
-
-  useEffect(() => {
-    routerRefreshRef.current = router.refresh
-  }, [router.refresh])
 
   useEffect(() => {
     batchActiveRef.current = Boolean(batch)
@@ -355,47 +352,12 @@ export function PurchaseBulk1688TrackingLookup({
 
   useEffect(() => () => {
     batchActiveRef.current = false
-    const popup = progressPopupRef.current
-    progressPopupRef.current = null
-    if (popup && !popup.closed) popup.close()
-  }, [])
-
-  function ensureProgressPopup() {
-    const existingPopup = progressPopupRef.current
-    if (existingPopup && !existingPopup.closed) {
-      existingPopup.focus()
-      return true
+    try {
+      window.localStorage.removeItem(storageKey)
+    } catch {
+      // Closing the work window must never block a later retry.
     }
-
-    const opened = openTrackingProgressPopup()
-    if (!opened) {
-      toast.error('일괄조회 진행 창을 열 수 없습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도해주세요.')
-      return false
-    }
-
-    progressPopupRef.current = opened.window
-    setProgressPopupRoot(opened.root)
-    opened.window.addEventListener('beforeunload', () => {
-      if (progressPopupRef.current !== opened.window) return
-      progressPopupRef.current = null
-      setProgressPopupRoot(null)
-      if (!batchActiveRef.current) return
-      stopRequestedRef.current = true
-      setProgress((current) => current ? {
-        ...current,
-        stopping: true,
-        message: '진행 창이 닫혀 현재 조회·저장이 끝나면 중지합니다.',
-      } : current)
-    }, { once: true })
-    return true
-  }
-
-  function closeProgressPopup() {
-    const popup = progressPopupRef.current
-    progressPopupRef.current = null
-    setProgressPopupRoot(null)
-    if (popup && !popup.closed) popup.close()
-  }
+  }, [storageKey])
 
   const eligibleCandidates = candidates.filter((candidate) => (
     valid1688OrderNumber(candidate.supplierOrderNumber)
@@ -461,7 +423,19 @@ export function PurchaseBulk1688TrackingLookup({
         complete: true,
       })
       if (didSaveAny) {
-        routerRefreshRef.current()
+        try {
+          window.opener?.postMessage({
+            source: PAGE_SOURCE,
+            type: TRACKING_LOOKUP_COMPLETE,
+          }, window.location.origin)
+        } catch {
+          // The originating tab may have been closed or navigated away.
+        }
+      }
+      try {
+        window.localStorage.removeItem(storageKey)
+      } catch {
+        // A completed popup can still show its summary if storage is unavailable.
       }
       if (stopRequestedRef.current || stops1688TrackingBatch(message)) {
         setLookupRows((rows) => rows.map((row) => (
@@ -651,11 +625,25 @@ export function PurchaseBulk1688TrackingLookup({
       clearTimers()
       window.removeEventListener('message', onMessage)
     }
-  }, [batch, isRecollectBatch])
+  }, [batch, isRecollectBatch, storageKey])
 
   function startBatch() {
-    if (batch || eligibleCandidates.length === 0) return
-    if (!ensureProgressPopup()) return
+    if (batch || eligibleCandidates.length === 0) {
+      if (eligibleCandidates.length === 0) {
+        setProgress({
+          totalItems: 0,
+          totalOrders: 0,
+          skippedItems: skippedCandidateCount,
+          succeededItems: 0,
+          failedItems: 0,
+          currentOrder: 0,
+          currentOrderNumber: null,
+          message: '이 작업 창에서 조회할 주문서번호가 있는 항목을 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
+          complete: true,
+        })
+      }
+      return
+    }
     const grouped = new Map<string, string[]>()
     for (const candidate of eligibleCandidates) {
       const orderNumber = candidate.supplierOrderNumber?.trim()
@@ -709,12 +697,20 @@ export function PurchaseBulk1688TrackingLookup({
       message: isRecollectBatch ? '1688 송장 다시 수집 시작' : '1688 송장 일괄조회 시작',
     })
     setBatch({
-      id: crypto.randomUUID(),
+      id: runId,
       jobs,
       totalItems: eligibleCandidates.length,
       skippedItems,
     })
   }
+
+  useEffect(() => {
+    if (startedRef.current) return
+    startedRef.current = true
+    startBatch()
+  // The popup payload is immutable for the lifetime of this dedicated window.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function stopAfterCurrent() {
     if (!batch) return
@@ -726,8 +722,8 @@ export function PurchaseBulk1688TrackingLookup({
     } : current)
   }
 
-  const progressWindow = progressPopupRoot ? createPortal(
-    <main className="flex h-screen min-w-[680px] flex-col overflow-hidden bg-background p-5">
+  return (
+    <main className="flex h-dvh min-w-[680px] flex-col overflow-hidden bg-background p-5">
       <h1 className="text-base font-semibold">{isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         {isRecollectBatch
@@ -793,30 +789,182 @@ export function PurchaseBulk1688TrackingLookup({
             중지(현재 건 이후)
           </Button>
         ) : (
-          <Button type="button" variant="outline" onClick={closeProgressPopup}>닫기</Button>
+          <Button type="button" variant="outline" onClick={() => window.close()}>닫기</Button>
         )}
       </div>
-    </main>,
-    progressPopupRoot,
-  ) : null
+    </main>
+  )
+}
+
+export function PurchaseBulk1688TrackingLookup({
+  candidates,
+  mode = 'initial',
+}: {
+  candidates: Purchase1688TrackingLookupCandidate[]
+  mode?: Purchase1688TrackingMode
+}) {
+  const router = useRouter()
+  const progressPopupRef = useRef<Window | null>(null)
+  const isRecollectBatch = mode === 'recollect'
+  const eligibleCandidates = candidates.filter((candidate) => (
+    valid1688OrderNumber(candidate.supplierOrderNumber)
+      && (isRecollectBatch ? /^LP/i.test(candidate.trackingNumber?.trim() ?? '') : !candidate.trackingNumber?.trim())
+  ))
+
+  useEffect(() => {
+    const refreshOriginatingList = (event: MessageEvent<unknown>) => {
+      if (event.origin !== window.location.origin) return
+      const message = event.data
+      if (!message || typeof message !== 'object') return
+      const data = message as { source?: unknown; type?: unknown }
+      if (data.source === PAGE_SOURCE && data.type === TRACKING_LOOKUP_COMPLETE) {
+        router.refresh()
+      }
+    }
+    window.addEventListener('message', refreshOriginatingList)
+    return () => window.removeEventListener('message', refreshOriginatingList)
+  }, [router])
+
+  function startBatch() {
+    if (eligibleCandidates.length === 0) return
+
+    const existingPopup = progressPopupRef.current
+    if (existingPopup && !existingPopup.closed) {
+      existingPopup.focus()
+      toast.info('이미 송장 재수집 작업 창이 열려 있습니다.')
+      return
+    }
+
+    const runId = crypto.randomUUID()
+    const storageKey = purchase1688TrackingPopupStorageKey(runId)
+    const payload: Purchase1688TrackingPopupPayload = {
+      createdAt: Date.now(),
+      mode,
+      candidates,
+    }
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(payload))
+    } catch {
+      toast.error('작업 목록을 준비하지 못했습니다. 브라우저 저장공간을 확인한 뒤 다시 시도해주세요.')
+      return
+    }
+
+    const popupUrl = new URL(TRACKING_POPUP_ROUTE, window.location.origin)
+    popupUrl.searchParams.set('runId', runId)
+    const popup = window.open(
+      popupUrl.toString(),
+      'funtastic-1688-tracking-progress',
+      'popup=yes,width=980,height=860,resizable=yes,scrollbars=yes',
+    )
+
+    if (!popup) {
+      try {
+        window.localStorage.removeItem(storageKey)
+      } catch {
+        // The missing popup is the actionable error; stale handoff data expires safely.
+      }
+      toast.error('일괄조회 작업 창을 열 수 없습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도해주세요.')
+      return
+    }
+
+    progressPopupRef.current = popup
+    popup.focus()
+  }
 
   return (
-    <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={startBatch}
-        disabled={Boolean(batch) || eligibleCandidates.length === 0}
-        title={isRecollectBatch
-          ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
-          : '현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}
-      >
-        {batch ? <Loader2 className="animate-spin" /> : <Search />}
-        {isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}
-      </Button>
-      {progressWindow}
-    </>
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={startBatch}
+      disabled={eligibleCandidates.length === 0}
+      title={isRecollectBatch
+        ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
+        : '현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}
+    >
+      <Search />
+      {isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}
+    </Button>
+  )
+}
+
+export function Purchase1688TrackingProgressWindow({ runId }: { runId: string | null }) {
+  const normalizedRunId = runId?.trim() ?? ''
+  const storageKey = purchase1688TrackingPopupStorageKey(normalizedRunId)
+  const [handoff, setHandoff] = useState<{
+    payload: Purchase1688TrackingPopupPayload | null
+    error: string | null
+  } | undefined>(undefined)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!normalizedRunId) {
+        setHandoff({
+          payload: null,
+          error: '작업 식별자가 없습니다. 원래 발주 화면에서 다시 시작해주세요.',
+        })
+        return
+      }
+
+      let payload: Purchase1688TrackingPopupPayload | null
+      try {
+        payload = parsePurchase1688TrackingPopupPayload(window.localStorage.getItem(storageKey))
+      } catch {
+        setHandoff({
+          payload: null,
+          error: '작업 정보를 읽지 못했습니다. 브라우저 저장공간을 확인한 뒤 원래 발주 화면에서 다시 시작해주세요.',
+        })
+        return
+      }
+      if (!payload) {
+        setHandoff({
+          payload: null,
+          error: '작업 정보를 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
+        })
+        return
+      }
+      if (Date.now() - payload.createdAt > TRACKING_POPUP_PAYLOAD_MAX_AGE_MS) {
+        try {
+          window.localStorage.removeItem(storageKey)
+        } catch {
+          // Expiry only prevents an accidental stale rerun; the error below remains actionable.
+        }
+        setHandoff({
+          payload: null,
+          error: '작업 준비 시간이 만료되었습니다. 원래 발주 화면에서 다시 시작해주세요.',
+        })
+        return
+      }
+      setHandoff({ payload, error: null })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [normalizedRunId, storageKey])
+
+  if (handoff === undefined) {
+    return (
+      <main className="flex h-dvh items-center justify-center bg-background p-5 text-sm text-muted-foreground">
+        1688 송장 조회 작업을 준비하고 있습니다.
+      </main>
+    )
+  }
+
+  if (!handoff.payload) {
+    return (
+      <main className="flex h-dvh min-w-[560px] flex-col items-center justify-center gap-4 bg-background p-8 text-center">
+        <p className="text-sm text-muted-foreground">{handoff.error ?? '작업 정보를 불러오지 못했습니다.'}</p>
+        <Button type="button" variant="outline" onClick={() => window.close()}>닫기</Button>
+      </main>
+    )
+  }
+
+  return (
+    <Purchase1688TrackingProgressRunner
+      candidates={handoff.payload.candidates}
+      mode={handoff.payload.mode}
+      runId={normalizedRunId}
+      storageKey={storageKey}
+    />
   )
 }
 

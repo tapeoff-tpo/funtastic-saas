@@ -1,3 +1,4 @@
+import { largestChinaOutboundBox } from './china-outbound-packaging'
 import ExcelJS from 'exceljs'
 import { dimensionNumber } from './china-outbound-dimensions'
 import {
@@ -389,7 +390,7 @@ async function parseLegacyChinaOutboundWorkWorkbook(
   for (const itemId of seenItemIds) {
     const item = itemsById.get(itemId)
     if (!item) continue
-    const allocations = mergeBoxAllocations(rawAllocationsByItemId.get(itemId) ?? [], errors, item.sku)
+    const allocations = mergeBoxAllocations(rawAllocationsByItemId.get(itemId) ?? [])
     const totalQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
     if (totalQuantity > item.reservedQuantity) {
       errors.push({ sheet: CHINA_OUTBOUND_WORKBOOK_SHEETS.boxSplits, row: 0, message: `${item.sku}의 박스 분할수량 ${totalQuantity.toLocaleString('ko-KR')}개가 출고수량 ${item.reservedQuantity.toLocaleString('ko-KR')}개를 넘습니다.` })
@@ -523,8 +524,6 @@ function parseDimensions(
 
 function mergeBoxAllocations(
   allocations: ChinaOutboundWorkbookBoxSplit['allocations'],
-  errors: ChinaOutboundWorkbookPreview['errors'],
-  sku: string,
 ) {
   const byBoxNo = new Map<string, ChinaOutboundWorkbookBoxSplit['allocations'][number]>()
   for (const allocation of allocations) {
@@ -533,31 +532,16 @@ function mergeBoxAllocations(
       byBoxNo.set(allocation.boxNo, allocation)
       continue
     }
-    if (hasDimensions(current) && hasDimensions(allocation) && !sameDimensions(current, allocation)) {
-      errors.push({ sheet: CHINA_OUTBOUND_WORKBOOK_SHEETS.boxSplits, row: 0, message: `${sku}의 ${allocation.boxNo} 규격이 서로 다릅니다.` })
-    }
+
     byBoxNo.set(allocation.boxNo, {
       ...current,
       quantity: current.quantity + allocation.quantity,
-      ...(hasDimensions(current) ? {} : {
-        lengthCm: allocation.lengthCm,
-        widthCm: allocation.widthCm,
-        heightCm: allocation.heightCm,
-      }),
+      lengthCm: largestChinaOutboundBox([current, allocation])?.lengthCm,
+      widthCm: largestChinaOutboundBox([current, allocation])?.widthCm,
+      heightCm: largestChinaOutboundBox([current, allocation])?.heightCm,
     })
   }
   return [...byBoxNo.values()]
-}
-
-function hasDimensions(value: ChinaOutboundWorkbookBoxSplit['allocations'][number]) {
-  return value.lengthCm != null && value.widthCm != null && value.heightCm != null
-}
-
-function sameDimensions(
-  left: ChinaOutboundWorkbookBoxSplit['allocations'][number],
-  right: ChinaOutboundWorkbookBoxSplit['allocations'][number],
-) {
-  return left.lengthCm === right.lengthCm && left.widthCm === right.widthCm && left.heightCm === right.heightCm
 }
 
 function compareShipmentItems(

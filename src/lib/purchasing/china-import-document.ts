@@ -58,6 +58,7 @@ export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Ma
     items: detail.items.map((item) => ({
       ...item, quantity: quantityByItem.get(item.id)!,
       ...(metadata.get(item.sku.trim()) ?? { englishName: '', chineseName: '', hsCode: '', material: '', unitPriceCny: null }),
+      chineseName: item.chineseProductName || metadata.get(item.sku.trim())?.chineseName || '',
     })),
     boxes: boxes.map((box) => ({
       id: box.id, boxNo: box.boxNo, palletId: box.palletId,
@@ -111,7 +112,11 @@ export async function exportChinaImportDocument(
         }
       }
       const values = [...rows.values()]
-      if (group.id && values.length) values[0].gross += options.palletTareKg
+      if (group.id && values.length) {
+        const measured = dimensionNumber(prepared.pallets.find((pallet) => pallet.id === group.id)?.grossWeightKg)
+        if (measured != null) { for (const row of values) row.gross = 0; values[0].gross = measured }
+        else values[0].gross += options.palletTareKg
+      }
       return { ...group, rows: values }
     }).filter((group) => group.rows.length)
   const count = groups.reduce((sum, group) => sum + group.rows.length, 0)
@@ -166,7 +171,8 @@ export async function exportChinaImportDocument(
     if (group.id && nextRow - start > 1) sheet.mergeCells(`O${start}:O${nextRow - 1}`)
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
-  const grossWeight = prepared.boxes.reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0) + prepared.palletCount * options.palletTareKg
+  const grossWeight = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0)
+    + prepared.pallets.reduce((sum, pallet) => sum + (dimensionNumber(pallet.grossWeightKg) ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((subtotal, box) => subtotal + options.boxes[box.id].grossWeightKg, options.palletTareKg)), 0)
   // A measured loaded pallet is one external package. Never add its inner
   // boxes again. Unmeasured legacy pallets retain their document override.
   const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].cbm, 0)

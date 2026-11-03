@@ -1,3 +1,4 @@
+import { largestChinaOutboundBox } from './china-outbound-packaging'
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import { createHash, randomUUID } from 'node:crypto'
 import ExcelJS from 'exceljs'
@@ -727,11 +728,7 @@ function validateRelationships(
 
     if (hasDimensions(allocation)) {
       const previousDimensions = dimensionsByBox.get(allocation.boxNo)
-      if (previousDimensions && !sameDimensions(previousDimensions, allocation)) {
-        errors.push({ sheet: CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.boxes, row: allocation.rowNumber, message: `${allocation.boxNo}에 서로 다른 박스 규격이 입력되었습니다.` })
-      } else if (!previousDimensions) {
-        dimensionsByBox.set(allocation.boxNo, allocation)
-      }
+      dimensionsByBox.set(allocation.boxNo, largestChinaOutboundBox(previousDimensions ? [previousDimensions, allocation] : [allocation])!)
     }
     if (allocation.palletNo) {
       const previousPallet = palletByBox.get(allocation.boxNo)
@@ -872,13 +869,6 @@ function sourceKey(value: Pick<ChinaOutboundRegistrationWorkbookItem, 'warehouse
 
 function hasDimensions(value: Pick<ChinaOutboundRegistrationWorkbookBoxAllocation, 'lengthCm' | 'widthCm' | 'heightCm'>) {
   return value.lengthCm != null && value.widthCm != null && value.heightCm != null
-}
-
-function sameDimensions(
-  left: Pick<ChinaOutboundRegistrationWorkbookBoxAllocation, 'lengthCm' | 'widthCm' | 'heightCm'>,
-  right: Pick<ChinaOutboundRegistrationWorkbookBoxAllocation, 'lengthCm' | 'widthCm' | 'heightCm'>,
-) {
-  return left.lengthCm === right.lengthCm && left.widthCm === right.widthCm && left.heightCm === right.heightCm
 }
 
 function nullableText(cell: ExcelJS.Cell) {

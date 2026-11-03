@@ -7,6 +7,9 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import {
+  mergeChinaOutboundBoxes,
+  saveChinaOutboundPackageWeight,
+  saveChinaOutboundItemChineseName,
   addChinaOutboundSample,
   saveChinaOutboundPalletDimensions,
   addChinaOutboundShipmentItems,
@@ -366,12 +369,42 @@ export async function addChinaOutboundSampleAction(input: unknown): Promise<Acti
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
     const value = z.object({
-      shipmentId, requestId: z.string().uuid(), productName: text('상품명', 1_000),
+      shipmentId, requestId: z.string().uuid(), productName: text('상품명', 1_000), chineseProductName: optionalText(1000),
       optionName: optionalText(200), warehouseCode: text('출고창고', 100),
       quantity: z.coerce.number().int().positive(), note: optionalText(),
     }).parse(input)
     const actor = await getActor()
     await addChinaOutboundSample({ ...value, ...actor })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function mergeChinaOutboundBoxesAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({ shipmentId, boxIds: z.array(z.string().uuid()).min(2).max(5000) }).parse(input)
+    const actor = await getActor()
+    await mergeChinaOutboundBoxes({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundPackageWeightAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({ shipmentId, kind: z.enum(['box', 'pallet']), packageId: z.string().uuid(), grossWeightKg: z.number().finite().positive().max(999_999_999) }).parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundPackageWeight({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundItemChineseNameAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({ shipmentId, shipmentItemId: z.string().uuid(), chineseProductName: text('중국어 상품명', 1000) }).parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundItemChineseName({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
   })
 }

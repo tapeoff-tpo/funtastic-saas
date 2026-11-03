@@ -376,7 +376,7 @@ describe('China outbound registration workbook', () => {
     expect(parsed.errors.some((error) => error.message.includes('적재수량 합계 90개가 출고수량 100개와 같아야'))).toBe(true)
   })
 
-  it('flags conflicting dimensions and pallet numbers for a shared box', async () => {
+  it('uses the largest shared-box dimensions while still flagging conflicting pallet numbers', async () => {
     const workbook = createWorkbook()
     workbook.getWorksheet(CHINA_OUTBOUND_REGISTRATION_WORKBOOK_SHEETS.shipment)!
       .addRow(['CN-20261027-XLSX-CONFLICT1', '', '인천', '', '', ''])
@@ -389,7 +389,8 @@ describe('China outbound registration workbook', () => {
 
     const parsed = await parseChinaOutboundRegistrationWorkbook(await workbook.xlsx.writeBuffer())
 
-    expect(parsed.errors.some((error) => error.message.includes('서로 다른 박스 규격'))).toBe(true)
+    expect(parsed.errors.some((error) => error.message.includes('서로 다른 박스 규격'))).toBe(false)
+    expect(parsed.boxAllocations.every((box) => box.lengthCm === 60 && box.widthCm === 40 && box.heightCm === 30)).toBe(true)
     expect(parsed.errors.some((error) => error.message.includes('서로 다른 파렛트번호'))).toBe(true)
   })
 

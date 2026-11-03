@@ -1125,6 +1125,7 @@ export const chinaOutboundShipmentItems = pgTable(
     sku: varchar('sku', { length: 100 }).notNull(),
     productName: text('product_name').notNull(),
     itemCategory: varchar('item_category', { length: 100 }),
+    chineseProductName: text('chinese_product_name'),
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
     // Preserve the warehouse name selected when this reservation was made.

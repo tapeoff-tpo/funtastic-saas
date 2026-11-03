@@ -9,6 +9,7 @@ import {
   listSaasChinaOutboundWarehouses,
   listChinaOutboundShipments,
 } from '@/lib/purchasing/saas-china-outbound'
+import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem, type ChinaShipmentStage, type ChinaShipmentStockItem } from './china-shipments-board'
@@ -41,11 +42,14 @@ export default async function ChinaShipmentsPage({
 
   const productImages: Record<string, ProductImageResult> = await findSavedNewProductImagesBatch(workspaceUserId, detail?.items ?? [])
     .catch((error) => { console.error('outbound image address preload failed', error); return {} })
+  const names = await getPurchasingItemLabelDataBySku(workspaceUserId, [...inventoryItems, ...(detail?.items ?? [])].map((item) => item.sku))
   const stockItems: ChinaShipmentStockItem[] = inventoryItems.map((item) => ({
     id: item.id,
     warehouseCode: item.warehouseCode,
     sku: item.sku,
     productName: item.productName,
+    chineseProductName: names.get(item.sku)?.chineseProductName ?? '',
+    lastReceivedAt: item.lastReceivedAt?.toISOString() ?? null,
     optionName: item.optionName,
     onHandQuantity: item.onHandQuantity,
     reservedQuantity: item.reservedQuantity,
@@ -78,7 +82,7 @@ export default async function ChinaShipmentsPage({
       <ChinaShipmentsBoard
         inventoryItems={stockItems}
         shipments={shipmentItems}
-        selectedShipment={detail ? toShipmentDetailView(detail, productImages) : null}
+        selectedShipment={detail ? toShipmentDetailView(detail, productImages, names) : null}
         selectedStep={selectedStep}
         showCreate={showCreate}
         outboundWarehouses={outboundWarehouses}
@@ -87,7 +91,7 @@ export default async function ChinaShipmentsPage({
   )
 }
 
-function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>, productImages: Record<string, ProductImageResult>): ChinaShipmentDetailView {
+function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>, productImages: Record<string, ProductImageResult>, names: Map<string, { chineseProductName: string }>): ChinaShipmentDetailView {
   return {
     shipment: {
       id: detail.shipment.id,
@@ -110,6 +114,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       warehouseCode: item.warehouseCode,
       sku: item.sku,
       productName: item.productName,
+      chineseProductName: item.chineseProductName || names.get(item.sku)?.chineseProductName || '',
       optionName: item.optionName,
       reservedQuantity: item.reservedQuantity,
       packedQuantity: item.packedQuantity,
@@ -122,7 +127,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       receiptPacking: item.receiptPacking,
       productImage: productImages[item.id],
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
+    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,
@@ -132,6 +137,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       status: box.status,
       completionStatus: box.completionStatus === 'completed' || box.completionStatus === 'in_progress' ? box.completionStatus : null,
       note: box.note,
+      grossWeightKg: dimensionNumber(box.grossWeightKg),
       lengthCm: dimensionNumber(box.lengthCm),
       widthCm: dimensionNumber(box.widthCm),
       heightCm: dimensionNumber(box.heightCm),

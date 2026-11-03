@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+  mergeBoxes: vi.fn(),
+  saveWeight: vi.fn(),
+  saveChineseName: vi.fn(),
   addSample: vi.fn(),
   savePalletDimensions: vi.fn(),
   createShipment: vi.fn(),
@@ -29,6 +32,9 @@ vi.mock('next/navigation', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => navigate }))
 vi.mock('../saas-china-actions', () => ({
+  mergeChinaOutboundBoxesAction: mergeBoxes,
+  saveChinaOutboundPackageWeightAction: saveWeight,
+  saveChinaOutboundItemChineseNameAction: saveChineseName,
   addChinaOutboundSampleAction: addSample,
   saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
   addChinaOutboundShipmentItemsAction: addShipmentItems,
@@ -284,6 +290,7 @@ describe('ChinaShipmentsBoard', () => {
     saveBoxStatuses.mockReset()
     savePalletStatuses.mockReset()
     addShipmentItems.mockReset()
+    mergeBoxes.mockReset(); saveWeight.mockReset(); saveChineseName.mockReset()
     addSample.mockReset()
     savePalletDimensions.mockReset()
     toastError.mockReset()
@@ -414,7 +421,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(await screen.findByRole('button', { name: '中文' }))
 
     await waitFor(() => expect(screen.getByText('第1步 · 确认出库品项')).toBeInTheDocument())
-    expect(screen.getByRole('columnheader', { name: '商品名' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '商品名(韩文)' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '实际出库数量' })).toBeInTheDocument()
     expect(screen.getByText('添加出库品项')).toBeInTheDocument()
     expect(screen.getAllByText('SKU-KEEP').length).toBeGreaterThan(0)
@@ -709,6 +716,87 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [], destinationName: '인천' })))
   })
 
+  it('allows loose-box dispatch and shows PLT + BOX totals', () => {
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes.forEach((box) => { box.palletId = null })
+    renderShipment(detail, 'summary')
+    expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
+    expect(screen.getByText('낱박스 1개')).toBeInTheDocument()
+    expect(screen.getAllByText('0 PLT + 1 BOX').length).toBeGreaterThan(0)
+  })
+
+  it('saves a measured gross weight for a box and a pallet', async () => {
+    saveWeight.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    fireEvent.change(screen.getByLabelText('파렛트 P1 총중량(kg)'), { target: { value: '52.5' } })
+    fireEvent.click(screen.getByRole('button', { name: '중량 저장' }))
+    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'a', kind: 'pallet', packageId: 'pallet-1', grossWeightKg: 52.5 }))
+    fireEvent.click(screen.getByRole('button', { name: 'BOX-01 박스 상품 펼치기' }))
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 총중량(kg)'), { target: { value: '12.25' } })
+    const input = screen.getByLabelText('박스 BOX-01 총중량(kg)')
+    fireEvent.click(within(input.closest('div')!).getByRole('button', { name: '중량 저장' }))
+    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'a', kind: 'box', packageId: 'box-saved', grossWeightKg: 12.25 }))
+  })
+
+  it('shows Korean and Chinese product names together in the item list and split popup', () => {
+    const detail = { ...shipmentA, items: shipmentA.items.map((item) => ({ ...item, chineseProductName: '水杯' })) }
+    renderShipment(detail, 'items')
+    expect(screen.getByText('水杯')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    expect(within(screen.getByRole('dialog', { name: 'SKU-A 박스분할' })).getByText('水杯')).toBeInTheDocument()
+  })
+
+  it('stores a Chinese name for the selected outbound item only', async () => {
+    saveChineseName.mockResolvedValue({ ok: true })
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: '중국어 상품명 수정' }))
+    fireEvent.change(screen.getByLabelText('SKU-A 中文品名'), { target: { value: '样品杯' } })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
+    await waitFor(() => expect(saveChineseName).toHaveBeenCalledWith({ shipmentId: 'a', shipmentItemId: 'shared-item-id', chineseProductName: '样品杯' }))
+  })
+
+  it('filters additional stock by inclusive Korea receipt dates and preserves hidden selections', async () => {
+    addShipmentItems.mockResolvedValue({ ok: true })
+    const stock = [
+      { ...inventoryItem, lastReceivedAt: '2026-11-02T15:00:00Z' },
+      { ...inventoryItem, id: 'older', sku: 'OLD-1', productName: '오래된 상품', lastReceivedAt: '2026-11-02T14:59:00Z' },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.change(screen.getAllByLabelText('추가 출고')[1]!, { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('입고일 시작'), { target: { value: '2026-11-03' } })
+    fireEvent.change(screen.getByLabelText('입고일 종료'), { target: { value: '2026-11-03' } })
+    expect(screen.queryByText('오래된 상품')).not.toBeInTheDocument()
+    expect(screen.getByText('새 상품')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
+    await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [{ inventoryId: 'older', quantity: 2 }] }))
+  })
+
+  it('loads current stock only when the existing shipment addition panel is opened', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [inventoryItem] })))
+    try {
+      render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+      expect(fetchSpy).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+      await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
+      expect(fetchSpy).toHaveBeenCalledWith('/api/purchasing/china-shipments/available-stock', { cache: 'no-store' })
+    } finally { fetchSpy.mockRestore() }
+  })
+
+  it('merges selected boxes using the largest physical box as the preview', async () => {
+    mergeBoxes.mockResolvedValue({ ok: true })
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    detail.boxes[0] = { ...detail.boxes[0]!, lengthCm: 50, widthCm: 40, heightCm: 30 }
+    detail.boxes[1] = { ...detail.boxes[1]!, lengthCm: 10, widthCm: 20, heightCm: 30 }
+    renderShipment(detail)
+    fireEvent.click(screen.getByRole('button', { name: '박스 합치기' }))
+    fireEvent.click(screen.getByLabelText('BOX-01 합치기 선택'))
+    fireEvent.click(screen.getByLabelText('BOX-02 합치기 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스 합치기' }))
+    await waitFor(() => expect(mergeBoxes).toHaveBeenCalledWith({ shipmentId: 'a', boxIds: ['box-saved', 'box-shared'] }))
+  })
+
   it('offers direct dispatch and removes cancellation and ready buttons', () => {
     renderShipment(makeFullyPackedInProgressShipment(), 'summary')
     expect(screen.queryByRole('button', { name: '포장완료' })).not.toBeInTheDocument()
@@ -827,7 +915,8 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits.mock.calls.map(([input]) => input.shipmentItemId).sort()).toEqual(['item-1', 'item-2'])
   })
 
-  it('does not bulk-save conflicting dimensions for the same shared box', () => {
+  it('allows shared-box drafts to save with server-side largest-box sizing', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithSharedBoxDimensions())
     fireEvent.change(itemEditor('SHARED-01').getByDisplayValue('10'), { target: { value: '11' } })
     fireEvent.change(itemEditor('SHARED-02').getByDisplayValue('10'), { target: { value: '12' } })
@@ -835,8 +924,8 @@ describe('ChinaShipmentsBoard', () => {
     parkEditor()
     fireEvent.click(screen.getByRole('button', { name: '전체 저장' }))
 
-    expect(saveBoxSplits).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith('COMMON-1 박스에 서로 다른 규격이 입력돼 있습니다. 규격을 일치시킨 뒤 저장해주세요.')
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledTimes(2))
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it('keeps only failed selected drafts checked after a partial batch save', async () => {

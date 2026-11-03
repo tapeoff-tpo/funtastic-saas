@@ -788,8 +788,6 @@ export async function PurchasingOrdersView({
                                     ? '출고날짜'
                                     : '구매날짜'}
                                 purchaseMethod={item.purchaseMethod}
-                                allow1688TrackingLookup={item.status === 'purchase_completed'}
-                                allow1688TrackingRecollect={item.status === 'inspecting'}
                               />
                               {item.status === 'china_arrived' ? <div className="mt-2"><PurchaseInspectionButton id={item.id} productName={item.productName} /></div> : null}
                             </>

@@ -2,7 +2,6 @@
 
 import {
   createContext,
-  useCallback,
   useEffect,
   useContext,
   useRef,
@@ -2631,8 +2630,6 @@ export function PurchasePlanFieldsV2({
   dateField,
   dateLabel,
   purchaseMethod,
-  allow1688TrackingLookup = false,
-  allow1688TrackingRecollect = false,
   trackingSaveMode = 'plan',
 }: {
   id: string
@@ -2643,14 +2640,10 @@ export function PurchasePlanFieldsV2({
   dateField: 'requestDate' | 'outboundExpectedDate'
   dateLabel: string
   purchaseMethod: string | null
-  allow1688TrackingLookup?: boolean
-  /** Re-collects exact waybills for an untouched legacy inspection. */
-  allow1688TrackingRecollect?: boolean
   /** Inspection rows update their primary parcel through the inspection API. */
   trackingSaveMode?: 'plan' | 'inspection'
 }) {
   const router = useRouter()
-  const formRef = useRef<HTMLFormElement>(null)
   const initialMethod = purchaseMethod === '개인' || purchaseMethod === '법인' ? purchaseMethod : purchaseMethod ? '직접입력' : '개인'
   const [methodMode, setMethodMode] = useState(initialMethod)
   const [customMethod, setCustomMethod] = useState(initialMethod === '직접입력' ? purchaseMethod ?? '' : '')
@@ -2661,113 +2654,6 @@ export function PurchasePlanFieldsV2({
   const [savedTrackingNumber, setSavedTrackingNumber] = useState(() => trackingNumber?.trim() ?? '')
   const [savedDateValue, setSavedDateValue] = useState(() => formatDateInput(dateValue))
   const [savedPurchaseMethod, setSavedPurchaseMethod] = useState(() => purchaseMethod?.trim() ?? '')
-  const [is1688TrackingLookupPending, setIs1688TrackingLookupPending] = useState(false)
-  const can1688TrackingLookup = allow1688TrackingLookup || allow1688TrackingRecollect
-  const trackingLookupRef = useRef<{ runId: string; orderNumber: string; replaceUninspectedInspection: boolean } | null>(null)
-  const trackingLookupTimeoutRef = useRef<number | null>(null)
-
-  const clearTrackingLookupTimeout = useCallback(() => {
-    if (trackingLookupTimeoutRef.current === null) return
-    window.clearTimeout(trackingLookupTimeoutRef.current)
-    trackingLookupTimeoutRef.current = null
-  }, [])
-
-  useEffect(() => {
-    const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== window || event.origin !== window.location.origin) return
-      const message = event.data
-      if (!message || typeof message !== 'object') return
-      const data = message as {
-        source?: unknown
-        type?: unknown
-        runId?: unknown
-        orderNumber?: unknown
-        trackingNumbers?: unknown
-        trackingSource?: unknown
-        trackingEvidence?: unknown
-        message?: unknown
-      }
-      if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string') return
-
-      const lookup = trackingLookupRef.current
-      if (!lookup || data.runId !== lookup.runId) return
-
-      if (data.type === TRACKING_LOOKUP_ACK) {
-        clearTrackingLookupTimeout()
-        return
-      }
-
-      if (data.type === TRACKING_LOOKUP_ERROR) {
-        clearTrackingLookupTimeout()
-        trackingLookupRef.current = null
-        setIs1688TrackingLookupPending(false)
-        setMessage(typeof data.message === 'string' ? data.message : '1688 송장 조회에 실패했습니다.')
-        return
-      }
-
-      if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== lookup.orderNumber) return
-      if (data.trackingSource !== 'waybill_number' || !hasExact1688WaybillEvidence(data.trackingEvidence)) {
-        clearTrackingLookupTimeout()
-        trackingLookupRef.current = null
-        setIs1688TrackingLookupPending(false)
-        setMessage('운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
-        return
-      }
-
-      const trackingNumbers = Array.from(new Set(
-        (Array.isArray(data.trackingNumbers) ? data.trackingNumbers : [])
-          .filter((value): value is string => typeof value === 'string')
-          .map((value) => value.trim())
-          .filter(Boolean),
-      ))
-      clearTrackingLookupTimeout()
-      if (trackingNumbers.length === 0) {
-        trackingLookupRef.current = null
-        setIs1688TrackingLookupPending(false)
-        setMessage('1688에서 유효한 송장번호를 찾지 못했습니다.')
-        return
-      }
-
-      setMessage('1688 송장번호 저장 중')
-      void (async () => {
-        try {
-          const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderNumber: lookup.orderNumber,
-              trackingNumbers,
-              trackingSource: 'waybill_number',
-              trackingEvidence: EXACT_WAYBILL_EVIDENCE,
-              replaceUninspectedInspection: lookup.replaceUninspectedInspection,
-            }),
-          })
-          const body = await response.json().catch(() => ({}))
-          if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
-
-          setSavedTrackingNumber(trackingNumbers[0] ?? '')
-          setMessage(lookup.replaceUninspectedInspection
-            ? `송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건 다시 수집 완료`
-            : `송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`)
-          toast.success(lookup.replaceUninspectedInspection
-            ? `1688 송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건을 다시 수집했습니다.`
-            : `1688 송장 ${trackingNumbers.length.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
-          router.refresh()
-        } catch (error) {
-          setMessage(error instanceof Error ? error.message : '1688 송장번호를 저장하지 못했습니다.')
-        } finally {
-          trackingLookupRef.current = null
-          setIs1688TrackingLookupPending(false)
-        }
-      })()
-    }
-
-    window.addEventListener('message', onMessage)
-    return () => {
-      window.removeEventListener('message', onMessage)
-      clearTrackingLookupTimeout()
-    }
-  }, [clearTrackingLookupTimeout, id, router])
 
   async function saveInspectionTrackingNumber(nextTrackingNumber: string) {
     if (!nextTrackingNumber) {
@@ -2867,69 +2753,12 @@ export function PurchasePlanFieldsV2({
     })
   }
 
-  async function saveAndLookup1688Tracking() {
-    if (!can1688TrackingLookup || is1688TrackingLookupPending || (savedTrackingNumber && !allow1688TrackingRecollect)) return
-    const form = formRef.current
-    if (!form) return
-
-    const nextSupplierOrderNumber = String(new FormData(form).get('supplierOrderNumber') ?? '').trim()
-    if (!/^\d{10,40}$/.test(nextSupplierOrderNumber)) {
-      setMessage('1688 주문번호는 숫자 10~40자리로 입력해주세요.')
-      return
-    }
-
-    setMessage(null)
-    if (nextSupplierOrderNumber !== savedSupplierOrderNumber) {
-      setMessage('주문서번호 저장 중')
-      try {
-        const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ supplierOrderNumber: nextSupplierOrderNumber }),
-        })
-        const body = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(body.error ?? '주문서번호를 저장하지 못했습니다.')
-        setSavedSupplierOrderNumber(nextSupplierOrderNumber)
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : '주문서번호를 저장하지 못했습니다.')
-        return
-      }
-    }
-
-    const runId = crypto.randomUUID()
-    trackingLookupRef.current = {
-      runId,
-      orderNumber: nextSupplierOrderNumber,
-      replaceUninspectedInspection: allow1688TrackingRecollect,
-    }
-    setIs1688TrackingLookupPending(true)
-    setMessage('1688에서 송장번호 조회 중')
-    trackingLookupTimeoutRef.current = window.setTimeout(() => {
-      if (trackingLookupRef.current?.runId !== runId) return
-      trackingLookupRef.current = null
-      setIs1688TrackingLookupPending(false)
-      setMessage('1688 확장프로그램 연결을 확인해주세요.')
-    }, 5_000)
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: TRACKING_LOOKUP_START,
-      runId,
-      orderNumber: nextSupplierOrderNumber,
-      background: false,
-    }, window.location.origin)
-  }
-
   return (
     <form
-      ref={formRef}
       onSubmit={save}
       className={`grid min-w-0 items-start gap-1.5 ${showTrackingNumber
-        ? can1688TrackingLookup
-          ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_minmax(146px,max-content)]'
-          : 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
-        : can1688TrackingLookup
-          ? 'grid-cols-[minmax(120px,1fr)_126px_148px_minmax(146px,max-content)]'
-          : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}
+        ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
+        : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}
     >
       <label className="space-y-1">
         <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
@@ -2989,26 +2818,10 @@ export function PurchasePlanFieldsV2({
         </div>
       </label>
       <div className="flex items-center gap-1">
-        <Button type="submit" size="sm" variant="outline" disabled={isPending || is1688TrackingLookupPending} className="px-2">
+        <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
           {isPending ? <Loader2 className="animate-spin" /> : <Save />}
           저장
         </Button>
-        {can1688TrackingLookup ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={isPending || is1688TrackingLookupPending || (Boolean(savedTrackingNumber) && !allow1688TrackingRecollect)}
-            onClick={() => void saveAndLookup1688Tracking()}
-            title={allow1688TrackingRecollect
-              ? '검수 수량·박스 정보를 입력하기 전의 기존 송장을 1688에서 다시 수집합니다.'
-              : '1688 주문서번호를 저장하고 로그인된 1688에서 송장번호를 조회합니다. 조회되면 검수 단계로 이동합니다.'}
-            className="px-2"
-          >
-            {is1688TrackingLookupPending ? <Loader2 className="animate-spin" /> : <Search />}
-            {allow1688TrackingRecollect ? '1688 송장 다시 수집' : '1688 송장조회'}
-          </Button>
-        ) : null}
       </div>
       {message ? (
         <div className="col-span-full text-[11px] text-muted-foreground" aria-live="polite">

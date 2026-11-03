@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ExternalLink, Search } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -48,6 +49,11 @@ export default async function AnalyticsPage({
     page?: string
     issue?: string
     month?: string
+    range?: string
+    date?: string
+    start?: string
+    end?: string
+    legacy?: string
     productSearch?: string
     productSort?: string
     productDirection?: string
@@ -61,6 +67,14 @@ export default async function AnalyticsPage({
   if (!user) return null
 
   const params = await searchParams
+  if (!params?.tab && params?.legacy !== '1') {
+    const query = new URLSearchParams()
+    for (const key of ['range', 'date', 'start', 'end', 'month'] as const) {
+      const value = params?.[key]
+      if (value) query.set(key, value)
+    }
+    redirect(`/analytics/overview${query.size ? `?${query.toString()}` : ''}`)
+  }
   const tab = parseTab(params?.tab)
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
   const issue = parseMissingIssue(params?.issue)
@@ -135,13 +149,11 @@ export default async function AnalyticsPage({
           <TabLink href={analyticsHref('dashboard', month)} active={tab === 'dashboard'}>대시보드</TabLink>
           <TabLink href={analyticsHref('orders', month)} active={tab === 'orders'}>주문별 손익</TabLink>
           <TabLink href={analyticsHref('products', month)} active={tab === 'products'}>상품별 손익</TabLink>
-          <TabLink href={analyticsHref('missing', month)} active={tab === 'missing'}>계산 누락</TabLink>
           <TabLink href={analyticsHref('uploads', month)} active={tab === 'uploads'}>업로드</TabLink>
           <TabLink href={analyticsHref('settings', month)} active={tab === 'settings'}>설정</TabLink>
           <TopNavLink href="/analytics/price-table">판매가 테이블</TopNavLink>
           <TopNavLink href="/analytics/sabangnet-review">사방넷 검수</TopNavLink>
           <TopNavLink href="/analytics/rocket-outbound">로켓배송/대량 매출</TopNavLink>
-          <TopNavLink href="/analytics/short-meeting">숏미팅</TopNavLink>
         </div>
       </div>
 

@@ -14,20 +14,22 @@ export function AnalyticsPeriodSelector({ path, period }: { path: string; period
   const end = previousDay(period.endDate)
 
   return (
-    <section className="rounded-xl border bg-card p-3">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 inline-flex items-center gap-2 text-sm font-semibold"><CalendarDays className="size-4 text-primary" />기간</span>
-          {options.map((option) => <Link key={option.key} href={`${path}?range=${option.key}&date=${period.key}`} className={`inline-flex min-h-9 items-center rounded-md border px-3 py-1.5 text-sm font-medium ${period.granularity === option.key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>{option.label}</Link>)}
+    <section className="rounded-xl border bg-card px-3 py-2.5">
+      <div className="flex items-center gap-2 overflow-x-auto pb-px">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="mr-1 inline-flex items-center gap-1.5 text-sm font-semibold"><CalendarDays className="size-4 text-primary" />기간</span>
+          {options.map((option) => <Link key={option.key} href={`${path}?range=${option.key}&date=${period.key}`} className={`inline-flex h-8 items-center rounded-md border px-2.5 text-sm font-medium ${period.granularity === option.key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>{option.label}</Link>)}
         </div>
-        <form action={path} className="flex flex-wrap items-end gap-2">
+        <span className="hidden h-5 w-px bg-border sm:block" aria-hidden />
+        <form action={path} className="flex shrink-0 items-center gap-1.5">
           <input type="hidden" name="range" value="custom" />
-          <label className="grid gap-1 text-xs text-muted-foreground">시작일<input aria-label="시작일" name="start" type="date" defaultValue={period.startDate} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" /></label>
-          <label className="grid gap-1 text-xs text-muted-foreground">종료일<input aria-label="종료일" name="end" type="date" defaultValue={end} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" /></label>
-          <button type="submit" className="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">적용</button>
+          <label className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><span className="hidden lg:inline">시작</span><input aria-label="시작일" name="start" type="date" defaultValue={period.startDate} className="h-8 w-[122px] rounded-md border bg-background px-1.5 text-sm text-foreground" /></label>
+          <span className="text-muted-foreground" aria-hidden>~</span>
+          <label className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><span className="hidden lg:inline">종료</span><input aria-label="종료일" name="end" type="date" defaultValue={end} className="h-8 w-[122px] rounded-md border bg-background px-1.5 text-sm text-foreground" /></label>
+          <button type="submit" className="h-8 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">적용</button>
         </form>
+        <p className="ml-auto hidden shrink-0 text-xs text-muted-foreground 2xl:block">현재 {period.label}</p>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">현재 {period.label} · {period.startDate} - {end}</p>
     </section>
   )
 }

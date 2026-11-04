@@ -30,9 +30,9 @@ export async function findCostCandidates(userId: string, search: string, sourceN
   return rows.map(({ metadata, ...row }) => ({ ...row, costPrice: itemNewCost(metadata) }))
 }
 
-async function normalizeCatalog(userId: string, sources: SourceProduct[]): Promise<CatalogProduct[]> {
+async function normalizeCatalog(userId: string, sources: SourceProduct[], includeCosts = true): Promise<CatalogProduct[]> {
   const unique = [...new Map(sources.map((product) => [product.code, product])).values()]
-  const candidates = unique.length ? await findCostCandidates(userId, '', unique.map((product) => product.name)) : []
+  const candidates = includeCosts && unique.length ? await findCostCandidates(userId, '', unique.map((product) => product.name)) : []
   return unique.map((product) => {
     const htmlUrls = Array.from((product.description ?? '').matchAll(/<img[^>]+src=["']([^"']+)["']/gi), (match) => match[1].replaceAll('&amp;', '&'))
     const remote = htmlUrls.filter(isImageUrl)
@@ -51,13 +51,14 @@ async function normalizeCatalog(userId: string, sources: SourceProduct[]): Promi
 export async function searchCatalog(userId: string, query: string) {
   if (!query.trim()) return []
   const payload = await sourceJson(`/api/products?${new URLSearchParams({ search: query, limit: '24' })}`) as { products?: SourceProduct[] }
-  // The detail endpoint includes option surcharges; list responses may omit them.
-  const detailed: SourceProduct[] = []
-  const sourceRows = payload.products ?? []
-  for (let index = 0; index < sourceRows.length; index += 4) {
-    detailed.push(...await Promise.all(sourceRows.slice(index, index + 4).map((product) => sourceJson(`/api/products/by-code?${new URLSearchParams({ code: product.code })}`) as Promise<SourceProduct>)))
-  }
-  return normalizeCatalog(userId, detailed)
+  // Show results after one list request. Hydrate option surcharges and current
+  // item-master costs only when a product is selected for registration.
+  return normalizeCatalog(userId, payload.products ?? [], false)
+}
+
+export async function getCatalogProduct(userId: string, code: string) {
+  const product = await sourceJson(`/api/products/by-code?${new URLSearchParams({ code })}`) as SourceProduct
+  return (await normalizeCatalog(userId, [product]))[0]
 }
 
 export async function matchCatalogProducts(userId: string, names: string[], codes: string[]) {

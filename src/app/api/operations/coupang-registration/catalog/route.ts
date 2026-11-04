@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { registrationWorkspace } from '@/lib/coupang-registration/auth'
-import { findCostCandidates, matchCatalogProducts, searchCatalog } from '@/lib/coupang-registration/catalog'
+import { findCostCandidates, getCatalogProduct, matchCatalogProducts, searchCatalog } from '@/lib/coupang-registration/catalog'
 import { money } from '@/lib/coupang-registration/model'
 
 export const maxDuration = 60
@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
       const rows = await findCostCandidates(workspace, query)
       return NextResponse.json({ costs: rows.map((row) => ({ ...row, costPrice: money(row.costPrice) })) })
     }
+    const code = (request.nextUrl.searchParams.get('code') ?? '').trim().slice(0, 100)
+    if (code) return NextResponse.json({ product: await getCatalogProduct(workspace, code) })
     return NextResponse.json({ products: await searchCatalog(workspace, query) })
   } catch (error) {
     console.error('Coupang catalogue lookup failed', error)

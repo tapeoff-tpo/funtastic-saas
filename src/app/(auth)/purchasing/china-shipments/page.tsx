@@ -1,18 +1,14 @@
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
-import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import {
-  getChinaOutboundShipmentDetail,
-  getSaasChinaInventory,
   listSaasChinaOutboundWarehouses,
   listChinaOutboundShipments,
 } from '@/lib/purchasing/saas-china-outbound'
-import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { ProductFlowNav } from '@/components/product-flow-nav'
-import { dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
-import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem, type ChinaShipmentStage, type ChinaShipmentStockItem } from './china-shipments-board'
+import { ChinaShipmentsBoard, type ChinaShipmentListItem, type ChinaShipmentStage } from './china-shipments-board'
+
+import { loadChinaShipmentDetailView, loadChinaShipmentStockItems } from './china-shipment-data'
 
 export const metadata: Metadata = {
   title: '중국출고',
@@ -31,30 +27,12 @@ export default async function ChinaShipmentsPage({
   const selectedShipmentId = showCreate ? undefined : parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [{ items: inventoryItems }, shipments, detail, outboundWarehouses] = await Promise.all([
-    // The full inventory list is only needed while creating a new outbound request.
-    // Avoid sending every China inventory row when opening an existing shipment or the list.
-    showCreate ? getSaasChinaInventory(workspaceUserId) : Promise.resolve({ items: [] }),
+  const [stockItems, shipments, selectedShipment, outboundWarehouses] = await Promise.all([
+    showCreate ? loadChinaShipmentStockItems(workspaceUserId) : Promise.resolve([]),
     listChinaOutboundShipments(workspaceUserId),
-    selectedShipmentId ? getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId: selectedShipmentId }) : Promise.resolve(null),
+    selectedShipmentId ? loadChinaShipmentDetailView(workspaceUserId, selectedShipmentId) : Promise.resolve(null),
     listSaasChinaOutboundWarehouses(workspaceUserId),
   ])
-
-  const productImages: Record<string, ProductImageResult> = await findSavedNewProductImagesBatch(workspaceUserId, detail?.items ?? [])
-    .catch((error) => { console.error('outbound image address preload failed', error); return {} })
-  const names = await getPurchasingItemLabelDataBySku(workspaceUserId, [...inventoryItems, ...(detail?.items ?? [])].map((item) => item.sku))
-  const stockItems: ChinaShipmentStockItem[] = inventoryItems.map((item) => ({
-    id: item.id,
-    warehouseCode: item.warehouseCode,
-    sku: item.sku,
-    productName: item.productName,
-    chineseProductName: names.get(item.sku)?.chineseProductName ?? '',
-    lastReceivedAt: item.lastReceivedAt?.toISOString() ?? null,
-    optionName: item.optionName,
-    onHandQuantity: item.onHandQuantity,
-    reservedQuantity: item.reservedQuantity,
-    availableQuantity: item.availableQuantity,
-  }))
   const shipmentItems: ChinaShipmentListItem[] = shipments.map((shipment) => ({
     id: shipment.id,
     displayName: shipment.displayName,
@@ -82,68 +60,13 @@ export default async function ChinaShipmentsPage({
       <ChinaShipmentsBoard
         inventoryItems={stockItems}
         shipments={shipmentItems}
-        selectedShipment={detail ? toShipmentDetailView(detail, productImages, names) : null}
+        selectedShipment={selectedShipment}
         selectedStep={selectedStep}
         showCreate={showCreate}
         outboundWarehouses={outboundWarehouses}
       />
     </div>
   )
-}
-
-function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>, productImages: Record<string, ProductImageResult>, names: Map<string, { chineseProductName: string }>): ChinaShipmentDetailView {
-  return {
-    shipment: {
-      id: detail.shipment.id,
-      displayName: detail.shipment.displayName,
-      shipmentNo: detail.shipment.shipmentNo,
-      status: detail.shipment.status,
-      originWarehouseCode: detail.shipment.originWarehouseCode,
-      destinationName: detail.shipment.destinationName,
-      destinationAddress: detail.shipment.destinationAddress,
-      forwarderName: detail.shipment.forwarderName,
-      externalReference: detail.shipment.externalReference,
-      plannedOutboundDate: detail.shipment.plannedOutboundDate,
-      memo: detail.shipment.memo,
-      createdAt: detail.shipment.createdAt.toISOString(),
-    },
-    items: detail.items.map((item) => ({
-      id: item.id,
-      inventoryId: item.inventoryId,
-      itemCategory: item.itemCategory,
-      warehouseCode: item.warehouseCode,
-      sku: item.sku,
-      productName: item.productName,
-      chineseProductName: item.chineseProductName || names.get(item.sku)?.chineseProductName || '',
-      optionName: item.optionName,
-      reservedQuantity: item.reservedQuantity,
-      packedQuantity: item.packedQuantity,
-      dispatchedQuantity: item.dispatchedQuantity,
-      boxSplitStatus: item.boxSplitStatus === 'completed' || item.boxSplitStatus === 'in_progress'
-        ? item.boxSplitStatus
-        : item.packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress',
-      onHandQuantity: item.onHandQuantity,
-      availableQuantity: item.availableQuantity,
-      receiptPacking: item.receiptPacking,
-      productImage: productImages[item.id],
-    })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
-    boxes: detail.boxes.map((box) => ({
-      id: box.id,
-      shipmentId: detail.shipment.id,
-      editable: detail.shipment.status === 'draft' || detail.shipment.status === 'packing',
-      palletId: box.palletId,
-      boxNo: box.boxNo,
-      status: box.status,
-      completionStatus: box.completionStatus === 'completed' || box.completionStatus === 'in_progress' ? box.completionStatus : null,
-      note: box.note,
-      grossWeightKg: dimensionNumber(box.grossWeightKg),
-      lengthCm: dimensionNumber(box.lengthCm),
-      widthCm: dimensionNumber(box.widthCm),
-      heightCm: dimensionNumber(box.heightCm),
-    })),
-    boxItems: detail.boxItems.map((item) => ({ id: item.id, boxId: item.boxId, shipmentItemId: item.shipmentItemId, quantity: item.quantity })),
-  }
 }
 
 function stringParam(value: string | string[] | undefined) {

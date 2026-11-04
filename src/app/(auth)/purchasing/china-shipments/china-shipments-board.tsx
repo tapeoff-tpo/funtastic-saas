@@ -171,6 +171,7 @@ function ChinaShipmentsBoardContent({
   const activeStep = stepParam === 'items' || stepParam === 'boxes' || stepParam === 'pallets' || stepParam === 'summary'
     ? stepParam : selectedStep
   const [isPending, startTransition] = useTransition()
+  const [isSelecting, startSelecting] = useTransition()
   const [initialDate] = useState(() => today())
   const createdShipmentId = useRef<string | null>(null)
   const creationMayExist = useRef(false)
@@ -284,7 +285,8 @@ function ChinaShipmentsBoardContent({
   }
 
   return (
-    <fieldset data-purchasing-translate disabled={isPending || guard.busy} className="min-w-0 space-y-4 border-0 p-0" aria-busy={isPending || guard.busy}>
+    <fieldset data-purchasing-translate disabled={isPending || isSelecting || guard.busy} className="min-w-0 space-y-4 border-0 p-0" aria-busy={isPending || isSelecting || guard.busy}>
+      {isSelecting && <p role="status" aria-live="polite" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />출고요청 불러오는 중</p>}
       <div className="space-y-3">
         <ShipmentSelector
           key={`selector:${showCreate ? 'new-shipment' : selectedShipment?.shipment.id ?? 'no-shipment'}`}
@@ -294,7 +296,7 @@ function ChinaShipmentsBoardContent({
           outboundWarehouses={outboundWarehouses}
           onToggleCreate={() => guard.requestNavigation(() => navigateChinaWork(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1'))}
           onSelect={(id) => {
-            if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => navigateChinaWork(shipmentHref(id, 'items')))
+            if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => startSelecting(() => navigateChinaWork(shipmentHref(id, 'items'))))
           }}
         />
         {showCreate ? (

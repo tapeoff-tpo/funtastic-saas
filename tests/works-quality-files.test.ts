@@ -20,4 +20,8 @@ describe('Works quality PDF backup import',()=>{
   const zip=new JSZip();zip.file(`${id}/big.pdf`,'%PDF-'+ 'A'.repeat(4*1024*1024));
   await expect(readWorksQualityArchive(await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}))).rejects.toThrow('용량 제한')
  })
+ it('accepts original 4.1 MB print PDFs without reducing quality',async()=>{
+  const files=await readWorksQualityArchive(await archive(`${id}/인쇄용.pdf`,'%PDF-'+ 'A'.repeat(4_100_000)))
+  expect(files[0].data.length).toBe(4_100_005)
+ })
 })

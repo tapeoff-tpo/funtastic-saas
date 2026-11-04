@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.formData()
     const file = body.get('file')
-    if (!(file instanceof File) || file.size > QUALITY_ARCHIVE_LIMIT) return NextResponse.json({ error: '3.5MB 이하의 품질표시 백업 ZIP을 선택해주세요.' }, { status: 400 })
+    if (!(file instanceof File) || file.size > QUALITY_ARCHIVE_LIMIT) return NextResponse.json({ error: '4.3MB 이하의 품질표시 백업 ZIP을 선택해주세요.' }, { status: 400 })
     const files = await readWorksQualityArchive(Buffer.from(await file.arrayBuffer()))
     const results = await saveWorksQualityFiles({ userId: await getWorkspaceUserId(user.id), actorId: user.id, files })
     revalidatePath('/new-products')

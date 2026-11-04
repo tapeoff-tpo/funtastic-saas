@@ -3,12 +3,13 @@ import type { Readable } from 'node:stream'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 
-export const QUALITY_ARCHIVE_LIMIT = 3_500_000
+// Leave multipart overhead below Vercel's 4.5 MB request limit.
+export const QUALITY_ARCHIVE_LIMIT = 4_300_000
 const PDF_LIMIT = 4 * 1024 * 1024
 export type WorksQualityFile = { sourceId: string; fileName: string; data: Buffer }
 
 export async function readWorksQualityArchive(buffer: Buffer): Promise<WorksQualityFile[]> {
-  if (!buffer.length || buffer.length > QUALITY_ARCHIVE_LIMIT) throw new Error('압축파일은 3.5MB 이하로 나눠주세요.')
+  if (!buffer.length || buffer.length > QUALITY_ARCHIVE_LIMIT) throw new Error('압축파일은 4.3MB 이하로 나눠주세요.')
   const archive = await JSZip.loadAsync(buffer)
   const entries = Object.values(archive.files).filter((entry) => !entry.dir)
   if (!entries.length || entries.length > 30) throw new Error('한 압축파일에는 PDF를 1~30개 넣어주세요.')

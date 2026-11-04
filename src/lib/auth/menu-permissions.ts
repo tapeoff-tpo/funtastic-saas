@@ -21,6 +21,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/inventory/adjustments', '입출고관리'], ['/purchasing/overdue', '구매/입고지연'],
   ] },
   { title: '상품등록·광고', items: [
+    ['/operations/coupang-registration', '쿠팡상품등록'],
     ['/analytics/price-table', '판매가 테이블'], ['/operations/marketplace-registration', '상품 등록 관리'],
     ['/operations/detail-pages', '상세페이지 제작'], ['/operations/deal-calendar', '딜 캘린더'],
   ] },

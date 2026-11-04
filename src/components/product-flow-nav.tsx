@@ -14,6 +14,7 @@ const RELATED_WORK = [
   { href: '/purchasing/china-shipments', label: '중국출고' },
   { href: '/analytics/price-table', label: '판매가' },
   { href: '/operations/marketplace-registration', label: '상품등록' },
+  { href: '/operations/coupang-registration', label: '쿠팡상품등록' },
 ]
 
 export function ProductFlowNav() {

@@ -24,6 +24,7 @@ export function tabPathname(tab: { href: string }): string {
 }
 
 const ROUTE_LABELS: Record<string, string> = {
+  '/operations/coupang-registration': '쿠팡상품등록',
   '/access-denied': '접근 권한 안내',
   '/admin/accounts': '계정관리',
   '/dashboard': '대시보드',

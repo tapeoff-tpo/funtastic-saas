@@ -167,6 +167,7 @@ export const navSections: NavSection[] = [
     title: '상품등록·광고',
     items: [
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
+      { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },
       { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },

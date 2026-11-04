@@ -7,6 +7,7 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductPageSetup } from '@/lib/new-products/workflow'
 import { NewProductBoard } from './new-product-board'
 import { CatalogueImageSyncButton } from './catalogue-image-sync-button'
+import { WorksQualityImportButton } from './works-quality-import-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +33,7 @@ export default async function NewProductsPage() {
           상품관리
         </h1>
       </header>
-      <CatalogueImageSyncButton />
+      <div className="flex flex-wrap items-start gap-2"><CatalogueImageSyncButton />{setup.viewer.isMain && <WorksQualityImportButton />}</div>
       <NewProductBoard
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}

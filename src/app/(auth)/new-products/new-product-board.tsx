@@ -202,6 +202,12 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
     return () => { active = false }
   }, [dataRevision, mode, selectedId, detailLoader])
 
+  useEffect(() => {
+    const refreshAttachments = () => { detailLoader.clear(); setDataRevision((value) => value + 1) }
+    window.addEventListener('new-product-attachments-imported', refreshAttachments)
+    return () => window.removeEventListener('new-product-attachments-imported', refreshAttachments)
+  }, [detailLoader])
+
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
   const hasSearchQuery = Boolean(query.trim())
   const selectedStageName = selectedStageIds.length === 0 && hasSearchQuery

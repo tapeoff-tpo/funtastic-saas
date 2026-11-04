@@ -15,7 +15,7 @@ export async function readWorksQualityArchive(buffer: Buffer): Promise<WorksQual
   const files: WorksQualityFile[] = []
   let total = 0
   for (const entry of entries) {
-    const match = /^(\d{10,20})\/([^/\\]+\.pdf)$/i.exec(entry.name)
+    const match = /^(\d{1,20})\/([^/\\]+\.pdf)$/i.exec(entry.name)
     if (!match || match[2].length > 500 || entry.unsafeOriginalName && entry.unsafeOriginalName !== entry.name) throw new Error('원본 WORKS ID별 폴더에 PDF를 넣은 백업 파일을 선택해주세요.')
     const data = await new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = []

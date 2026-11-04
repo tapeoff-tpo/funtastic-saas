@@ -9,6 +9,7 @@ describe('Works quality PDF backup import',()=>{
  it('retains the exact Works ID and original PDF filename',async()=>{
   const files=await readWorksQualityArchive(await archive(`${id}/품질표시.pdf`,'%PDF-1.4\n%%EOF'))
   expect(files[0]).toMatchObject({sourceId:id,fileName:'품질표시.pdf'})
+  expect((await readWorksQualityArchive(await archive('1737370/기존상품.pdf','%PDF-1.4')))[0].sourceId).toBe('1737370')
  })
  it('rejects wrong types and missing or traversing document folders',async()=>{
   await expect(readWorksQualityArchive(await archive(`${id}/품질표시.pdf`,'html login page'))).rejects.toThrow('올바른 PDF')

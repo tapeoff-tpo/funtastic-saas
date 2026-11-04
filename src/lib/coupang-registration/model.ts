@@ -15,6 +15,8 @@ export type RegistrationRow = {
   priceMode: PriceMode
   markupPercent: number
   manualSupplyPrice: number | null
+  saleMode?: 'auto' | 'manual'
+  manualSalePrice?: number | null
   sourceCode: string
   sourceName: string
   sourceStatus: string
@@ -54,17 +56,22 @@ export function money(value: unknown): number | null {
   return Number.isFinite(number) && number >= 0 && number <= MONEY_LIMIT ? number : null
 }
 
-export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice'>, rounding = 1) {
+export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice'>, rounding = 1) {
   const wholesale = money(row.wholesalePrice)
   const input = row.priceMode === 'manual' ? money(row.manualSupplyPrice)
     : wholesale === null ? null : wholesale * (row.priceMode === 'markup' ? 1 + row.markupPercent / 100 : 1)
   const supply = input === null || !Number.isFinite(input) || Math.round(input) < 1 || input > MONEY_LIMIT ? null : Math.round(input)
   const unit = [1, 10, 100, 1000].includes(rounding) ? rounding : 1
   // Integer arithmetic avoids 15,000 / 0.6 floating-point rounding surprises.
-  const sale = supply === null ? null : Math.ceil(supply * 5 / (3 * unit)) * unit
+  const manualSale = money(row.manualSalePrice)
+  const sale = row.saleMode === 'manual'
+    ? manualSale === null || Math.round(manualSale) < 1 ? null : Math.round(manualSale)
+    : supply === null ? null : Math.ceil(supply * 5 / (3 * unit)) * unit
   const cost = money(row.costPrice)
-  const profit = supply === null || cost === null ? null : supply - cost
-  return { supply, sale, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
+  // User's current proposal workbook: 매출부가세 = 공급가 / 11, 순수익 = 공급가 - 원가 - 매출부가세.
+  const salesVat = supply === null ? null : supply / 11
+  const profit = supply === null || cost === null || salesVat === null ? null : supply - cost - salesVat
+  return { supply, sale, salesVat, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
 }
 
 export function isImageUrl(value: string): boolean {
@@ -116,7 +123,10 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
     if (column.label === '상세이미지 파일명' && html) continue
     if (!fields[column.label]?.trim()) issues.push(`${column.label} 누락`)
   }
-  if (calculatePrice(row, draft.rounding).supply === null) issues.push('공급가를 1원 이상 입력해주세요.')
+  const prices = calculatePrice(row, draft.rounding)
+  if (prices.supply === null) issues.push('공급가를 1원 이상 입력해주세요.')
+  if (prices.sale === null) issues.push('판매가를 1원 이상 입력해주세요.')
+  else if (prices.supply !== null && prices.sale < prices.supply) issues.push('판매가는 공급가 이상이어야 합니다.')
   if (/[2-9]\d*개입/.test(row.name) && !row.bundleReviewed) issues.push('묶음 구성과 등록단위 가격 확인 필요')
   for (const field of ['대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', LABEL_FIELD]) {
     for (const value of (fields[field] ?? '').split(',').map((part) => part.trim()).filter(Boolean)) {
@@ -137,7 +147,7 @@ export function createRegistrationRow(product?: CatalogProduct, optionName = '')
   return {
     id: crypto.randomUUID(), templateId: '', sheetName: '', name: [product?.name ?? '', optionName].filter(Boolean).join(' '), optionName,
     internalSku: cost?.sku ?? '', costPrice: cost?.costPrice ?? null, wholesalePrice: product?.price === null || product?.price === undefined ? null : product.price + (option?.addPrice ?? 0),
-    priceMode: 'wholesale', markupPercent: 20, manualSupplyPrice: null,
+    priceMode: 'wholesale', markupPercent: 20, manualSupplyPrice: null, saleMode: 'auto', manualSalePrice: null,
     sourceCode: product?.code ?? '', sourceName: product?.name ?? '', sourceStatus: product?.status ?? '', bundleReviewed: false,
     primaryImage: product?.thumbnails[0] ?? '', thumbnails: product?.thumbnails ?? [], detailImages: product?.detailImages ?? [], label: '', fields: {},
   }

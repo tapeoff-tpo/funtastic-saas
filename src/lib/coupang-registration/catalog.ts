@@ -2,6 +2,7 @@ import { and, eq, ilike, ne, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { inventory, products } from '@/lib/db/schema'
 import { isImageUrl, money, type CatalogProduct } from './model'
+import { itemNewCost } from './item-cost'
 
 type SourceProduct = {
   code: string; name: string; price?: number; status?: string; imageUrl?: string; thumbnailImages?: string[]; detailImages?: string[]; description?: string;
@@ -18,12 +19,15 @@ async function sourceJson(path: string): Promise<unknown> {
 export async function findCostCandidates(userId: string, search: string, sourceNames: string[] = []) {
   const patterns = sourceNames.length ? sourceNames.slice(0, 100) : [search]
   if (!patterns.some(Boolean)) return []
-  return db.select({
-    sku: products.internalSku, name: products.name, costPrice: products.costPrice,
-    optionName: sql<string>`COALESCE(MAX(${inventory.optionName}), '')`,
+  const rows = await db.select({
+    sku: products.internalSku,
+    name: sql<string>`COALESCE(NULLIF(${products.metadata}->'esa009m'->>'품목명', ''), ${products.name})`,
+    metadata: products.metadata,
+    optionName: sql<string>`COALESCE(NULLIF(${products.metadata}->'esa009m'->>'규격정보', ''), MAX(${inventory.optionName}), '')`,
   }).from(products).leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, userId)))
-    .where(and(eq(products.userId, userId), ne(products.status, 'deleted'), or(...patterns.flatMap((pattern) => [ilike(products.name, `%${pattern}%`), ilike(products.internalSku, `%${pattern}%`), ilike(inventory.productName, `%${pattern}%`)]))))
+    .where(and(eq(products.userId, userId), ne(products.status, 'deleted'), or(...patterns.flatMap((pattern) => [ilike(products.name, `%${pattern}%`), ilike(products.internalSku, `%${pattern}%`), ilike(inventory.productName, `%${pattern}%`), sql`${products.metadata}->'esa009m'->>'품목명' ILIKE ${`%${pattern}%`}`]))))
     .groupBy(products.id).limit(500)
+  return rows.map(({ metadata, ...row }) => ({ ...row, costPrice: itemNewCost(metadata) }))
 }
 
 async function normalizeCatalog(userId: string, sources: SourceProduct[]): Promise<CatalogProduct[]> {

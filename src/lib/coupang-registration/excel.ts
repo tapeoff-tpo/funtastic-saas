@@ -45,7 +45,8 @@ export async function readTemplate(buffer: Buffer, name: string) {
       const fields = Object.fromEntries(definition.columns.map((column) => [column.label, cellText(sheet.getCell(index, column.column))]))
       rows.push({
         ...createRegistrationRow(), id: randomUUID(), templateId: id, sheetName: definition.name, name: productName,
-        priceMode: 'manual', manualSupplyPrice: money(fields['공급가']), fields,
+        priceMode: 'manual', manualSupplyPrice: money(fields['공급가']),
+        saleMode: money(fields['쿠팡 판매가']) === null ? 'auto' : 'manual', manualSalePrice: money(fields['쿠팡 판매가']), fields,
         primaryImage: fields['대표이미지 파일명'] ?? '', label: fields[LABEL_FIELD] ?? '',
       })
     }

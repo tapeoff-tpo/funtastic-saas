@@ -7,6 +7,7 @@ const file = z.object({ name: z.string().min(1).max(250).refine((value) => !/[\\
 export const rowSchema = z.object({
   id: z.string().min(1).max(100), templateId: z.string().max(100), sheetName: z.string().max(100), name: z.string().max(500), optionName: z.string().max(300), internalSku: z.string().max(100),
   costPrice: amount, wholesalePrice: amount, priceMode: z.enum(['wholesale', 'markup', 'manual']), markupPercent: z.number().finite().min(0).max(1000), manualSupplyPrice: amount,
+  saleMode: z.enum(['auto', 'manual']).default('auto'), manualSalePrice: amount.default(null),
   sourceCode: z.string().max(100), sourceName: z.string().max(500), sourceStatus: z.string().max(50), bundleReviewed: z.boolean(), primaryImage: z.string().max(4000),
   thumbnails: z.array(z.string().max(4000)).max(30), detailImages: z.array(z.string().max(4000)).max(100), label: z.string().max(4000), fields: z.record(z.string().max(200), text),
 })

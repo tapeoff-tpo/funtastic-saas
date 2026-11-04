@@ -33,6 +33,7 @@ describe('official Coupang template round trip', () => {
   it('imports only populated products and preserves metadata, validation and formulas while replacing prices/images', async () => {
     const { draft, parsed } = await fixture()
     expect(parsed.rows).toHaveLength(2)
+    expect(parsed.rows[0]).toMatchObject({ saleMode: 'manual', manualSalePrice: 20000 })
     expect(rowIssues(draft.rows[0], draft)).toEqual([])
     const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
     const file = zip.file('견적서/sample_등록용.xlsx')!
@@ -42,12 +43,25 @@ describe('official Coupang template round trip', () => {
     expect(sheet.getCell('B1').value).toBe('Retail_Categorized_Excel:Version186')
     expect(result.getWorksheet('HQF_100')!.state).toBe('veryHidden')
     expect(sheet.getCell('C9').value).toBe(15000)
-    expect(sheet.getCell('D9').value).toBe(25000)
+    expect(sheet.getCell('D9').value).toBe(20000)
     expect(sheet.getCell('F9').value).toBeNull()
     expect(sheet.getCell('G9').value).toContain('<img ')
     expect(sheet.getCell('B10').value).toBeNull()
     expect(sheet.getCell('I9').dataValidation.type).toBe('list')
     expect(sheet.getCell('J10').formula).toBe('"기타 재화"')
+  })
+  it('exports direct price edits and blocks missing or below-supply retail', async () => {
+    const { draft } = await fixture()
+    Object.assign(draft.rows[0], { manualSupplyPrice: 12000, manualSalePrice: 19000 })
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('QF_100_test')!.getCell('C9').value).toBe(12000)
+    expect(workbook.getWorksheet('QF_100_test')!.getCell('D9').value).toBe(19000)
+    draft.rows[0].manualSalePrice = null
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('판매가')
+    draft.rows[0].manualSalePrice = 11000
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('공급가 이상')
   })
   it('blocks missing label attachments and requires a bundle review', async () => {
     const { draft } = await fixture()

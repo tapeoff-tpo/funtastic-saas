@@ -51,7 +51,8 @@ export function mergeWorksProduct(current:SyncRow,incoming:DaouWorksImportItem,s
     if(!equal(chosen.value,current[column]))patch[column]=chosen.value
     nextBaseline[key]=chosen.baseline
   }
-  const existingOptions=normalizeNewProductOptionDetails(metadata.optionDetails)
+  const rawOptions=Array.isArray(metadata.optionDetails)?metadata.optionDetails:[]
+  const existingOptions=normalizeNewProductOptionDetails(rawOptions).map(option=>({...record(rawOptions.find(raw=>record(raw).id===option.id)),...option}))
   const baseOptions=normalizeNewProductOptionDetails(sync.optionBaseline??old?.values.optionDetails)
   const worksOptions=normalizeNewProductOptionDetails(incoming.values.optionDetails)
   const options=existingOptions.map(o=>({...o}));const optionBaseline=baseOptions.map(o=>({...o}));const seenBase=new Set<string>()

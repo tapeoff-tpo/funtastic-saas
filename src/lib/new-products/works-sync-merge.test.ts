@@ -24,6 +24,12 @@ describe('safe WORKS merge',()=>{
   const next={...row,...merged.patch,metadata:merged.metadata}
   expect(mergeWorksProduct(next,parse(200,'700ml'),stages).needsWrite).toBe(false)
  })
+ it('preserves hidden legacy and custom option fields',()=>{
+  const row=initial();const options=row.metadata!.optionDetails as Array<Record<string,unknown>>
+  options[0].bulkSize='40×50×60';options[0].productSize='5cm';options[0].customSupplierNote='보존'
+  const result=mergeWorksProduct(row,parse(200),stages)
+  expect(result.metadata.optionDetails).toEqual(expect.arrayContaining([expect.objectContaining({bulkSize:'40×50×60',productSize:'5cm',customSupplierNote:'보존'})]))
+ })
  it('preserves source clears and local clears',()=>{
   expect(mergeWorksProduct(initial(),parse(100,''),stages).patch.notice_capacity).toBeUndefined()
   const local=initial();local.notice_capacity=null

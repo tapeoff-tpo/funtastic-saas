@@ -31,16 +31,8 @@ export async function syncWorksProducts(input: {
   const items = normalizeDaouWorksImportItems(input.items)
   if (items.length !== input.items.length || items.some(i => !/^\d{1,24}$/.test(i.sourceId))) throw new Error('중복 또는 유효하지 않은 WORKS 상품이 포함되어 있습니다.')
   const runId = input.runId && /^[\w-]{1,80}$/.test(input.runId) ? input.runId : randomUUID()
-  if (!input.preview) {
-    await db.transaction(async tx => {
-    await tx.execute(sql`CREATE TABLE IF NOT EXISTS new_product_works_sync_audit (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, actor_user_id uuid NOT NULL,
-      run_id text NOT NULL, item_id uuid NOT NULL, source_id text NOT NULL, action text NOT NULL,
-      before_row jsonb, after_row jsonb NOT NULL, conflicts jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
-    )`)
-    await tx.execute(sql`ALTER TABLE new_product_works_sync_audit ENABLE ROW LEVEL SECURITY`)
-    })
-  }
+  if (!input.preview) await ensureSyncAuditTable()
+
   return db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-daou-import:${input.userId}`}))`)
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
@@ -114,4 +106,19 @@ export async function syncWorksProducts(input: {
     }
     return {runId,preview:Boolean(input.preview),processed:items.length,results}
   })
+}
+
+let auditSchemaPromise: Promise<void> | undefined
+function ensureSyncAuditTable() {
+  auditSchemaPromise ??= (async () => {
+    await db.transaction(async tx => {
+    await tx.execute(sql`CREATE TABLE IF NOT EXISTS new_product_works_sync_audit (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, actor_user_id uuid NOT NULL,
+      run_id text NOT NULL, item_id uuid NOT NULL, source_id text NOT NULL, action text NOT NULL,
+      before_row jsonb, after_row jsonb NOT NULL, conflicts jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+    )`)
+    await tx.execute(sql`ALTER TABLE new_product_works_sync_audit ENABLE ROW LEVEL SECURITY`)
+    })
+  })().catch(error => { auditSchemaPromise = undefined; throw error })
+  return auditSchemaPromise
 }

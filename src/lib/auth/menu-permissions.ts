@@ -25,14 +25,14 @@ export const MENU_PERMISSION_GROUPS = [
     ['/analytics/price-table', '판매가 테이블'], ['/operations/marketplace-registration', '상품 등록 관리'],
     ['/operations/detail-pages', '상세페이지 제작'], ['/operations/deal-calendar', '딜 캘린더'],
   ] },
-  { title: '분석', items: [
-    ['/analytics', '매출분석'], ['/analytics/clearance', '재고정리 운영'], ['/analytics/settlements', '정산 캘린더'],
+  { title: '매출분석', items: [
+    ['/analytics', '대시보드'], ['/analytics/clearance', '재고정리 운영'], ['/analytics/settlements', '정산 캘린더'],
     ['/analytics/rocket-outbound', '로켓배송/대량 매출'], ['/analytics/short-meeting', '숏미팅'],
-    ['/analytics/sabangnet-review', '사방넷 검수'],
+    ['/analytics/sabangnet-review', '사방넷 검수'], ['/settings/market-settings', '마켓설정'],
   ] },
   { title: '운영·설정', items: [
     ['/operations/ai-accounts', 'AI 계정공유'], ['/purchasing/quotes', '견적서'], ['/operations/flow', '운영 흐름'], ['/admin/dev-log', '개발 작업 일지'],
-    ['/settings/company', '회사 설정'], ['/settings/marketplaces', '마켓연동'], ['/settings/market-settings', '마켓설정'],
+    ['/settings/company', '회사 설정'], ['/settings/marketplaces', '마켓연동'],
   ] },
 ] as const
 

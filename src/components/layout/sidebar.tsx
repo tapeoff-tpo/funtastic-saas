@@ -15,7 +15,6 @@ import {
   Warehouse,
   BarChart3,
   Store,
-  Settings,
   Users,
   LogOut,
   ChevronsLeft,
@@ -118,7 +117,6 @@ const orderRelatedGroups: NavGroup[] = [
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
     ],
   },
 ]
@@ -178,8 +176,11 @@ export const navSections: NavSection[] = [
     id: 'analytics',
     title: '매출분석',
     items: [
-      { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/overview', label: '대시보드', icon: BarChart3 },
+      { href: '/analytics/channels', label: '채널별', icon: BarChart3 },
+      { href: '/analytics/products', label: '상품별', icon: Package },
       { href: '/analytics/clearance', label: '재고정리 운영', icon: BadgePercent },
+      { href: '/settings/market-settings', label: '마켓설정', icon: Store },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
     ],

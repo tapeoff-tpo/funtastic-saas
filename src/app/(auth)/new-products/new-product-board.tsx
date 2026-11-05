@@ -55,6 +55,7 @@ import {
   updateNewProductAction,
 } from './actions'
 import { WorksSyncDialog } from './works-sync-dialog'
+import { WorksAssetPanel } from './works-asset-panel'
 
 type Props = {
   initialStages: NewProductStage[]
@@ -954,6 +955,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
             />
           ))}
         </div>
+        {item?.daouWorks && <WorksAssetPanel key={item.id} itemId={item.id} />}
       </EditorSection>
     ),
     notice: (

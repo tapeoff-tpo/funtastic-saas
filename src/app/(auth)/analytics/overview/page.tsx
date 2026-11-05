@@ -38,7 +38,7 @@ export default async function AnalyticsOverviewPage({ searchParams }: PageProps)
     <div className="space-y-5">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div><div className="flex items-center gap-2"><BarChart3 className="size-5 text-primary" /><h1 className="text-2xl font-bold">매출분석</h1></div><p className="mt-1 text-sm text-muted-foreground">기간별 핵심 지표와 바로 확인할 상품 변화를 봅니다.</p></div>
-        <nav aria-label="매출 분석 보기" className="flex flex-wrap gap-2"><ViewLink href={viewHref('/analytics/overview', period)} active>대시보드</ViewLink><ViewLink href={viewHref('/analytics/channels', period)}>채널별</ViewLink><ViewLink href={viewHref('/analytics/products', period)}>상품별</ViewLink><ViewLink href="/settings/market-settings">마켓 설정</ViewLink></nav>
+        <nav aria-label="매출 분석 보기" className="flex flex-wrap gap-2"><ViewLink href={viewHref('/analytics/overview', period)} active>대시보드</ViewLink><ViewLink href={viewHref('/analytics/channels', period)}>채널별</ViewLink><ViewLink href={viewHref('/analytics/products', period)}>상품별</ViewLink><ViewLink href="/analytics/clearance">재고정리</ViewLink><ViewLink href="/settings/market-settings">마켓 설정</ViewLink></nav>
       </header>
 
       <AnalyticsPeriodSelector path="/analytics/overview" period={period} />

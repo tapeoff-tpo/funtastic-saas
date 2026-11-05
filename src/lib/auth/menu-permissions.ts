@@ -26,7 +26,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/operations/detail-pages', '상세페이지 제작'], ['/operations/deal-calendar', '딜 캘린더'],
   ] },
   { title: '분석', items: [
-    ['/analytics', '매출분석'], ['/analytics/settlements', '정산 캘린더'],
+    ['/analytics', '매출분석'], ['/analytics/clearance', '재고정리 운영'], ['/analytics/settlements', '정산 캘린더'],
     ['/analytics/rocket-outbound', '로켓배송/대량 매출'], ['/analytics/short-meeting', '숏미팅'],
     ['/analytics/sabangnet-review', '사방넷 검수'],
   ] },

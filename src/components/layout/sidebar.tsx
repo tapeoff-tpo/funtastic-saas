@@ -35,6 +35,7 @@ import {
   PanelsTopLeft,
   Sparkles,
   WalletCards,
+  BadgePercent,
 } from 'lucide-react'
 import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'
@@ -178,6 +179,7 @@ export const navSections: NavSection[] = [
     title: '매출분석',
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/clearance', label: '재고정리 운영', icon: BadgePercent },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
     ],

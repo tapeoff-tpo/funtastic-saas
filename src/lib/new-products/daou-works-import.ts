@@ -156,7 +156,13 @@ export function parseDaouWorksCsvText(text: string): DaouWorksCsvParseResult {
 
   const groups = new Map<string, Array<Record<string, string>>>()
   for (const row of dataRows) {
-    const values = Object.fromEntries(headers.map((header, index) => [header, cleanText(row[index])]))
+    const values: Record<string, string> = {}
+    headers.forEach((header, index) => {
+      const value = cleanText(row[index])
+      if (!value || value.toLowerCase() === 'null') return
+      if (values[header] && values[header] !== value) throw new Error(`같은 이름의 열에 서로 다른 값이 있습니다: ${header}`)
+      values[header] = value
+    })
     const sourceId = normalizeSourceId(values[HEADER.id])
     if (!sourceId) continue
     const group = groups.get(sourceId)
@@ -298,6 +304,18 @@ function buildImportItem(sourceId: string, rows: Array<Record<string, string>>):
   }
 
   return { sourceId, sourceStatus, values, source }
+}
+
+export function importItemFromDaouWorksSource(source: DaouWorksSourceData): DaouWorksImportItem | null {
+  const count = Math.max(1, source.optionRows?.length ?? 0, source.materialRows?.length ?? 0, source.inquiryRows?.length ?? 0)
+  const rows = Array.from({ length: count }, (_, index) => {
+    const row: Record<string, string> = { ...(source.rawFields ?? {}), '*ID': source.sourceId, '상태': source.sourceStatus }
+    for (const [prefix, values] of [['옵션-', source.optionRows?.[index]], ['부자재 정보-', source.materialRows?.[index]], ['상품문의-', source.inquiryRows?.[index]]] as const) {
+      for (const [key, value] of Object.entries(values ?? {})) row[prefix + key] = value
+    }
+    return row
+  })
+  return buildImportItem(source.sourceId, rows)
 }
 
 export function splitDaouWorksRequiredChecks(value: string | null | undefined) {
@@ -444,7 +462,7 @@ function normalizeSourceData(input: unknown, fallback: Pick<DaouWorksSourceData,
 }
 
 function compactProductFields(rows: Array<Record<string, string>>) {
-  const fieldNames = Object.keys(rows[0] ?? {})
+  const fieldNames = [...new Set(rows.flatMap((row) => Object.keys(row)))]
   return Object.fromEntries(fieldNames
     .filter((header) => !header.startsWith('옵션-') && !header.startsWith('부자재 정보-') && !header.startsWith('상품문의-'))
     .map((header) => [header, valueFor(rows, header)])

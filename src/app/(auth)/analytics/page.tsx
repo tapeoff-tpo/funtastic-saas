@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { AlertCircle, ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, BadgePercent, BarChart3, CheckCircle2, ExternalLink, PackageSearch, Search } from 'lucide-react'
+import { redirect } from 'next/navigation'
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ExternalLink, Search } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { listBoxCostRates } from '@/lib/analytics/box-costs'
@@ -66,7 +67,14 @@ export default async function AnalyticsPage({
   if (!user) return null
 
   const params = await searchParams
-  if (!params?.tab && params?.legacy !== '1') return <AnalyticsHub />
+  if (!params?.tab && params?.legacy !== '1') {
+    const query = new URLSearchParams()
+    for (const key of ['range', 'date', 'start', 'end', 'month'] as const) {
+      const value = params?.[key]
+      if (value) query.set(key, value)
+    }
+    redirect(`/analytics/channels${query.size ? `?${query.toString()}` : ''}`)
+  }
   const tab = parseTab(params?.tab)
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
   const issue = parseMissingIssue(params?.issue)
@@ -196,14 +204,6 @@ export default async function AnalyticsPage({
   )
 }
 
-function AnalyticsHub() {
-  const items = [
-    { href: '/analytics/channels', label: '채널별', icon: BarChart3 },
-    { href: '/analytics/products', label: '상품별', icon: PackageSearch },
-    { href: '/analytics/clearance', label: '재고정리 운영', icon: BadgePercent },
-  ]
-  return <div className="space-y-4"><header><h1 className="text-2xl font-bold">매출분석</h1></header><section className="grid gap-3 md:grid-cols-3">{items.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className="group flex min-h-32 items-center justify-between rounded-xl border bg-card p-5 transition hover:border-primary hover:shadow-sm"><div className="flex items-center gap-3"><Icon className="size-5 text-primary" /><span className="text-lg font-semibold">{label}</span></div><ArrowRight className="size-5 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-primary" /></Link>)}</section></div>
-}
 
 function parseTab(value: string | undefined): AnalyticsTab {
   if (value === 'orders' || value === 'products' || value === 'missing' || value === 'uploads' || value === 'settings') return value

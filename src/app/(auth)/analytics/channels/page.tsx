@@ -43,7 +43,7 @@ export default async function ChannelAnalyticsPage({ searchParams }: PageProps) 
           <div className="flex items-center gap-2"><BarChart3 className="size-5 text-primary" /><h1 className="text-2xl font-bold">채널별 분석</h1></div>
           <p className="mt-1 text-sm text-muted-foreground">기간별 채널 매출과 상품 원장을 상세하게 확인합니다.</p>
         </div>
-        <nav aria-label="매출 분석 보기" className="flex gap-2"><FilterLink href={viewHref('/analytics', period)}>대시보드</FilterLink><FilterLink href={viewHref('/analytics/channels', period)} active>채널별</FilterLink><FilterLink href={viewHref('/analytics/products', period)}>상품별</FilterLink></nav>
+        <nav aria-label="매출 분석 보기" className="flex gap-2"><FilterLink href={viewHref('/analytics/channels', period)} active>채널별</FilterLink><FilterLink href={viewHref('/analytics/products', period)}>상품별</FilterLink><FilterLink href="/analytics/clearance">재고정리 운영</FilterLink></nav>
       </header>
 
       <AnalyticsPeriodSelector path="/analytics/channels" period={period} />

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { BarChart3, CircleDollarSign, PackageCheck, RotateCcw, Sparkles, Truck } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -40,24 +41,27 @@ export default async function AnalyticsOverviewPage({ searchParams }: PageProps)
       <AnalyticsPeriodSelector path="/analytics/overview" period={period} />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={<CircleDollarSign className="size-5 text-emerald-600" />} label="일반 출고 매출" value={currency.format(data.summary.grossSales)} hint={salesChange == null ? '이전 기간 데이터 없음' : `직전 대비 ${percent.format(salesChange)}`} />
-        <MetricCard icon={<PackageCheck className="size-5 text-violet-600" />} label="출고 주문" value={`${integer.format(data.summary.orders)}건`} hint={data.previous.orders > 0 ? `직전 ${integer.format(data.previous.orders)}건` : '이전 기간 데이터 없음'} />
-        <MetricCard icon={<Truck className="size-5 text-blue-600" />} label="배송비 값 보유" value={coverageText(data.summary.shippingValueCoverage)} hint={`유료 배송비 ${integer.format(data.summary.shippingNonzeroOrders)}건`} />
-        <MetricCard icon={<RotateCcw className="size-5 text-rose-600" />} label="클레임" value={`${integer.format(claimTotal)}건`} hint="반품·교환 합계" />
+        <MetricCard href={viewHref('/analytics/channels', period)} icon={<CircleDollarSign className="size-5 text-emerald-600" />} label="일반 출고 매출" value={currency.format(data.summary.grossSales)} hint={salesChange == null ? '이전 기간 데이터 없음' : `직전 대비 ${percent.format(salesChange)}`} />
+        <MetricCard href={viewHref('/analytics/channels', period)} icon={<PackageCheck className="size-5 text-violet-600" />} label="출고 주문" value={`${integer.format(data.summary.orders)}건`} hint={data.previous.orders > 0 ? `직전 ${integer.format(data.previous.orders)}건` : '이전 기간 데이터 없음'} />
+        <MetricCard href="/settings/market-settings" icon={<Truck className="size-5 text-blue-600" />} label="배송비 값 보유" value={coverageText(data.summary.shippingValueCoverage)} hint={`유료 배송비 ${integer.format(data.summary.shippingNonzeroOrders)}건`} />
+        <MetricCard href={viewHref('/analytics/channels', period)} icon={<RotateCcw className="size-5 text-rose-600" />} label="클레임" value={`${integer.format(claimTotal)}건`} hint="반품·교환 합계" />
       </section>
 
-      <section className="grid gap-3 xl:grid-cols-2">
-        <SummaryCard icon={<Sparkles className="size-4 text-primary" />} title="채널·상품 하락">
+      <section className="grid gap-3 xl:grid-cols-3">
+        <SummaryCard href={viewHref('/analytics/products', period)} icon={<Sparkles className="size-4 text-primary" />} title="채널·상품 하락">
           {data.channelProductDrops.length > 0 ? <ul className="space-y-1">{data.channelProductDrops.slice(0, 8).map((row) => <li key={`${row.marketplace}-${row.sku}`}><strong>{row.marketplace}</strong> · {row.productName} <span className="text-rose-700">{currency.format(row.previousSales - row.currentSales)} 감소</span><span className="ml-1 text-xs text-muted-foreground">({row.sku})</span></li>)}</ul> : '비교 가능한 하락 상품이 없습니다.'}
         </SummaryCard>
-        <SummaryCard title="채널·상품 상승">
+        <SummaryCard href={viewHref('/analytics/products', period)} title="채널·상품 상승">
           {data.channelProductRises.length > 0 ? <ul className="space-y-1">{data.channelProductRises.slice(0, 8).map((row) => <li key={`${row.marketplace}-${row.sku}`}><strong>{row.marketplace}</strong> · {row.productName} <span className="text-emerald-700">{currency.format(row.currentSales - row.previousSales)} 증가</span><span className="ml-1 text-xs text-muted-foreground">({row.sku})</span></li>)}</ul> : '비교 가능한 상승 상품이 없습니다.'}
         </SummaryCard>
+        <SummaryCard href="/analytics/clearance" title="재고정리 운영">재고·입고·마진 기준으로 특가 후보와 실행안을 검토합니다.</SummaryCard>
       </section>
     </div>
   )
 }
 
-function MetricCard({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint: string }) { return <Card><CardContent className="flex min-h-[118px] items-start justify-between pt-4"><div><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p><p className="mt-1 text-xs text-muted-foreground">{hint}</p></div>{icon}</CardContent></Card> }
-function SummaryCard({ icon, title, children }: { icon?: React.ReactNode; title: string; children: React.ReactNode }) { return <Card><CardContent className="min-h-[148px] pt-4"><div className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</div><div className="mt-2 text-sm leading-5 text-muted-foreground">{children}</div></CardContent></Card> }
+function MetricCard({ href, icon, label, value, hint }: { href: string; icon: React.ReactNode; label: string; value: string; hint: string }) { return <Link href={href} className="rounded-xl outline-none transition hover:-translate-y-px focus-visible:ring-2 focus-visible:ring-primary"><Card><CardContent className="flex min-h-[118px] items-start justify-between pt-4"><div><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p><p className="mt-1 text-xs text-muted-foreground">{hint}</p></div>{icon}</CardContent></Card></Link> }
+function SummaryCard({ href, icon, title, children }: { href: string; icon?: React.ReactNode; title: string; children: React.ReactNode }) { return <Link href={href} className="rounded-xl outline-none transition hover:-translate-y-px focus-visible:ring-2 focus-visible:ring-primary"><Card><CardContent className="min-h-[148px] pt-4"><div className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</div><div className="mt-2 text-sm leading-5 text-muted-foreground">{children}</div></CardContent></Card></Link> }
 function coverageText(value: number | null) { return value == null ? '–' : compactPercent.format(value) }
+function viewHref(path: string, period: ReturnType<typeof getAnalyticsPeriod>) { return period.granularity === 'custom' ? `${path}?range=custom&start=${period.startDate}&end=${previousDay(period.endDate)}` : `${path}?range=${period.granularity}&date=${period.key}` }
+function previousDay(endDate: string) { const date = new Date(`${endDate}T00:00:00Z`); date.setUTCDate(date.getUTCDate() - 1); return date.toISOString().slice(0, 10) }

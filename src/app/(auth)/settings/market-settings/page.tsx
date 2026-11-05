@@ -10,7 +10,7 @@ import '@/lib/marketplace/adapters/configs'
 import { MarketSettingsList, type MarketSettingsItem } from './market-settings-list'
 
 export const metadata: Metadata = {
-  title: '마켓설정',
+  title: '매출분석 설정',
 }
 
 export default async function MarketSettingsPage() {
@@ -81,8 +81,8 @@ export default async function MarketSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-bold">마켓·수수료 설정</h1>
-        <p className="mt-1 text-sm text-muted-foreground">신규 몰을 추가하고, 매출 분석에 반영할 표시명과 수수료율을 관리합니다.</p>
+        <h1 className="text-xl font-bold">매출분석 설정</h1>
+        <p className="mt-1 text-sm text-muted-foreground">대시보드와 채널별 손익에 반영할 마켓 표시명·수수료율을 관리합니다.</p>
       </div>
       <MarketSettingsList connections={rows} />
     </div>

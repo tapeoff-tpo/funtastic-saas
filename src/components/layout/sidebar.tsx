@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  LayoutDashboard,
   ShoppingCart,
   ArrowRightLeft,
   Package,
@@ -116,18 +115,11 @@ const orderRelatedGroups: NavGroup[] = [
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/market-settings', label: '마켓설정', icon: Store },
     ],
   },
 ]
 
 export const navSections: NavSection[] = [
-  {
-    id: 'dashboard',
-    items: [
-      { href: '/dashboard', label: '대시보드', icon: LayoutDashboard },
-    ],
-  },
   {
     id: 'order-related',
     title: '주문관련',
@@ -176,7 +168,9 @@ export const navSections: NavSection[] = [
     id: 'analytics',
     title: '매출분석',
     items: [
-      { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/overview', label: '대시보드', icon: BarChart3 },
+      { href: '/analytics/channels', label: '매출분석', icon: BarChart3 },
+      { href: '/settings/market-settings', label: '설정', icon: Store },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
     ],

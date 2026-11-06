@@ -5,6 +5,7 @@ import { getNewProductViewer } from './workflow'
 
 export type WorksAsset = {
   id: string; fieldName: string; fileName: string; contentType: string; fileSize: number; sha256: string
+  archived?: boolean
 }
 export const WORKS_ASSET_PART_SIZE=1024*1024
 export function sliceWorksAssetParts(parts:Uint8Array[],start:number,length:number){
@@ -109,7 +110,7 @@ export async function saveWorksAsset(input: {
 
 export async function listWorksAssets(userId:string,itemId:string):Promise<WorksAsset[]> {
   await ensureWorksAssets()
-  return await db.execute(sql`SELECT id,field_name AS "fieldName",file_name AS "fileName",content_type AS "contentType",file_size AS "fileSize",sha256 FROM new_product_works_assets WHERE user_id=${userId}::uuid AND item_id=${itemId}::uuid ORDER BY field_name,created_at,id`) as unknown as WorksAsset[]
+  return await db.execute(sql`SELECT a.id,a.field_name AS "fieldName",a.file_name AS "fileName",a.content_type AS "contentType",a.file_size AS "fileSize",a.sha256,(COALESCE(i.metadata->'worksArchivedAssetIds','[]'::jsonb) ? a.id::text) AS archived FROM new_product_works_assets a JOIN new_product_workflow_items i ON i.id=a.item_id AND i.user_id=a.user_id WHERE a.user_id=${userId}::uuid AND a.item_id=${itemId}::uuid ORDER BY archived,a.field_name,a.created_at,a.id`) as unknown as WorksAsset[]
 }
 export async function getWorksAsset(userId:string,id:string) {
   await ensureWorksAssets()

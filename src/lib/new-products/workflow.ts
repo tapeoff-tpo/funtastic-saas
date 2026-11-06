@@ -417,7 +417,7 @@ async function createNewProductWorkflowSchema() {
       product_name text NOT NULL,
       product_option text,
       china_unit_price_cny numeric(14, 2),
-      unit_shipping_cny numeric(14, 2),
+      unit_shipping_cny numeric(18, 6),
       exchange_rate_krw numeric(14, 4),
       calculated_cost_krw integer,
       domestic_sale_url text,
@@ -471,7 +471,7 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS sourcing_item_id uuid,
       ADD COLUMN IF NOT EXISTS product_option text,
       ADD COLUMN IF NOT EXISTS china_unit_price_cny numeric(14, 2),
-      ADD COLUMN IF NOT EXISTS unit_shipping_cny numeric(14, 2),
+      ADD COLUMN IF NOT EXISTS unit_shipping_cny numeric(18, 6),
       ADD COLUMN IF NOT EXISTS exchange_rate_krw numeric(14, 4),
       ADD COLUMN IF NOT EXISTS calculated_cost_krw integer,
       ADD COLUMN IF NOT EXISTS domestic_sale_url text,
@@ -495,6 +495,17 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS notice_food_safety text,
       ADD COLUMN IF NOT EXISTS notice_components text,
       ADD COLUMN IF NOT EXISTS notice_special_notes text
+  `)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'new_product_workflow_items'
+          AND column_name = 'unit_shipping_cny' AND numeric_scale < 6
+      ) THEN
+        ALTER TABLE new_product_workflow_items ALTER COLUMN unit_shipping_cny TYPE numeric(18, 6);
+      END IF;
+    END $$
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_owner_updated_idx
@@ -853,7 +864,8 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
           'createdAt', attachment.created_at::text
         ) ORDER BY attachment.created_at)
         FROM new_product_workflow_attachments attachment
-        WHERE attachment.item_id = item.id
+        WHERE attachment.item_id = item.id AND attachment.user_id = item.user_id
+          AND NOT (COALESCE(item.metadata->'worksArchivedAttachmentIds', '[]'::jsonb) ? attachment.id::text)
       ), '[]'::jsonb) AS attachments,
       COALESCE((
         SELECT jsonb_agg(history_row ORDER BY history_row."changedAt" DESC)
@@ -987,7 +999,8 @@ export async function getNewProductWorkflow(userId: string) {
             'createdAt', attachment.created_at::text
           ) ORDER BY attachment.created_at)
           FROM new_product_workflow_attachments attachment
-          WHERE attachment.item_id = item.id
+          WHERE attachment.item_id = item.id AND attachment.user_id = item.user_id
+            AND NOT (COALESCE(item.metadata->'worksArchivedAttachmentIds', '[]'::jsonb) ? attachment.id::text)
         ), '[]'::jsonb) AS attachments,
         COALESCE((
           SELECT jsonb_agg(history_row ORDER BY history_row."changedAt" DESC)

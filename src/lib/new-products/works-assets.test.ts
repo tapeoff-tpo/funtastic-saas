@@ -1,6 +1,14 @@
 import {describe,it,expect} from 'vitest'
-import {detectWorksAssetType,worksAssetKind} from './works-assets'
+import {detectWorksAssetType,worksAssetKind,sliceWorksAssetParts,WORKS_ASSET_PART_SIZE} from './works-assets'
 describe('Works original asset routing',()=>{
+ it('streams exact bytes across storage-part boundaries and through the final partial part',()=>{
+  const original=Buffer.alloc(WORKS_ASSET_PART_SIZE*2+713)
+  for(let i=0;i<original.length;i++)original[i]=(i*31)%251
+  const parts=[original.subarray(0,WORKS_ASSET_PART_SIZE),original.subarray(WORKS_ASSET_PART_SIZE,WORKS_ASSET_PART_SIZE*2),original.subarray(WORKS_ASSET_PART_SIZE*2)]
+  const streamed=[]
+  for(let start=0;start<original.length;start+=384*1024){const length=Math.min(384*1024,original.length-start);const first=Math.floor(start/WORKS_ASSET_PART_SIZE),last=Math.floor((start+length-1)/WORKS_ASSET_PART_SIZE);streamed.push(sliceWorksAssetParts(parts.slice(first,last+1),start,length))}
+  expect(Buffer.concat(streamed)).toEqual(original)
+ })
  it('detects actual bytes instead of trusting a filename',()=>{
   expect(detectWorksAssetType(Buffer.from('%PDF-1.7'))).toBe('application/pdf')
   expect(detectWorksAssetType(Buffer.from([0xff,0xd8,0xff,0]))).toBe('image/jpeg')

@@ -19,7 +19,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
    if(cancelled||request.signal.aborted){controller.close();return}
    if(offset>=asset.fileSize){controller.close();return}
    try{
-    const chunk=await readWorksAssetChunk(owner,id,offset,Math.min(384*1024,asset.fileSize-offset),asset.attachmentId)
+    const chunk=await readWorksAssetChunk(owner,id,offset,Math.min(384*1024,asset.fileSize-offset),asset.attachmentId,asset.chunked)
     if(!chunk.length)throw Error('원본 파일의 일부를 읽지 못했습니다.')
     offset+=chunk.length
     if(!cancelled)controller.enqueue(new Uint8Array(chunk))

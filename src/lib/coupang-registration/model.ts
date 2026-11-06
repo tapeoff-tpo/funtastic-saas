@@ -3,6 +3,15 @@ export type SavedFile = { name: string; data: string }
 export type TemplateColumn = { column: number; label: string; requirement: string; guide: string }
 export type TemplateSheet = { name: string; columns: TemplateColumn[] }
 export type TemplateInfo = { id: string; name: string; sheets: TemplateSheet[] }
+export type BundleComponent = {
+  sourceCode: string
+  optionName: string
+  name: string
+  internalSku: string
+  quantity: number
+  unitCost: number | null
+  unitWholesale: number | null
+}
 export type RegistrationRow = {
   id: string
   templateId: string
@@ -23,6 +32,7 @@ export type RegistrationRow = {
   sourceName: string
   sourceStatus: string
   bundleReviewed: boolean
+  bundleComponents?: BundleComponent[]
   primaryImage: string
   thumbnails: string[]
   detailImages: string[]
@@ -52,6 +62,8 @@ export type CostLookup = Pick<RegistrationRow, 'id' | 'internalSku' | 'name' | '
 
 export const LABEL_FIELD = '제품 필수 표시사항 (라벨 또는 도안 이미지)'
 export const MONEY_LIMIT = 1_000_000_000
+export const BUNDLE_COMPONENT_LIMIT = 50
+export const BUNDLE_QUANTITY_LIMIT = 9999
 export const blankDraft = (): RegistrationDraft => ({ name: '쿠팡 등록 준비', rounding: 1, rows: [], templates: [], labels: [] })
 
 export function money(value: unknown): number | null {
@@ -62,8 +74,20 @@ export function money(value: unknown): number | null {
   return Number.isFinite(number) && number >= 0 && number <= MONEY_LIMIT ? number : null
 }
 
-export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice' | 'supplyDeductionPercent' | 'manualSalesVat'>, rounding = 1) {
-  const wholesale = money(row.wholesalePrice)
+function bundleTotal(components: BundleComponent[], field: 'unitCost' | 'unitWholesale') {
+  if (!components.length) return null
+  let total = 0
+  for (const component of components) {
+    const unit = money(component[field])
+    if (unit === null || !Number.isInteger(component.quantity) || component.quantity < 1 || component.quantity > BUNDLE_QUANTITY_LIMIT) return null
+    total += unit * component.quantity
+  }
+  return money(total)
+}
+
+export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice' | 'supplyDeductionPercent' | 'manualSalesVat' | 'bundleComponents'>, rounding = 1) {
+  const wholesale = row.bundleComponents ? bundleTotal(row.bundleComponents, 'unitWholesale') : money(row.wholesalePrice)
+  const cost = row.bundleComponents ? bundleTotal(row.bundleComponents, 'unitCost') : money(row.costPrice)
   const input = row.priceMode === 'manual' ? money(row.manualSupplyPrice)
     : wholesale === null ? null : wholesale * (row.priceMode === 'markup' ? 1 + row.markupPercent / 100 : 1)
   const supply = input === null || !Number.isFinite(input) || input < 1 || input > MONEY_LIMIT
@@ -73,14 +97,13 @@ export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesa
   const manualSale = money(row.manualSalePrice)
   const sale = row.saleMode === 'manual'
     ? manualSale === null || manualSale < 1 ? null : manualSale
-    : supply === null ? null : Math.ceil(supply * 5 / (3 * unit)) * unit
-  const cost = money(row.costPrice)
+    : supply === null ? null : money(Math.ceil(supply * 5 / (3 * unit)) * unit)
   // The 2026 proposal uses both the VAT-only formula and an additional 10% of supply.
   const salesVat = supply === null ? null : money(row.manualSalesVat) ?? supply / 11
   const deduction = supply === null ? null : supply * (row.supplyDeductionPercent === 10 ? 0.1 : 0)
   const profit = supply === null || cost === null || salesVat === null || deduction === null
     ? null : supply - cost - salesVat - deduction
-  return { supply, sale, salesVat, deduction, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
+  return { cost, wholesale, supply, sale, salesVat, deduction, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
 }
 
 export function isImageUrl(value: string): boolean {
@@ -122,9 +145,15 @@ export function rowFields(row: RegistrationRow, rounding: number, labels: SavedF
 
 export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): string[] {
   const issues: string[] = []
+  const prices = calculatePrice(row, draft.rounding)
+  if (row.bundleComponents) {
+    if (!row.bundleComponents.length) issues.push('세트 구성품을 추가해주세요.')
+    else if (prices.cost === null) issues.push('구성품 원가와 수량을 확인해주세요.')
+    if (row.bundleComponents.length && !row.bundleReviewed) issues.push('묶음 구성과 등록단위 가격 확인 필요')
+  }
   const template = draft.templates.find((item) => item.id === row.templateId)
   const sheet = template?.sheets.find((item) => item.name === row.sheetName)
-  if (!sheet) return ['쿠팡 견적서 카테고리를 선택해주세요.']
+  if (!sheet) return [...issues, '쿠팡 견적서 카테고리를 선택해주세요.']
   const fields = rowFields(row, draft.rounding, draft.labels)
   const html = fields['HTML 상품 상세 컨텐츠']?.trim()
   for (const column of sheet.columns) {
@@ -132,11 +161,10 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
     if (column.label === '상세이미지 파일명' && html) continue
     if (!fields[column.label]?.trim()) issues.push(`${column.label} 누락`)
   }
-  const prices = calculatePrice(row, draft.rounding)
   if (prices.supply === null) issues.push('공급가를 1원 이상 입력해주세요.')
   if (prices.sale === null) issues.push('판매가를 1원 이상 입력해주세요.')
   else if (prices.supply !== null && prices.sale < prices.supply) issues.push('판매가는 공급가 이상이어야 합니다.')
-  if (/[2-9]\d*개입/.test(row.name) && !row.bundleReviewed) issues.push('묶음 구성과 등록단위 가격 확인 필요')
+  if (!row.bundleComponents && /[2-9]\d*개입/.test(row.name) && !row.bundleReviewed) issues.push('묶음 구성과 등록단위 가격 확인 필요')
   for (const field of ['대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', LABEL_FIELD]) {
     for (const value of (fields[field] ?? '').split(',').map((part) => part.trim()).filter(Boolean)) {
       if (isImageUrl(value)) continue

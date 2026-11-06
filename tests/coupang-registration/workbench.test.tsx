@@ -10,6 +10,38 @@ describe('registration pricing workbench', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
   })
+  it('builds one registration row from searched components and saves their quantities', async () => {
+    render(<CoupangRegistrationWorkbench />)
+    fireEvent.click(screen.getByRole('button', { name: '세트 만들기' }))
+    const dialog = screen.getByRole('dialog', { name: '세트 구성품 검색' })
+    fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '마미백' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
+    const beige = await within(dialog).findByRole('button', { name: '베이지' })
+    fireEvent.click(beige)
+    await within(dialog).findByText('구성품 1종 추가')
+    fireEvent.click(beige)
+    fireEvent.click(within(dialog).getByRole('button', { name: '구성 확인' }))
+    fireEvent.change(screen.getByLabelText('등록 상품명'), { target: { value: '마미백 3개입' } })
+    const quantity = screen.getByRole('spinbutton', { name: '마미백 플러스 베이지 구성 수량' })
+    expect(quantity).toHaveValue(2)
+    fireEvent.change(quantity, { target: { value: '3' } })
+    expect(screen.getByLabelText('마미백 3개입 원가')).toHaveTextContent('30,000원')
+    expect(screen.getByLabelText('마미백 3개입 쿠팡공급가')).toHaveValue(45000)
+    expect(screen.getByLabelText('마미백 3개입 쿠팡판매가')).toHaveValue(75000)
+    const supply = screen.getByLabelText('마미백 3개입 쿠팡공급가')
+    fireEvent.change(supply, { target: { value: '42000' } })
+    expect(screen.getByLabelText('마미백 3개입 쿠팡판매가')).toHaveValue(70000)
+    fireEvent.click(screen.getByRole('button', { name: '공급가 자동계산' }))
+    expect(supply).toHaveValue(45000)
+    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(call).toBeDefined()
+      const { draft } = JSON.parse(String(call![1]!.body))
+      expect(draft.rows).toHaveLength(1)
+      expect(draft.rows[0].bundleComponents).toMatchObject([{ sourceCode: '1471', optionName: '베이지', quantity: 3, unitCost: 10000, unitWholesale: 15000 }])
+    })
+  })
   it('fills a saved draft’s missing cost and allows a VAT override', async () => {
     const row = { ...createRegistrationRow(source, '베이지'), costPrice: null }
     const saved = { id: 'draft-1', name: '마미백 견적', revision: 1, updatedAt: '2026-11-06' }

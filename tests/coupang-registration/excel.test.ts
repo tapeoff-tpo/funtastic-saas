@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
-import { blankDraft, LABEL_FIELD, rowIssues } from '@/lib/coupang-registration/model'
+import { blankDraft, calculatePrice, LABEL_FIELD, rowIssues } from '@/lib/coupang-registration/model'
+import { draftSchema } from '@/lib/coupang-registration/schema'
 
 async function fixture() {
   const workbook = new ExcelJS.Workbook()
@@ -72,6 +73,34 @@ describe('official Coupang template round trip', () => {
     await expect(buildRegistrationArchive(draft)).rejects.toThrow('묶음 구성')
     draft.rows[0].bundleReviewed = true
     expect(rowIssues(draft.rows[0], draft)).toEqual([])
+  })
+  it('exports the quantity-weighted set prices as one row after saving and reopening', async () => {
+    const { draft } = await fixture()
+    Object.assign(draft.rows[0], {
+      name: '마미백 베이지 2개입', priceMode: 'wholesale', saleMode: 'auto', bundleReviewed: true,
+      bundleComponents: [{
+        sourceCode: '1471', optionName: '베이지', name: '마미백 플러스 베이지',
+        internalSku: '112361-0001', quantity: 2, unitCost: 8776, unitWholesale: 14500,
+      }],
+    })
+    const reopened = draftSchema.parse(JSON.parse(JSON.stringify(draft)))
+    expect(calculatePrice(reopened.rows[0])).toMatchObject({ cost: 17552, wholesale: 29000, supply: 29000, sale: 48334 })
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(reopened))
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    const sheet = workbook.getWorksheet('QF_100_test')!
+    expect(sheet.getCell('B9').value).toBe('마미백 베이지 2개입')
+    expect(sheet.getCell('C9').value).toBe(29000)
+    expect(sheet.getCell('D9').value).toBe(48334)
+    expect(sheet.getCell('B10').value).toBeNull()
+    reopened.rows[0].bundleComponents!.push({
+      sourceCode: '1480', optionName: '', name: '파우치', internalSku: 'POUCH-1',
+      quantity: 3, unitCost: 500, unitWholesale: 2000,
+    })
+    expect(calculatePrice(reopened.rows[0], 100)).toMatchObject({ cost: 19052, wholesale: 35000, supply: 35000, sale: 58400 })
+    reopened.rows[0].bundleComponents![0].unitCost = null
+    expect(calculatePrice(reopened.rows[0]).profit).toBeNull()
+    await expect(buildRegistrationArchive(reopened)).rejects.toThrow('구성품 원가')
   })
   it('revalidates actual template headers and rejects forged file identity', async () => {
     const { draft } = await fixture()

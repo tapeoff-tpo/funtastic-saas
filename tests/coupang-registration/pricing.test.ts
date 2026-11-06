@@ -43,6 +43,18 @@ describe('Coupang pricing and matching', () => {
     expect(rowSchema.parse(legacy)).toMatchObject({ saleMode: 'auto', manualSalePrice: null })
     expect(calculatePrice(legacy).sale).toBe(25000)
   })
+  it('matches the 2026 workbook row 101 with the saved 10% supply deduction', () => {
+    const row = rowSchema.parse({
+      ...createRegistrationRow(), costPrice: 6886, priceMode: 'manual', manualSupplyPrice: 11000,
+      saleMode: 'manual', manualSalePrice: 16000, supplyDeductionPercent: 10,
+    })
+    const result = calculatePrice(row)
+    expect(result).toMatchObject({ salesVat: 1000, deduction: 1100, profit: 2014, coupangRate: 31.25 })
+    expect(result.profitRate).toBeCloseTo(18.3090909091)
+    const legacy = { ...row, supplyDeductionPercent: undefined }
+    expect(rowSchema.parse(legacy).supplyDeductionPercent).toBe(0)
+    expect(calculatePrice(legacy).profit).toBe(3114)
+  })
   it('reads only item-master new KRW cost and preserves missing versus zero', () => {
     expect(itemNewCost({ esa009m: { 'works 신규 원가': '8,776', 'works 기존 원가': '10000', '신규원가(元)': '20' } })).toBe(8776)
     for (const value of ['', '  ', null, undefined]) expect(itemNewCost({ esa009m: { 'works 신규 원가': value, 'works 기존 원가': '10000' } })).toBeNull()

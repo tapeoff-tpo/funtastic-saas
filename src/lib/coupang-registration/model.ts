@@ -17,6 +17,7 @@ export type RegistrationRow = {
   manualSupplyPrice: number | null
   saleMode?: 'auto' | 'manual'
   manualSalePrice?: number | null
+  supplyDeductionPercent?: 0 | 10
   sourceCode: string
   sourceName: string
   sourceStatus: string
@@ -56,7 +57,7 @@ export function money(value: unknown): number | null {
   return Number.isFinite(number) && number >= 0 && number <= MONEY_LIMIT ? number : null
 }
 
-export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice'>, rounding = 1) {
+export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice' | 'supplyDeductionPercent'>, rounding = 1) {
   const wholesale = money(row.wholesalePrice)
   const input = row.priceMode === 'manual' ? money(row.manualSupplyPrice)
     : wholesale === null ? null : wholesale * (row.priceMode === 'markup' ? 1 + row.markupPercent / 100 : 1)
@@ -68,10 +69,12 @@ export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesa
     ? manualSale === null || Math.round(manualSale) < 1 ? null : Math.round(manualSale)
     : supply === null ? null : Math.ceil(supply * 5 / (3 * unit)) * unit
   const cost = money(row.costPrice)
-  // User's current proposal workbook: 매출부가세 = 공급가 / 11, 순수익 = 공급가 - 원가 - 매출부가세.
+  // The 2026 proposal uses both the VAT-only formula and an additional 10% of supply.
   const salesVat = supply === null ? null : supply / 11
-  const profit = supply === null || cost === null || salesVat === null ? null : supply - cost - salesVat
-  return { supply, sale, salesVat, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
+  const deduction = supply === null ? null : supply * (row.supplyDeductionPercent === 10 ? 0.1 : 0)
+  const profit = supply === null || cost === null || salesVat === null || deduction === null
+    ? null : supply - cost - salesVat - deduction
+  return { supply, sale, salesVat, deduction, profit, profitRate: profit === null || !supply ? null : profit / supply * 100, coupangRate: sale && supply ? (sale - supply) / sale * 100 : null }
 }
 
 export function isImageUrl(value: string): boolean {

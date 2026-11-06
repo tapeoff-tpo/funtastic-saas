@@ -9,6 +9,7 @@ const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
 const buttonClass = 'inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40'
 const won = (value: number | null) => value === null ? '—' : `${value.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}원`
+const marginText = (value: number | null, digits: number) => value === null ? '—' : `${value.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
 type DraftSummary = { id: string; name: string; revision: number; updatedAt: string }
 
 async function jsonRequest(path: string, init?: RequestInit) {
@@ -203,7 +204,18 @@ export function CoupangRegistrationWorkbench() {
     <section className="overflow-hidden rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" /><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-48 pl-7`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} /></div><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label></div><div className="flex gap-2"><button className={buttonClass} disabled={!!busy || !draft.rows.length} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />{selected.size ? '선택 상품' : '전체 상품'} 이미지 연결</button><button className={buttonClass} disabled={!!busy} onClick={() => setCatalogOpen(true)}><Plus className="size-3.5" />상품 추가</button></div></div>
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2"><span className="mr-1 text-xs font-medium">선택 {selected.size}개</span><select className={`${inputClass} max-w-52`} aria-label="일괄 카테고리" value={templateChoice} onChange={(event) => setTemplateChoice(event.target.value)}><option value="">쿠팡 견적서 카테고리</option>{draft.templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')}</option>))}</select><button className={buttonClass} disabled={!!busy || !selected.size || !templateChoice} onClick={() => { const [templateId, sheetName] = templateChoice.split(':'); update((value) => ({ ...value, rows: value.rows.map((row) => selected.has(row.id) ? { ...row, templateId, sheetName } : row) })) }}>카테고리 적용</button><label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">판매가 올림<select aria-label="판매가 올림 단위" className={inputClass} value={draft.rounding} onChange={(event) => update((value) => ({ ...value, rounding: Number(event.target.value) }))}>{[1, 10, 100, 1000].map((unit) => <option key={unit} value={unit}>{unit.toLocaleString()}원</option>)}</select></label></div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[1180px] table-fixed text-center text-xs tabular-nums">
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        <label className="text-xs text-muted-foreground" htmlFor="bulk-supply-deduction">선택 상품 추가 차감</label>
+        <select id="bulk-supply-deduction" className={inputClass} value="" disabled={!selected.size || !!busy} onChange={(event) => {
+          const supplyDeductionPercent: NonNullable<RegistrationRow['supplyDeductionPercent']> = event.target.value === '10' ? 10 : 0
+          update((value) => ({ ...value, rows: value.rows.map((row) => selected.has(row.id) ? { ...row, supplyDeductionPercent } : row) }))
+        }}>
+          <option value="" disabled>차감률 선택</option>
+          <option value="0">차감 없음 (0%)</option>
+          <option value="10">공급가의 10%</option>
+        </select>
+      </div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-center text-xs tabular-nums">
         <thead className="border-b bg-muted/40 text-muted-foreground [&_th]:h-11 [&_th]:px-2 [&_th]:text-center [&_th]:align-middle [&_th]:whitespace-nowrap"><tr>
           <th className="w-9"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} /></th>
           <th className="w-56">상품 · 옵션</th>
@@ -212,6 +224,7 @@ export function CoupangRegistrationWorkbench() {
           <th className="w-24">쿠팡공급가</th>
           <th className="w-24">쿠팡판매가</th>
           <th className="w-24">매출부가세</th>
+          <th className="w-24" title="공급가에 차감률을 곱해 순수익에서 뺍니다">추가 차감</th>
           <th className="w-24">순수익</th>
           <th className="w-20">우리 마진</th>
           <th className="w-20">쿠팡 마진</th>
@@ -230,15 +243,22 @@ export function CoupangRegistrationWorkbench() {
             <td><MoneyInput label={`${row.name} 쿠팡공급가`} value={prices.supply} onChange={(value) => patchRow(row.id, { priceMode: 'manual', manualSupplyPrice: value })} /></td>
             <td><MoneyInput label={`${row.name} 쿠팡판매가`} value={prices.sale} onChange={(value) => patchRow(row.id, { saleMode: 'manual', manualSalePrice: value })} /></td>
             <td className="whitespace-nowrap">{won(prices.salesVat)}</td>
+            <td>
+              <select aria-label={`${row.name} 추가 차감률`} className={inputClass} value={row.supplyDeductionPercent ?? 0} onChange={(event) => patchRow(row.id, { supplyDeductionPercent: event.target.value === '10' ? 10 : 0 })}>
+                <option value={0}>0%</option>
+                <option value={10}>10%</option>
+              </select>
+              <div className="mt-1 whitespace-nowrap text-muted-foreground">{won(prices.deduction)}</div>
+            </td>
             <td className={`whitespace-nowrap ${prices.profit !== null && prices.profit < 0 ? 'font-medium text-red-600' : ''}`}>{won(prices.profit)}</td>
-            <td>{prices.profitRate === null ? '—' : `${prices.profitRate.toFixed(1)}%`}</td>
-            <td>{prices.coupangRate === null ? '—' : `${prices.coupangRate.toFixed(2)}%`}</td>
+            <td title={marginText(prices.profitRate, 4)}>{marginText(prices.profitRate, 0)}</td>
+            <td title={marginText(prices.coupangRate, 4)}>{marginText(prices.coupangRate, 1)}</td>
             <td><button onClick={() => setActiveId(row.id)} className={`rounded px-2 py-1 text-[11px] ${issues.length ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>{issues.length ? `확인 ${issues.length}건` : '입력 완료'}</button>{row.sourceStatus === 'RESTOCKING' && <div className="mt-1 text-[10px] text-amber-700">B2B 예약구매</div>}</td>
             <td><button aria-label={`${row.name} 삭제`} className="rounded p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600" disabled={!!busy} onClick={() => { update((value) => ({ ...value, rows: value.rows.filter((item) => item.id !== row.id) })); setSelected((value) => { const next = new Set(value); next.delete(row.id); return next }) }}><Trash2 className="size-3.5" /></button></td>
           </tr>
         })}</tbody>
       </table>{!visible.length && <div className="flex flex-col items-center gap-3 py-16 text-center"><FileSpreadsheet className="size-8 text-muted-foreground/50" /><div><p className="text-sm font-medium">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '등록할 상품을 준비하세요'}</p><p className="mt-1 text-xs text-muted-foreground">{draft.rows.length ? '검색어나 확인 필요 필터를 변경해주세요.' : '작성한 쿠팡 견적서를 불러오거나 B2B 상품을 검색해 추가하세요.'}</p></div>{!draft.rows.length && <button className={buttonClass} onClick={() => setCatalogOpen(true)}><Plus className="size-3.5" />B2B 상품 검색</button>}</div>}</div>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span>도매가·원가는 등록하는 세트 한 단위의 금액입니다. 순수익 = 공급가 − 원가 − 매출부가세(공급가 ÷ 11)</span><span>자동 판매가 = 공급가 ÷ 0.6 · 직접 수정 시 실제 쿠팡 비중을 표시합니다.</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span>순수익 = 공급가 − 원가 − 매출부가세(공급가 ÷ 11) − 추가 차감</span><span>자동 판매가 = 공급가 ÷ 0.6 · 직접 수정 시 실제 쿠팡 비중을 표시합니다.</span></div>
     </section>
 
     {active && <RowEditor key={active.id} row={active} draft={draft} issues={issueMap.get(active.id)!} onPatch={(patch) => patchRow(active.id, patch)} onClose={() => setActiveId('')} />}

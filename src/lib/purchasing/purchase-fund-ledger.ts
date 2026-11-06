@@ -398,7 +398,7 @@ export async function createPurchaseFundCredit(input: {
   entryType: PurchaseFundManualEntryType
   occurredOn: string
   amountKrw: number
-  amountCny?: number | null
+  amountCny: number
   memo?: string | null
 }) {
   await ensurePurchaseFundLedgerSchema()
@@ -409,9 +409,8 @@ export async function createPurchaseFundCredit(input: {
   if (!Number.isFinite(input.amountKrw) || input.amountKrw <= 0) {
     throw new Error('입금액은 0원보다 커야 합니다.')
   }
-  if (input.amountCny !== undefined && input.amountCny !== null
-    && (!Number.isFinite(input.amountCny) || input.amountCny <= 0)) {
-    throw new Error('위안화 입금액은 0보다 커야 합니다.')
+  if (!Number.isFinite(input.amountCny) || input.amountCny < 0.01) {
+    throw new Error('위안화 입금액은 0.01위안 이상이어야 합니다.')
   }
 
   const [row] = await db
@@ -421,9 +420,7 @@ export async function createPurchaseFundCredit(input: {
       entryType: input.entryType,
       occurredOn: input.occurredOn,
       amountKrw: String(Math.round(input.amountKrw)),
-      amountCny: input.amountCny === undefined || input.amountCny === null
-        ? null
-        : String(Math.round(input.amountCny * 100) / 100),
+      amountCny: String(Math.round(input.amountCny * 100) / 100),
       memo: normalizeMemo(input.memo),
       createdBy: input.createdBy,
     })

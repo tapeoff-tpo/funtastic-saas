@@ -14,7 +14,7 @@ const bodySchema = z.object({
   entryType: z.enum(PURCHASE_FUND_MANUAL_ENTRY_TYPES),
   occurredOn: dateSchema,
   amountKrw: z.number().positive().max(100_000_000_000),
-  amountCny: z.number().positive().max(1_000_000_000).nullable().optional(),
+  amountCny: z.number().min(0.01).max(1_000_000_000),
   memo: z.string().trim().max(500).nullable().optional(),
 }).strict()
 

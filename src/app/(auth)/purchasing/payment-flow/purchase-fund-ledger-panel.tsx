@@ -49,12 +49,12 @@ export function PurchaseFundLedgerPanel({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const parsedKrw = parseFormattedNumber(amountKrw)
-    const parsedCny = amountCny.trim() ? parseFormattedNumber(amountCny) : null
+    const parsedCny = parseFormattedNumber(amountCny)
     if (!Number.isFinite(parsedKrw) || parsedKrw <= 0) {
       setError('입금액(원화)을 입력해주세요.')
       return
     }
-    if (parsedCny !== null && (!Number.isFinite(parsedCny) || parsedCny <= 0)) {
+    if (!Number.isFinite(parsedCny) || parsedCny <= 0) {
       setError('입금액(위안화)을 올바르게 입력해주세요.')
       return
     }
@@ -180,7 +180,7 @@ export function PurchaseFundLedgerPanel({
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="purchase-fund-cny">입금액 (위안화, 선택)</Label>
+                    <Label htmlFor="purchase-fund-cny">입금액 (위안화) *</Label>
                     <div className="relative">
                       <Input
                         id="purchase-fund-cny"
@@ -189,6 +189,7 @@ export function PurchaseFundLedgerPanel({
                         onChange={(event) => setAmountCny(formatDecimalInput(event.target.value))}
                         className="pr-8 text-right tabular-nums"
                         placeholder="0"
+                        required
                         disabled={isPending}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">元</span>

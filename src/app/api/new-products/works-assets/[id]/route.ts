@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server'
 import {getCurrentUser} from '@/lib/auth/current-user'
 import {getWorkspaceUserId} from '@/lib/admin-accounts/queries'
-import {getWorksAsset,readWorksAssetChunk} from '@/lib/new-products/works-assets'
+import {getWorksAsset,readWorksAssetChunk,getR2Object} from '@/lib/new-products/works-assets'
 export const runtime='nodejs'
 export const dynamic='force-dynamic'
 export const maxDuration=300
@@ -13,6 +13,12 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
  const owner=await getWorkspaceUserId(user.id)
  const asset=await getWorksAsset(owner,id)
  if(!asset)return new Response(null,{status:404})
+ if(asset.objectKey){
+  try{
+   const object=await getR2Object(asset.objectKey)
+   return new Response(object.body,{headers:{'Content-Type':asset.contentType,'Content-Length':String(asset.fileSize),'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(asset.fileName)}`,'Cache-Control':'private, max-age=300','Vary':'Cookie','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"}})
+  }catch{return NextResponse.json({error:'보관 파일을 읽지 못했습니다.'},{status:502})}
+ }
  let offset=0;let cancelled=false
  const stream=new ReadableStream<Uint8Array>({
   async pull(controller){

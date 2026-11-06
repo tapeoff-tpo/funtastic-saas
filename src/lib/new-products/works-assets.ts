@@ -2,15 +2,10 @@ import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { getNewProductViewer } from './workflow'
+import { newProductObjectKey, putR2Object, getR2Object } from '@/lib/storage/r2'
 
 export type WorksAsset = {
   id: string; fieldName: string; fileName: string; contentType: string; fileSize: number; sha256: string
-  archived?: boolean
-}
-export const WORKS_ASSET_PART_SIZE=1024*1024
-export function sliceWorksAssetParts(parts:Uint8Array[],start:number,length:number){
-  const offset=start%WORKS_ASSET_PART_SIZE
-  return Buffer.concat(parts.map(p=>Buffer.from(p))).subarray(offset,offset+length)
 }
 let schemaPromise: Promise<void> | undefined
 export function ensureWorksAssets() {
@@ -20,29 +15,16 @@ export function ensureWorksAssets() {
       item_id uuid NOT NULL REFERENCES new_product_workflow_items(id) ON DELETE CASCADE,
       source_id text NOT NULL, source_file_id text NOT NULL, field_name text NOT NULL,
       file_name text NOT NULL, content_type text NOT NULL, file_size integer NOT NULL,
-      sha256 text NOT NULL, file_data bytea,
+      sha256 text NOT NULL, file_data bytea, object_key text,
       attachment_id uuid REFERENCES new_product_workflow_attachments(id) ON DELETE CASCADE,
       created_at timestamptz NOT NULL DEFAULT now(),
-      CHECK ((file_data IS NOT NULL) <> (attachment_id IS NOT NULL)),
+      CHECK (file_data IS NOT NULL OR attachment_id IS NOT NULL OR object_key IS NOT NULL),
       UNIQUE(user_id,source_id,source_file_id)
     )`)
     await tx.execute(sql`ALTER TABLE new_product_works_assets ALTER COLUMN file_data SET STORAGE EXTERNAL`)
-    await tx.execute(sql`ALTER TABLE new_product_works_assets ADD COLUMN IF NOT EXISTS chunked boolean NOT NULL DEFAULT false`)
-    await tx.execute(sql`DO $$ BEGIN
-      IF EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='new_product_works_assets'::regclass AND conname='new_product_works_assets_check') THEN
-        ALTER TABLE new_product_works_assets DROP CONSTRAINT new_product_works_assets_check;
-      END IF;
-      IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='new_product_works_assets'::regclass AND conname='new_product_works_assets_storage_check') THEN
-        ALTER TABLE new_product_works_assets ADD CONSTRAINT new_product_works_assets_storage_check CHECK ((file_data IS NOT NULL)::int+(attachment_id IS NOT NULL)::int+chunked::int=1);
-      END IF;
-    END $$`)
-    await tx.execute(sql`CREATE TABLE IF NOT EXISTS new_product_works_asset_parts (
-      asset_id uuid NOT NULL REFERENCES new_product_works_assets(id) ON DELETE CASCADE,
-      user_id uuid NOT NULL,part_index integer NOT NULL CHECK(part_index>=0),
-      file_data bytea NOT NULL,PRIMARY KEY(asset_id,part_index)
-    )`)
-    await tx.execute(sql`ALTER TABLE new_product_works_asset_parts ALTER COLUMN file_data SET STORAGE EXTERNAL`)
-    await tx.execute(sql`ALTER TABLE new_product_works_asset_parts ENABLE ROW LEVEL SECURITY`)
+    await tx.execute(sql`ALTER TABLE new_product_works_assets ADD COLUMN IF NOT EXISTS object_key text`)
+    await tx.execute(sql`ALTER TABLE new_product_works_assets DROP CONSTRAINT IF EXISTS new_product_works_assets_check`)
+    await tx.execute(sql`ALTER TABLE new_product_works_assets ADD CONSTRAINT new_product_works_assets_file_location_check CHECK (file_data IS NOT NULL OR attachment_id IS NOT NULL OR object_key IS NOT NULL) NOT VALID`)
     await tx.execute(sql`CREATE INDEX IF NOT EXISTS new_product_works_assets_item_idx ON new_product_works_assets(user_id,item_id)`)
     await tx.execute(sql`ALTER TABLE new_product_works_assets ENABLE ROW LEVEL SECURITY`)
   }).catch(error => { schemaPromise = undefined; throw error })
@@ -98,34 +80,25 @@ export async function saveWorksAsset(input: {
       }
     }
     if(existing?.attachment_id&&existing.file_name!==input.fileName)await tx.execute(sql`UPDATE new_product_workflow_attachments SET file_name=${input.fileName} WHERE id=${existing.attachment_id}::uuid AND user_id=${input.userId}::uuid AND file_name=${existing.file_name}`)
-    const chunked=!attachmentId&&input.bytes.length>8*1024*1024
-    const [asset]=await tx.execute(sql`INSERT INTO new_product_works_assets(user_id,item_id,source_id,source_file_id,field_name,file_name,content_type,file_size,sha256,file_data,attachment_id,chunked) VALUES (${input.userId}::uuid,${item.id}::uuid,${input.sourceId},${input.sourceFileId},${input.fieldName},${input.fileName},${type},${input.bytes.length},${hash},${attachmentId||chunked?null:sql`decode(${input.bytes.toString('base64')},'base64')`},${attachmentId}::uuid,${chunked}) ON CONFLICT(user_id,source_id,source_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,field_name=EXCLUDED.field_name,file_data=EXCLUDED.file_data,attachment_id=EXCLUDED.attachment_id,chunked=EXCLUDED.chunked WHERE new_product_works_assets.sha256=EXCLUDED.sha256 RETURNING id`)
-    if(chunked)for(let start=0;start<input.bytes.length;start+=WORKS_ASSET_PART_SIZE){
-      const part=input.bytes.subarray(start,start+WORKS_ASSET_PART_SIZE)
-      await tx.execute(sql`INSERT INTO new_product_works_asset_parts(asset_id,user_id,part_index,file_data) VALUES (${asset.id}::uuid,${input.userId}::uuid,${start/WORKS_ASSET_PART_SIZE},decode(${part.toString('base64')},'base64')) ON CONFLICT(asset_id,part_index) DO NOTHING`)
-    }
+    const assetId=existing?.id ? String(existing.id) : crypto.randomUUID()
+    const objectKey=attachmentId ? null : newProductObjectKey(input.userId,'works-assets',assetId,hash)
+    if(objectKey)await putR2Object(objectKey,input.bytes,type)
+    const [asset]=await tx.execute(sql`INSERT INTO new_product_works_assets(id,user_id,item_id,source_id,source_file_id,field_name,file_name,content_type,file_size,sha256,file_data,object_key,attachment_id) VALUES (${assetId}::uuid,${input.userId}::uuid,${item.id}::uuid,${input.sourceId},${input.sourceFileId},${input.fieldName},${input.fileName},${type},${input.bytes.length},${hash},NULL,${objectKey},${attachmentId}::uuid) ON CONFLICT(user_id,source_id,source_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,field_name=EXCLUDED.field_name,file_data=NULL,object_key=EXCLUDED.object_key,attachment_id=EXCLUDED.attachment_id WHERE new_product_works_assets.sha256=EXCLUDED.sha256 RETURNING id`)
     return {id:String(asset.id),status:'saved' as const,attachmentId}
   })
 }
 
 export async function listWorksAssets(userId:string,itemId:string):Promise<WorksAsset[]> {
   await ensureWorksAssets()
-  return await db.execute(sql`SELECT a.id,a.field_name AS "fieldName",a.file_name AS "fileName",a.content_type AS "contentType",a.file_size AS "fileSize",a.sha256,(COALESCE(i.metadata->'worksArchivedAssetIds','[]'::jsonb) ? a.id::text) AS archived FROM new_product_works_assets a JOIN new_product_workflow_items i ON i.id=a.item_id AND i.user_id=a.user_id WHERE a.user_id=${userId}::uuid AND a.item_id=${itemId}::uuid ORDER BY archived,a.field_name,a.created_at,a.id`) as unknown as WorksAsset[]
+  return await db.execute(sql`SELECT id,field_name AS "fieldName",file_name AS "fileName",content_type AS "contentType",file_size AS "fileSize",sha256 FROM new_product_works_assets WHERE user_id=${userId}::uuid AND item_id=${itemId}::uuid ORDER BY field_name,created_at,id`) as unknown as WorksAsset[]
 }
 export async function getWorksAsset(userId:string,id:string) {
   await ensureWorksAssets()
-  const [asset]=await db.execute(sql`SELECT id,file_name AS "fileName",content_type AS "contentType",file_size AS "fileSize",attachment_id AS "attachmentId",chunked FROM new_product_works_assets WHERE id=${id}::uuid AND user_id=${userId}::uuid`)
-  return asset as {id:string;fileName:string;contentType:string;fileSize:number;attachmentId:string|null;chunked:boolean}|undefined
+  const [asset]=await db.execute(sql`SELECT id,file_name AS "fileName",content_type AS "contentType",file_size AS "fileSize",attachment_id AS "attachmentId",object_key AS "objectKey" FROM new_product_works_assets WHERE id=${id}::uuid AND user_id=${userId}::uuid`)
+  return asset as {id:string;fileName:string;contentType:string;fileSize:number;attachmentId:string|null;objectKey:string|null}|undefined
 }
-export async function readWorksAssetChunk(userId:string,id:string,start:number,length:number,attachmentId:string|null,chunked=false) {
-  if(chunked){
-    const first=Math.floor(start/WORKS_ASSET_PART_SIZE),last=Math.floor((start+length-1)/WORKS_ASSET_PART_SIZE)
-    const parts=await db.execute(sql`SELECT part_index,encode(file_data,'base64') AS bytes FROM new_product_works_asset_parts WHERE asset_id=${id}::uuid AND user_id=${userId}::uuid AND part_index BETWEEN ${first} AND ${last} ORDER BY part_index`)
-    if(parts.length!==last-first+1||parts.some((p,i)=>Number(p.part_index)!==first+i))throw Error('원본 파일의 일부를 찾지 못했습니다.')
-    const result=sliceWorksAssetParts(parts.map(p=>Buffer.from(String(p.bytes),'base64')),start,length)
-    if(result.length!==length)throw Error('원본 파일의 일부를 읽지 못했습니다.')
-    return result
-  }
+export { getR2Object }
+export async function readWorksAssetChunk(userId:string,id:string,start:number,length:number,attachmentId:string|null) {
   const [row]=attachmentId ? await db.execute(sql`SELECT encode(substring(file_data FROM ${start+1} FOR ${length}),'base64') AS bytes FROM new_product_workflow_attachments WHERE id=${attachmentId}::uuid AND user_id=${userId}::uuid`) : await db.execute(sql`SELECT encode(substring(file_data FROM ${start+1} FOR ${length}),'base64') AS bytes FROM new_product_works_assets WHERE id=${id}::uuid AND user_id=${userId}::uuid`)
   if(!row)throw Error('파일을 찾을 수 없습니다.')
   return Buffer.from(String(row.bytes),'base64')

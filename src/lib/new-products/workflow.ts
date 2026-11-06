@@ -18,6 +18,8 @@ import {
   type DaouWorksImportItem,
   type DaouWorksSourceData,
 } from './daou-works-import'
+import { createHash } from 'node:crypto'
+import { getR2Object, newProductObjectKey, putR2Object } from '@/lib/storage/r2'
 
 export type { NewProductOptionDetail } from './option-details'
 
@@ -566,6 +568,8 @@ async function createNewProductWorkflowSchema() {
     CREATE INDEX IF NOT EXISTS new_product_workflow_attachments_item_kind_idx
     ON new_product_workflow_attachments(item_id, kind, created_at)
   `)
+  await db.execute(sql`ALTER TABLE new_product_workflow_attachments ADD COLUMN IF NOT EXISTS object_key text`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_attachments ALTER COLUMN file_data DROP NOT NULL`)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_preferences (
       user_id uuid PRIMARY KEY,
@@ -1911,14 +1915,17 @@ export async function addNewProductAttachment(input: {
     LIMIT 1
   `))
   if (!item) throw new Error('첨부할 신상품을 찾을 수 없습니다.')
-  const base64 = Buffer.from(input.fileBuffer).toString('base64')
+  const bytes = Buffer.from(input.fileBuffer)
+  const id = crypto.randomUUID()
+  const objectKey = newProductObjectKey(input.userId, 'attachments', id, createHash('sha256').update(bytes).digest('hex'))
+  await putR2Object(objectKey, bytes, input.contentType)
   const [created] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO new_product_workflow_attachments (
-      user_id, item_id, kind, file_name, content_type, file_size, file_data, uploaded_by_user_id
+      id, user_id, item_id, kind, file_name, content_type, file_size, file_data, object_key, uploaded_by_user_id
     )
     SELECT
-      ${input.userId}::uuid, item.id, ${input.kind}, ${input.fileName}, ${input.contentType},
-      ${input.fileBuffer.byteLength}, decode(${base64}, 'base64'), ${input.requestedByUserId}::uuid
+      ${id}::uuid, ${input.userId}::uuid, item.id, ${input.kind}, ${input.fileName}, ${input.contentType},
+      ${input.fileBuffer.byteLength}, NULL, ${objectKey}, ${input.requestedByUserId}::uuid
     FROM new_product_workflow_items item
     WHERE item.id = ${input.itemId}::uuid AND item.user_id = ${input.userId}::uuid
     RETURNING id
@@ -1936,18 +1943,25 @@ export async function getNewProductAttachment(input: { userId: string; requested
   const [attachment] = resultRows<{
     fileName: string
     contentType: string
-    fileDataBase64: string
+    fileDataBase64: string | null
+    objectKey: string | null
   }>(await db.execute(sql`
     SELECT
       attachment.file_name AS "fileName",
       attachment.content_type AS "contentType",
-      encode(attachment.file_data, 'base64') AS "fileDataBase64"
+      encode(attachment.file_data, 'base64') AS "fileDataBase64",
+      attachment.object_key AS "objectKey"
     FROM new_product_workflow_attachments attachment
     JOIN new_product_workflow_items item ON item.id = attachment.item_id
     WHERE attachment.id = ${input.attachmentId}::uuid
       AND attachment.user_id = ${input.userId}::uuid
   `))
-  return attachment ?? null
+  if (!attachment) return null
+  if (attachment.objectKey) {
+    const response = await getR2Object(attachment.objectKey)
+    return { ...attachment, fileDataBase64: Buffer.from(await response.arrayBuffer()).toString('base64') }
+  }
+  return attachment
 }
 
 export async function deleteNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {

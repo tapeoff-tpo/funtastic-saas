@@ -97,7 +97,7 @@ export async function saveWorksAsset(input: {
       }
     }
     if(existing?.attachment_id&&existing.file_name!==input.fileName)await tx.execute(sql`UPDATE new_product_workflow_attachments SET file_name=${input.fileName} WHERE id=${existing.attachment_id}::uuid AND user_id=${input.userId}::uuid AND file_name=${existing.file_name}`)
-    const chunked=!attachmentId&&input.bytes.length>32*1024*1024
+    const chunked=!attachmentId&&input.bytes.length>8*1024*1024
     const [asset]=await tx.execute(sql`INSERT INTO new_product_works_assets(user_id,item_id,source_id,source_file_id,field_name,file_name,content_type,file_size,sha256,file_data,attachment_id,chunked) VALUES (${input.userId}::uuid,${item.id}::uuid,${input.sourceId},${input.sourceFileId},${input.fieldName},${input.fileName},${type},${input.bytes.length},${hash},${attachmentId||chunked?null:sql`decode(${input.bytes.toString('base64')},'base64')`},${attachmentId}::uuid,${chunked}) ON CONFLICT(user_id,source_id,source_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,field_name=EXCLUDED.field_name,file_data=EXCLUDED.file_data,attachment_id=EXCLUDED.attachment_id,chunked=EXCLUDED.chunked WHERE new_product_works_assets.sha256=EXCLUDED.sha256 RETURNING id`)
     if(chunked)for(let start=0;start<input.bytes.length;start+=WORKS_ASSET_PART_SIZE){
       const part=input.bytes.subarray(start,start+WORKS_ASSET_PART_SIZE)

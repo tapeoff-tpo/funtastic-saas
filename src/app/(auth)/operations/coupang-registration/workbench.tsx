@@ -9,6 +9,7 @@ const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
 const buttonClass = 'inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40'
 const won = (value: number | null) => value === null ? '—' : `${value.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}원`
+const inputWon = (value: number) => `${value.toLocaleString('ko-KR', { maximumFractionDigits: 6 })}원`
 const marginText = (value: number | null, digits: number) => value === null ? '—' : `${value.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
 type DraftSummary = { id: string; name: string; revision: number; updatedAt: string }
 
@@ -22,6 +23,30 @@ function postJson(path: string, value: unknown) {
   const body = JSON.stringify(value)
   if (new TextEncoder().encode(body).length > 4_000_000) throw new Error('작업 용량이 4MB를 초과했습니다. 견적서 또는 상품을 나눠주세요.')
   return jsonRequest(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+}
+
+async function fillMissingCosts(rows: RegistrationRow[]) {
+  const missing = rows.filter((row) => row.costPrice == null && (row.internalSku || row.sourceName || row.name))
+  const found = new Map<string, { internalSku: string; costPrice: number }>()
+  for (let start = 0; start < missing.length; start += 30) {
+    const lookup = missing.slice(start, start + 30).map(({ id, name, sourceName, optionName, internalSku }) => ({
+      id, name, sourceName, optionName, internalSku,
+    }))
+    const { costs } = await postJson('/costs', lookup)
+    for (const { id, internalSku, costPrice } of costs) found.set(id, { internalSku, costPrice })
+  }
+  return {
+    rows: rows.map((row) => row.costPrice == null && found.has(row.id) ? { ...row, ...found.get(row.id) } : row),
+    filled: found.size,
+    unresolved: missing.length - found.size,
+  }
+}
+
+async function fillMissingCostsOnOpen(rows: RegistrationRow[]) {
+  try { return await fillMissingCosts(rows) } catch {
+    toast.error('원가를 자동으로 불러오지 못했습니다. 빈 원가 채우기로 다시 시도해주세요.')
+    return { rows, filled: 0 }
+  }
 }
 async function savedFile(file: File): Promise<SavedFile> {
   if (file.size > 3_000_000) throw new Error('파일은 3MB 이하로 선택해주세요.')
@@ -87,10 +112,24 @@ export function CoupangRegistrationWorkbench() {
         if (next.templates.length >= 6 || next.rows.length + response.rows.length > 500) throw new Error('작업당 견적서 6개, 등록행 500개까지 사용할 수 있습니다.')
         next = { ...next, templates: [...next.templates, response.template], rows: [...next.rows, ...response.rows] }
       }
-      setDraft(next); setDirty(true)
+      const costs = await fillMissingCostsOnOpen(next.rows)
+      setDraft({ ...next, rows: costs.rows }); setDirty(true)
       toast.success(`견적서 ${next.templates.length}개 · 등록행 ${next.rows.length}개를 불러왔습니다.`)
     })
     if (templateInput.current) templateInput.current.value = ''
+  }
+
+  async function reloadCosts() {
+    await run('품목 신규 원가 확인 중', async () => {
+      const targets = selected.size ? draft.rows.filter((row) => selected.has(row.id)) : draft.rows
+      const result = await fillMissingCosts(targets)
+      const byId = new Map(result.rows.map((row) => [row.id, row]))
+      if (result.filled) update((value) => ({
+        ...value,
+        rows: value.rows.map((row) => row.costPrice == null ? byId.get(row.id) ?? row : row),
+      }))
+      toast.success(`원가 ${result.filled}개 입력 · 확인 필요 ${result.unresolved}개`)
+    })
   }
 
   async function importLabels(files: FileList | null) {
@@ -149,7 +188,9 @@ export function CoupangRegistrationWorkbench() {
     if (!id || dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 저장된 작업을 불러올까요?')) return
     await run('작업 불러오는 중', async () => {
       const response = await jsonRequest(`/drafts?id=${encodeURIComponent(id)}`)
-      setDraft(response.payload); setCurrentId(response.id); setRevision(response.revision); setDirty(false); setSelected(new Set()); setActiveId('')
+      const payload: RegistrationDraft = response.payload
+      const costs = await fillMissingCostsOnOpen(payload.rows)
+      setDraft({ ...payload, rows: costs.rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0); setSelected(new Set()); setActiveId('')
     })
   }
   function newDraft() {
@@ -205,6 +246,9 @@ export function CoupangRegistrationWorkbench() {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" /><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-48 pl-7`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} /></div><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label></div><div className="flex gap-2"><button className={buttonClass} disabled={!!busy || !draft.rows.length} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />{selected.size ? '선택 상품' : '전체 상품'} 이미지 연결</button><button className={buttonClass} disabled={!!busy} onClick={() => setCatalogOpen(true)}><Plus className="size-3.5" />상품 추가</button></div></div>
       <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2"><span className="mr-1 text-xs font-medium">선택 {selected.size}개</span><select className={`${inputClass} max-w-52`} aria-label="일괄 카테고리" value={templateChoice} onChange={(event) => setTemplateChoice(event.target.value)}><option value="">쿠팡 견적서 카테고리</option>{draft.templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')}</option>))}</select><button className={buttonClass} disabled={!!busy || !selected.size || !templateChoice} onClick={() => { const [templateId, sheetName] = templateChoice.split(':'); update((value) => ({ ...value, rows: value.rows.map((row) => selected.has(row.id) ? { ...row, templateId, sheetName } : row) })) }}>카테고리 적용</button><label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">판매가 올림<select aria-label="판매가 올림 단위" className={inputClass} value={draft.rounding} onChange={(event) => update((value) => ({ ...value, rounding: Number(event.target.value) }))}>{[1, 10, 100, 1000].map((unit) => <option key={unit} value={unit}>{unit.toLocaleString()}원</option>)}</select></label></div>
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        <button className={buttonClass} disabled={!!busy || !draft.rows.some((row) => row.costPrice == null && (!selected.size || selected.has(row.id)))} onClick={() => void reloadCosts()}>
+          <RefreshCw className="size-3.5" />빈 원가 채우기
+        </button>
         <label className="text-xs text-muted-foreground" htmlFor="bulk-supply-deduction">선택 상품 추가 차감</label>
         <select id="bulk-supply-deduction" className={inputClass} value="" disabled={!selected.size || !!busy} onChange={(event) => {
           const supplyDeductionPercent: NonNullable<RegistrationRow['supplyDeductionPercent']> = event.target.value === '10' ? 10 : 0
@@ -242,7 +286,7 @@ export function CoupangRegistrationWorkbench() {
             <td><span aria-label={`${row.name} 도매가`} className="inline-flex h-8 items-center justify-center whitespace-nowrap">{won(row.wholesalePrice)}</span></td>
             <td><MoneyInput label={`${row.name} 쿠팡공급가`} value={prices.supply} onChange={(value) => patchRow(row.id, { priceMode: 'manual', manualSupplyPrice: value })} /></td>
             <td><MoneyInput label={`${row.name} 쿠팡판매가`} value={prices.sale} onChange={(value) => patchRow(row.id, { saleMode: 'manual', manualSalePrice: value })} /></td>
-            <td className="whitespace-nowrap">{won(prices.salesVat)}</td>
+            <td className="whitespace-nowrap" title={row.manualSalesVat == null ? '공급가 ÷ 11' : '직접 입력한 매출부가세'}>{won(prices.salesVat)}{row.manualSalesVat != null && <div className="text-[10px] text-muted-foreground">직접 입력</div>}</td>
             <td>
               <select aria-label={`${row.name} 추가 차감률`} className={inputClass} value={row.supplyDeductionPercent ?? 0} onChange={(event) => patchRow(row.id, { supplyDeductionPercent: event.target.value === '10' ? 10 : 0 })}>
                 <option value={0}>0%</option>
@@ -258,7 +302,7 @@ export function CoupangRegistrationWorkbench() {
           </tr>
         })}</tbody>
       </table>{!visible.length && <div className="flex flex-col items-center gap-3 py-16 text-center"><FileSpreadsheet className="size-8 text-muted-foreground/50" /><div><p className="text-sm font-medium">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '등록할 상품을 준비하세요'}</p><p className="mt-1 text-xs text-muted-foreground">{draft.rows.length ? '검색어나 확인 필요 필터를 변경해주세요.' : '작성한 쿠팡 견적서를 불러오거나 B2B 상품을 검색해 추가하세요.'}</p></div>{!draft.rows.length && <button className={buttonClass} onClick={() => setCatalogOpen(true)}><Plus className="size-3.5" />B2B 상품 검색</button>}</div>}</div>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span>순수익 = 공급가 − 원가 − 매출부가세(공급가 ÷ 11) − 추가 차감</span><span>자동 판매가 = 공급가 ÷ 0.6 · 직접 수정 시 실제 쿠팡 비중을 표시합니다.</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span>순수익 = 공급가 − 원가 − 매출부가세 − 추가 차감</span><span>자동 판매가 = 공급가 ÷ 0.6 · 직접 수정 시 실제 쿠팡 비중을 표시합니다.</span></div>
     </section>
 
     {active && <RowEditor key={active.id} row={active} draft={draft} issues={issueMap.get(active.id)!} onPatch={(patch) => patchRow(active.id, patch)} onClose={() => setActiveId('')} />}
@@ -272,8 +316,8 @@ export function CoupangRegistrationWorkbench() {
 function Summary({ label, value, note, warning }: { label: string; value: string; note: string; warning?: boolean }) {
   return <div className="rounded-lg border bg-card px-4 py-3"><div className="text-xs text-muted-foreground">{label}</div><div className={`mt-1 text-2xl font-semibold tabular-nums ${warning ? 'text-amber-700' : ''}`}>{value}</div><div className="mt-1 text-[11px] text-muted-foreground">{note}</div></div>
 }
-function MoneyInput({ label, value, onChange }: { label: string; value: number | null; onChange: (value: number | null) => void }) {
-  return <input aria-label={label} type="number" min="0" max="1000000000" step="1" className={`${inputClass} w-full min-w-0 text-center tabular-nums`} value={value ?? ''} placeholder="미입력" onChange={(event) => onChange(money(event.target.value))} />
+function MoneyInput({ label, value, onChange, placeholder = '미입력' }: { label: string; value: number | null; onChange: (value: number | null) => void; placeholder?: string }) {
+  return <input aria-label={label} type="number" min="0" max="1000000000" step="any" className={`${inputClass} w-full min-w-0 text-center tabular-nums`} value={value ?? ''} placeholder={placeholder} onChange={(event) => onChange(money(event.target.value))} />
 }
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="flex flex-col gap-1.5 text-xs"><span className="font-medium">{label}</span>{children}{hint && <span className="text-[10px] text-muted-foreground">{hint}</span>}</label>
@@ -286,6 +330,7 @@ function RowEditor({ row, draft, issues, onPatch, onClose }: { row: Registration
   const [preview, setPreview] = useState(false)
   const sheet = draft.templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
   const computed = rowFields(row, draft.rounding, draft.labels)
+  const prices = calculatePrice(row, draft.rounding)
   const automatic = new Set(['상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD])
   const fieldValue = (label: string, value: string) => onPatch({ fields: { ...row.fields, [label]: value } })
   const file = draft.labels.find((label) => imageStem(label.name) === imageStem(row.label))
@@ -302,6 +347,21 @@ function RowEditor({ row, draft, issues, onPatch, onClose }: { row: Registration
       <Field label="상세이미지 URL" hint="JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다. HTML은 자동 생성됩니다."><textarea className={`${inputClass} h-20 py-2 font-mono text-[11px]`} value={row.detailImages.join('\n')} onChange={(event) => onPatch({ detailImages: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) })} /></Field>
       {preview && <iframe title="쿠팡 상세 HTML 미리보기" sandbox="" className="h-[560px] w-full rounded border bg-white" srcDoc={`<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>${detailHtml(row.detailImages, row.name)}</body></html>`} />}
       <details open className="rounded-md border"><summary className="cursor-pointer px-3 py-2 text-xs font-medium">카테고리 필수정보 · 상품 사이즈·포장·인증</summary><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{sheet ? sheet.columns.filter((column) => !automatic.has(column.label) && (column.requirement === '필수' || column.requirement.includes('조건부') || !!row.fields[column.label])).map((column) => <Field key={column.column} label={`${column.label}${column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : ''}`} hint={column.guide.slice(0, 120)}><input className={inputClass} value={row.fields[column.label] ?? ''} onChange={(event) => fieldValue(column.label, event.target.value)} title={column.guide} /></Field>) : <p className="text-xs text-muted-foreground">쿠팡 견적서를 불러오고 카테고리를 선택하면 필수 입력항목이 표시됩니다.</p>}</div></details>
-    </div><aside className="space-y-3"><div><h3 className="text-xs font-medium">대표이미지 선택</h3><div className="mt-2 grid grid-cols-4 gap-2">{row.thumbnails.filter(isImageUrl).map((url, index) => <button key={url} aria-label={`대표이미지 ${index + 1} 선택`} className={`relative aspect-square overflow-hidden rounded border bg-white ${row.primaryImage === url ? 'border-blue-600 ring-2 ring-blue-200' : ''}`} onClick={() => onPatch({ primaryImage: url })}><img className="size-full object-contain" src={url} alt={`상품 이미지 ${index + 1}`} />{row.primaryImage === url && <Check className="absolute bottom-1 right-1 size-4 rounded-full bg-blue-600 text-white" />}</button>)}</div></div><Field label="대표이미지 URL"><input className={inputClass} value={row.primaryImage} onChange={(event) => onPatch({ primaryImage: event.target.value })} /></Field><div className="rounded-md bg-muted/40 p-3 text-xs leading-6"><p>상세페이지에서 <strong>상품 자체 사이즈</strong>를 확인해주세요.</p><p className="mt-2">쿠팡 물류용 <strong>포장 사이즈·무게</strong>는 포장한 상태의 실측값을 입력해야 합니다.</p><p className="mt-2 text-muted-foreground">원본 고시정보와 라벨의 내용이 일치하는지도 확인해주세요.</p></div><div className="rounded-md border p-3 text-xs"><div className="font-medium">견적서 반영 가격</div><div className="mt-2 flex flex-wrap gap-2"><button className={buttonClass} aria-label={`${row.name} 판매가 자동계산`} onClick={() => onPatch({ saleMode: 'auto', manualSalePrice: null })}>판매가 자동계산</button><button className={buttonClass} aria-label={`${row.name} 판매가 기준 쿠팡 40% 맞추기`} disabled={!computed['쿠팡 판매가']} onClick={() => onPatch({ priceMode: 'manual', manualSupplyPrice: Math.round(Number(computed['쿠팡 판매가']) * 3 / 5) })}>쿠팡 40% 맞추기</button></div><div className="mt-2 flex justify-between"><span className="text-muted-foreground">공급가</span><span>{computed['공급가'] ? won(Number(computed['공급가'])) : '—'}</span></div><div className="mt-1 flex justify-between"><span className="text-muted-foreground">판매가</span><span className="font-semibold text-blue-700">{computed['쿠팡 판매가'] ? won(Number(computed['쿠팡 판매가'])) : '—'}</span></div></div></aside></div>
+      <section className="rounded-md border p-3">
+        <h3 className="text-xs font-medium">수익 계산 상세</h3>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <Field label="매출부가세 직접 입력" hint="비우면 공급가 ÷ 11로 계산합니다. 합산 부가세 등 엑셀 예외 행은 값을 그대로 입력하세요.">
+            <MoneyInput label="매출부가세 직접 입력" value={row.manualSalesVat ?? null}
+              placeholder={prices.salesVat === null ? '자동 계산' : `자동 ${inputWon(prices.salesVat)}`}
+              onChange={(manualSalesVat) => onPatch({ manualSalesVat })} />
+          </Field>
+          <div className="space-y-1 text-xs">
+            <p>추가 차감 {prices.deduction === null ? '—' : inputWon(prices.deduction)}</p>
+            <p>순수익 {prices.profit === null ? '—' : inputWon(prices.profit)}</p>
+            <p>우리 마진 {marginText(prices.profitRate, 4)} · 쿠팡 마진 {marginText(prices.coupangRate, 4)}</p>
+          </div>
+        </div>
+      </section>
+    </div><aside className="space-y-3"><div><h3 className="text-xs font-medium">대표이미지 선택</h3><div className="mt-2 grid grid-cols-4 gap-2">{row.thumbnails.filter(isImageUrl).map((url, index) => <button key={url} aria-label={`대표이미지 ${index + 1} 선택`} className={`relative aspect-square overflow-hidden rounded border bg-white ${row.primaryImage === url ? 'border-blue-600 ring-2 ring-blue-200' : ''}`} onClick={() => onPatch({ primaryImage: url })}><img className="size-full object-contain" src={url} alt={`상품 이미지 ${index + 1}`} />{row.primaryImage === url && <Check className="absolute bottom-1 right-1 size-4 rounded-full bg-blue-600 text-white" />}</button>)}</div></div><Field label="대표이미지 URL"><input className={inputClass} value={row.primaryImage} onChange={(event) => onPatch({ primaryImage: event.target.value })} /></Field><div className="rounded-md bg-muted/40 p-3 text-xs leading-6"><p>상세페이지에서 <strong>상품 자체 사이즈</strong>를 확인해주세요.</p><p className="mt-2">쿠팡 물류용 <strong>포장 사이즈·무게</strong>는 포장한 상태의 실측값을 입력해야 합니다.</p><p className="mt-2 text-muted-foreground">원본 고시정보와 라벨의 내용이 일치하는지도 확인해주세요.</p></div><div className="rounded-md border p-3 text-xs"><div className="font-medium">견적서 반영 가격</div><div className="mt-2 flex flex-wrap gap-2"><button className={buttonClass} aria-label={`${row.name} 판매가 자동계산`} onClick={() => onPatch({ saleMode: 'auto', manualSalePrice: null })}>판매가 자동계산</button><button className={buttonClass} aria-label={`${row.name} 판매가 기준 쿠팡 40% 맞추기`} disabled={!computed['쿠팡 판매가']} onClick={() => onPatch({ priceMode: 'manual', manualSupplyPrice: Number(computed['쿠팡 판매가']) * 3 / 5 })}>쿠팡 40% 맞추기</button></div><div className="mt-2 flex justify-between"><span className="text-muted-foreground">공급가</span><span>{computed['공급가'] ? inputWon(Number(computed['공급가'])) : '—'}</span></div><div className="mt-1 flex justify-between"><span className="text-muted-foreground">판매가</span><span className="font-semibold text-blue-700">{computed['쿠팡 판매가'] ? inputWon(Number(computed['쿠팡 판매가'])) : '—'}</span></div></div></aside></div>
   </section>
 }

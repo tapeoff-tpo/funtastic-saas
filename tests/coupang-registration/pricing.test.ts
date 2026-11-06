@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attachCatalog, calculatePrice, createRegistrationRow, detailHtml, matchCatalog, type CatalogProduct } from '@/lib/coupang-registration/model'
+import { attachCatalog, calculatePrice, createRegistrationRow, detailHtml, matchCatalog, resolveItemCost, type CatalogProduct } from '@/lib/coupang-registration/model'
 import { itemNewCost } from '@/lib/coupang-registration/item-cost'
 import { rowSchema } from '@/lib/coupang-registration/schema'
 
@@ -54,6 +54,30 @@ describe('Coupang pricing and matching', () => {
     const legacy = { ...row, supplyDeductionPercent: undefined }
     expect(rowSchema.parse(legacy).supplyDeductionPercent).toBe(0)
     expect(calculatePrice(legacy).profit).toBe(3114)
+  })
+  it('preserves fractional supply and uses the entered VAT for a bundle', () => {
+    const row = rowSchema.parse({
+      ...createRegistrationRow(), costPrice: 2549, priceMode: 'manual', manualSupplyPrice: 6134.4,
+      saleMode: 'manual', manualSalePrice: 10224, supplyDeductionPercent: 10, manualSalesVat: 950.25,
+    })
+    const result = calculatePrice(row)
+    expect(result.supply).toBe(6134.4)
+    expect(result.salesVat).toBe(950.25)
+    expect(result.profit).toBeCloseTo(2021.71)
+    expect(result.coupangRate).toBeCloseTo(40)
+    expect(calculatePrice({ ...row, manualSalesVat: null }).salesVat).toBeCloseTo(6134.4 / 11)
+  })
+  it('connects known SKUs and normalized option titles without substituting another option', () => {
+    const costs = [
+      { sku: '112361', name: '마미백 플러스', optionName: '', costPrice: null },
+      { sku: '112361-0001', name: '마미백 플러스', optionName: '베이지(소)', costPrice: 8776 },
+      { sku: '112361-0002', name: '마미백 플러스', optionName: '블랙', costPrice: null },
+    ]
+    const base = { name: '마미백플러스 베이지 소', internalSku: '', sourceName: '', optionName: '' }
+    expect(resolveItemCost(base, costs)?.costPrice).toBe(8776)
+    expect(resolveItemCost({ ...base, internalSku: '112361-0002' }, costs)?.costPrice).toBeNull()
+    expect(resolveItemCost({ ...base, sourceName: '마미백 플러스', optionName: '다른 옵션' }, costs)).toBeUndefined()
+    expect(resolveItemCost({ ...base, sourceName: '마미백 플러스' }, costs)).toBeUndefined()
   })
   it('reads only item-master new KRW cost and preserves missing versus zero', () => {
     expect(itemNewCost({ esa009m: { 'works 신규 원가': '8,776', 'works 기존 원가': '10000', '신규원가(元)': '20' } })).toBe(8776)

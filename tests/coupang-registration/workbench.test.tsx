@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CoupangRegistrationWorkbench } from '@/app/(auth)/operations/coupang-registration/workbench'
+import { blankDraft, createRegistrationRow } from '@/lib/coupang-registration/model'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const source = { code: '1471', name: '마미백 플러스', price: 15000, status: 'SELLING', thumbnails: ['https://cdn.tapeoff.kr/front.jpg'], detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ name: '베이지', addPrice: 0 }], notice: [], costCandidates: [{ sku: '112361-0001', name: '마미백 플러스', optionName: '베이지', costPrice: 10000 }] }
@@ -8,6 +9,26 @@ const source = { code: '1471', name: '마미백 플러스', price: 15000, status
 describe('registration pricing workbench', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
+  })
+  it('fills a saved draft’s missing cost and allows a VAT override', async () => {
+    const row = { ...createRegistrationRow(source, '베이지'), costPrice: null }
+    const saved = { id: 'draft-1', name: '마미백 견적', revision: 1, updatedAt: '2026-11-06' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => url.endsWith('/costs')
+        ? { costs: [{ id: row.id, internalSku: row.internalSku, costPrice: 8776 }] }
+        : url.includes('?id=')
+          ? { ...saved, payload: { ...blankDraft(), rows: [row] } }
+          : { drafts: [saved] },
+    })))
+
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /마미백 견적/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    expect(await screen.findByLabelText('마미백 플러스 베이지 원가')).toHaveValue(8776)
+    fireEvent.click(screen.getByRole('button', { name: /마미백 플러스 베이지 112361-0001/ }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: '매출부가세 직접 입력' }), { target: { value: '2000' } })
+    expect(screen.getByText('4,224원')).toBeInTheDocument()
   })
   it('loads selected product costs and keeps wholesale fixed while editing supply and retail', async () => {
     render(<CoupangRegistrationWorkbench />)

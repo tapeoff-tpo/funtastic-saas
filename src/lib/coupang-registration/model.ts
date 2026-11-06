@@ -18,6 +18,7 @@ export type RegistrationRow = {
   saleMode?: 'auto' | 'manual'
   manualSalePrice?: number | null
   supplyDeductionPercent?: 0 | 10
+  manualSalesVat?: number | null
   sourceCode: string
   sourceName: string
   sourceStatus: string
@@ -44,8 +45,10 @@ export type CatalogProduct = {
   detailImages: string[]
   options: Array<{ name: string; addPrice: number }>
   notice: Array<{ label: string; value: string }>
-  costCandidates: Array<{ sku: string; name: string; optionName: string; costPrice: number | null }>
+  costCandidates: CostCandidate[]
 }
+export type CostCandidate = { sku: string; name: string; optionName: string; costPrice: number | null; aliases?: string[] }
+export type CostLookup = Pick<RegistrationRow, 'id' | 'internalSku' | 'name' | 'sourceName' | 'optionName'>
 
 export const LABEL_FIELD = '제품 필수 표시사항 (라벨 또는 도안 이미지)'
 export const MONEY_LIMIT = 1_000_000_000
@@ -53,24 +56,27 @@ export const blankDraft = (): RegistrationDraft => ({ name: '쿠팡 등록 준�
 
 export function money(value: unknown): number | null {
   if (value === '' || value === null || value === undefined) return null
-  const number = Number(String(value).replaceAll(',', '').trim())
+  const text = String(value).replaceAll(',', '').trim()
+  if (!text) return null
+  const number = Number(text)
   return Number.isFinite(number) && number >= 0 && number <= MONEY_LIMIT ? number : null
 }
 
-export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice' | 'supplyDeductionPercent'>, rounding = 1) {
+export function calculatePrice(row: Pick<RegistrationRow, 'costPrice' | 'wholesalePrice' | 'priceMode' | 'markupPercent' | 'manualSupplyPrice' | 'saleMode' | 'manualSalePrice' | 'supplyDeductionPercent' | 'manualSalesVat'>, rounding = 1) {
   const wholesale = money(row.wholesalePrice)
   const input = row.priceMode === 'manual' ? money(row.manualSupplyPrice)
     : wholesale === null ? null : wholesale * (row.priceMode === 'markup' ? 1 + row.markupPercent / 100 : 1)
-  const supply = input === null || !Number.isFinite(input) || Math.round(input) < 1 || input > MONEY_LIMIT ? null : Math.round(input)
+  const supply = input === null || !Number.isFinite(input) || input < 1 || input > MONEY_LIMIT
+    ? null : row.priceMode === 'manual' ? input : Math.round(input)
   const unit = [1, 10, 100, 1000].includes(rounding) ? rounding : 1
   // Integer arithmetic avoids 15,000 / 0.6 floating-point rounding surprises.
   const manualSale = money(row.manualSalePrice)
   const sale = row.saleMode === 'manual'
-    ? manualSale === null || Math.round(manualSale) < 1 ? null : Math.round(manualSale)
+    ? manualSale === null || manualSale < 1 ? null : manualSale
     : supply === null ? null : Math.ceil(supply * 5 / (3 * unit)) * unit
   const cost = money(row.costPrice)
   // The 2026 proposal uses both the VAT-only formula and an additional 10% of supply.
-  const salesVat = supply === null ? null : supply / 11
+  const salesVat = supply === null ? null : money(row.manualSalesVat) ?? supply / 11
   const deduction = supply === null ? null : supply * (row.supplyDeductionPercent === 10 ? 0.1 : 0)
   const profit = supply === null || cost === null || salesVat === null || deduction === null
     ? null : supply - cost - salesVat - deduction
@@ -145,8 +151,7 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
 
 export function createRegistrationRow(product?: CatalogProduct, optionName = ''): RegistrationRow {
   const option = product?.options.find((item) => item.name === optionName)
-  const candidates = product?.costCandidates.filter((item) => normalizeOption(item.optionName) === normalizeOption(optionName)) ?? []
-  const cost = candidates.length === 1 ? candidates[0] : undefined
+  const cost = product && resolveItemCost({ name: product.name, sourceName: product.name, optionName, internalSku: '' }, product.costCandidates)
   return {
     id: crypto.randomUUID(), templateId: '', sheetName: '', name: [product?.name ?? '', optionName].filter(Boolean).join(' '), optionName,
     internalSku: cost?.sku ?? '', costPrice: cost?.costPrice ?? null, wholesalePrice: product?.price === null || product?.price === undefined ? null : product.price + (option?.addPrice ?? 0),
@@ -157,7 +162,32 @@ export function createRegistrationRow(product?: CatalogProduct, optionName = '')
 }
 
 export function normalizeOption(value: string) {
-  return value.normalize('NFC').toLowerCase().replaceAll('세트', 'set').replace(/\s+/g, '')
+  return normalizeCostName(value).replaceAll('세트', 'set')
+}
+
+export function normalizeCostName(value: string) {
+  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+export function candidateNames(candidate: CostCandidate) {
+  return [candidate.name, ...(candidate.aliases ?? [])].map(normalizeCostName).filter(Boolean)
+}
+
+export function resolveItemCost(row: Omit<CostLookup, 'id'>, candidates: CostCandidate[]) {
+  if (row.internalSku) return candidates.find((item) => item.sku.toUpperCase() === row.internalSku.trim().toUpperCase())
+  const base = normalizeCostName(row.sourceName || row.name)
+  if (!base) return undefined
+  const option = normalizeOption(row.optionName)
+  const genericOption = !option || ['기본', '기본상품', '단품', '옵션없음'].includes(option)
+  const exactBase = candidates.filter((item) => candidateNames(item).includes(base))
+  const exactOptions = exactBase.filter((item) => normalizeOption(item.optionName) === option)
+  const hasExactCost = exactOptions.some((item) => item.costPrice !== null)
+  const matches = hasExactCost || !genericOption ? exactOptions : exactBase.filter((item) => normalizeOption(item.optionName))
+  if (matches.length === 1) return matches[0]
+  if (matches.length || row.sourceName || !genericOption) return undefined
+  // A title imported from a quote can include the option even when the option field is empty.
+  const withOption = candidates.filter((item) => item.optionName && candidateNames(item).some((name) => normalizeOption(name + item.optionName) === normalizeOption(row.name)))
+  return withOption.length === 1 ? withOption[0] : undefined
 }
 
 export function matchCatalog(row: RegistrationRow, products: CatalogProduct[]): CatalogProduct | null {
@@ -172,12 +202,12 @@ export function attachCatalog(row: RegistrationRow, product: CatalogProduct): Re
   const suffix = row.name.slice(product.name.length).trim()
   const options = product.options.filter((option) => normalizeOption(option.name) === normalizeOption(row.optionName || suffix))
   const optionName = options.length === 1 ? options[0].name : row.optionName || suffix
-  const costs = product.costCandidates.filter((candidate) => normalizeOption(candidate.optionName) === normalizeOption(optionName))
+  const cost = resolveItemCost({ ...row, sourceName: product.name, optionName }, product.costCandidates)
   return {
     ...row, sourceCode: product.code, sourceName: product.name, sourceStatus: product.status, optionName,
     // Imported supply prices and manually entered cost/wholesale prices are authoritative.
-    costPrice: row.costPrice ?? (costs.length === 1 ? costs[0].costPrice : null),
-    internalSku: row.internalSku || (costs.length === 1 ? costs[0].sku : ''),
+    costPrice: row.costPrice ?? cost?.costPrice ?? null,
+    internalSku: row.internalSku || cost?.sku || '',
     wholesalePrice: row.wholesalePrice ?? (options.length === 1 && product.price !== null ? product.price + options[0].addPrice : null),
     primaryImage: isImageUrl(row.primaryImage) ? row.primaryImage : product.thumbnails[0] ?? '',
     thumbnails: product.thumbnails, detailImages: product.detailImages,

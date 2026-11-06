@@ -1,7 +1,7 @@
-import { and, eq, ilike, ne, or, sql } from 'drizzle-orm'
+import { and, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { inventory, products } from '@/lib/db/schema'
-import { isImageUrl, money, type CatalogProduct } from './model'
+import { candidateNames, isImageUrl, money, normalizeCostName, resolveItemCost, type CatalogProduct, type CostLookup } from './model'
 import { itemNewCost } from './item-cost'
 
 type SourceProduct = {
@@ -16,18 +16,46 @@ async function sourceJson(path: string): Promise<unknown> {
   return response.json()
 }
 
-export async function findCostCandidates(userId: string, search: string, sourceNames: string[] = []) {
-  const patterns = sourceNames.length ? sourceNames.slice(0, 100) : [search]
-  if (!patterns.some(Boolean)) return []
+export async function findCostCandidates(userId: string, search: string, sourceNames: string[] = [], skus: string[] = [], includeTitleOptions = false) {
+  const names = [...new Set(sourceNames.map(normalizeCostName).filter(Boolean))].slice(0, 100)
+  const skusToFind = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))].slice(0, 100)
+  if (!search && !names.length && !skusToFind.length) return []
+  const masterName = sql<string>`${products.metadata}->'esa009m'->>'품목명'`
+  const nameColumns = [products.name, masterName, inventory.productName]
+  const normalNames = nameColumns.map((column) => sql`regexp_replace(lower(normalize(coalesce(${column}, ''), NFKC)), '[^[:alnum:]]', '', 'g')`)
+  const filters = [
+    ...(skusToFind.length ? [inArray(sql`upper(${products.internalSku})`, skusToFind)] : []),
+    ...(search ? [...nameColumns, products.internalSku].map((column) => ilike(column, `%${search}%`)) : []),
+    ...(names.length ? normalNames.map((column) => includeTitleOptions
+      ? sql`length(${column}) >= 2 AND EXISTS (SELECT 1 FROM unnest(ARRAY[${sql.join(names.map((name) => sql`${name}::text`), sql`, `)}]) AS title(name) WHERE starts_with(title.name, ${column}))`
+      : inArray(column, names)) : []),
+  ]
   const rows = await db.select({
     sku: products.internalSku,
     name: sql<string>`COALESCE(NULLIF(${products.metadata}->'esa009m'->>'품목명', ''), ${products.name})`,
+    productName: products.name,
+    inventoryNames: sql<string[]>`COALESCE(array_agg(DISTINCT ${inventory.productName}) FILTER (WHERE ${inventory.productName} IS NOT NULL), ARRAY[]::text[])`,
     metadata: products.metadata,
     optionName: sql<string>`COALESCE(NULLIF(${products.metadata}->'esa009m'->>'규격정보', ''), MAX(${inventory.optionName}), '')`,
   }).from(products).leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, userId)))
-    .where(and(eq(products.userId, userId), ne(products.status, 'deleted'), or(...patterns.flatMap((pattern) => [ilike(products.name, `%${pattern}%`), ilike(products.internalSku, `%${pattern}%`), ilike(inventory.productName, `%${pattern}%`), sql`${products.metadata}->'esa009m'->>'품목명' ILIKE ${`%${pattern}%`}`]))))
+    .where(and(eq(products.userId, userId), ne(products.status, 'deleted'), or(...filters)))
     .groupBy(products.id).limit(500)
-  return rows.map(({ metadata, ...row }) => ({ ...row, costPrice: itemNewCost(metadata) }))
+  return rows.map(({ metadata, productName, inventoryNames, ...row }) => ({
+    ...row,
+    aliases: [...new Set([productName, ...(inventoryNames ?? [])].filter((name) => name && name !== row.name))],
+    costPrice: itemNewCost(metadata),
+  }))
+}
+
+export async function lookupRegistrationCosts(userId: string, rows: CostLookup[]) {
+  const candidates = await findCostCandidates(
+    userId, '', rows.filter((row) => !row.internalSku).map((row) => row.sourceName || row.name),
+    rows.map((row) => row.internalSku), true,
+  )
+  return rows.flatMap((row) => {
+    const cost = resolveItemCost(row, candidates)
+    return cost?.costPrice == null ? [] : [{ id: row.id, internalSku: cost.sku, costPrice: cost.costPrice }]
+  })
 }
 
 async function normalizeCatalog(userId: string, sources: SourceProduct[], includeCosts = true): Promise<CatalogProduct[]> {
@@ -43,7 +71,7 @@ async function normalizeCatalog(userId: string, sources: SourceProduct[], includ
       detailImages: [...new Set(remote.length ? remote : details)],
       options: (product.options ?? []).map((option) => ({ name: option.optionName || '기본', addPrice: money(option.addPrice) ?? 0 })),
       notice: (product.productInfoNotice ?? []).filter((item) => item.label),
-      costCandidates: candidates.filter((item) => item.name.includes(product.name)).map((item) => ({ ...item, costPrice: money(item.costPrice) })),
+      costCandidates: candidates.filter((item) => candidateNames(item).includes(normalizeCostName(product.name))),
     }
   })
 }

@@ -397,7 +397,7 @@ export async function createPurchaseFundCredit(input: {
   createdBy: string
   entryType: PurchaseFundManualEntryType
   occurredOn: string
-  amountKrw: number
+  amountKrw?: number
   amountCny: number
   memo?: string | null
 }) {
@@ -406,8 +406,9 @@ export async function createPurchaseFundCredit(input: {
     throw new Error('지원하지 않는 입금 유형입니다.')
   }
   if (!isDateOnly(input.occurredOn)) throw new Error('입금일이 올바르지 않습니다.')
-  if (!Number.isFinite(input.amountKrw) || input.amountKrw <= 0) {
-    throw new Error('입금액은 0원보다 커야 합니다.')
+  const amountKrw = input.amountKrw ?? 0
+  if (!Number.isFinite(amountKrw) || amountKrw < 0) {
+    throw new Error('입금액(원화)은 0원 이상이어야 합니다.')
   }
   if (!Number.isFinite(input.amountCny) || input.amountCny < 0.01) {
     throw new Error('위안화 입금액은 0.01위안 이상이어야 합니다.')
@@ -419,7 +420,7 @@ export async function createPurchaseFundCredit(input: {
       userId: input.userId,
       entryType: input.entryType,
       occurredOn: input.occurredOn,
-      amountKrw: String(Math.round(input.amountKrw)),
+      amountKrw: String(Math.round(amountKrw)),
       amountCny: String(Math.round(input.amountCny * 100) / 100),
       memo: normalizeMemo(input.memo),
       createdBy: input.createdBy,

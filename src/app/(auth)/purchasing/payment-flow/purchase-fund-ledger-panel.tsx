@@ -246,22 +246,22 @@ export function PurchaseFundLedgerPanel({
 
       <div className="grid gap-3 md:grid-cols-3">
         <FundSummaryCard
-          label="누적 입금"
+          label="누적 입금 (위안화 기준)"
           amountKrw={summary.totalDepositedKrw}
           amountCny={summary.totalDepositedCny}
           tone="credit"
         />
         <FundSummaryCard
-          label="발주 차감"
+          label="발주 차감 (위안화 기준)"
           amountKrw={summary.totalDebitedKrw}
           amountCny={summary.totalDebitedCny}
           tone="debit"
         />
         <FundSummaryCard
-          label="현재 잔액"
+          label="현재 잔액 (위안화 기준)"
           amountKrw={summary.balanceKrw}
           amountCny={summary.balanceCny}
-          tone={summary.balanceKrw < 0 ? 'debit' : 'balance'}
+          tone={summary.balanceCny !== null && summary.balanceCny < 0 ? 'debit' : 'balance'}
         />
       </div>
 
@@ -281,9 +281,9 @@ export function PurchaseFundLedgerPanel({
               <th className="px-3 py-2 text-left font-medium">날짜</th>
               <th className="px-3 py-2 text-left font-medium">구분</th>
               <th className="px-3 py-2 text-left font-medium">내역</th>
-              <th className="px-3 py-2 text-right font-medium">입금</th>
-              <th className="px-3 py-2 text-right font-medium">발주 차감</th>
-              <th className="px-3 py-2 text-right font-medium">잔액</th>
+              <th className="px-3 py-2 text-right font-medium">입금 (元)</th>
+              <th className="px-3 py-2 text-right font-medium">발주 차감 (元)</th>
+              <th className="px-3 py-2 text-right font-medium">잔액 (元)</th>
               <th className="w-12 px-2 py-2"><span className="sr-only">관리</span></th>
             </tr>
           </thead>
@@ -303,13 +303,21 @@ export function PurchaseFundLedgerPanel({
                 </td>
                 <td className="max-w-[360px] px-3 py-2.5 text-muted-foreground">{entry.detail}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-emerald-700">
-                  {entry.isManualCredit ? formatKrw(entry.amountKrw) : '-'}
+                  {entry.isManualCredit ? (
+                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
+                  ) : '-'}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-red-700">
-                  {entry.entryType === 'purchase_debit' ? formatKrw(entry.amountKrw) : '-'}
+                  {entry.entryType === 'purchase_debit' ? (
+                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
+                  ) : '-'}
                 </td>
-                <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums ${entry.balanceKrw < 0 ? 'text-red-700' : ''}`}>
-                  {formatKrw(entry.balanceKrw)}
+                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
+                  <LedgerAmount
+                    amountCny={entry.balanceCny}
+                    amountKrw={entry.balanceKrw}
+                    className={entry.balanceCny !== null && entry.balanceCny < 0 ? 'text-red-700' : 'text-foreground'}
+                  />
                 </td>
                 <td className="px-2 py-2 text-right">
                   {entry.isManualCredit ? (
@@ -336,13 +344,13 @@ export function PurchaseFundLedgerPanel({
       </details>
 
       {(
-        (summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0)
+        (summary.totalDepositedCny === 0 && summary.totalDebitedCny !== null && summary.totalDebitedCny > 0)
         || summary.missingCnyDepositCount > 0
         || summary.missingCostOrderCount > 0
       ) ? (
         <aside aria-label="정산 참고" className="border-t pt-3">
           <div className="space-y-1.5 text-[11px] leading-4">
-            {summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0 ? (
+            {summary.totalDepositedCny === 0 && summary.totalDebitedCny !== null && summary.totalDebitedCny > 0 ? (
               <p className="rounded-sm border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-blue-800">
                 기존 발주 차감만 먼저 불러왔습니다. 실제 잔액부터 관리하려면 `입금내역 추가`에서 `기초잔액`을 한 번 등록해주세요.
               </p>
@@ -383,11 +391,30 @@ function FundSummaryCard({
   return (
     <div className="rounded-md border bg-muted/20 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>{formatKrw(amountKrw)}</p>
-      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>
         {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
       </p>
+      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatKrw(amountKrw)}</p>
     </div>
+  )
+}
+
+function LedgerAmount({
+  amountCny,
+  amountKrw,
+  className = '',
+}: {
+  amountCny: number | null
+  amountKrw: number
+  className?: string
+}) {
+  return (
+    <span className={className}>
+      <span className="block font-medium">
+        {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
+      </span>
+      <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{formatKrw(amountKrw)}</span>
+    </span>
   )
 }
 

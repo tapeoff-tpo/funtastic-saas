@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { AppShell } from '@/components/layout/app-shell'
-import { getProfile } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { getUserAuthorization } from '@/lib/auth/menu-access'
 
 export default async function AuthLayout({
   children,
@@ -17,8 +16,8 @@ export default async function AuthLayout({
   }
 
   // Block deactivated accounts (defense-in-depth alongside Supabase ban)
-  const [profile, menuAccess] = await Promise.all([getProfile(user.id), getUserMenuAccess(user.id)])
-  if (profile?.deactivatedAt) {
+  const authorization = await getUserAuthorization(user.id)
+  if (authorization?.deactivatedAt) {
     const supabase = await createClient()
     await supabase.auth.signOut()
     redirect('/login?reason=deactivated')
@@ -28,6 +27,6 @@ export default async function AuthLayout({
     redirect('/change-password')
   }
 
-  if (!menuAccess) redirect('/login')
-  return <AppShell menuAccess={menuAccess}>{children}</AppShell>
+  if (!authorization?.access) redirect('/login')
+  return <AppShell menuAccess={authorization.access}>{children}</AppShell>
 }

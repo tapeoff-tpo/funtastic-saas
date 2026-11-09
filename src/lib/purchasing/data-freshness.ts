@@ -39,16 +39,7 @@ export async function recordDataRefresh(input: {
 }
 
 export async function getPurchasingDataFreshness(userId: string) {
-  await ensureDataRefreshEvents()
-  const result = await db.execute<{
-    recommendationCalculatedAt: string | null
-    targetStockMonths: string | null
-    rawDataAppliedAt: string | null
-    domesticInventoryAt: string | null
-    chinaInventoryAt: string | null
-    outboundRawAt: string | null
-    outboundReflectionAt: string | null
-  }>(sql`
+  const query = sql`
     SELECT
       (
         SELECT MAX(NULLIF(raw_data->>'evaluatedAt', '')::timestamptz)
@@ -85,9 +76,23 @@ export async function getPurchasingDataFreshness(userId: string) {
         SELECT MAX(applied_at) FROM outbound_reflection_batches
         WHERE user_id = ${userId}::uuid
       )::text AS "outboundReflectionAt"
-  `)
-  const rows = Array.isArray(result) ? result : result.rows ?? []
-  return rows[0] ?? {
+  `
+  const read = () => db.execute<{
+    recommendationCalculatedAt: string | null
+    targetStockMonths: string | null
+    rawDataAppliedAt: string | null
+    domesticInventoryAt: string | null
+    chinaInventoryAt: string | null
+    outboundRawAt: string | null
+    outboundReflectionAt: string | null
+  }>(query)
+  const result = await read().catch(async (error: unknown) => {
+    const failure = error as { code?: string; cause?: { code?: string } }
+    if (failure.code !== '42P01' && failure.cause?.code !== '42P01') throw error
+    await ensureDataRefreshEvents()
+    return read()
+  })
+  return result[0] ?? {
     recommendationCalculatedAt: null,
     targetStockMonths: null,
     rawDataAppliedAt: null,

@@ -271,7 +271,14 @@ export async function getPurchasingItemLabelDataBySku(userId: string, skus: stri
   for (const skuChunk of chunks(uniqueSkus, 500)) {
     const rows = await db.select({
       internalSku: products.internalSku,
-      metadata: products.metadata,
+      metadata: sql<Record<string, unknown>>`jsonb_build_object(
+        'esa009m', jsonb_build_object(
+          '중국어 상품명', ${products.metadata}->'esa009m'->'중국어 상품명',
+          '한국창고기준 위치', ${products.metadata}->'esa009m'->'한국창고기준 위치'
+        )
+      ) || CASE WHEN ${products.metadata} ? 'chineseProductName'
+        THEN jsonb_build_object('chineseProductName', ${products.metadata}->'chineseProductName')
+        ELSE '{}'::jsonb END`,
     }).from(products).where(and(
       eq(products.userId, userId),
       inArray(products.internalSku, skuChunk),

@@ -23,30 +23,36 @@ describe('China outbound selection reads', () => {
   it('loads package and receipt allocations together and keeps all reads workspace scoped', async () => {
     let releaseBoxes!: (rows: unknown[]) => void
     const waitingBoxes = new Promise<unknown[]>((resolve) => { releaseBoxes = resolve })
+    let releaseShipment!: (rows: unknown[]) => void
+    const waitingShipment = new Promise<unknown[]>((resolve) => { releaseShipment = resolve })
     const started = new Set<unknown>()
     const clauses: SQL[] = []
-    mocks.select.mockImplementation(() => ({ from: (table: unknown) => ({ where: (condition: SQL) => {
+    mocks.select.mockImplementation(() => ({ from: (table: unknown) => {
+      const builder = { leftJoin: (_table: unknown, condition: SQL) => { clauses.push(condition); return builder }, where: (condition: SQL) => {
       started.add(table); clauses.push(condition)
       const rows = table === chinaOutboundShipments ? [{ id: 'shipment', originWarehouseCode: 'default' }]
-        : table === chinaOutboundShipmentItems ? [{ id: 'item', inventoryId: 'inventory', originWarehouseCode: 'snapshot' }]
+        : table === chinaOutboundShipmentItems ? [{ id: 'item', inventoryId: 'inventory', originWarehouseCode: 'snapshot', onHandQuantity: 12, availableQuantity: 2, inventoryWarehouseCode: 'renamed' }]
           : table === saasChinaInventory ? [{ id: 'inventory', warehouseCode: 'renamed', onHandQuantity: 12, availableQuantity: 2 }]
             : table === saasChinaShipmentPurchaseAllocations ? [{ shipmentItemId: 'item', inspectionBoxes: [{ receiptBoxId: 'receipt' }] }]
               : table === chinaOutboundBoxItems ? [{ id: 'allocation', shipmentItemId: 'item', boxId: 'box', quantity: 10 }, { id: 'orphan', shipmentItemId: 'foreign', boxId: 'box', quantity: 1 }]
                 : []
-      const result = table === chinaOutboundBoxes ? waitingBoxes : Promise.resolve(rows)
+      const result = table === chinaOutboundBoxes ? waitingBoxes : table === chinaOutboundShipments ? waitingShipment : Promise.resolve(rows)
       return Object.assign(result, { orderBy: () => result, limit: async (count: number) => (await result).slice(0, count) })
-    } }) }))
+    } }; return builder } }))
     const loading = getChinaOutboundShipmentDetail({ userId: 'owner', shipmentId: 'shipment' })
     await vi.waitFor(() => {
       expect(started.has(chinaOutboundBoxItems)).toBe(true)
       expect(started.has(saasChinaShipmentPurchaseAllocations)).toBe(true)
       expect(started.has(chinaOutboundPallets)).toBe(true)
     })
+    releaseShipment([{ id: 'shipment', originWarehouseCode: 'default' }])
     releaseBoxes([{ id: 'box' }])
     const detail = await loading
     expect(detail?.boxItems).toHaveLength(1)
     expect(detail?.items[0]).toMatchObject({ warehouseCode: 'snapshot', onHandQuantity: 12, availableQuantity: 2, receiptPacking: [{ receiptBoxId: 'receipt' }] })
     for (const clause of clauses) expect(new PgDialect().sqlToQuery(clause).params).toContain('owner')
     expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(started.has(saasChinaInventory)).toBe(false)
+    expect(mocks.select).toHaveBeenCalledTimes(6)
   })
 })

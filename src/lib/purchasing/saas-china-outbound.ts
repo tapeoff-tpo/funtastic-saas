@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { nextAvailableBoxNumbers, planInspectionPacking, type InspectionPackingPiece } from './china-outbound-auto-packing'
 import {
@@ -1046,24 +1046,29 @@ export async function listChinaOutboundShipments(
 
 export async function getChinaOutboundShipmentDetail(input: { userId: string; shipmentId: string }) {
   await ensureSaasChinaOutboundSchema()
-  const [shipment] = await db
-    .select()
-    .from(chinaOutboundShipments)
-    .where(and(
-      eq(chinaOutboundShipments.userId, input.userId),
-      eq(chinaOutboundShipments.id, input.shipmentId),
-    ))
-    .limit(1)
-
-  if (!shipment) return null
-
-  const [items, pallets, boxes, packingAllocations, allBoxItems] = await Promise.all([
+  // All reads are scoped independently; package reads need not wait for the
+  // shipment header or a second inventory lookup to finish first.
+  const [shipmentRows, items, pallets, boxes, packingAllocations, allBoxItems] = await Promise.all([
     db
       .select()
+      .from(chinaOutboundShipments)
+      .where(and(
+        eq(chinaOutboundShipments.userId, input.userId),
+        eq(chinaOutboundShipments.id, input.shipmentId),
+      ))
+      .limit(1),
+    db
+      .select({
+        ...getTableColumns(chinaOutboundShipmentItems),
+        onHandQuantity: saasChinaInventory.onHandQuantity,
+        availableQuantity: saasChinaInventory.availableQuantity,
+        inventoryWarehouseCode: saasChinaInventory.warehouseCode,
+      })
       .from(chinaOutboundShipmentItems)
+      .leftJoin(saasChinaInventory, and(eq(saasChinaInventory.id, chinaOutboundShipmentItems.inventoryId), eq(saasChinaInventory.userId, input.userId)))
       .where(and(
         eq(chinaOutboundShipmentItems.userId, input.userId),
-        eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
+        eq(chinaOutboundShipmentItems.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundShipmentItems.sortOrder), asc(chinaOutboundShipmentItems.createdAt)),
     db
@@ -1071,7 +1076,7 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .from(chinaOutboundPallets)
       .where(and(
         eq(chinaOutboundPallets.userId, input.userId),
-        eq(chinaOutboundPallets.shipmentId, shipment.id),
+        eq(chinaOutboundPallets.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
     db
@@ -1079,31 +1084,18 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .from(chinaOutboundBoxes)
       .where(and(
         eq(chinaOutboundBoxes.userId, input.userId),
-        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        eq(chinaOutboundBoxes.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
     db.select({ shipmentItemId: saasChinaShipmentPurchaseAllocations.shipmentItemId, inspectionBoxes: saasChinaShipmentPurchaseAllocations.inspectionBoxes })
-      .from(saasChinaShipmentPurchaseAllocations).where(and(eq(saasChinaShipmentPurchaseAllocations.userId, input.userId), eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipment.id))),
+      .from(saasChinaShipmentPurchaseAllocations).where(and(eq(saasChinaShipmentPurchaseAllocations.userId, input.userId), eq(saasChinaShipmentPurchaseAllocations.shipmentId, input.shipmentId))),
     db.select().from(chinaOutboundBoxItems)
-      .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, shipment.id)))
+      .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId)))
       .orderBy(asc(chinaOutboundBoxItems.sortOrder), asc(chinaOutboundBoxItems.createdAt)),
   ])
 
-  // New shipment rows carry their warehouse snapshot. Keep the inventory
-  // lookup only as a compatibility fallback for rows created before that
-  // column was introduced.
-  const inventoryIds = [...new Set(items.map((item) => item.inventoryId))]
-  const inventoryRows = inventoryIds.length === 0
-    ? []
-    : await db
-      .select({ id: saasChinaInventory.id, warehouseCode: saasChinaInventory.warehouseCode, onHandQuantity: saasChinaInventory.onHandQuantity, availableQuantity: saasChinaInventory.availableQuantity })
-      .from(saasChinaInventory)
-      .where(and(
-        eq(saasChinaInventory.userId, input.userId),
-        inArray(saasChinaInventory.id, inventoryIds),
-      ))
-  const warehouseCodeByInventoryId = new Map(inventoryRows.map((inventory) => [inventory.id, inventory.warehouseCode]))
-  const stockById = new Map(inventoryRows.map((inventory) => [inventory.id, inventory]))
+  const shipment = shipmentRows[0]
+  if (!shipment) return null
   const boxIds = new Set(boxes.map((box) => box.id))
   const itemIds = new Set(items.map((item) => item.id))
   const boxItems = allBoxItems.filter((row) => boxIds.has(row.boxId) && itemIds.has(row.shipmentItemId))
@@ -1112,13 +1104,11 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
 
   return {
     shipment,
-    items: items.map((item) => ({
+    items: items.map(({ inventoryWarehouseCode, ...item }) => ({
       ...item,
-      onHandQuantity: stockById.get(item.inventoryId)?.onHandQuantity ?? null,
-      availableQuantity: stockById.get(item.inventoryId)?.availableQuantity ?? null,
       receiptPacking: packingByItem.get(item.id) ?? [],
       warehouseCode: item.originWarehouseCode
-        || warehouseCodeByInventoryId.get(item.inventoryId)
+        || inventoryWarehouseCode
         || shipment.originWarehouseCode,
     })),
     pallets,

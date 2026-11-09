@@ -638,7 +638,10 @@ export async function PurchasingOrdersView({
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
                     return (
-                      <tr key={item.id ?? item.sku} className={`border-t align-middle ${isOverdueRow ? 'bg-red-50/80' : ''}`}>
+                      <tr
+                        key={item.id ?? item.sku}
+                        className={`border-t align-middle ${!isRequestedStatus ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
+                      >
                       <td className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         {item.id ? <PurchaseRowCheckbox id={item.id} /> : null}
                       </td>
@@ -773,7 +776,7 @@ export async function PurchasingOrdersView({
                         <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
                       {isRequestedStatus ? null : (
-                        <td className="px-3 py-2 align-middle">
+                        <td data-purchase-plan className="px-3 py-2 align-middle">
                           {item.id ? (
                             <>
                               <PurchasePlanFieldsV2

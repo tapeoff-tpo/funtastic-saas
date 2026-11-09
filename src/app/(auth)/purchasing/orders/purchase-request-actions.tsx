@@ -2751,12 +2751,12 @@ export function PurchasePlanFieldsV2({
   return (
     <form
       onSubmit={save}
-      className={`grid min-w-0 items-start gap-1.5 ${showTrackingNumber
+      className={`grid min-w-0 items-end gap-1.5 ${showTrackingNumber
         ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
         : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}
     >
       <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
+        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
         <Input
           name="supplierOrderNumber"
           defaultValue={supplierOrderNumber ?? ''}
@@ -2766,7 +2766,7 @@ export function PurchasePlanFieldsV2({
       </label>
       {showTrackingNumber ? (
         <div className="space-y-1">
-          <div className="flex items-center gap-1">
+          <div className="flex h-5 items-center gap-1 whitespace-nowrap">
             <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
             {savedTrackingNumber ? (
               <a
@@ -2791,7 +2791,7 @@ export function PurchasePlanFieldsV2({
         </div>
       ) : null}
       <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
+        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
         <Input
           name={dateField}
           type="date"
@@ -2800,7 +2800,7 @@ export function PurchasePlanFieldsV2({
         />
       </label>
       <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">구매방법</span>
+        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">구매방법</span>
         <div className="flex items-center gap-1">
           <select
             value={methodMode}

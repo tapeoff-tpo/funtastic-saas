@@ -4,7 +4,6 @@ import { eq, and, or, ilike, desc, asc, count, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
 import { getSkuOutgoingMetrics } from '@/lib/purchasing/items'
-import { normalizeStoredInventoryProductNames } from './product-name-cleanup'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -17,12 +16,6 @@ export async function getInventoryList(
   userId: string,
   filters: InventoryFilters = {},
 ) {
-  try {
-    await normalizeStoredInventoryProductNames(userId)
-  } catch (error) {
-    console.error('[inventory] legacy product-name cleanup failed:', error)
-  }
-
   const page = filters.page ?? 1
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
   const offset = (page - 1) * pageSize
@@ -93,7 +86,7 @@ export async function getInventoryList(
     db.select({ total: count() }).from(countQuery.as('matching_inventory_skus')),
   ])
   const outgoingMetricsBySku = pageRows.length > 0
-    ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku))
+    ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku), undefined, 'summary')
     : new Map()
 
   return {

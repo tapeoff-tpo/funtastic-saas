@@ -746,6 +746,7 @@ export async function getSkuOutgoingMetrics(
   userId: string,
   skus: string[],
   now = new Date(),
+  detail: 'full' | 'summary' = 'full',
 ): Promise<Map<string, PurchasingItemOutgoingMetrics>> {
   const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
   if (uniqueSkus.length === 0) return new Map()
@@ -758,33 +759,8 @@ export async function getSkuOutgoingMetrics(
     nextMonthDate,
   } = getOutgoingMetricWindows(now)
   const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
-  const [storedRows, result] = await Promise.all([
-    db.select({
-      internalSku: products.internalSku,
-      metadata: products.metadata,
-    }).from(products).where(and(
-      eq(products.userId, userId),
-      inArray(products.internalSku, uniqueSkus),
-    )),
-    db.execute<PurchasingItemOutgoingMetricRow>(sql`
-      SELECT
-        line.sku AS "internalSku",
-        COALESCE(SUM(
-          CASE
-            WHEN line.shipment_date >= ${currentMonthDate}::date
-             AND line.shipment_date < ${nextMonthDate}::date
-            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
-            ELSE 0
-          END
-        ), 0)::numeric AS "currentMonthOutgoing",
-        (COALESCE(SUM(
-          CASE
-            WHEN line.shipment_date >= ${previousThreeMonthDate}::date
-             AND line.shipment_date < ${currentMonthDate}::date
-            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
-            ELSE 0
-          END
-        ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+  // Inventory displays two totals; purchasing recommendations also need order signals.
+  const detailColumns = detail === 'full' ? sql`
         , COALESCE(SUM(
           CASE
             WHEN line.shipment_date >= ${twoMonthsAgoDate}::date
@@ -815,6 +791,38 @@ export async function getSkuOutgoingMetrics(
           THEN line.quantity
           ELSE 0
         END), 0)::numeric AS "currentMonthLargestOrderQuantity"
+  ` : sql``
+  const [storedRows, result] = await Promise.all([
+    db.select({
+      internalSku: products.internalSku,
+      metadata: sql<unknown>`jsonb_build_object(
+        'purchasingOutgoingMetrics', ${products.metadata}->'purchasingOutgoingMetrics',
+        'purchasingRollingAverageBaseline', ${products.metadata}->'purchasingRollingAverageBaseline'
+      )`,
+    }).from(products).where(and(
+      eq(products.userId, userId),
+      inArray(products.internalSku, uniqueSkus),
+    )),
+    db.execute<PurchasingItemOutgoingMetricRow>(sql`
+      SELECT
+        line.sku AS "internalSku",
+        COALESCE(SUM(
+          CASE
+            WHEN line.shipment_date >= ${currentMonthDate}::date
+             AND line.shipment_date < ${nextMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+            ELSE 0
+          END
+        ), 0)::numeric AS "currentMonthOutgoing",
+        (COALESCE(SUM(
+          CASE
+            WHEN line.shipment_date >= ${previousThreeMonthDate}::date
+             AND line.shipment_date < ${currentMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+            ELSE 0
+          END
+        ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+        ${detailColumns}
       FROM outbound_reflection_lines line
       WHERE line.user_id = ${userId}::uuid
         AND line.reflection_status = 'applied'
@@ -831,11 +839,13 @@ export async function getSkuOutgoingMetrics(
       {
         currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
         threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
-        recentCompletedMonthOutgoing: [
-          cleanOutgoingNumber(row.twoMonthsAgoOutgoing),
-          cleanOutgoingNumber(row.previousMonthOutgoing),
-        ],
-        ...currentMonthOrderSignals(row),
+        ...(detail === 'full' ? {
+          recentCompletedMonthOutgoing: [
+            cleanOutgoingNumber(row.twoMonthsAgoOutgoing),
+            cleanOutgoingNumber(row.previousMonthOutgoing),
+          ],
+          ...currentMonthOrderSignals(row),
+        } : {}),
       },
     ]),
   )

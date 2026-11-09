@@ -43,7 +43,7 @@ describe('inventory pagination', () => {
     expect(mocks.cleanup).not.toHaveBeenCalled()
   })
 
-  it('passes the searched historical month to the metric query while retaining live stock', async () => {
+  it('reads only the selected historical snapshot and passes its month to outgoing metrics', async () => {
     mocks.query.mockImplementation(async (query: string) => ({ rows: query.startsWith('select count(*)')
       ? [[1]]
       : [['id', 'id', 'SKU-1', '상품', null, '1창고', 'A', 10, 10, 0, 0, 10, '2026-11-09T00:00:00Z']] }))
@@ -53,5 +53,12 @@ describe('inventory pagination', () => {
     const result = await getInventoryList('owner', { referenceMonth: '2026-01' })
     expect(mocks.outgoing).toHaveBeenLastCalledWith('owner', ['SKU-1'], new Date('2025-12-31T15:00:00Z'), 'historical-summary')
     expect(result.items[0].availableStock).toBe(10)
+    for (const [query, params] of mocks.query.mock.calls as [string, unknown[]][]) {
+      expect(query).toContain('"inventory_month_end_stock"')
+      expect(query).toContain('"reference_month"')
+      expect(params).toContain('owner')
+      expect(params.some((value) => value === '2025-12' || value === '2026-01')).toBe(true)
+      expect(query).not.toContain('from "inventory"')
+    }
   })
 })

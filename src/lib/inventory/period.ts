@@ -11,3 +11,7 @@ export function inventoryPeriodDate(month: string | undefined) {
   const match = month?.match(/^(\d{4})-(0[1-9]|1[0-2])$/)
   return match ? getInventoryPeriod(Number(match[1]), Number(match[2])).referenceDate : undefined
 }
+
+export function isHistoricalInventoryMonth(month: string | undefined, now = new Date()) {
+  return Boolean(inventoryPeriodDate(month) && month! < getInventoryPeriod(undefined, undefined, now).key)
+}

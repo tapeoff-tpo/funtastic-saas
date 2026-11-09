@@ -7,13 +7,14 @@ import { db } from '@/lib/db'
 import { inventory } from '@/lib/db/schema'
 import { eq, isNotNull, and } from 'drizzle-orm'
 import { getInventoryList } from '@/lib/inventory/queries'
+import { inventoryMonthEndImports, inventoryMonthEndStock } from '@/lib/inventory/snapshot-schema'
 import { InventoryTable } from './inventory-table'
 import type { InventoryFilters } from '@/lib/inventory/types'
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { ProductFlowNav } from '@/components/product-flow-nav'
-import { getInventoryPeriod } from '@/lib/inventory/period'
+import { getInventoryPeriod, isHistoricalInventoryMonth } from '@/lib/inventory/period'
 
 export const metadata: Metadata = {
   title: '재고관리',
@@ -50,6 +51,8 @@ export default async function InventoryPage({
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const period = getInventoryPeriod(params.year, params.month)
+  const historical = isHistoricalInventoryMonth(period.key)
+  const stock = historical ? inventoryMonthEndStock : inventory
 
   const filters: InventoryFilters = {
     referenceMonth: period.key,
@@ -66,7 +69,7 @@ export default async function InventoryPage({
 
   // 검색 버튼 누르기 전엔 재고 fetch 하지 않음. 창고 목록은 항상 로드 (필터 select 채우기 위함).
   const searched = !!params.searched
-  const [{ items, total }, warehouseZoneRows] = await Promise.all([
+  const [{ items, total }, warehouseZoneRows, snapshotRows] = await Promise.all([
     searched
       ? getInventoryList(workspaceUserId, filters)
       : Promise.resolve({
@@ -74,9 +77,13 @@ export default async function InventoryPage({
           total: 0,
         }),
     db
-      .selectDistinct({ warehouseZone: inventory.warehouseZone })
-      .from(inventory)
-      .where(and(eq(inventory.userId, workspaceUserId), isNotNull(inventory.warehouseZone))),
+      .selectDistinct({ warehouseZone: stock.warehouseZone })
+      .from(stock)
+      .where(and(eq(stock.userId, workspaceUserId), isNotNull(stock.warehouseZone), historical ? eq(inventoryMonthEndStock.referenceMonth, period.key) : undefined)),
+    historical
+      ? db.select({ month: inventoryMonthEndImports.referenceMonth }).from(inventoryMonthEndImports)
+        .where(and(eq(inventoryMonthEndImports.userId, workspaceUserId), eq(inventoryMonthEndImports.referenceMonth, period.key))).limit(1)
+      : Promise.resolve([]),
   ])
 
   const warehouseZones = warehouseZoneRows
@@ -99,6 +106,7 @@ export default async function InventoryPage({
       {/* Table */}
       <InventoryTable
         referenceMonth={period.key}
+        snapshotAvailable={!historical || snapshotRows.length > 0}
         searched={searched}
         data={items}
         total={total}

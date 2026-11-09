@@ -19,7 +19,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import { normalizeInventoryProductName } from '@/lib/inventory/product-name'
-import { getInventoryPeriod } from '@/lib/inventory/period'
+import { getInventoryPeriod, isHistoricalInventoryMonth } from '@/lib/inventory/period'
 
 export interface InventoryRow {
   id: string
@@ -40,6 +40,7 @@ export interface InventoryRow {
 
 interface InventoryTableProps {
   referenceMonth?: string
+  snapshotAvailable?: boolean
   data: InventoryRow[]
   total: number
   page: number
@@ -81,6 +82,7 @@ function StockBreakdownCell({ row }: { row: InventoryRow }) {
 
 export function InventoryTable({
   referenceMonth,
+  snapshotAvailable = true,
   data,
   total,
   page,
@@ -140,21 +142,25 @@ export function InventoryTable({
 
   // 상품 등록 관리에서 넘어온 SKU는 검색 결과가 준비되는 즉시 이력까지 연다.
   useEffect(() => {
-    if (!focusSku || handledFocusSku === focusSku) return
+    if (!focusSku || handledFocusSku === focusSku || isHistoricalInventoryMonth(referenceMonth)) return
     const row = data.find((item) => item.sku === focusSku)
     if (!row) return
     setHandledFocusSku(focusSku)
     setHistoryDialog({ open: true, inventoryId: row.id, sku: row.sku })
-  }, [data, focusSku, handledFocusSku])
+  }, [data, focusSku, handledFocusSku, referenceMonth])
 
   const currentPeriod = getInventoryPeriod()
   const appliedPeriod = referenceMonth ?? currentPeriod.key
+  const historical = isHistoricalInventoryMonth(appliedPeriod)
+  const stockLabel = historical ? `${appliedPeriod} 월말재고` : '현재고(실시간)'
   const [dlYear, setDlYear] = useState(Number(appliedPeriod.slice(0, 4)))
   const [dlMonth, setDlMonth] = useState(Number(appliedPeriod.slice(5, 7)))
   const yearOptions = Array.from(new Set([currentPeriod.year - 2, currentPeriod.year - 1, currentPeriod.year, dlYear])).sort()
   useEffect(() => {
     setDlYear(Number(appliedPeriod.slice(0, 4)))
     setDlMonth(Number(appliedPeriod.slice(5, 7)))
+    setRowSelection({})
+    setMobileDetailRow(null)
   }, [appliedPeriod])
 
   const submitSearch = useCallback(() => {
@@ -303,7 +309,7 @@ export function InventoryTable({
       size: 360,
       header: () => (
         <button type="button" onClick={() => handleSort('availableStock')} className="w-full hover:text-foreground">
-          <span className="block pb-0.5">현재고(실시간){getSortIndicator('availableStock')}</span>
+          <span className="block pb-0.5">{stockLabel}{getSortIndicator('availableStock')}</span>
           <span className="grid grid-cols-4 font-normal">
             <span>합계</span>
             <span>1창고</span>
@@ -337,7 +343,7 @@ export function InventoryTable({
       size: 110,
       header: () => (
         <button type="button" onClick={() => handleSort('updatedAt')} className="hover:text-foreground">
-          최종수정날짜{getSortIndicator('updatedAt')}
+          {historical ? '재고기준일' : '최종수정날짜'}{getSortIndicator('updatedAt')}
         </button>
       ),
       cell: (info) => new Date(info.getValue()).toLocaleDateString('ko-KR'),
@@ -377,11 +383,12 @@ export function InventoryTable({
     }),
   ]
 
+  const visibleColumns = historical ? columns.filter((column) => column.id !== 'actions') : columns
   const pageCount = Math.ceil(total / pageSize)
   const [columnSizing, setColumnSizing] = useColumnSizing('inventory-table-v3')
   const table = useReactTable({
     data,
-    columns,
+    columns: visibleColumns,
     getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
     manualSorting: true,
@@ -564,12 +571,12 @@ export function InventoryTable({
           <button type="button" onClick={() => downloadExcel(false)} className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
             일괄 다운
           </button>
-          {mode === 'inventory' && (
+          {mode === 'inventory' && !historical && (
             <button type="button" onClick={() => setExcelDialogOpen(true)} className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
               엑셀 업로드
             </button>
           )}
-          {mode === 'adjustments' ? (
+          {historical ? null : mode === 'adjustments' ? (
             <>
               <a href="/api/inventory/adjustments/template" className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted">
                 엑셀양식 다운로드
@@ -596,7 +603,7 @@ export function InventoryTable({
           <div className="space-y-1 md:hidden">
             {data.length === 0 ? (
               <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
-                재고 항목이 없습니다.
+                {historical && !snapshotAvailable ? `${appliedPeriod} 월말 재고 자료가 등록되지 않았습니다.` : '재고 항목이 없습니다.'}
               </div>
             ) : (
               data.map((row) => {
@@ -645,8 +652,8 @@ export function InventoryTable({
                 <tbody>
                   {table.getRowModel().rows.length === 0 ? (
                     <tr>
-                      <td colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                        재고 항목이 없습니다.
+                      <td colSpan={visibleColumns.length} className="h-32 text-center text-muted-foreground">
+                        {historical && !snapshotAvailable ? `${appliedPeriod} 월말 재고 자료가 등록되지 않았습니다.` : '재고 항목이 없습니다.'}
                       </td>
                     </tr>
                   ) : (
@@ -704,7 +711,7 @@ export function InventoryTable({
                   <dd className="mt-0.5 break-words">{mobileDetailRow.sectorCode || '-'}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">현재고 합계(실시간)</dt>
+                  <dt className="text-xs text-muted-foreground">{stockLabel} 합계</dt>
                   <dd className={`mt-0.5 font-semibold tabular-nums ${mobileDetailRow.availableStock <= 0 ? 'text-red-600' : ''}`}>
                     {formatNumber(mobileDetailRow.availableStock)}개
                   </dd>
@@ -724,12 +731,12 @@ export function InventoryTable({
                   <dd className="mt-0.5 tabular-nums">{formatNumber(mobileDetailRow.threeMonthAverageOutgoing, 1)}개</dd>
                 </div>
                 <div className="col-span-2">
-                  <dt className="text-xs text-muted-foreground">최종수정날짜</dt>
+                  <dt className="text-xs text-muted-foreground">{historical ? '재고기준일' : '최종수정날짜'}</dt>
                   <dd className="mt-0.5">{new Date(mobileDetailRow.updatedAt).toLocaleDateString('ko-KR')}</dd>
                 </div>
               </dl>
 
-              <div className="mt-5 flex justify-end gap-2 border-t pt-4">
+              {!historical && <div className="mt-5 flex justify-end gap-2 border-t pt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -757,7 +764,7 @@ export function InventoryTable({
                 >
                   이력 보기
                 </button>
-              </div>
+              </div>}
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>

@@ -9,10 +9,21 @@ try {
   if (process.env.VERCEL_ENV === 'production') {
     const seedDirectory = new URL('./inventory-month-end-seeds/', import.meta.url)
     const files = (await readdir(seedDirectory)).filter((name) => name.endsWith('.json')).sort()
+    // Match getWorkspaceUserId: canonical account first, then the established
+    // operational owner when the original account has been renamed/removed.
     const [owner] = await sql`
-      SELECT id FROM user_profiles WHERE deactivated_at IS NULL
-        AND (email ILIKE 'admin123%' OR display_name ILIKE 'admin123%')
-      ORDER BY created_at ASC LIMIT 1
+      SELECT id FROM (
+        (SELECT id, 0 AS priority, created_at FROM user_profiles WHERE deactivated_at IS NULL
+          AND (email ILIKE 'admin123%' OR display_name ILIKE 'admin123%') ORDER BY created_at ASC LIMIT 1)
+        UNION ALL
+        (SELECT user_id AS id, 1 AS priority, created_at FROM marketplace_connections ORDER BY created_at ASC LIMIT 1)
+        UNION ALL
+        (SELECT user_id AS id, 2 AS priority, created_at FROM orders ORDER BY created_at ASC LIMIT 1)
+        UNION ALL
+        (SELECT user_id AS id, 3 AS priority, created_at FROM products ORDER BY created_at ASC LIMIT 1)
+        UNION ALL
+        (SELECT id, 4 AS priority, created_at FROM user_profiles WHERE role = 'super_admin' AND deactivated_at IS NULL ORDER BY created_at ASC LIMIT 1)
+      ) owners ORDER BY priority, created_at ASC LIMIT 1
     `
     if (!owner) throw new Error('공유 워크스페이스 소유자를 찾을 수 없습니다.')
     for (const file of files) {

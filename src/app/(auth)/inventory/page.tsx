@@ -13,6 +13,7 @@ import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { ProductFlowNav } from '@/components/product-flow-nav'
+import { getInventoryPeriod } from '@/lib/inventory/period'
 
 export const metadata: Metadata = {
   title: '재고관리',
@@ -31,6 +32,8 @@ const searchParamsCache = createSearchParamsCache({
   focusSku: parseAsString,
   // 검색 트리거 sentinel — 이게 없으면 페이지 진입 직후엔 fetch 하지 않는다.
   searched: parseAsString,
+  year: parseAsInteger,
+  month: parseAsInteger,
 })
 
 export default async function InventoryPage({
@@ -46,8 +49,10 @@ export default async function InventoryPage({
     return null
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const period = getInventoryPeriod(params.year, params.month)
 
   const filters: InventoryFilters = {
+    referenceMonth: period.key,
     page: params.page,
     pageSize: params.pageSize,
     search: params.search ?? undefined,
@@ -93,6 +98,7 @@ export default async function InventoryPage({
 
       {/* Table */}
       <InventoryTable
+        referenceMonth={period.key}
         searched={searched}
         data={items}
         total={total}

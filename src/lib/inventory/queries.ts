@@ -4,6 +4,7 @@ import { eq, and, or, ilike, desc, asc, count, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
 import { getSkuOutgoingMetrics } from '@/lib/purchasing/items'
+import { getInventoryPeriod, inventoryPeriodDate } from './period'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -85,8 +86,10 @@ export async function getInventoryList(
     pageQuery.orderBy(sortDirection(sortColumn)).limit(pageSize).offset(offset),
     db.select({ total: count() }).from(countQuery.as('matching_inventory_skus')),
   ])
+  const referenceDate = inventoryPeriodDate(filters.referenceMonth)
+  const historicalMonth = referenceDate && filters.referenceMonth !== getInventoryPeriod().key
   const outgoingMetricsBySku = pageRows.length > 0
-    ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku), undefined, 'summary')
+    ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku), referenceDate, historicalMonth ? 'historical-summary' : 'summary')
     : new Map()
 
   return {

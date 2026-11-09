@@ -38,4 +38,13 @@ describe('outgoing queries for inventory search', () => {
     const result = await getSkuOutgoingMetrics('owner', ['SKU-1'], new Date('2026-11-09T00:00:00Z'), 'summary')
     expect(result.get('SKU-1')).toEqual({ currentMonthOutgoing: 20, threeMonthAverageOutgoing: 74 })
   })
+
+  it('uses historical ledger averages instead of copying an undated live manual average into every month', async () => {
+    const result = await getSkuOutgoingMetrics('owner', ['SKU-1'], new Date('2026-10-01T00:00:00+09:00'), 'historical-summary')
+    expect(result.get('SKU-1')).toEqual({ currentMonthOutgoing: 20, threeMonthAverageOutgoing: 11 })
+    metadata = { purchasingRollingAverageBaseline: { referenceMonth: '2026-10', threeMonthAverageOutgoing: 74 } }
+    const matching = await getSkuOutgoingMetrics('owner', ['SKU-1'], new Date('2026-10-01T00:00:00+09:00'), 'historical-summary')
+    expect(matching.get('SKU-1')?.threeMonthAverageOutgoing).toBe(11)
+    expect(mocks.select).not.toHaveBeenCalled()
+  })
 })

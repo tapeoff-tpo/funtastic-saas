@@ -746,7 +746,7 @@ export async function getSkuOutgoingMetrics(
   userId: string,
   skus: string[],
   now = new Date(),
-  detail: 'full' | 'summary' = 'full',
+  detail: 'full' | 'summary' | 'historical-summary' = 'full',
 ): Promise<Map<string, PurchasingItemOutgoingMetrics>> {
   const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
   if (uniqueSkus.length === 0) return new Map()
@@ -793,7 +793,7 @@ export async function getSkuOutgoingMetrics(
         END), 0)::numeric AS "currentMonthLargestOrderQuantity"
   ` : sql``
   const [storedRows, result] = await Promise.all([
-    db.select({
+    detail === 'historical-summary' ? Promise.resolve([]) : db.select({
       internalSku: products.internalSku,
       metadata: sql<unknown>`jsonb_build_object(
         'purchasingOutgoingMetrics', ${products.metadata}->'purchasingOutgoingMetrics',

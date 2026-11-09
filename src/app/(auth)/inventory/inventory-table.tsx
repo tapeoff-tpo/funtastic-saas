@@ -19,6 +19,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import { normalizeInventoryProductName } from '@/lib/inventory/product-name'
+import { getInventoryPeriod } from '@/lib/inventory/period'
 
 export interface InventoryRow {
   id: string
@@ -38,6 +39,7 @@ export interface InventoryRow {
 }
 
 interface InventoryTableProps {
+  referenceMonth?: string
   data: InventoryRow[]
   total: number
   page: number
@@ -78,6 +80,7 @@ function StockBreakdownCell({ row }: { row: InventoryRow }) {
 }
 
 export function InventoryTable({
+  referenceMonth,
   data,
   total,
   page,
@@ -118,6 +121,8 @@ export function InventoryTable({
     page: parseAsInteger.withDefault(1),
     warehouseZone: parseAsString,
     searched: parseAsString,
+    year: parseAsInteger,
+    month: parseAsInteger,
   }, { shallow: false })
 
   const [isPending, startTransition] = useTransition()
@@ -142,6 +147,16 @@ export function InventoryTable({
     setHistoryDialog({ open: true, inventoryId: row.id, sku: row.sku })
   }, [data, focusSku, handledFocusSku])
 
+  const currentPeriod = getInventoryPeriod()
+  const appliedPeriod = referenceMonth ?? currentPeriod.key
+  const [dlYear, setDlYear] = useState(Number(appliedPeriod.slice(0, 4)))
+  const [dlMonth, setDlMonth] = useState(Number(appliedPeriod.slice(5, 7)))
+  const yearOptions = Array.from(new Set([currentPeriod.year - 2, currentPeriod.year - 1, currentPeriod.year, dlYear])).sort()
+  useEffect(() => {
+    setDlYear(Number(appliedPeriod.slice(0, 4)))
+    setDlMonth(Number(appliedPeriod.slice(5, 7)))
+  }, [appliedPeriod])
+
   const submitSearch = useCallback(() => {
     const maxStock = maxStockInput.trim() === '' ? null : Number(maxStockInput)
     if (maxStock !== null && (!Number.isFinite(maxStock) || maxStock < 0)) {
@@ -156,9 +171,11 @@ export function InventoryTable({
         maxStock,
         page: 1,
         searched: '1',
+        year: dlYear,
+        month: dlMonth,
       })
     })
-  }, [maxStockInput, optionCodeInput, productCodeInput, searchInput, setFilters])
+  }, [dlMonth, dlYear, maxStockInput, optionCodeInput, productCodeInput, searchInput, setFilters])
 
   const handleResetFilters = useCallback(() => {
     setSearchInput('')
@@ -195,11 +212,6 @@ export function InventoryTable({
     if (filters.sort !== columnId) return ''
     return filters.order === 'asc' ? ' ↑' : ' ↓'
   }
-
-  const now = new Date()
-  const [dlYear, setDlYear] = useState(now.getFullYear())
-  const [dlMonth, setDlMonth] = useState(now.getMonth() + 1)
-  const yearOptions = [now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear()]
 
   const downloadExcel = useCallback((selectedOnly: boolean) => {
     const params = new URLSearchParams({ year: String(dlYear), month: String(dlMonth) })
@@ -291,7 +303,7 @@ export function InventoryTable({
       size: 360,
       header: () => (
         <button type="button" onClick={() => handleSort('availableStock')} className="w-full hover:text-foreground">
-          <span className="block pb-0.5">현재고{getSortIndicator('availableStock')}</span>
+          <span className="block pb-0.5">현재고(실시간){getSortIndicator('availableStock')}</span>
           <span className="grid grid-cols-4 font-normal">
             <span>합계</span>
             <span>1창고</span>
@@ -304,7 +316,7 @@ export function InventoryTable({
     }),
     columnHelper.accessor('currentMonthOutgoing', {
       size: 110,
-      header: '당월 출고수량',
+      header: `${appliedPeriod} 출고수량`,
       cell: (info) => <span className="tabular-nums">{formatNumber(info.getValue())}</span>,
     }),
     columnHelper.accessor('threeMonthAverageOutgoing', {
@@ -400,6 +412,17 @@ export function InventoryTable({
         className="rounded-md border bg-muted/30 p-2"
       >
         <div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center md:gap-x-3 md:gap-y-1.5">
+          <div className="flex min-w-0 items-center gap-1 text-xs">
+            <span className="shrink-0 text-muted-foreground">조회 월</span>
+            <select aria-label="조회 연도" value={dlYear} onChange={(event) => setDlYear(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
+              {yearOptions.map((year) => <option key={year} value={year}>{year}년</option>)}
+            </select>
+            <select aria-label="조회 월" value={dlMonth} onChange={(event) => setDlMonth(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>{month}월</option>
+              ))}
+            </select>
+          </div>
           <label className="flex min-w-0 items-center gap-1 text-xs">
             <span className="text-muted-foreground">창고</span>
             <select
@@ -535,14 +558,6 @@ export function InventoryTable({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 lg:flex-nowrap">
-          <select value={dlYear} onChange={(event) => setDlYear(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
-            {yearOptions.map((year) => <option key={year} value={year}>{year}년</option>)}
-          </select>
-          <select value={dlMonth} onChange={(event) => setDlMonth(Number(event.target.value))} className="shrink-0 rounded border px-1.5 py-1 text-xs">
-            {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
-              <option key={month} value={month}>{month}월</option>
-            ))}
-          </select>
           <button type="button" onClick={() => downloadExcel(true)} disabled={selectedCount === 0} className="hidden whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex">
             선택 다운({selectedCount})
           </button>
@@ -689,7 +704,7 @@ export function InventoryTable({
                   <dd className="mt-0.5 break-words">{mobileDetailRow.sectorCode || '-'}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">현재고 합계</dt>
+                  <dt className="text-xs text-muted-foreground">현재고 합계(실시간)</dt>
                   <dd className={`mt-0.5 font-semibold tabular-nums ${mobileDetailRow.availableStock <= 0 ? 'text-red-600' : ''}`}>
                     {formatNumber(mobileDetailRow.availableStock)}개
                   </dd>
@@ -701,7 +716,7 @@ export function InventoryTable({
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">당월 출고수량</dt>
+                  <dt className="text-xs text-muted-foreground">{appliedPeriod} 출고수량</dt>
                   <dd className="mt-0.5 tabular-nums">{formatNumber(mobileDetailRow.currentMonthOutgoing)}개</dd>
                 </div>
                 <div>

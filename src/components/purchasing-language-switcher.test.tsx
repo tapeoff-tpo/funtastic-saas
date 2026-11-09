@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from './purchasing-language-switcher'
 
 function GlobalTranslationFixture({
@@ -57,6 +57,7 @@ describe('PurchasingLanguageSwitcher', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     document.querySelectorAll('[data-sonner-toaster]').forEach((element) => element.remove())
     document.documentElement.lang = 'ko'
   })
@@ -111,6 +112,27 @@ describe('PurchasingLanguageSwitcher', () => {
 
     expect(document.documentElement.lang).toBe('ko')
     expect(toaster).toHaveTextContent('저장되었습니다.')
+  })
+
+  it('translates only changed nodes after a large table is already in Chinese', async () => {
+    render(<div data-app-translate><PurchasingLanguageSwitcher /><div data-testid="table">{Array.from({ length: 800 }, (_, i) => <p key={i}>저장</p>)}</div><div data-testid="updates" /></div>)
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => expect(screen.getByTestId('table').firstChild).toHaveTextContent('保存'))
+    const walker = vi.spyOn(document, 'createTreeWalker')
+    const button = document.createElement('button')
+    button.textContent = '삭제'
+    screen.getByTestId('updates').appendChild(button)
+    await waitFor(() => expect(button).toHaveTextContent('删除'))
+    expect(walker.mock.calls.length).toBeGreaterThan(0)
+    expect(walker.mock.calls.every(([root]) => root === button)).toBe(true)
+    const before = walker.mock.calls.length
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(walker).toHaveBeenCalledTimes(before)
+    button.textContent = '저장'
+    await waitFor(() => expect(button).toHaveTextContent('保存'))
+    fireEvent.click(screen.getByRole('button', { name: '한국어' }))
+    await waitFor(() => expect(button).toHaveTextContent('저장'))
+    expect(screen.getByTestId('table').firstChild).toHaveTextContent('저장')
   })
 
   it('translates dynamic SaaS inventory protection messages without translating product data', async () => {

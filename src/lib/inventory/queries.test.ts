@@ -1,5 +1,6 @@
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('./product-name-cleanup', () => ({ normalizeStoredInventoryProductNames: vi.fn() }))
 import { buildWarehouseSelectionHaving } from './queries'
 
 describe('inventory warehouse selection', () => {

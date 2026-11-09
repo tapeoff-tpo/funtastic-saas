@@ -34,7 +34,7 @@ export default async function ChannelAnalyticsPage({ searchParams }: PageProps) 
     start: params.start,
     end: params.end,
   })
-  const data = await getSalesAnalytics(workspaceUserId, period)
+  const data = await getSalesAnalytics(workspaceUserId, period, 'channels')
 
   return (
     <div className="space-y-6">

@@ -30,7 +30,7 @@ export default async function AnalyticsOverviewPage({ searchParams }: PageProps)
     start: params.start,
     end: params.end,
   })
-  const data = await getSalesAnalytics(workspaceUserId, period)
+  const data = await getSalesAnalytics(workspaceUserId, period, 'overview')
   const claimTotal = data.claims.reduce((sum, row) => sum + row.count, 0)
   const salesChange = data.previous.grossSales > 0 ? (data.summary.grossSales - data.previous.grossSales) / data.previous.grossSales : null
 

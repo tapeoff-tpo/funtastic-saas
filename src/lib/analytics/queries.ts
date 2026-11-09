@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 
 export type AnalyticsGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'custom'
@@ -135,24 +135,32 @@ export async function getLatestAnalyticsDate(userId: string) {
 export type SalesAnalytics = Awaited<ReturnType<typeof getSalesAnalytics>>
 
 /** Uses reflected outbound lines; excluded rows are known duplicate reflections. */
-export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod) {
+export type SalesAnalyticsView = 'all' | 'overview' | 'channels' | 'products'
+const viewQueries: Record<Exclude<SalesAnalyticsView, 'all'>, ReadonlySet<string>> = {
+  overview: new Set(['summary', 'previous', 'claims', 'drops', 'rises']),
+  channels: new Set(['summary', 'channels', 'products', 'coverage']),
+  products: new Set(['summary', 'performance', 'coverage']),
+}
+
+export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod, view: SalesAnalyticsView = 'all') {
+  const query = (name: string, statement: SQL) => view === 'all' || viewQueries[view].has(name) ? db.execute(statement) : Promise.resolve([])
   const baseWhere = sql`l.user_id = ${userId} and ${eligibleStatus} and l.claim_type is null and l.shipment_date >= ${period.startDate} and l.shipment_date < ${period.endDate}`
   const previousWhere = sql`l.user_id = ${userId} and ${eligibleStatus} and l.claim_type is null and l.shipment_date >= ${period.previousStartDate} and l.shipment_date < ${period.previousEndDate}`
 
   const [summaryRows, previousRows, channelRows, productRows, productPerformanceRows, coverageRows, claimRows, specialRows, channelProductDropRows, channelProductRiseRows, slowStockRows, incomingCoverageRows] = await Promise.all([
-    db.execute(sql`
+    query('summary', sql`
       with order_rows as (select coalesce(l.source_order_number, l.source_key) as order_key, coalesce(sum(l.sales_amount), 0) as sales_amount, max(l.shipping_fee) as shipping_fee from outbound_reflection_lines l where ${baseWhere} group by coalesce(l.source_order_number, l.source_key))
       select count(*)::int as orders, coalesce(sum(sales_amount), 0)::text as gross_sales, coalesce(sum(shipping_fee), 0)::text as paid_shipping, count(shipping_fee)::int as shipping_value_orders, count(*) filter (where shipping_fee > 0)::int as shipping_nonzero_orders from order_rows
     `) as unknown as Promise<SummaryRow[]>,
-    db.execute(sql`
+    query('previous', sql`
       with order_rows as (select coalesce(l.source_order_number, l.source_key) as order_key, coalesce(sum(l.sales_amount), 0) as sales_amount from outbound_reflection_lines l where ${previousWhere} group by coalesce(l.source_order_number, l.source_key))
       select count(*)::int as orders, coalesce(sum(sales_amount), 0)::text as gross_sales, '0'::text as paid_shipping, 0::int as shipping_value_orders, 0::int as shipping_nonzero_orders from order_rows
     `) as unknown as Promise<SummaryRow[]>,
-    db.execute(sql`
+    query('channels', sql`
       with order_rows as (select coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류') as marketplace, coalesce(l.source_order_number, l.source_key) as order_key, coalesce(sum(l.sales_amount), 0) as sales_amount, max(l.shipping_fee) as shipping_fee from outbound_reflection_lines l where ${baseWhere} group by coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류'), coalesce(l.source_order_number, l.source_key))
       select marketplace, count(*)::int as orders, coalesce(sum(sales_amount), 0)::text as sales, coalesce(sum(shipping_fee), 0)::text as paid_shipping, count(shipping_fee)::int as shipping_value_orders from order_rows group by marketplace order by sum(sales_amount) desc
     `) as unknown as Promise<ChannelRow[]>,
-    db.execute(sql`
+    query('products', sql`
       select coalesce(l.sku, '미매핑') as sku,
         coalesce(max(direct_product.name), max(variant_product.name), max(l.product_name), '이름 없음') as product_name,
         coalesce(sum(l.quantity), 0)::int as units,
@@ -166,7 +174,7 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       where ${baseWhere}
       group by l.sku order by sum(l.sales_amount) desc limit 30
     `) as unknown as Promise<ProductRow[]>,
-    db.execute(sql`
+    query('performance', sql`
       with current_products as (
         select coalesce(l.sku, '미매핑') as sku, max(l.product_name) as product_name, coalesce(sum(l.quantity), 0)::int as units, coalesce(sum(l.sales_amount), 0) as sales
         from outbound_reflection_lines l where ${baseWhere}
@@ -189,7 +197,7 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       group by coalesce(c.sku, p.sku), c.product_name, p.product_name, direct_product.name, variant_product.name, c.units, c.sales, p.sales
       order by greatest(coalesce(c.sales, 0), coalesce(p.sales, 0)) desc limit 100
     `) as unknown as Promise<ProductPerformanceRow[]>,
-    db.execute(sql`
+    query('coverage', sql`
       select count(*)::int as line_count,
         count(coalesce(${worksCost('direct_product')}, ${worksCost('variant_product')}))::int as cost_known_lines
       from outbound_reflection_lines l
@@ -198,14 +206,14 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       left join products variant_product on variant_product.id = pv.product_id and variant_product.user_id = ${userId}
       where ${baseWhere}
     `) as unknown as Promise<CoverageRow[]>,
-    db.execute(sql`
+    query('claims', sql`
       select l.claim_type as type, l.reflection_status as status, count(*)::int as count from outbound_reflection_lines l where l.user_id = ${userId} and ${eligibleStatus} and l.claim_type is not null and l.shipment_date >= ${period.startDate} and l.shipment_date < ${period.endDate} group by l.claim_type, l.reflection_status
     `) as unknown as Promise<ClaimRow[]>,
-    db.execute(sql`
+    query('special', sql`
       with order_rows as (select coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류') as marketplace, coalesce(l.source_order_number, l.source_key) as order_key, coalesce(sum(l.sales_amount), 0) as sales_amount from outbound_reflection_lines l where ${baseWhere} group by coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류'), coalesce(l.source_order_number, l.source_key))
       select marketplace, count(*)::int as orders, coalesce(sum(sales_amount), 0)::text as sales from order_rows where marketplace in ('로켓배송', '대량') group by marketplace
     `) as unknown as Promise<SpecialRow[]>,
-    db.execute(sql`
+    query('drops', sql`
       with current_sales as (
         select coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류') as marketplace, coalesce(l.sku, '미매핑') as sku, max(l.product_name) as product_name, coalesce(sum(l.sales_amount), 0) as sales
         from outbound_reflection_lines l where ${baseWhere}
@@ -220,7 +228,7 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       where p.sales > coalesce(c.sales, 0) and p.sales >= 10000
       order by p.sales - coalesce(c.sales, 0) desc limit 8
     `) as unknown as Promise<ChannelProductDropRow[]>,
-    db.execute(sql`
+    query('rises', sql`
       with current_sales as (
         select coalesce(nullif(trim(l.marketplace_name), ''), l.marketplace_id, '미분류') as marketplace, coalesce(l.sku, '미매핑') as sku, max(l.product_name) as product_name, coalesce(sum(l.sales_amount), 0) as sales
         from outbound_reflection_lines l where ${baseWhere}
@@ -235,7 +243,7 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       where c.sales > coalesce(p.sales, 0) and c.sales >= 10000
       order by c.sales - coalesce(p.sales, 0) desc limit 8
     `) as unknown as Promise<ChannelProductRiseRow[]>,
-    db.execute(sql`
+    query('slowStock', sql`
       with stock as (
         select i.sku, max(i.product_name) as product_name, coalesce(sum(i.available_stock), 0)::int as available_stock
         from inventory i where i.user_id = ${userId} group by i.sku
@@ -254,7 +262,7 @@ export async function getSalesAnalytics(userId: string, period: AnalyticsPeriod)
       where s.available_stock >= 10 and li.last_incoming_at < (${period.endDate}::date - interval '30 days') and coalesce(ssi.sold_since_incoming, 0) <= greatest(1, s.available_stock * 0.1)
       order by s.available_stock desc limit 3
     `) as unknown as Promise<SlowStockRow[]>,
-    db.execute(sql`
+    query('incomingCoverage', sql`
       select count(distinct i.sku)::int as sku_count, count(*)::int as history_count, max(h.created_at)::text as latest_incoming_at
       from inventory_history h join inventory i on i.id = h.inventory_id
       where h.user_id = ${userId} and h.adjustment_reason = 'incoming'

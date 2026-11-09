@@ -88,9 +88,9 @@ export async function getInventoryList(
     countQuery.having(havingClause)
   }
 
-  const [pageRows, countRows] = await Promise.all([
+  const [pageRows, [countRow]] = await Promise.all([
     pageQuery.orderBy(sortDirection(sortColumn)).limit(pageSize).offset(offset),
-    countQuery,
+    db.select({ total: count() }).from(countQuery.as('matching_inventory_skus')),
   ])
   const outgoingMetricsBySku = pageRows.length > 0
     ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku))
@@ -105,7 +105,7 @@ export async function getInventoryList(
         threeMonthAverageOutgoing: outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
       }
     }),
-    total: countRows.length,
+    total: Number(countRow?.total ?? 0),
   }
 }
 

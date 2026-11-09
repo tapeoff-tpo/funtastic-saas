@@ -36,50 +36,26 @@ export const getProfile = cache(async (userId: string): Promise<UserProfile | nu
  * through that owner id so staff see the same synced orders after logging in.
  */
 async function resolveWorkspaceUserId(userId: string): Promise<string> {
-  const profile = await getProfile(userId)
-
-  // Keep the existing owner precedence, but avoid serial database round trips
-  // on every server-rendered page.
-  const [admin123Rows, connectionRows, orderRows, productRows] = await Promise.all([
-    db
-      .select({ id: userProfiles.id })
-      .from(userProfiles)
-      .where(and(
-        isNull(userProfiles.deactivatedAt),
-        or(
-          ilike(userProfiles.email, 'admin123%'),
-          ilike(userProfiles.displayName, 'admin123%'),
-        ),
-      ))
-      .orderBy(asc(userProfiles.createdAt))
-      .limit(1),
-    db
-      .select({ id: marketplaceConnections.userId })
-      .from(marketplaceConnections)
-      .orderBy(asc(marketplaceConnections.createdAt))
-      .limit(1),
-    db
-      .select({ id: orders.userId })
-      .from(orders)
-      .orderBy(asc(orders.createdAt))
-      .limit(1),
-    db
-      .select({ id: products.userId })
-      .from(products)
-      .orderBy(asc(products.createdAt))
-      .limit(1),
+  // Resolve the canonical owner first. The fallback scans are unnecessary in
+  // the normal workspace and can otherwise scan large order/product tables.
+  const [canonicalOwner] = await db.select({ id: userProfiles.id }).from(userProfiles)
+    .where(and(isNull(userProfiles.deactivatedAt), or(ilike(userProfiles.email, 'admin123%'), ilike(userProfiles.displayName, 'admin123%'))))
+    .orderBy(asc(userProfiles.createdAt)).limit(1)
+  if (canonicalOwner?.id) return canonicalOwner.id
+  const [connectionRows, orderRows, productRows] = await Promise.all([
+    db.select({ id: marketplaceConnections.userId }).from(marketplaceConnections).orderBy(asc(marketplaceConnections.createdAt)).limit(1),
+    db.select({ id: orders.userId }).from(orders).orderBy(asc(orders.createdAt)).limit(1),
+    db.select({ id: products.userId }).from(products).orderBy(asc(products.createdAt)).limit(1),
   ])
-
-  const admin123Owner = admin123Rows[0]
   const connectionOwner = connectionRows[0]
   const orderOwner = orderRows[0]
   const productOwner = productRows[0]
 
-  if (admin123Owner?.id) return admin123Owner.id
   if (connectionOwner?.id) return connectionOwner.id
   if (orderOwner?.id) return orderOwner.id
   if (productOwner?.id) return productOwner.id
 
+  const profile = await getProfile(userId)
   if (profile?.createdBy) return profile.createdBy
 
   if (profile?.role === 'super_admin') return userId

@@ -975,9 +975,9 @@ function getTranslationRoots() {
   return roots.filter((root, index) => !roots.some((candidate, candidateIndex) => candidateIndex !== index && candidate.contains(root)))
 }
 
-function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
+function applyLanguage(root: Node, language: PurchasingLanguage) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const textNodes: Text[] = []
+  const textNodes: Text[] = root.nodeType === Node.TEXT_NODE ? [root as Text] : []
   while (walker.nextNode()) {
     textNodes.push(walker.currentNode as Text)
   }
@@ -994,7 +994,7 @@ function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
 
   const elements = root instanceof Element
     ? [root, ...Array.from(root.querySelectorAll('*'))]
-    : Array.from(root.querySelectorAll('*'))
+    : root instanceof Document ? Array.from(root.querySelectorAll('*')) : []
 
   for (const element of elements) {
     if (shouldSkip(element)) continue
@@ -1061,21 +1061,44 @@ export function PurchasingLanguageSwitcher() {
 
     sync()
     let syncTimer: number | undefined
-    const scheduleSync = () => {
+    const dirtyNodes = new Set<Node>()
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'childList') {
+          for (const node of record.addedNodes) dirtyNodes.add(node)
+        } else dirtyNodes.add(record.target)
+      }
+      if (!dirtyNodes.size) return
       if (syncTimer !== undefined) return
       syncTimer = window.setTimeout(() => {
         syncTimer = undefined
-        sync()
+        const changed = [...dirtyNodes].filter((node) => node.isConnected)
+        const changedSet = new Set(changed)
+        dirtyNodes.clear()
+        // Translation writes are synchronous. Disconnect while applying them so
+        // our own text/attribute changes never schedule another full scan.
+        observer.disconnect()
+        try {
+          for (const node of changed) {
+            let ancestor = node.parentNode
+            while (ancestor && !changedSet.has(ancestor)) ancestor = ancestor.parentNode
+            if (ancestor) continue
+            const element = node instanceof Element ? node : node.parentElement
+            const scopes = [GLOBAL_TRANSLATION_SCOPE, EXPLICIT_TRANSLATION_SCOPE, TOAST_TRANSLATION_SCOPE].join(',')
+            if (!element || (!element.closest(scopes) && !element.querySelector(scopes))) continue
+            applyLanguage(node, language)
+          }
+        } finally { observe() }
       }, 0)
-    }
-    const observer = new MutationObserver(scheduleSync)
-    observer.observe(document.body, {
+    })
+    const observe = () => observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: [...ATTRIBUTE_NAMES, 'data-no-translate'],
+      attributeFilter: [...ATTRIBUTE_NAMES, 'data-no-translate', 'data-app-translate', 'data-purchasing-translate', 'data-sonner-toaster', 'role'],
     })
+    observe()
     return () => {
       observer.disconnect()
       if (syncTimer !== undefined) window.clearTimeout(syncTimer)

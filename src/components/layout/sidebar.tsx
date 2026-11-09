@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { useIntentPrefetch } from './use-intent-prefetch'
+import { useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import {
   ShoppingCart,
   ArrowRightLeft,
@@ -200,10 +201,9 @@ interface SidebarProps {
 
 export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps = {}) {
   const pathname = usePathname()
-  const router = useRouter()
+  const intent = useIntentPrefetch()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
   const access = useMenuAccess()
-  const prefetchedHrefs = useRef(new Set<string>())
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
 
@@ -247,14 +247,6 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
     return section.items.some((item) => isItemActive(item.href))
   }
 
-  function prefetchItem(href: string) {
-    if (prefetchedHrefs.current.has(href)) return
-    prefetchedHrefs.current.add(href)
-    router.prefetch(href, {
-      onInvalidate: () => prefetchedHrefs.current.delete(href),
-    })
-  }
-
   function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
     const Icon = item.icon
     const active = isItemActive(item.href)
@@ -271,9 +263,12 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           href={item.href}
           prefetch={false}
           onClick={() => onNavigate?.()}
-          onMouseEnter={() => prefetchItem(item.href)}
-          onFocus={() => prefetchItem(item.href)}
-          onTouchStart={() => prefetchItem(item.href)}
+          onMouseEnter={() => intent.prepare(item.href)}
+          onFocus={() => intent.prepare(item.href)}
+          onMouseLeave={intent.cancel}
+          onBlur={intent.cancel}
+          onTouchEnd={intent.cancel}
+          onTouchStart={() => intent.prepare(item.href)}
           className={`flex flex-1 items-center font-medium ${
             mobile
               ? 'min-h-11 gap-3 px-3 py-2 text-sm'

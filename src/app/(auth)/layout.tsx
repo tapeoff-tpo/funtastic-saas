@@ -17,7 +17,7 @@ export default async function AuthLayout({
   }
 
   // Block deactivated accounts (defense-in-depth alongside Supabase ban)
-  const profile = await getProfile(user.id)
+  const [profile, menuAccess] = await Promise.all([getProfile(user.id), getUserMenuAccess(user.id)])
   if (profile?.deactivatedAt) {
     const supabase = await createClient()
     await supabase.auth.signOut()
@@ -28,7 +28,6 @@ export default async function AuthLayout({
     redirect('/change-password')
   }
 
-  const menuAccess = await getUserMenuAccess(user.id)
   if (!menuAccess) redirect('/login')
   return <AppShell menuAccess={menuAccess}>{children}</AppShell>
 }

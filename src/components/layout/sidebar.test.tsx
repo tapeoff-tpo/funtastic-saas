@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Sidebar } from './sidebar'
 
 const prefetch = vi.hoisted(() => vi.fn())
@@ -19,24 +19,27 @@ vi.mock('./sidebar-menu-order', () => ({
 }))
 
 describe('Sidebar navigation prefetch', () => {
-  beforeEach(() => prefetch.mockReset())
+  beforeEach(() => { prefetch.mockReset(); vi.useFakeTimers() })
+  afterEach(() => vi.useRealTimers())
 
-  it('re-fetches an expired route on hover instead of disabling prefetch forever', async () => {
+  it('waits for intent and warms again after expiry', () => {
     render(<Sidebar />)
     const link = screen.getByRole('link', { name: '대시보드' })
+    fireEvent.mouseEnter(link); fireEvent.focus(link)
+    expect(prefetch).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(120))
+    expect(prefetch).toHaveBeenCalledExactlyOnceWith('/analytics/overview')
+    act(() => vi.advanceTimersByTime(15_000))
     fireEvent.mouseEnter(link)
-    fireEvent.focus(link)
-    expect(prefetch).toHaveBeenCalledTimes(1)
-    const [href, options] = prefetch.mock.calls[0]
-    expect(href).toBe('/dashboard')
-    act(() => options.onInvalidate())
-    fireEvent.mouseEnter(link)
+    act(() => vi.advanceTimersByTime(120))
     expect(prefetch).toHaveBeenCalledTimes(2)
   })
 
-  it('starts loading a mobile destination when it is touched', () => {
-    render(<Sidebar mobile />)
-    fireEvent.touchStart(screen.getByRole('link', { name: '대시보드' }))
-    expect(prefetch).toHaveBeenCalledWith('/dashboard', expect.objectContaining({ onInvalidate: expect.any(Function) }))
+  it('does not load routes when the pointer briefly crosses them', () => {
+    render(<Sidebar />)
+    const link = screen.getByRole('link', { name: '대시보드' })
+    fireEvent.mouseEnter(link); fireEvent.mouseLeave(link)
+    act(() => vi.advanceTimersByTime(200))
+    expect(prefetch).not.toHaveBeenCalled()
   })
 })

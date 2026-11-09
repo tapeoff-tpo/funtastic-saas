@@ -143,8 +143,8 @@ function PurchaseFlowTotalLink({
         </p>
       </div>
       <div className="shrink-0 sm:text-right">
-        <p className="text-xl font-semibold tabular-nums">₩ {formatCost(summary.totalCostKrw, 0)}</p>
-        <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">元 {formatCost(summary.totalCostYuan, 2)}</p>
+        <p className="text-xl font-semibold tabular-nums">元 {formatCost(summary.totalCostYuan, 2)}</p>
+        <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">₩ {formatCost(summary.totalCostKrw, 0)}</p>
       </div>
     </PaymentFlowPendingLink>
   )
@@ -203,9 +203,9 @@ function PurchaseFlowCard({
         </div>
       </div>
       <div className="mt-2 text-xl font-semibold tabular-nums">
-        ₩ {formatCost(summary.totalCostKrw, 0)}
+        元 {formatCost(summary.totalCostYuan, 2)}
       </div>
-      <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">元 {formatCost(summary.totalCostYuan, 2)}</div>
+      <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">₩ {formatCost(summary.totalCostKrw, 0)}</div>
       <p className="mt-1 text-[11px] text-muted-foreground">
         {description}
         {hasMissingCost

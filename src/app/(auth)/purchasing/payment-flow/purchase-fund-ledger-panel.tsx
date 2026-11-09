@@ -249,18 +249,32 @@ export function PurchaseFundLedgerPanel({
           label="누적 입금 (위안화 기준)"
           amountKrw={summary.totalDepositedKrw}
           amountCny={summary.totalDepositedCny}
+          unknownReason={summary.missingCnyDepositCount > 0
+            ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
+            : null}
           tone="credit"
         />
         <FundSummaryCard
           label="발주 차감 (위안화 기준)"
           amountKrw={summary.totalDebitedKrw}
           amountCny={summary.totalDebitedCny}
+          unknownReason={summary.missingCostOrderCount > 0
+            ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+            : null}
           tone="debit"
         />
         <FundSummaryCard
           label="현재 잔액 (위안화 기준)"
           amountKrw={summary.balanceKrw}
           amountCny={summary.balanceCny}
+          unknownReason={[
+            summary.missingCnyDepositCount > 0
+              ? `위안화 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
+              : null,
+            summary.missingCostOrderCount > 0
+              ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+              : null,
+          ].filter(Boolean).join(' · ') || null}
           tone={summary.balanceCny !== null && summary.balanceCny < 0 ? 'debit' : 'balance'}
         />
       </div>
@@ -358,10 +372,10 @@ export function PurchaseFundLedgerPanel({
             {summary.missingCnyDepositCount > 0 || summary.missingCostOrderCount > 0 ? (
               <p className="rounded-sm border border-amber-100 bg-amber-50/50 px-2 py-1.5 text-amber-800">
                 {summary.missingCnyDepositCount > 0
-                  ? `위안화 금액을 입력하지 않은 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 위안화 잔액은 표시하지 않습니다. `
+                  ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 누적 입금액과 잔액을 확정할 수 없습니다. `
                   : null}
                 {summary.missingCostOrderCount > 0
-                  ? `원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건은 확인된 금액만 차감되어 있습니다.`
+                  ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건이 있어 발주 차감액과 잔액을 확정할 수 없습니다. 확인된 금액만 장부에 차감했습니다.`
                   : null}
               </p>
             ) : null}
@@ -376,11 +390,13 @@ function FundSummaryCard({
   label,
   amountKrw,
   amountCny,
+  unknownReason,
   tone,
 }: {
   label: string
   amountKrw: number
   amountCny: number | null
+  unknownReason: string | null
   tone: 'credit' | 'debit' | 'balance'
 }) {
   const color = tone === 'credit'
@@ -395,6 +411,9 @@ function FundSummaryCard({
         {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
       </p>
       <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatKrw(amountKrw)}</p>
+      {amountCny === null && unknownReason ? (
+        <p className="mt-1 text-[11px] leading-4 text-amber-700">{unknownReason}</p>
+      ) : null}
     </div>
   )
 }

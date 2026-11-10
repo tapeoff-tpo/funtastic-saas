@@ -194,7 +194,10 @@ function ChinaShipmentsBoardContent({
   for (const item of availableInventory) {
     availableQuantityByWarehouse.set(item.warehouseCode, (availableQuantityByWarehouse.get(item.warehouseCode) ?? 0) + item.availableQuantity)
   }
-  const warehouseOptions = [...availableQuantityByWarehouse.keys()]
+  const warehouseOptions = [...new Set([
+    ...outboundWarehouses.map((warehouse) => warehouse.warehouseCode),
+    ...inventoryItems.map((item) => item.warehouseCode),
+  ])]
     .sort((left, right) => left.localeCompare(right, 'ko-KR', { numeric: true }))
   const selectedWarehouseInventory = availableInventory.filter((item) => selectedWarehouseCodes.includes(item.warehouseCode))
   const allWarehouseSelected = warehouseOptions.length > 0 && warehouseOptions.every((warehouseCode) => selectedWarehouseCodes.includes(warehouseCode))
@@ -331,6 +334,7 @@ function ChinaShipmentsBoardContent({
                     <span className="text-xs tabular-nums text-muted-foreground">{(availableQuantityByWarehouse.get(warehouseCode) ?? 0).toLocaleString('ko-KR')}개</span>
                   </label>
                 ))}
+                {warehouseOptions.length === 0 && <p className="text-sm text-muted-foreground">등록된 출고 창고가 없습니다.</p>}
               </div>
             </section>
 
@@ -363,7 +367,11 @@ function ChinaShipmentsBoardContent({
                     ))}
                   </div>
                 </>
-              ) : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
+              ) : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">
+                {selectedWarehouseCodes.length > 0
+                  ? '선택한 창고에 작업 가능한 SaaS 재고가 없습니다.'
+                  : '출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.'}
+              </p>}
             </section>
             <div className="flex justify-end"><button type="submit" disabled={isPending || !destinationName} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 중국출고요청 만들기</button></div>
           </form>

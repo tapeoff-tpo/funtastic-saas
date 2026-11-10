@@ -580,6 +580,35 @@ describe('ChinaShipmentsBoard', () => {
     })))
   })
 
+  it('shows configured stock locations before they have available inventory', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate
+      outboundWarehouses={[
+        { warehouseCode: '중국창고', isDefault: true, hasActiveInventory: false },
+        { warehouseCode: '쿠팡창고', isDefault: false, hasActiveInventory: false },
+        { warehouseCode: '대량창고', isDefault: false, hasActiveInventory: false },
+      ]} />)
+    const warehouses = within(screen.getByRole('group', { name: '출고 재고 위치 선택' }))
+    expect(warehouses.getAllByRole('checkbox')).toHaveLength(3)
+    expect(warehouses.getAllByText('0개')).toHaveLength(3)
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /중국창고/ }))
+    expect(screen.getByText('선택한 창고에 작업 가능한 SaaS 재고가 없습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('spinbutton', { name: '이번 출고' })).not.toBeInTheDocument()
+  })
+
+  it('keeps fully reserved inventory locations visible and lists active warehouses once', () => {
+    const stock = [
+      { ...inventoryItem, availableQuantity: 0, reservedQuantity: 20 },
+      { ...inventoryItem, id: 'second', warehouseCode: '대량창고', availableQuantity: 15 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate
+      outboundWarehouses={[{ warehouseCode: '중국창고', isDefault: true, hasActiveInventory: true }]} />)
+    const warehouses = within(screen.getByRole('group', { name: '출고 재고 위치 선택' }))
+    expect(warehouses.getAllByRole('checkbox')).toHaveLength(2)
+    expect(warehouses.getByRole('checkbox', { name: /중국창고/ })).toBeInTheDocument()
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /대량창고/ }))
+    expect(screen.getByLabelText('이번 출고')).toHaveAttribute('max', '15')
+  })
+
   it('shows only the selected shipment when the server provides another detail', () => {
     const { rerender } = render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="boxes" showCreate={false} />)
 

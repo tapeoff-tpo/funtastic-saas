@@ -339,6 +339,37 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByPlaceholderText('1')).not.toBeInTheDocument()
   })
 
+  it('applies the first box dimensions to every automatic split and saves them together', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = { ...shipmentA, items: [{ ...shipmentA.items[0], reservedQuantity: 300 }] }
+    renderShipment(detail, 'items')
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('SKU-A 박스당 수량'), { target: { value: '30' } })
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    const apply = dialog.getByRole('button', { name: '첫 박스 규격 전체 적용' })
+    expect(apply).toBeDisabled()
+    const rows = dialog.getAllByRole('row').slice(1)
+    const first = within(rows[0]).getAllByRole('spinbutton')
+    fireEvent.change(first[1], { target: { value: '10' } })
+    fireEvent.change(first[2], { target: { value: '20' } })
+    expect(apply).toBeDisabled()
+    fireEvent.change(first[3], { target: { value: '20' } })
+    fireEvent.click(apply)
+    for (const row of rows) {
+      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['30', '10', '20', '20'])
+      expect(within(row).getByText('0.0040')).toBeInTheDocument()
+    }
+    fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0]).toMatchObject({
+      shipmentItemId: shipmentA.items[0].id,
+      allocations: Array.from({ length: 10 }, (_, index) => ({
+        boxNo: String(index + 1), autoNumber: true, quantity: 30, lengthCm: 10, widthCm: 20, heightCm: 20,
+      })),
+    })
+  })
+
   it('opens the selected mixed-box product and does not save or select another product', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithSharedBoxDimensions())

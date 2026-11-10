@@ -907,6 +907,20 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
   const [quantityPerBox, setQuantityPerBox] = useState('')
   const [boxCount, setBoxCount] = useState('')
+  const firstBox = drafts[0]
+  const canApplyFirstBoxDimensions = firstBox && [firstBox.lengthCm, firstBox.widthCm, firstBox.heightCm]
+    .every((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+
+  function applyFirstBoxDimensions() {
+    if (!canApplyFirstBoxDimensions) return
+    setDrafts((current) => current.map((draft) => ({
+      ...draft,
+      lengthCm: firstBox.lengthCm,
+      widthCm: firstBox.widthCm,
+      heightCm: firstBox.heightCm,
+    })))
+  }
+
   function occupiedNumbers() { return [...allBoxes.map((box) => box.boxNo), ...(guard.getBoxNumbers?.(draftId) ?? [])] }
   function generateSplits() {
     try {
@@ -1009,7 +1023,12 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         <label className="text-xs">총 박스 수<input aria-label={`${item.sku} 총 박스 수`} type="number" min="1" max="5000" step="1" value={boxCount} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 w-28`} onChange={(event) => { setBoxCount(event.target.value); setQuantityPerBox('') }} placeholder="자동 계산" /></label>
         <label className="text-xs">박스당 수량<input aria-label={`${item.sku} 박스당 수량`} type="number" min="1" step="1" value={quantityPerBox} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 w-28`} onChange={(event) => { setQuantityPerBox(event.target.value); const value = positiveInteger(event.target.value); setBoxCount(value ? String(Math.ceil(item.reservedQuantity / value)) : '') }} placeholder="자동 분배" /></label>
         <button type="button" disabled={!editable || isPending || guard.busy} onClick={generateSplits} className="h-8 rounded-md border bg-background px-3 text-xs font-medium">자동 분할 미리보기</button>
-
+        {drafts.length > 1 && <button type="button"
+          disabled={!editable || isPending || guard.busy || !canApplyFirstBoxDimensions}
+          onClick={applyFirstBoxDimensions}
+          className="h-8 rounded-md border bg-background px-3 text-xs font-medium disabled:opacity-50">
+          첫 박스 규격 전체 적용
+        </button>}
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-[880px] w-full text-sm">

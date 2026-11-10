@@ -44,6 +44,7 @@ import { useMenuAccess } from './menu-access-provider'
 import { canAccessPage } from '@/lib/auth/menu-permissions'
 import {
   applySidebarMenuOrder,
+  canMoveSidebarItemAcrossSections,
   createSidebarMenuOrder,
   fetchSidebarMenuOrder,
   moveSidebarEntry,
@@ -217,15 +218,21 @@ interface SidebarProps {
   mobile?: boolean
 }
 
-type MenuPosition = { sectionId: string; groupId?: string; href?: string }
+type MenuPosition = { sectionId: string; groupId?: string; href?: string; crossSection?: boolean }
 
 function canDropMenu(source: MenuPosition, target: MenuPosition) {
-  return source.href && target.href
-    ? source.sectionId === target.sectionId && source.groupId === target.groupId && source.href !== target.href
-    : !source.href && !target.href && source.sectionId !== target.sectionId
+  if (!source.href) return !target.href && source.sectionId !== target.sectionId
+  if (source.sectionId === target.sectionId) {
+    return Boolean(target.href && source.groupId === target.groupId && source.href !== target.href)
+  }
+  return Boolean(source.crossSection && target.crossSection)
 }
 
 const menuPositionKey = ({ sectionId, href }: MenuPosition) => href ?? sectionId
+const sectionPosition = (section: NavSection): MenuPosition => ({
+  sectionId: section.id,
+  crossSection: canMoveSidebarItemAcrossSections(section),
+})
 
 export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps = {}) {
   const pathname = usePathname()
@@ -273,23 +280,42 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
         return { ...group, items: items.filter((item) => groupHrefs.has(item.href)) }
       }).filter((group) => group.items.length),
     }
-  }).filter((section) => section.items.length)
+  }).filter((section) => section.items.length || (
+    !mobile && canMoveSidebarItemAcrossSections(section)
+    && navSections.find(({ id }) => id === section.id)?.items.some((item) => canAccessPage(access, item.href))
+  ))
   const orderedNavItems = visibleSections.flatMap((section) => section.items)
   const favoriteItems = favorites
     .map((href) => orderedNavItems.find((item) => item.href === href))
     .filter((item): item is NavItem => Boolean(item))
   const sortableSections = visibleSections.filter((section) => section.id !== 'dashboard')
-  const sectionPositions = sortableSections.map(({ id }) => ({ sectionId: id }))
+  const sectionPositions = sortableSections.map(sectionPosition)
+  const crossSectionCount = sectionPositions.filter((position) => position.crossSection).length
 
   async function reorder(source: MenuPosition, target: MenuPosition) {
     if (savingRef.current || mobile || !orderReady || !canDropMenu(source, target)) return
     const previous = orderedSections
-    const next = source.href
-      ? previous.map((section) => section.id === source.sectionId ? {
-        ...section,
-        items: moveSidebarEntry(section.items, section.items.findIndex((item) => item.href === source.href), section.items.findIndex((item) => item.href === target.href)),
-      } : section)
-      : moveSidebarEntry(previous, previous.findIndex((section) => section.id === source.sectionId), previous.findIndex((section) => section.id === target.sectionId))
+    const from = previous.findIndex((section) => section.id === source.sectionId)
+    const to = previous.findIndex((section) => section.id === target.sectionId)
+    if (from < 0 || to < 0) return
+    let next = previous
+    if (source.href) {
+      const item = previous[from].items.find((entry) => entry.href === source.href)
+      if (!item) return
+      const targetItems = previous[to].items
+      const targetIndex = target.href ? targetItems.findIndex((entry) => entry.href === target.href) : targetItems.length
+      if (targetIndex < 0) return
+      if (from === to) {
+        const items = moveSidebarEntry(targetItems, targetItems.indexOf(item), targetIndex)
+        next = previous.map((section, index) => index === to ? { ...section, items } : section)
+      } else {
+        const items = [...targetItems]
+        items.splice(targetIndex, 0, item)
+        next = [...previous]
+        next[from] = { ...previous[from], items: previous[from].items.filter((entry) => entry !== item) }
+        next[to] = { ...previous[to], items }
+      }
+    } else next = moveSidebarEntry(previous, from, to)
 
     savingRef.current = true
     setSaving(true)
@@ -333,7 +359,8 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
   }
 
   function renderDragHandle(label: string, position: MenuPosition, positions: MenuPosition[]) {
-    if (mobile || !orderReady || positions.length < 2) return null
+    const canChangeCategory = position.href && position.crossSection && crossSectionCount > 1
+    if (mobile || !orderReady || (positions.length < 2 && !canChangeCategory)) return null
     const description = `${label} 순서 변경`
     return (
       <button
@@ -433,7 +460,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
 
   function renderSectionItems(section: NavSection) {
     function renderItems(items: NavItem[], groupId?: string) {
-      const positions = items.map((item) => ({ sectionId: section.id, groupId, href: item.href }))
+      const positions = items.map((item) => ({ ...sectionPosition(section), groupId, href: item.href }))
       return items.map((item, index) => renderNavItem(item, { showStar: true, position: positions[index], siblings: positions }))
     }
     if (!section.groups?.length) {
@@ -496,7 +523,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           return (
           <div key={section.id} className="mt-2">
             {section.title && <div
-              {...dropHandlers({ sectionId: section.id })}
+              {...dropHandlers(sectionPosition(section))}
               className={`group flex items-center rounded ${dropTarget === section.id ? 'ring-1 ring-inset ring-sky-400' : ''}`}
             >
               {section.collapsible ? (
@@ -520,7 +547,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
                   {section.title}
                 </p>
               )}
-              {renderDragHandle(section.title, { sectionId: section.id }, sectionPositions)}
+              {renderDragHandle(section.title, sectionPosition(section), sectionPositions)}
             </div>}
             {sectionIsOpen && (
               <div className="space-y-px">

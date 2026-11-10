@@ -1,8 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Sidebar } from './sidebar'
+import type { SidebarMenuOrder } from './sidebar-menu-order'
 
-const { prefetch, saveOrder } = vi.hoisted(() => ({ prefetch: vi.fn(), saveOrder: vi.fn() }))
+const { prefetch, saveOrder, loadOrder } = vi.hoisted(() => ({
+  prefetch: vi.fn(), saveOrder: vi.fn(), loadOrder: vi.fn<() => Promise<SidebarMenuOrder | null>>(async () => null),
+}))
 vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
   useRouter: () => ({ prefetch }),
@@ -14,7 +17,7 @@ vi.mock('./nav-state', () => ({
 vi.mock('./sidebar-menu-order', async (importOriginal) => ({
   ...await importOriginal<typeof import('./sidebar-menu-order')>(),
   readSidebarMenuOrder: () => null,
-  fetchSidebarMenuOrder: async () => null,
+  fetchSidebarMenuOrder: loadOrder,
   SIDEBAR_MENU_ORDER_EVENT: 'test-menu-order',
   saveSidebarMenuOrderRemote: saveOrder,
 }))
@@ -58,7 +61,7 @@ it('drags a menu item within its category and saves the new account order', asyn
   render(<Sidebar />)
   const grip = await screen.findByRole('button', { name: '발주 순서 변경' })
   const first = screen.getByRole('link', { name: '발주검토' })
-  const moved = screen.getByRole('link', { name: '발주', exact: true })
+  const moved = screen.getByRole('link', { name: '발주' })
   const dataTransfer = { setData: vi.fn(), effectAllowed: 'none', dropEffect: 'none' }
   fireEvent.dragStart(grip, { dataTransfer })
   fireEvent.dragOver(first, { dataTransfer })
@@ -90,7 +93,7 @@ it('moves a category with the grip arrow keys and restores its order if saving f
 it('reorders items inside a nested menu group without moving them to another group', async () => {
   saveOrder.mockReset().mockResolvedValue(undefined)
   render(<Sidebar />)
-  fireEvent.click(screen.getByRole('button', { name: '주문관련', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '주문관련' }))
   const grip = await screen.findByRole('button', { name: '주문 수집 순서 변경' })
   const first = screen.getByRole('link', { name: '전체 주문' })
   const otherGroup = screen.getByRole('link', { name: '상품검수/CS' })
@@ -103,4 +106,30 @@ it('reorders items inside a nested menu group without moving them to another gro
   expect(screen.getByRole('link', { name: '주문 수집' }).compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(saveOrder.mock.calls[0][0].items['order-related'].slice(0, 4)).toEqual(['/orders/collect', '/orders', '/shipping/held', '/cs'])
   await waitFor(() => expect(grip).toHaveAttribute('aria-disabled', 'false'))
+})
+
+it('moves China stock into purchasing by dropping it on the category title and restores the saved placement', async () => {
+  saveOrder.mockReset().mockResolvedValue(undefined)
+  const view = render(<Sidebar />)
+  const grip = await screen.findByRole('button', { name: '중국재고 순서 변경' })
+  const category = screen.getByText('발주·입고', { exact: true })
+  const dataTransfer = { setData: vi.fn(), effectAllowed: 'none', dropEffect: 'none' }
+  fireEvent.dragStart(grip, { dataTransfer })
+  fireEvent.dragOver(category, { dataTransfer })
+  fireEvent.drop(category, { dataTransfer })
+
+  const order = saveOrder.mock.calls[0][0] as SidebarMenuOrder
+  expect(order.items.purchasing.at(-1)).toBe('/purchasing/china-inventory')
+  expect(order.items['inventory-flow']).not.toContain('/purchasing/china-inventory')
+  const moved = screen.getByRole('link', { name: '중국재고' })
+  expect(moved.compareDocumentPosition(screen.getByText('중국재고·재고관리')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await waitFor(() => expect(screen.getByRole('button', { name: '중국재고 순서 변경' })).toHaveAttribute('aria-disabled', 'false'))
+
+  view.unmount()
+  loadOrder.mockResolvedValueOnce(order)
+  render(<Sidebar />)
+  await screen.findByRole('button', { name: '중국재고 순서 변경' })
+  const links = screen.getAllByRole('link', { name: '중국재고' })
+  expect(links).toHaveLength(1)
+  expect(links[0].compareDocumentPosition(screen.getByText('중국재고·재고관리')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

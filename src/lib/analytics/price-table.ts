@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
 
@@ -47,7 +47,7 @@ export async function importPriceTableRows(data: {
   const parsed = parsePriceTableWorkbook(data.fileBuffer)
   const importedAt = new Date()
 
-  await db.delete(analyticsPriceTableRows).where(eq(analyticsPriceTableRows.userId, data.userId))
+  await db.delete(analyticsPriceTableRows).where(and(eq(analyticsPriceTableRows.userId, data.userId), or(sql`${analyticsPriceTableRows.sourceFileName} IS NULL`, ne(analyticsPriceTableRows.sourceFileName, '직접 등록'))))
 
   for (const chunk of chunks(parsed.rows, 500)) {
     await db.insert(analyticsPriceTableRows).values(chunk.map((row) => ({
@@ -279,6 +279,7 @@ function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   const direction = sortOrder === 'desc' ? desc : asc
   const coreColumn = (() => {
     switch (sortKey) {
+      case 'importedAt': return analyticsPriceTableRows.importedAt
       case 'productCode': return analyticsPriceTableRows.productCode
       case 'productName': return analyticsPriceTableRows.productName
       case 'optionName': return analyticsPriceTableRows.optionName

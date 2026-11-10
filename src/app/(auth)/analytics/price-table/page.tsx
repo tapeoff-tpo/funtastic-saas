@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
+import { ManualPriceProduct } from './manual-price-product'
 import { PriceTableUpload } from './price-table-upload'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 
@@ -35,8 +36,8 @@ export default async function PriceTablePage({
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
   const search = params?.q?.trim() ?? ''
   const activeSheet = params?.sheet?.trim() || '상품등록'
-  const sortKey = params?.sort?.trim() || 'productCode'
-  const sortOrder = params?.order === 'desc' ? 'desc' : 'asc'
+  const sortKey = params?.sort?.trim() || 'importedAt'
+  const sortOrder = params?.order === 'asc' ? 'asc' : 'desc'
   const activeView = params?.view === 'products' ? 'products' : 'compare'
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
@@ -110,6 +111,8 @@ export default async function PriceTablePage({
         </details>
       </div>
 
+      <ManualPriceProduct sheetName={activeSheet} />
+      <p className="text-xs text-muted-foreground">최근 추가 순 · 같은 파일의 상품은 원본 행 순서로 표시합니다.</p>
       <ChannelBundleOverridesUpload />
 
       <section className="overflow-hidden rounded-md border bg-card">

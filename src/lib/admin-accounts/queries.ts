@@ -9,10 +9,16 @@ import { db } from '@/lib/db'
 import { marketplaceConnections, orders, products, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 
+export const deletedAccountLog = sql`${auditLogs.action} = 'account.deactivate' AND ${auditLogs.metadata}->>'deleted' = 'true'`
+
 export async function listAdmins(): Promise<UserProfile[]> {
   return db
     .select()
     .from(userProfiles)
+    .where(sql`NOT EXISTS (
+      SELECT 1 FROM ${auditLogs}
+      WHERE ${auditLogs.targetId} = ${userProfiles.id} AND ${deletedAccountLog}
+    )`)
     .orderBy(desc(userProfiles.createdAt))
 }
 

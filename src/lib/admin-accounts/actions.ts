@@ -16,6 +16,7 @@ import {
   withPasswordChangeRequired,
 } from '@/lib/auth/force-password-change'
 import { db } from '@/lib/db'
+import { deletedAccountLog, getWorkspaceUserId } from './queries'
 import { userProfiles, userMenuPermissions, auditLogs, type UserRole } from '@/lib/db/schema'
 import { MENU_PATHS } from '@/lib/auth/menu-permissions'
 import { z } from 'zod'
@@ -294,13 +295,20 @@ export async function resetAccountPassword(input: { targetId: string }): Promise
     const token = randomBytes(32).toString('base64url')
     const tokenHash = createHash('sha256').update(token).digest('hex')
     const auth = authDatabase()
-    await auth.begin(async tx => {
+    const issued = await auth.begin(async tx => {
+      const [active] = await tx.unsafe(
+        'SELECT p.id FROM user_profiles p JOIN app_auth_accounts a ON a.user_id = p.id WHERE p.id = $1::uuid AND p.deactivated_at IS NULL FOR UPDATE OF p',
+        [target.id],
+      )
+      if (!active) return false
       await tx.unsafe('DELETE FROM app_auth_password_tokens WHERE user_id = $1::uuid', [target.id])
       await tx.unsafe('INSERT INTO app_auth_password_tokens(token_hash,user_id,expires_at) VALUES($1,$2::uuid,now()+interval \'1 hour\')', [tokenHash,target.id])
       await tx.unsafe('UPDATE app_auth_accounts SET password_hash=NULL WHERE user_id=$1::uuid', [target.id])
       await tx.unsafe('DELETE FROM app_auth_sessions WHERE user_id=$1::uuid', [target.id])
       await tx.unsafe('DELETE FROM app_auth_login_limits WHERE email_hash=$1', [createHash('sha256').update(target.email.trim().toLowerCase()).digest('hex')])
+      return true
     })
+    if (!issued) return { success: false, error: '활성 로그인 계정을 찾을 수 없습니다.' }
     await db.insert(auditLogs).values({ actorId: guard.callerId, targetId: target.id, action: 'account.password_reset', metadata: { provider: 'local', oneTimeLink: true } })
     revalidatePath('/admin/accounts')
     return { success: true, data: { resetPath: '/set-password?token=' + token } }
@@ -339,6 +347,55 @@ export async function resetAccountPassword(input: { targetId: string }): Promise
 
   revalidatePath('/admin/accounts')
   return { success: true }
+}
+
+/** Remove the login identity while retaining the profile referenced by business records. */
+export async function deleteAccount(input: { targetId: string }): Promise<ActionResult> {
+  const guard = await assertSuperAdmin()
+  if (!guard.ok) return { success: false, error: guard.error }
+  if (process.env.AUTH_PROVIDER !== 'local' || !z.string().uuid().safeParse(input.targetId).success) {
+    return { success: false, error: '삭제할 계정을 확인해주세요.' }
+  }
+  const workspaceOwnerId = await getWorkspaceUserId(guard.callerId)
+
+  try {
+    const result = await db.transaction(async (tx): Promise<ActionResult> => {
+      const [target] = await tx.select().from(userProfiles)
+        .where(eq(userProfiles.id, input.targetId)).for('update')
+      if (!target) return { success: false, error: '계정을 찾을 수 없습니다.' }
+      if (
+        target.id === guard.callerId ||
+        target.id === workspaceOwnerId ||
+        target.role === 'super_admin' ||
+        [target.email, target.displayName].some((name) => normalizeEmail(name).startsWith('admin123'))
+      ) {
+        return { success: false, error: '내 계정, 최고관리자, 업무 데이터 소유자는 삭제할 수 없습니다.' }
+      }
+
+      const [deleted] = await tx.select({ id: auditLogs.id }).from(auditLogs)
+        .where(and(eq(auditLogs.targetId, target.id), deletedAccountLog)).limit(1)
+      if (deleted) return { success: true }
+
+      await tx.execute(sql`DELETE FROM app_auth_password_tokens WHERE user_id = ${target.id}`)
+      await tx.execute(sql`DELETE FROM app_auth_sessions WHERE user_id = ${target.id}`)
+      await tx.execute(sql`DELETE FROM app_auth_identities WHERE user_id = ${target.id}`)
+      await tx.execute(sql`DELETE FROM app_auth_accounts WHERE user_id = ${target.id}`)
+      await tx.update(userProfiles)
+        .set({ deactivatedAt: new Date(), deactivatedBy: guard.callerId })
+        .where(eq(userProfiles.id, target.id))
+      await tx.insert(auditLogs).values({
+        actorId: guard.callerId,
+        targetId: target.id,
+        action: 'account.deactivate',
+        metadata: { email: target.email, deleted: true },
+      })
+      return { success: true }
+    })
+    if (result.success) revalidatePath('/admin/accounts')
+    return result
+  } catch {
+    return { success: false, error: '계정 삭제에 실패했습니다. 다시 시도해주세요.' }
+  }
 }
 
 /**
@@ -394,8 +451,13 @@ export async function deactivateAccount(input: { targetId: string }): Promise<Ac
         metadata: { email: target.email },
       })
 
-      const admin = createAdminClient()
-      await admin.auth.admin.updateUserById(target.id, { ban_duration: BAN_FOREVER })
+      if (process.env.AUTH_PROVIDER === 'local') {
+        await tx.execute(sql`UPDATE app_auth_accounts SET approval_status = 'blocked' WHERE user_id = ${target.id}`)
+        await tx.execute(sql`DELETE FROM app_auth_sessions WHERE user_id = ${target.id}`)
+      } else {
+        const admin = createAdminClient()
+        await admin.auth.admin.updateUserById(target.id, { ban_duration: BAN_FOREVER })
+      }
 
       return { success: true as const }
     })
@@ -413,24 +475,37 @@ export async function reactivateAccount(input: { targetId: string }): Promise<Ac
   const guard = await assertSuperAdmin()
   if (!guard.ok) return { success: false, error: guard.error }
 
-  await db.transaction(async (tx) => {
-    await tx
-      .update(userProfiles)
-      .set({ deactivatedAt: null, deactivatedBy: null })
-      .where(eq(userProfiles.id, input.targetId))
+  const result = await db.transaction(async (tx): Promise<ActionResult> => {
+    const [target] = await tx.select({ id: userProfiles.id }).from(userProfiles)
+      .where(eq(userProfiles.id, input.targetId)).for('update')
+    if (!target) return { success: false, error: '계정을 찾을 수 없습니다.' }
 
+    const [deleted] = await tx.select({ id: auditLogs.id }).from(auditLogs)
+      .where(and(eq(auditLogs.targetId, target.id), deletedAccountLog)).limit(1)
+    if (deleted) return { success: false, error: '삭제된 계정은 다시 활성화할 수 없습니다.' }
+
+    if (process.env.AUTH_PROVIDER === 'local') {
+      const accounts = await tx.execute(sql`UPDATE app_auth_accounts SET approval_status = 'approved' WHERE user_id = ${target.id} RETURNING user_id`)
+      if (!accounts.length) return { success: false, error: '로그인 계정을 찾을 수 없습니다.' }
+      await tx.execute(sql`DELETE FROM app_auth_sessions WHERE user_id = ${target.id}`)
+    } else {
+      const admin = createAdminClient()
+      await admin.auth.admin.updateUserById(target.id, { ban_duration: 'none' })
+    }
+
+    await tx.update(userProfiles)
+      .set({ deactivatedAt: null, deactivatedBy: null })
+      .where(eq(userProfiles.id, target.id))
     await tx.insert(auditLogs).values({
       actorId: guard.callerId,
       action: 'account.reactivate',
-      targetId: input.targetId,
+      targetId: target.id,
     })
-
-    const admin = createAdminClient()
-    await admin.auth.admin.updateUserById(input.targetId, { ban_duration: 'none' })
+    return { success: true }
   })
 
-  revalidatePath('/admin/accounts')
-  return { success: true }
+  if (result.success) revalidatePath('/admin/accounts')
+  return result
 }
 
 /**

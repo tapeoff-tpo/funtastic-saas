@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { Dialog } from '@base-ui/react/dialog'
 import { Button } from '@/components/ui/button'
 import {
   purchasePriceDifference,
@@ -18,8 +19,10 @@ const labels: Record<PurchasePriceField, string> = {
 }
 const cny = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 })
 
-export function PurchasePriceComparisonFields({ id, prices, quantity, canEditBaseline, canEditActual }: {
+export function PurchasePriceComparisonFields({ id, productName, sku, prices, quantity, canEditBaseline, canEditActual }: {
   id: string
+  productName: string
+  sku: string
   prices: Required<PurchasePriceComparison>
   quantity: number
   canEditBaseline: boolean
@@ -32,6 +35,8 @@ export function PurchasePriceComparisonFields({ id, prices, quantity, canEditBas
   const [message, setMessage] = useState('')
   const unitDifference = purchasePriceDifference(draft.actualUnitPriceCny, draft.baselineUnitPriceCny)
   const shippingDifference = purchasePriceDifference(draft.actualShippingCny, draft.baselineShippingCny)
+  const exceedsBaseline = (purchasePriceDifference(saved.actualUnitPriceCny, saved.baselineUnitPriceCny) ?? 0) > 0
+    || (purchasePriceDifference(saved.actualShippingCny, saved.baselineShippingCny) ?? 0) > 0
   const keys = Object.keys(labels) as PurchasePriceField[]
   const changed = keys.filter((key) => draft[key] !== saved[key])
 
@@ -82,9 +87,9 @@ export function PurchasePriceComparisonFields({ id, prices, quantity, canEditBas
               setDraft((current) => ({ ...current, [key]: Number.isFinite(value) ? value : null }))
               setMessage('')
             }}
-            className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 text-right tabular-nums"
+            className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-right text-sm tabular-nums"
           />
-        ) : <span className="flex h-7 items-center justify-end px-2 tabular-nums">{draft[key] === null ? '–' : cny.format(draft[key])}</span>}
+        ) : <span className="flex h-9 items-center justify-end rounded-md bg-muted px-3 text-sm tabular-nums">{draft[key] === null ? '–' : cny.format(draft[key])}</span>}
       </label>
     )
   }
@@ -95,24 +100,44 @@ export function PurchasePriceComparisonFields({ id, prices, quantity, canEditBas
   }
 
   return (
-    <form onSubmit={save} className="grid min-w-[300px] gap-1.5">
-      <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-        {field('baselineUnitPriceCny')}
-        {field('baselineShippingCny')}
-        {field('actualUnitPriceCny')}
-        {field('actualShippingCny')}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-1 text-[11px] text-muted-foreground">
-        <span>개당 배송비</span>
-        <span data-no-translate>{perUnit(draft.baselineShippingCny)} → {perUnit(draft.actualShippingCny)}</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <PriceDifference label="단가 차이" amount={unitDifference} />
-        <PriceDifference label="배송비 차이" amount={shippingDifference} />
-        {canEditBaseline && <Button type="submit" variant="outline" size="xs" className="ml-auto" disabled={saving || changed.length === 0}>{saving ? '저장 중' : '저장'}</Button>}
-        <span role="status" className="text-xs text-muted-foreground">{message}</span>
-      </div>
-    </form>
+    <Dialog.Root>
+      <Dialog.Trigger render={
+        <Button type="button" variant="outline" size="sm" className={exceedsBaseline ? 'border-red-200 text-red-700 hover:text-red-800' : undefined} />
+      }>
+        <span>가격 비교</span>
+        {exceedsBaseline && <span className="rounded bg-red-100 px-1 text-[10px]">가격 초과</span>}
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-4 shadow-xl sm:p-5">
+          <Dialog.Title className="text-base font-semibold">구매가격 비교 (元)</Dialog.Title>
+          <Dialog.Description data-no-translate className="mt-1 break-words text-sm text-muted-foreground">
+            {productName} · {sku}
+          </Dialog.Description>
+          <form onSubmit={save} className="mt-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              {field('baselineUnitPriceCny')}
+              {field('actualUnitPriceCny')}
+              {field('baselineShippingCny')}
+              {field('actualShippingCny')}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+              <span>개당 배송비</span>
+              <span data-no-translate>{perUnit(draft.baselineShippingCny)} → {perUnit(draft.actualShippingCny)}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <PriceDifference label="단가 차이" amount={unitDifference} />
+              <PriceDifference label="배송비 차이" amount={shippingDifference} />
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+              <span role="status" className="mr-auto text-xs text-muted-foreground">{message}</span>
+              <Dialog.Close render={<Button type="button" variant="outline" size="sm" />}>닫기</Dialog.Close>
+              {canEditBaseline && <Button type="submit" size="sm" disabled={saving || changed.length === 0}>{saving ? '저장 중' : '저장'}</Button>}
+            </div>
+          </form>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

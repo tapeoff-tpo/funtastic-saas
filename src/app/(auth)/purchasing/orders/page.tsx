@@ -591,7 +591,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
-                  {showPriceComparison && <th className="min-w-[324px] px-3 py-2 font-medium">구매가격 비교 (元)</th>}
+                  {showPriceComparison && <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
                   {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
@@ -814,11 +814,13 @@ export async function PurchasingOrdersView({
                         </td>
                       )}
                       {showPriceComparison && (
-                        <td className="px-3 py-2 align-middle">
+                        <td className="whitespace-nowrap px-2 py-2 text-center align-middle">
                           {item.id && purchasePrices && (
                             <PurchasePriceComparisonFields
                               key={JSON.stringify(purchasePrices)}
                               id={item.id}
+                              productName={item.productName}
+                              sku={item.sku}
                               prices={purchasePrices}
                               quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
                               canEditBaseline={['purchased', 'purchase_completed', 'inspecting'].includes(item.status)}

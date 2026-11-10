@@ -71,6 +71,7 @@ export default async function PriceTablePage({
   const gridRows: PriceTableGridRow[] = data.rows.map((row) => ({
     id: row.id,
     rowNumber: row.rowNumber,
+    registrationNumber: row.registrationNumber,
     productCode: row.productCode,
     productName: row.productName,
     optionName: row.optionName,

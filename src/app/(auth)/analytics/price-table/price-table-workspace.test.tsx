@@ -37,15 +37,19 @@ it('shows the date for each product number in price comparison and product detai
   const key = '쿠팡 상품번호'
   render(<PriceTableWorkspace initialView="compare" rows={[{
     id: 'row-1',
-    rowNumber: 1,
+    rowNumber: 4,
+    registrationNumber: 27,
     productCode: 'SKU-1',
     productName: '테스트 상품',
     optionName: null,
     registeredProductName: null,
     rawData: { [key]: '123456', [priceNumberDateKey(key)]: '2026-11-10' },
   }]} />)
+  expect(screen.getByRole('columnheader', { name: 'No.' })).toBeVisible()
+  expect(screen.getByRole('cell', { name: '27' })).toBeVisible()
   expect(screen.getByText('입력일 2026-11-10')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: '상품 기준' }))
+  expect(screen.getByText('27')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: /테스트 상품/ }))
   expect(screen.getByText('상품번호 123456')).toBeVisible()
   expect(screen.getByText('입력일 2026-11-10')).toBeVisible()

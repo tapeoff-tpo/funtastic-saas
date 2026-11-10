@@ -14,6 +14,8 @@ import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
 
 type WorkspaceView = 'compare' | 'products'
 
+const NUMBER_WIDTH = 52
+
 const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string; icon: typeof Table2 }> = [
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
   { id: 'products', label: '상품 기준', icon: Table2 },
@@ -71,11 +73,15 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
     try { localStorage.setItem('price-table-mall-groups-v1', JSON.stringify(next)) } catch { /* Selection remains usable without storage. */ }
   }
   function applyGroup(ids: string[]) { setSelected([...new Set(['b2b', 'b2c', ...ids.filter(id => columns.some(column => column.id === id))])]) }
-  function pinnedLeft(id: string) { return id === 'b2b' ? codeWidth + productWidth : id === 'b2c' ? codeWidth + productWidth + width('b2b', 132) : undefined }
+  function pinnedLeft(id: string) {
+    const priceStart = NUMBER_WIDTH + codeWidth + productWidth
+    if (id === 'b2b') return priceStart
+    if (id === 'b2c') return priceStart + width('b2b', 132)
+  }
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
   const codeWidth = width('productCode', 96)
   const productWidth = width('product', 240)
-  const tableWidth = codeWidth + productWidth + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
+  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
 
   function toggle(id: string) {
     if (id === 'b2b' || id === 'b2c') return
@@ -135,27 +141,29 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
       <div className="overflow-auto rounded-md border bg-card">
         <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
           <colgroup>
-            <col style={{ width: codeWidth }} /><col style={{ width: productWidth }} />
+            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} />
             {selectedColumns.map(column => <col key={column.id} style={{ width: width(column.id, 132) }} />)}
           </colgroup>
           <thead>
             <tr className="bg-muted text-left text-xs text-muted-foreground">
-              <th className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
-              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: codeWidth }}>상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
+              <th scope="col" title="등록순 번호" className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2 text-center">No.</th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }}>상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }}>상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
               {selectedColumns.map((column) => <th key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><span className="block truncate">{column.label}</span><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t hover:bg-muted/30">
-                <td className="sticky left-0 z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle font-mono text-xs font-medium">
+                <td className="sticky left-0 z-10 border-r border-b bg-card px-1 text-center text-xs tabular-nums text-muted-foreground">{row.registrationNumber}</td>
+                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle font-mono text-xs font-medium" style={{ left: NUMBER_WIDTH }}>
                   {row.productCode ? (
                     <Link data-no-translate title={row.productCode} href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="block truncate text-primary hover:underline">
                       {row.productCode}
                     </Link>
                   ) : '-'}
                 </td>
-                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle" style={{ left: codeWidth }}>
+                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle" style={{ left: NUMBER_WIDTH + codeWidth }}>
                   <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
                   <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
@@ -186,14 +194,15 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
   const { width, resize } = usePriceColumnWidths('price-table-products-widths-v1')
   const codeWidth = width('productCode', 96)
   const productWidth = width('product', 240)
-  const gridStyle = { gridTemplateColumns: `${codeWidth}px ${productWidth}px minmax(300px, 1fr) 36px`, minWidth: codeWidth + productWidth + 360 }
+  const gridStyle = { gridTemplateColumns: `${NUMBER_WIDTH}px ${codeWidth}px ${productWidth}px minmax(300px, 1fr) 36px`, minWidth: NUMBER_WIDTH + codeWidth + productWidth + 360 }
   const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const [openRow, setOpenRow] = useState<string | null>(null)
 
   return (
     <div className="overflow-auto rounded-md border bg-card">
       <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-        <span className="relative border-r pr-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
+        <span title="등록순 번호" className="border-r text-center">No.</span>
+        <span className="relative border-r px-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
         <span className="relative border-r px-2">상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
         <span className="px-2">등록 현황 · 클릭하면 전체 판매가 / 등록번호</span><span />
       </div>
@@ -213,7 +222,8 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
               style={gridStyle}
               className="grid h-12 w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted/30"
             >
-              <span data-no-translate title={row.productCode ?? ''} className="truncate border-r pr-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
+              <span className="border-r text-center text-xs tabular-nums text-muted-foreground">{row.registrationNumber}</span>
+              <span data-no-translate title={row.productCode ?? ''} className="truncate border-r px-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
               <span className="min-w-0 border-r px-2">
                 <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
                 {row.optionName || row.productCode ? (

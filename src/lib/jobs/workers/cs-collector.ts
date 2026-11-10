@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { jobLogs, marketplaceConnections } from '@/lib/db/schema'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential } from '@/lib/auth/admin'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import { upsertInquiries } from '@/lib/orders/inquiry-queries'

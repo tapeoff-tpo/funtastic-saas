@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { importCoupangRocketOutboundBatch } from '@/lib/analytics/coupang-rocket-outbound'
 import { InvalidExcelWorkbookError } from '@/lib/orders/excel-workbook-buffer'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { reflectSelectedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const bodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500).optional(),

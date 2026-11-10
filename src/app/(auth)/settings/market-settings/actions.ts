@@ -3,7 +3,7 @@
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { nanoid } from 'nanoid'
 import { revalidatePath, updateTag } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   listMarketplaceBusinessSettings,

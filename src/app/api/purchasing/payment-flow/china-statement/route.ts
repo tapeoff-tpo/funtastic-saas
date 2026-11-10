@@ -6,7 +6,7 @@ import {
   getChinaFundStatementEntries,
   importChinaFundStatementEntries,
 } from '@/lib/purchasing/china-fund-statement'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const entrySchema = z.object({

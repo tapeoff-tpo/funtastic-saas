@@ -6,7 +6,7 @@ import {
   updateChinaFundStatementEntry,
   voidChinaFundStatementEntry,
 } from '@/lib/purchasing/china-fund-statement'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const entryIdSchema = z.string().uuid()
 const updateSchema = z.object({

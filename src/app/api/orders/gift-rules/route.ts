@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { createGiftRule, listGiftRules, type GiftConditionType, type GiftRuleCondition } from '@/lib/orders/gift-rules'
 
 interface CreateGiftRuleBody {

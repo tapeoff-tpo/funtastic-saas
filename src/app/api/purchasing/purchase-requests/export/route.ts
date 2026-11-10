@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { exportPurchaseRequestsExcel } from '@/lib/purchasing/purchase-request-excel'
 import {
   PURCHASE_REVIEW_LIST_STATUSES,

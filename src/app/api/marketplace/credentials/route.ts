@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { storeCredential, deleteCredential } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/auth/server'
+import { storeCredential, deleteCredential } from '@/lib/auth/admin'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'

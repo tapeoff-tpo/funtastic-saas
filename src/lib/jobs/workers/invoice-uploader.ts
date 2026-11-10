@@ -21,7 +21,7 @@ import { jobLogs, marketplaceConnections, orders } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 import type { InvoiceData, MarketplaceAdapter } from '@/lib/marketplace/types'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential } from '@/lib/auth/admin'
 import { createAdapter } from './order-collector'
 
 const INVOICE_UPLOAD_CONCURRENCY = Number(process.env.INVOICE_UPLOAD_CONCURRENCY ?? 4)

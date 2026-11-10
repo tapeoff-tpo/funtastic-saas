@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { BarChart3, CircleDollarSign, PackageSearch } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getAnalyticsPeriod, getAvailableAnalyticsMonths, getLatestAnalyticsDate, getSalesAnalytics } from '@/lib/analytics/queries'
 import { AnalyticsPeriodSelector } from '@/components/analytics/analytics-period-selector'

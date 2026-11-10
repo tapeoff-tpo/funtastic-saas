@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, isNotNull, or, sql } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { claims, inventory, orders } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'

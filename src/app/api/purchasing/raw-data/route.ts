@@ -2,7 +2,7 @@ import { gunzipSync } from 'node:zlib'
 import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import {
   WorkspaceDataOperationInProgressError,
   withWorkspaceDataOperationLock,

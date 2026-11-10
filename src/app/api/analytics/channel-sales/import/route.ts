@@ -6,7 +6,7 @@ import {
   isChannelSalesChannel,
 } from '@/lib/analytics/channel-sales'
 import { InvalidExcelWorkbookError } from '@/lib/orders/excel-workbook-buffer'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()

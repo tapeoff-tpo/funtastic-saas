@@ -6,7 +6,7 @@ import {
   updatePurchaseRequestStatus,
 } from '@/lib/purchasing/purchase-requests'
 import { PURCHASE_REQUEST_STATUS_LABELS } from '@/lib/purchasing/purchase-request-status'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const bodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),

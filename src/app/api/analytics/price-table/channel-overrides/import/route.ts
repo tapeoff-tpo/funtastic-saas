@@ -5,7 +5,7 @@ import {
   createChannelBundleOverrideTemplate,
   importChannelBundleOverrides,
 } from '@/lib/analytics/channel-product-overrides'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const ALLOWED_EXTENSIONS = new Set(['xlsx', 'xls', 'csv'])
 

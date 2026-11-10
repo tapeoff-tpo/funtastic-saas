@@ -9,7 +9,7 @@
  * src/app/api/products/mapping-codes/unmapped/route.ts 와 동일한 SQL 패턴을 사용.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'

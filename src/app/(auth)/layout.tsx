@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { AppShell } from '@/components/layout/app-shell'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getUserAuthorization } from '@/lib/auth/menu-access'

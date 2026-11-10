@@ -11,7 +11,7 @@
  * - Add/edit memo: store a note in holdReason for context
  */
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { redirect } from 'next/navigation'
 import { getHeldShipments } from '@/lib/shipping/queries'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'

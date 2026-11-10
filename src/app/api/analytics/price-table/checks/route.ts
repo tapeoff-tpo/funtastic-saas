@@ -5,7 +5,7 @@ import {
   MARKETPLACE_CHECK_STATUSES,
   saveMarketplaceProductCheck,
 } from '@/lib/analytics/marketplace-product-checks'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const checkSchema = z.object({
   productCode: z.string().trim().min(1).max(100),

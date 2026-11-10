@@ -6,7 +6,7 @@ import {
   createPurchaseFundCredit,
   PURCHASE_FUND_MANUAL_ENTRY_TYPES,
 } from '@/lib/purchasing/purchase-fund-ledger'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isCalendarDate)
 

@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
 import { eq, and, ne, sql, inArray } from 'drizzle-orm'

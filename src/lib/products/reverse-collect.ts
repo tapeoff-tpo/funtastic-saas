@@ -16,7 +16,7 @@ import {
   productMarketplaceLinks,
 } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential } from '@/lib/auth/admin'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'

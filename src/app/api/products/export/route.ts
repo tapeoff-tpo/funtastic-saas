@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { exportProductsToExcel } from '@/lib/products/excel-export'
 import type { ProductFilters, ProductStatus } from '@/lib/products/types'
 

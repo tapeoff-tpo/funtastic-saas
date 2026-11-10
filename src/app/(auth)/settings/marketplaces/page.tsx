@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { commonAuthProfiles, marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'

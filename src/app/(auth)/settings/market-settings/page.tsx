@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { eq } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'

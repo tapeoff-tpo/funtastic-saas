@@ -9,8 +9,8 @@
  * Last super_admin protection: cannot demote/deactivate the only active super_admin.
  */
 
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/auth/server'
+import { createAdminClient } from '@/lib/auth/admin'
 import {
   isPasswordChangeRequired,
   withPasswordChangeRequired,

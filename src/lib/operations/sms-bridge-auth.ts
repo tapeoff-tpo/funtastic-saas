@@ -1,5 +1,5 @@
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function getSmsBridgeWorkspaceUserId() {
   const supabase = await createClient()

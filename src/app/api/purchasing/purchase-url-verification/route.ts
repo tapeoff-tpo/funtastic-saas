@@ -5,7 +5,7 @@ import {
   getPurchaseUrlVerificationQueue,
   markPurchaseUrlsForVerification,
 } from '@/lib/purchasing/purchase-url-collector'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const verificationResultSchema = z.object({
   url: z.string().trim().url().max(2_000),

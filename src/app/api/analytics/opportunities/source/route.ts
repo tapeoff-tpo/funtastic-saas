@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { loadOpportunitySource } from '@/lib/opportunities/source'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()

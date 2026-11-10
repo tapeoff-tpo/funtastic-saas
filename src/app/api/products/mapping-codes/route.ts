@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createHash } from 'crypto'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents, products, productVariants, inventory } from '@/lib/db/schema'
 import { and, eq, inArray, sql } from 'drizzle-orm'

@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
 import { eq, and, gte, count, isNull, or, inArray, sql } from 'drizzle-orm'

@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { importPriceTableRows } from '@/lib/analytics/price-table'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const ALLOWED_EXTENSIONS = new Set(['xlsb', 'xlsx', 'xls'])
 

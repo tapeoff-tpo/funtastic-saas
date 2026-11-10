@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createPurchasingItem, ESA009M_HEADERS } from '@/lib/purchasing/items'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const bodySchema = z.object({
   data: z.record(z.string(), z.string().nullable()).default({}),

@@ -6,7 +6,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { exportUnassignedCarriersToExcel } from '@/lib/products/carrier-excel'
 
 export async function GET() {

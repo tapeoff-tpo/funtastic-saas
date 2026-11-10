@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { parseInvoiceExcel, matchInvoicesToOrders } from '@/lib/shipping/excel/import'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export const runtime = 'nodejs'

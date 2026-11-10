@@ -40,7 +40,7 @@ export async function proxy(request: NextRequest) {
 
   const hasAuthCookie = request.cookies
     .getAll()
-    .some((cookie) => process.env.AUTH_PROVIDER === 'local' ? cookie.name === 'funtastic_session' : cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'))
+    .some((cookie) => cookie.name === 'funtastic_session')
 
   if (!hasAuthCookie) {
     if (pathname === '/login') {

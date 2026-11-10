@@ -15,7 +15,7 @@ import {
   saveSourcingMeetingRows,
   updateSourcingMeeting,
 } from '@/lib/operations/sourcing'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 type SourcingMeetingValues = {
   meetingDate: string

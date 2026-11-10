@@ -1,8 +1,8 @@
 'use server'
 
 import { assertMenuAccess } from '@/lib/auth/menu-access'
-import { createClient } from '@/lib/supabase/server'
-import { storeCredential, deleteCredential, deleteCredentialByName, readCredential } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/auth/server'
+import { storeCredential, deleteCredential, deleteCredentialByName, readCredential } from '@/lib/auth/admin'
 import { db } from '@/lib/db'
 import { commonAuthProfiles, marketplaceConnections } from '@/lib/db/schema'
 import { ensureCommonAuthProfilesTable, storeCommonAuthProfileCredentials } from '@/lib/common-auth-profiles'

@@ -6,7 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { jobLogs } from '@/lib/db/schema'
 import { generatePurchaseRecommendations } from '@/lib/purchasing/purchase-recommendations'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export const maxDuration = 300
 

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getOrderById } from '@/lib/orders/queries'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'

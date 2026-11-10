@@ -13,7 +13,7 @@
  * Returns: { applied: number }
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'

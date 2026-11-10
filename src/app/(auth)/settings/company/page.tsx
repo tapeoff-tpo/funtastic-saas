@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { redirect } from 'next/navigation'
 import { getCompanySettings } from './actions'
 import { CompanySettingsForm } from './company-settings-form'

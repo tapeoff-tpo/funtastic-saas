@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { applyPurchaseRequest1688TrackingLookup } from '@/lib/purchasing/purchase-requests'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const lookupResultSchema = z.object({
   orderNumber: z.string().trim().regex(/^\d{10,40}$/),

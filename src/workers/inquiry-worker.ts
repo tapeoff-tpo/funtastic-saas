@@ -19,7 +19,7 @@ import { Queue, Worker, type Job } from 'bullmq'
 import { getConnection } from '@/lib/jobs/connection'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import type { MarketplaceAdapter } from '@/lib/marketplace/types'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential } from '@/lib/auth/admin'
 import { upsertInquiries } from '@/lib/orders/inquiry-queries'
 
 export const INQUIRY_QUEUE = 'inquiry-collection'

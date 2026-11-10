@@ -8,7 +8,7 @@ import {
 } from '@/lib/purchasing/purchase-requests'
 import { PURCHASE_DELAY_REASONS } from '@/lib/purchasing/purchase-delay'
 import { PURCHASE_PAYMENT_STATUSES } from '@/lib/purchasing/purchase-request-status'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export const purchaseRequestPlanFieldsBodySchema = z.object({
   requestedQuantity: z.number().int().min(1).max(1_000_000).optional(),

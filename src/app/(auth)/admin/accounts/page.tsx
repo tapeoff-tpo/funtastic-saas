@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getProfile, listAdmins } from '@/lib/admin-accounts/queries'
 import { AccountsTable } from './accounts-table'
 import { CreateAccountDialog } from './create-account-dialog'

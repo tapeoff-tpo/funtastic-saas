@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { gptAccountMessages, gptAccounts, gptAccountUsers } from '@/lib/db/schema'
-import { deleteCredential, readCredential, storeCredential } from '@/lib/supabase/admin'
+import { deleteCredential, readCredential, storeCredential } from '@/lib/auth/admin'
 
 const aiAccountCredentialScope = (accountId: string) => `ai-account-${accountId}`
 const aiAccountLoginPasswordKey = 'login_password'

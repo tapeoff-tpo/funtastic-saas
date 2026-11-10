@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { commonAuthProfiles } from '@/lib/db/schema'
-import { createAdminClient, deleteCredentialByName } from '@/lib/supabase/admin'
+import { createAdminClient, deleteCredentialByName } from '@/lib/auth/admin'
 
 export interface CommonAuthProfileCredentials {
   email: string

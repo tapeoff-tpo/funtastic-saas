@@ -1125,63 +1125,6 @@ export function CompletedOutboundDateFilter({
   )
 }
 
-const PURCHASE_BUYERS = [
-  { code: '1', name: '한상철' },
-  { code: '2', name: '김기환' },
-  { code: '3', name: '최종석' },
-  { code: '4', name: '오지은' },
-  { code: '5', name: '김소희' },
-]
-
-export function PurchaseBulkBuyerApply() {
-  const router = useRouter()
-  const context = useBulkSelection()
-  const [buyerCode, setBuyerCode] = useState('4')
-  const [message, setMessage] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-  const selectedCount = context.selectedIds.size
-  const targetCount = selectedCount || context.ids.length
-
-  function apply() {
-    const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
-    if (ids.length === 0) return
-    setMessage(null)
-    startTransition(async () => {
-      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, buyerCode }),
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setMessage(body.error ?? '담당자 적용 실패')
-        return
-      }
-      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
-      router.refresh()
-    })
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select
-        value={buyerCode}
-        onChange={(event) => setBuyerCode(event.target.value)}
-        className="h-7 rounded-md border border-input bg-background px-2 text-xs"
-      >
-        {PURCHASE_BUYERS.map((buyer) => (
-          <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
-        ))}
-      </select>
-      <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
-        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-        담당자 전체적용
-      </Button>
-      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
-    </div>
-  )
-}
-
 export function PurchaseBulkPaymentDialog() {
   const router = useRouter()
   const context = useBulkSelection()
@@ -2954,45 +2897,6 @@ type PurchaseRequestExcelResult = {
   skipped: number
   duplicate?: boolean
   errors?: Array<{ row: number; message: string }>
-}
-
-export function PurchaseBuyerField({
-  id,
-  buyerCode,
-}: {
-  id: string
-  buyerCode: string | null
-}) {
-  const router = useRouter()
-  const [value, setValue] = useState(
-    buyerCode && PURCHASE_BUYERS.some((buyer) => buyer.code === buyerCode) ? buyerCode : '4',
-  )
-  const [isPending, startTransition] = useTransition()
-
-  function save(nextValue: string) {
-    setValue(nextValue)
-    startTransition(async () => {
-      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buyerCode: nextValue }),
-      })
-      if (response.ok) router.refresh()
-    })
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={(event) => save(event.target.value)}
-      disabled={isPending}
-      className="h-7 w-full min-w-[92px] rounded-md border border-input bg-background px-2 text-xs"
-    >
-      {PURCHASE_BUYERS.map((buyer) => (
-        <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
-      ))}
-    </select>
-  )
 }
 
 function parseQuantityPreview(value: string, fallback: number) {

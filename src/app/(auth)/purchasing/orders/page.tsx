@@ -40,7 +40,6 @@ import { PurchasePriceComparisonFields } from './purchase-price-comparison-field
 import { readPurchasePriceComparison, resolvePurchasePriceComparison } from '@/lib/purchasing/purchase-price-comparison'
 import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import {
-  PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
   PurchaseBulk1688TrackingLookup,
   PurchaseBulkInventoryReflectedButton,
@@ -48,7 +47,6 @@ import {
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
   CompletedOutboundDateFilter,
-  PurchaseBuyerField,
   PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
@@ -207,7 +205,7 @@ export async function PurchasingOrdersView({
     ? isRequestedStatus
     : recommendationBasisParam === '1'
   const visibleColumnCount =
-    8 +
+    7 +
     (showCosts ? (isRequestedStatus ? 3 : 4) : 0) +
     (isRequestedStatus ? 1 : 0) +
     (isRequestedStatus ? 1 : 0) +
@@ -484,7 +482,6 @@ export async function PurchasingOrdersView({
                 />
               ) : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
-              {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
@@ -592,9 +589,6 @@ export async function PurchasingOrdersView({
                   {showPriceComparison && <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
                   {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" {...sortHeaderProps} align="center" />
-                  </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
                 </tr>
@@ -855,9 +849,6 @@ export async function PurchasingOrdersView({
                           ) : '-'}
                         </td>
                       ) : null}
-                      <td className="px-2 py-2 text-center align-middle">
-                        {item.id ? <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} /> : '-'}
-                      </td>
                       <td className="px-3 py-2 text-center align-middle">
                         {item.id && (item.status === 'purchase_completed' || item.status === 'inspecting') ? <PurchaseInspectionButton id={item.id} productName={item.productName} /> : item.id ? (
                           <PurchaseStatusButton

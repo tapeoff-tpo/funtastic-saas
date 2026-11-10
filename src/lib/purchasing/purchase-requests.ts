@@ -2283,12 +2283,12 @@ export async function updatePurchaseRequestPlanFields(input: {
         throw new Error('현재 발주 단계에서는 해당 구매가격을 수정할 수 없습니다.')
       }
       const stored = readPurchasePriceComparison(current.rawData)
-      if (editsActual && (stored.baselineUnitPriceCny === undefined || stored.baselineShippingCny === undefined)) {
+      if (editsActual && (stored.baselineUnitPriceCny === undefined || stored.baselineUnitShippingCny === undefined)) {
         const [master] = await tx.select({
           unitPrice: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
           shipping: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
         }).from(products).where(and(eq(products.userId, input.userId), eq(products.internalSku, current.sku))).limit(1)
-        priceComparison = { ...resolvePurchasePriceComparison(stored, master?.unitPrice, master?.shipping), ...pricePatch }
+        priceComparison = { ...stored, ...resolvePurchasePriceComparison(stored, master?.unitPrice, master?.shipping), ...pricePatch }
       } else {
         priceComparison = { ...stored, ...pricePatch }
       }

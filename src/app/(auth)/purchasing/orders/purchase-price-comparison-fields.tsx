@@ -13,17 +13,18 @@ import {
 
 const labels: Record<PurchasePriceField, string> = {
   baselineUnitPriceCny: '기존 구매단가',
-  baselineShippingCny: '기존 배송비 합계',
+  baselineUnitShippingCny: '기존 개당 배송비',
   actualUnitPriceCny: '신규 구매단가',
   actualShippingCny: '신규 배송비 합계',
 }
 const cny = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 })
 
-export function PurchasePriceComparisonFields({ id, productName, sku, prices, quantity, canEditBaseline, canEditActual }: {
+export function PurchasePriceComparisonFields({ id, productName, sku, prices, legacyShipping, quantity, canEditBaseline, canEditActual }: {
   id: string
   productName: string
   sku: string
   prices: Required<PurchasePriceComparison>
+  legacyShipping?: number | null
   quantity: number
   canEditBaseline: boolean
   canEditActual: boolean
@@ -34,9 +35,11 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, qu
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const unitDifference = purchasePriceDifference(draft.actualUnitPriceCny, draft.baselineUnitPriceCny)
-  const shippingDifference = purchasePriceDifference(draft.actualShippingCny, draft.baselineShippingCny)
+  const actualUnitShipping = purchaseShippingPerUnit(draft.actualShippingCny, quantity)
+  const shippingDifference = purchasePriceDifference(actualUnitShipping, draft.baselineUnitShippingCny, 4)
+  const savedUnitShipping = purchaseShippingPerUnit(saved.actualShippingCny, quantity)
   const exceedsBaseline = (purchasePriceDifference(saved.actualUnitPriceCny, saved.baselineUnitPriceCny) ?? 0) > 0
-    || (purchasePriceDifference(saved.actualShippingCny, saved.baselineShippingCny) ?? 0) > 0
+    || (purchasePriceDifference(savedUnitShipping, saved.baselineUnitShippingCny, 4) ?? 0) > 0
   const keys = Object.keys(labels) as PurchasePriceField[]
   const changed = keys.filter((key) => draft[key] !== saved[key])
 
@@ -94,8 +97,7 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, qu
     )
   }
 
-  function perUnit(shipping: number | null) {
-    const amount = purchaseShippingPerUnit(shipping, quantity)
+  function formatShipping(amount: number | null) {
     return amount === null ? '–' : `¥${cny.format(amount)}`
   }
 
@@ -118,16 +120,19 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, qu
             <div className="grid grid-cols-2 gap-3">
               {field('baselineUnitPriceCny')}
               {field('actualUnitPriceCny')}
-              {field('baselineShippingCny')}
+              {field('baselineUnitShippingCny')}
               {field('actualShippingCny')}
             </div>
             <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
               <span>개당 배송비</span>
-              <span data-no-translate>{perUnit(draft.baselineShippingCny)} → {perUnit(draft.actualShippingCny)}</span>
+              <span data-no-translate>{formatShipping(draft.baselineUnitShippingCny)} → {formatShipping(actualUnitShipping)}</span>
             </div>
+            {draft.baselineUnitShippingCny === null && legacyShipping != null && (
+              <p className="text-xs text-amber-700"><span>이전에 저장한 배송비 단위를 확인해주세요.</span> <span data-no-translate>{formatShipping(legacyShipping)}</span></p>
+            )}
             <div className="flex flex-wrap items-center gap-1.5">
               <PriceDifference label="단가 차이" amount={unitDifference} />
-              <PriceDifference label="배송비 차이" amount={shippingDifference} />
+              <PriceDifference label="개당 배송비 차이" amount={shippingDifference} />
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
               <span role="status" className="mr-auto text-xs text-muted-foreground">{message}</span>

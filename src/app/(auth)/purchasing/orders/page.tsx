@@ -637,9 +637,10 @@ export async function PurchasingOrdersView({
                     })
                     const receipt = ('purchaseInspection' in item ? item.purchaseInspection : null) as PurchaseInspection | null
                     const receiptSummary = receipt ? inspectionSummary(receipt) : null
-                    const purchasePrices = showPriceComparison && 'masterPurchasePriceCny' in item
+                    const storedPurchasePrices = showPriceComparison ? readPurchasePriceComparison(item.rawData) : null
+                    const purchasePrices = storedPurchasePrices && 'masterPurchasePriceCny' in item
                       ? resolvePurchasePriceComparison(
-                        readPurchasePriceComparison(item.rawData),
+                        storedPurchasePrices,
                         item.masterPurchasePriceCny,
                         item.masterPurchaseShippingCny,
                       )
@@ -820,6 +821,7 @@ export async function PurchasingOrdersView({
                               productName={item.productName}
                               sku={item.sku}
                               prices={purchasePrices}
+                              legacyShipping={storedPurchasePrices?.baselineShippingCny}
                               quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
                               canEditBaseline={['purchased', 'purchase_completed', 'inspecting'].includes(item.status)}
                               canEditActual={item.status === 'purchase_completed' || item.status === 'inspecting'}

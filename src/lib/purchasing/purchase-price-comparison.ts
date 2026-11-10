@@ -1,12 +1,13 @@
 export const PURCHASE_PRICE_FIELDS = [
   'baselineUnitPriceCny',
-  'baselineShippingCny',
+  'baselineUnitShippingCny',
   'actualUnitPriceCny',
   'actualShippingCny',
 ] as const
 
 export type PurchasePriceField = typeof PURCHASE_PRICE_FIELDS[number]
 export type PurchasePriceComparison = Partial<Record<PurchasePriceField, number | null>>
+export type StoredPurchasePriceComparison = PurchasePriceComparison & { baselineShippingCny?: number | null }
 
 export const purchaseMasterPriceKeys = {
   unitPrice: '상품원가(元)',
@@ -14,25 +15,32 @@ export const purchaseMasterPriceKeys = {
 } as const
 
 export function resolvePurchasePriceComparison(
-  stored: PurchasePriceComparison,
+  stored: StoredPurchasePriceComparison,
   masterUnitPrice: string | null | undefined,
   masterShipping: string | null | undefined,
 ): Required<PurchasePriceComparison> {
+  const { baselineShippingCny: legacyShipping, ...prices } = stored
+  const masterUnitShipping = readPurchaseMasterPrice(masterShipping)
+  // The old field could hold either a copied master value or a manually
+  // entered total. Only the matching master value establishes a unit basis.
+  const baselineUnitShippingCny = legacyShipping === undefined || legacyShipping === masterUnitShipping
+    ? masterUnitShipping
+    : null
   return {
     baselineUnitPriceCny: readPurchaseMasterPrice(masterUnitPrice),
-    baselineShippingCny: readPurchaseMasterPrice(masterShipping),
+    baselineUnitShippingCny,
     actualUnitPriceCny: null,
     actualShippingCny: null,
-    ...stored,
+    ...prices,
   }
 }
 
-export function readPurchasePriceComparison(rawData: Record<string, unknown>): PurchasePriceComparison {
+export function readPurchasePriceComparison(rawData: Record<string, unknown>): StoredPurchasePriceComparison {
   const stored = rawData.purchasePriceComparison
   if (!stored || typeof stored !== 'object') return {}
   const source = stored as Record<string, unknown>
-  const values: PurchasePriceComparison = {}
-  for (const field of PURCHASE_PRICE_FIELDS) {
+  const values: StoredPurchasePriceComparison = {}
+  for (const field of [...PURCHASE_PRICE_FIELDS, 'baselineShippingCny'] as const) {
     const value = source[field]
     if (value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)) values[field] = value
   }
@@ -46,8 +54,9 @@ export function readPurchaseMasterPrice(value: string | null | undefined): numbe
   return Number.isFinite(price) && price <= 999_999_999 ? Math.round(price * 100) / 100 : null
 }
 
-export function purchasePriceDifference(actual: number | null, baseline: number | null) {
-  return actual === null || baseline === null ? null : (Math.round(actual * 100) - Math.round(baseline * 100)) / 100
+export function purchasePriceDifference(actual: number | null, baseline: number | null, fractionDigits = 2) {
+  const scale = 10 ** fractionDigits
+  return actual === null || baseline === null ? null : (Math.round(actual * scale) - Math.round(baseline * scale)) / scale
 }
 
 export function purchaseShippingPerUnit(shipping: number | null, quantity: number) {

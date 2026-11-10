@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Pencil, Plus, S
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { purchaseMasterPriceKeys } from '@/lib/purchasing/purchase-price-comparison'
 import {
   isDiscontinuedPurchasingStatus,
   PURCHASING_ITEM_STATUS_LABELS,
@@ -46,6 +47,10 @@ function purchaseHref(value: string | null | undefined) {
 
 function emptyDraft(headers: readonly string[]) {
   return Object.fromEntries(headers.map((header) => [header, '']))
+}
+
+function itemFieldLabel(header: string) {
+  return header === purchaseMasterPriceKeys.shipping ? '개당 배송비(元)' : header
 }
 
 export function CostsEditableTable({
@@ -219,7 +224,7 @@ export function CostsEditableTable({
         <HeaderToggle label={header} expanded={openGroups.extra} onToggle={() => toggleGroup('extra')} />
       )
     }
-    return header
+    return itemFieldLabel(header)
   }
 
   function renderCell(row: CostEditableRow, header: string) {
@@ -419,10 +424,10 @@ export function CostsEditableTable({
               ) : null}
               {editableHeaders.map((header) => (
                 <div key={header} className="space-y-1">
-                  <span className="flex items-center justify-between text-xs font-medium text-muted-foreground"><label htmlFor={`purchasing-field-${header.replaceAll(' ', '-')}`}>{header}</label>{header === '중국어 상품명' && draft[header] ? <button type="button" aria-label="중국어명 삭제" disabled={isPending} className="text-red-600 hover:underline" onClick={() => setDraft((current) => ({ ...current, [header]: '' }))}>중국어명 삭제</button> : null}</span>
+                  <span className="flex items-center justify-between text-xs font-medium text-muted-foreground"><label htmlFor={`purchasing-field-${header.replaceAll(' ', '-')}`}>{itemFieldLabel(header)}</label>{header === '중국어 상품명' && draft[header] ? <button type="button" aria-label="중국어명 삭제" disabled={isPending} className="text-red-600 hover:underline" onClick={() => setDraft((current) => ({ ...current, [header]: '' }))}>중국어명 삭제</button> : null}</span>
                   <Input
                     id={`purchasing-field-${header.replaceAll(' ', '-')}`}
-                    aria-label={header}
+                    aria-label={itemFieldLabel(header)}
                     maxLength={header === '중국어 상품명' ? 1000 : undefined}
                     type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
                     value={draft[header] ?? ''}

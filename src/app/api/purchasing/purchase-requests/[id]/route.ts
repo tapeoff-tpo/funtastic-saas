@@ -28,7 +28,7 @@ export const purchaseRequestPlanFieldsBodySchema = z.object({
   purchaseMethod: z.string().max(100).nullable().optional(),
   purchasePriceComparison: z.object({
     baselineUnitPriceCny: price,
-    baselineShippingCny: price,
+    baselineUnitShippingCny: price,
     actualUnitPriceCny: price,
     actualShippingCny: price,
   }).refine((values) => Object.keys(values).length > 0).optional(),

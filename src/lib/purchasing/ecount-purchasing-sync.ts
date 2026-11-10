@@ -29,7 +29,7 @@ import {
   normalizeSupplierOrderReference,
 } from './supplier-order-reference'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import { readPurchasePriceComparison, type PurchasePriceComparison } from './purchase-price-comparison'
+import { readPurchasePriceComparison, type StoredPurchasePriceComparison } from './purchase-price-comparison'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -2405,7 +2405,7 @@ function purchasePriceIdentity(item: { sku: string; purchaseManagementCode?: str
 }
 
 export function collectPurchasePriceComparisons(rows: ReadonlyArray<BulkPaymentIdentity & { rawData: Record<string, unknown> }>) {
-  const comparisons = new Map<string, PurchasePriceComparison>()
+  const comparisons = new Map<string, StoredPurchasePriceComparison>()
   for (const row of rows) {
     const key = purchasePriceIdentity(row)
     if (!key || comparisons.has(key)) continue
@@ -2415,7 +2415,7 @@ export function collectPurchasePriceComparisons(rows: ReadonlyArray<BulkPaymentI
   return comparisons
 }
 
-export function applyPurchasePriceComparison(row: PurchaseRequestItemInsert, comparisons: Map<string, PurchasePriceComparison>): PurchaseRequestItemInsert {
+export function applyPurchasePriceComparison(row: PurchaseRequestItemInsert, comparisons: Map<string, StoredPurchasePriceComparison>): PurchaseRequestItemInsert {
   const key = purchasePriceIdentity(row)
   const comparison = key ? comparisons.get(key) : undefined
   return comparison ? { ...row, rawData: { ...row.rawData, purchasePriceComparison: comparison } } : row

@@ -26,6 +26,7 @@ const DEFAULT_PAGE_SIZE = 50
 export const getProducts = cache(async function getProducts(
   userId: string,
   filters: ProductFilters = {},
+  options: { includeDescription?: boolean } = {},
 ): Promise<{ items: ProductListItem[]; total: number }> {
   const page = filters.page ?? 1
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
@@ -83,6 +84,13 @@ export const getProducts = cache(async function getProducts(
     ? (filters.order === 'asc' ? asc : desc)
     : asc
 
+  // Select the requested page before joining variants and warehouse rows.
+  // Counts and option aggregation retain their original semantics, but only
+  // the visible products participate in the potentially multiplying joins.
+  const selectedProducts = db.select({ id: products.id }).from(products)
+    .where(whereClause).orderBy(sortDirection(sortColumn))
+    .limit(pageSize).offset(offset).as('page_products')
+
   const [rows, [{ total }]] = await Promise.all([
     db
       .select({
@@ -90,7 +98,7 @@ export const getProducts = cache(async function getProducts(
         userId: products.userId,
         internalSku: products.internalSku,
         name: products.name,
-        description: products.description,
+        description: options.includeDescription === false ? sql<null>`NULL` : products.description,
         basePrice: products.basePrice,
         costPrice: products.costPrice,
         warehouseLocation: products.warehouseLocation,
@@ -105,16 +113,14 @@ export const getProducts = cache(async function getProducts(
         optionName: sql<string | null>`max(${inventory.optionName})`,
       })
       .from(products)
+      .innerJoin(selectedProducts, eq(products.id, selectedProducts.id))
       .leftJoin(productVariants, eq(products.id, productVariants.productId))
       .leftJoin(
         inventory,
         and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
       )
-      .where(whereClause)
       .groupBy(products.id)
-      .orderBy(sortDirection(sortColumn))
-      .limit(pageSize)
-      .offset(offset),
+      .orderBy(sortDirection(sortColumn)),
     db
       .select({ total: count() })
       .from(products)

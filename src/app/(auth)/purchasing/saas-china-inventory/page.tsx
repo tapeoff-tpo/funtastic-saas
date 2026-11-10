@@ -7,7 +7,6 @@ import {
   listSaasChinaOutboundWarehouses,
   SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
 } from '@/lib/purchasing/saas-china-outbound'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { SaasChinaInventoryBoard, type SaasChinaInventoryViewItem } from './saas-china-inventory-board'
 
 export const metadata: Metadata = {
@@ -40,7 +39,6 @@ export default async function SaasChinaInventoryPage() {
 
   return (
     <div className="space-y-4">
-      <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">

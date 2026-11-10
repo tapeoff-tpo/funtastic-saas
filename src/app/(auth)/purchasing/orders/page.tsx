@@ -34,7 +34,6 @@ import {
 } from '@/lib/purchasing/purchase-urgency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 import { PurchaseInspectionButton } from './purchase-inspection-dialog'
 import { PurchasePriceComparisonFields } from './purchase-price-comparison-fields'
@@ -272,7 +271,6 @@ export async function PurchasingOrdersView({
   return (
     <div className="min-w-0 space-y-4">
       <PurchaseOrderRetentionCleanup />
-      <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{title}</h1>

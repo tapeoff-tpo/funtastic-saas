@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { Button } from '@/components/ui/button'
 import { getChinaWarehouseInventory } from '@/lib/purchasing/purchase-requests'
 
@@ -33,7 +32,6 @@ export default async function ChinaInventoryPage({
 
   return (
     <div className="space-y-4">
-      <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">중국재고</h1>

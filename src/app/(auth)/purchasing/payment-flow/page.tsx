@@ -17,7 +17,6 @@ import {
   type PurchasePaymentFlowSort,
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchasePaymentFlowDetailList } from './purchase-payment-flow-detail-list'
 import { PurchasePaymentFlowSummaryPanel } from './purchase-payment-flow-summary'
 import { PurchaseFundLedgerPanel } from './purchase-fund-ledger-panel'
@@ -86,7 +85,6 @@ export default async function PurchasePaymentFlowPage({
   return (
     <div className="space-y-5">
       <PurchaseOrderRetentionCleanup />
-      <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">발주금액</h1>

@@ -5,7 +5,6 @@ import {
   listSaasChinaOutboundWarehouses,
   listChinaOutboundShipments,
 } from '@/lib/purchasing/saas-china-outbound'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { ChinaShipmentsBoard, type ChinaShipmentListItem, type ChinaShipmentStage } from './china-shipments-board'
 
 import { loadChinaShipmentDetailView, loadChinaShipmentStockItems } from './china-shipment-data'
@@ -49,7 +48,6 @@ export default async function ChinaShipmentsPage({
 
   return (
     <div className="space-y-4">
-      <ProductFlowNav />
       <header>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-semibold">중국출고</h1>

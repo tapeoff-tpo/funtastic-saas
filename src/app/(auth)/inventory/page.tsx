@@ -13,7 +13,6 @@ import type { InventoryFilters } from '@/lib/inventory/types'
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { getInventoryPeriod, isHistoricalInventoryMonth } from '@/lib/inventory/period'
 
 export const metadata: Metadata = {
@@ -92,7 +91,6 @@ export default async function InventoryPage({
 
   return (
     <div className="space-y-2">
-      <ProductFlowNav />
       {/* Header */}
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-bold">재고관리</h1>

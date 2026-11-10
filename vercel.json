@@ -2,5 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "buildCommand": "npm run build",
-  "regions": ["bom1"]
+  "regions": ["bom1"],
+  "functions": {
+    "src/proxy.ts": {
+      "regions": ["bom1"]
+    }
+  }
 }

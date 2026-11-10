@@ -2,9 +2,11 @@ import 'server-only'
 import { createHash, randomBytes } from 'node:crypto'
 import { client } from '@/lib/db'
 import { cache } from 'react'
+import { keepDatabaseAliveUntilIdle } from '@/lib/db/connection-lifecycle'
 
 export const LOCAL_SESSION_COOKIE = 'funtastic_session'
 export function authDatabase() {
+  keepDatabaseAliveUntilIdle()
   return client
 }
 const digest = (token: string) => createHash('sha256').update(token).digest('hex')

@@ -8,7 +8,7 @@ vi.mock('@/lib/db', () => ({ db: { select: () => {
   const builder = { from: () => builder, leftJoin: () => builder, where: () => builder, limit: async () => mocks.rows }
   return builder
 } } }))
-vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.client }))
+vi.mock('@/lib/auth/server', () => ({ createClient: mocks.client }))
 vi.mock('@/lib/inventory/actions', () => ({ setStock: mocks.setStock }))
 vi.mock('@/lib/inventory/queries', () => ({ getInventoryHistory: vi.fn() }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), unstable_cache: (fn: unknown) => fn }))

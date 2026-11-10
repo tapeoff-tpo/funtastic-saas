@@ -1,7 +1,9 @@
 import { client as sql } from '@/lib/db'
 import { hash } from 'bcryptjs'
+import { keepDatabaseAliveUntilIdle } from '@/lib/db/connection-lifecycle'
 
 export function createLocalAdmin() {
+  keepDatabaseAliveUntilIdle()
   async function getUserById(id: string) {
     const [row] = await sql`SELECT p.id::text,p.email,p.role,p.display_name,a.approval_status FROM user_profiles p LEFT JOIN app_auth_accounts a ON a.user_id=p.id WHERE p.id=${id}::uuid`
     return { data: { user: row ? { id: row.id, email: row.email, app_metadata: { role: row.role }, user_metadata: { full_name: row.display_name } } : null }, error: null }

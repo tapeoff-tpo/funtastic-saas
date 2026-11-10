@@ -433,7 +433,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           }`}
         >
           <Icon className={mobile ? 'h-4 w-4 shrink-0' : 'h-3.5 w-3.5 shrink-0'} />
-          <span className="truncate">{item.label}</span>
+          <span className="min-w-0 whitespace-normal break-keep [overflow-wrap:anywhere]">{item.label}</span>
         </Link>
         {opts.position && opts.siblings && renderDragHandle(item.label, opts.position, opts.siblings)}
         {opts.showStar && (

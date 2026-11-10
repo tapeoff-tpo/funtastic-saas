@@ -1,13 +1,10 @@
 import 'server-only'
 import { createHash, randomBytes } from 'node:crypto'
-import postgres from 'postgres'
+import { client } from '@/lib/db'
 
 export const LOCAL_SESSION_COOKIE = 'funtastic_session'
-let client: ReturnType<typeof postgres> | undefined
 export function authDatabase() {
-  const url = process.env.DATABASE_URL
-  if (!url) throw new Error('Independent authentication database is not configured')
-  return client ??= postgres(url, { max: 2, prepare: false, idle_timeout: 20 })
+  return client
 }
 const digest = (token: string) => createHash('sha256').update(token).digest('hex')
 

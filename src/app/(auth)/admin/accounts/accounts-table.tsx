@@ -34,10 +34,15 @@ export function AccountsTable({ accounts, currentUserId, menuPermissions }: Prop
   }
 
   function handleReset(targetId: string, email: string) {
-    if (!confirm(`${email} 의 비밀번호를 0000으로 초기화하시겠습니까?\n다음 로그인 시 새 비밀번호를 설정해야 합니다.`)) return
+    if (!confirm(`${email} 의 비밀번호를 초기화하시겠습니까?\n기존 세션이 종료되고 새 비밀번호 설정 링크가 발급됩니다.`)) return
     startTransition(async () => {
       const res = await resetAccountPassword({ targetId })
-      if (res.success) toast.success('비밀번호가 0000으로 초기화되었습니다. 다음 로그인 시 새 비밀번호를 설정해야 합니다.')
+      if (res.success) {
+        if (res.data?.resetPath) {
+          window.prompt('계정 소유자에게 전달할 비밀번호 설정 링크입니다. 1시간 내 1회 사용할 수 있습니다.', window.location.origin + res.data.resetPath)
+          toast.success('비밀번호 설정 링크가 발급되었습니다.')
+        } else toast.success('비밀번호가 초기화되었습니다.')
+      }
       else toast.error(res.error)
     })
   }

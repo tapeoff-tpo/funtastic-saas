@@ -21,6 +21,8 @@ import { MENU_PATHS } from '@/lib/auth/menu-permissions'
 import { z } from 'zod'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import { createHash, randomBytes } from 'node:crypto'
+import { authDatabase } from '@/lib/auth/local-session'
 import {
   getTemporaryResetAuthPassword,
 } from '@/lib/auth/temporary-reset-password'
@@ -264,7 +266,7 @@ export async function changeRole(input: {
 }
 
 /** Reset a user's password and require a new password on their next login. */
-export async function resetAccountPassword(input: { targetId: string }): Promise<ActionResult> {
+export async function resetAccountPassword(input: { targetId: string }): Promise<ActionResult<{ resetPath: string }>> {
   const guard = await assertSuperAdmin()
   if (!guard.ok) return { success: false, error: guard.error }
 
@@ -274,6 +276,22 @@ export async function resetAccountPassword(input: { targetId: string }): Promise
     .where(eq(userProfiles.id, input.targetId))
     .limit(1)
   if (!target) return { success: false, error: 'Target not found' }
+
+  if (process.env.AUTH_PROVIDER === 'local') {
+    const token = randomBytes(32).toString('base64url')
+    const tokenHash = createHash('sha256').update(token).digest('hex')
+    const auth = authDatabase()
+    await auth.begin(async tx => {
+      await tx.unsafe('DELETE FROM app_auth_password_tokens WHERE user_id = $1::uuid', [target.id])
+      await tx.unsafe('INSERT INTO app_auth_password_tokens(token_hash,user_id,expires_at) VALUES($1,$2::uuid,now()+interval \'1 hour\')', [tokenHash,target.id])
+      await tx.unsafe('UPDATE app_auth_accounts SET password_hash=NULL WHERE user_id=$1::uuid', [target.id])
+      await tx.unsafe('DELETE FROM app_auth_sessions WHERE user_id=$1::uuid', [target.id])
+      await tx.unsafe('DELETE FROM app_auth_login_limits WHERE email_hash=$1', [createHash('sha256').update(target.email.trim().toLowerCase()).digest('hex')])
+    })
+    await db.insert(auditLogs).values({ actorId: guard.callerId, targetId: target.id, action: 'account.password_reset', metadata: { provider: 'local', oneTimeLink: true } })
+    revalidatePath('/admin/accounts')
+    return { success: true, data: { resetPath: '/set-password?token=' + token } }
+  }
 
   const admin = createAdminClient()
   const authTarget = await resolveAuthUserForProfile(admin, target)

@@ -25,7 +25,7 @@ export function PriceTableWorkspace(props: {
   const [view, setView] = useState<WorkspaceView>(props.initialView)
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1.5">
       <div className="flex border-b">
         {VIEW_ITEMS.map((item) => {
           const Icon = item.icon
@@ -82,8 +82,10 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="border-b bg-muted/15 px-3 py-2.5">
+    <div className="space-y-1.5">
+      <details className="group rounded-md border bg-muted/15">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5 text-xs [&::-webkit-details-marker]:hidden"><span className="font-medium">몰 선택·그룹 ▾</span><span className="text-muted-foreground">{selected.length}개 선택 · B2B / B2C 고정</span></summary>
+        <div className="border-t px-3 py-2">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm font-medium">이용 중인 몰</p>
           <span className="text-xs text-muted-foreground">{selected.length}개 선택 · B2B / B2C 항상 표시</span>
@@ -127,7 +129,8 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
             ))}
           </div>
         </details>
-      </div>
+        </div>
+      </details>
       <div className="overflow-auto rounded-md border bg-card">
         <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
           <colgroup>

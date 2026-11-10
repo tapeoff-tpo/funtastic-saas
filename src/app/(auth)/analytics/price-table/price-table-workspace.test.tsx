@@ -7,6 +7,7 @@ afterEach(() => { cleanup(); localStorage.clear() })
 describe('price table mall selection', () => {
   it('selects every mall initially and keeps baseline prices pinned when clearing', () => {
     render(<PriceTableWorkspace rows={[]} initialView="compare" />)
+    fireEvent.click(screen.getByText("몰 선택·그룹 ▾"))
     const inputs = screen.getAllByRole('checkbox') as HTMLInputElement[]
     expect(inputs.length).toBeGreaterThan(6)
     expect(inputs.every(input => input.checked)).toBe(true)
@@ -18,6 +19,7 @@ describe('price table mall selection', () => {
   })
   it('restores a saved custom mall group in one click', () => {
     render(<PriceTableWorkspace rows={[]} initialView="compare" />)
+    fireEvent.click(screen.getByText("몰 선택·그룹 ▾"))
     fireEvent.click(screen.getByRole('button', { name: '몰 선택 해제' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '쿠팡' }))
     fireEvent.change(screen.getByRole('textbox', { name: '몰 그룹 이름' }), { target: { value: 'B2C몰' } })

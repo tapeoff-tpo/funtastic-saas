@@ -1,6 +1,6 @@
 export const SIDEBAR_MENU_ORDER_KEY = 'funtastic-sidebar-menu-order'
 export const SIDEBAR_MENU_ORDER_EVENT = 'funtastic-sidebar-menu-order-changed'
-export const SIDEBAR_MENU_ORDER_VERSION = 3
+export const SIDEBAR_MENU_ORDER_VERSION = 4
 
 export interface SidebarMenuOrder {
   version: number
@@ -81,7 +81,7 @@ export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection e
   sections: TSection[],
   order: SidebarMenuOrder | null,
 ): TSection[] {
-  if (!order) return sections.map((section) => ({ ...section, items: [...section.items] }))
+  if (!order || order.version !== SIDEBAR_MENU_ORDER_VERSION) return sections.map((section) => ({ ...section, items: [...section.items] }))
 
   const sectionRank = new Map(order.sections.map((id, index) => [id, index]))
   const defaultSectionRank = new Map(sections.map((section, index) => [section.id, index]))

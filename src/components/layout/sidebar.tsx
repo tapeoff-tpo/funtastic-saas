@@ -122,20 +122,11 @@ const orderRelatedGroups: NavGroup[] = [
 
 export const navSections: NavSection[] = [
   {
-    id: 'order-related',
-    title: '주문관련',
-    collapsible: true,
-    defaultCollapsed: true,
-    groups: orderRelatedGroups,
-    items: orderRelatedGroups.flatMap((group) => group.items),
-  },
-  {
     id: 'product-preparation',
-    title: '상품 준비',
+    title: '소싱·상품 준비',
     items: [
       { href: '/new-products', label: '상품관리', icon: Sparkles },
       { href: '/operations/sourcing', label: '소싱', icon: Search },
-      { href: '/costs', label: '품목', icon: Package },
     ],
   },
   {
@@ -146,22 +137,35 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
       { href: '/purchasing/payment-flow', label: '발주금액', icon: WalletCards },
       { href: '/purchasing/raw-data', label: '발주 로우데이터', icon: FileSpreadsheet },
-      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
-      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
-      { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
-      { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
     ],
   },
   {
-    id: 'product-registration',
-    title: '상품등록·광고',
+    id: 'inventory-flow',
+    title: '중국재고·재고관리',
     items: [
+      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
+      { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
+      { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
+    ],
+  },
+  {
+    id: 'pricing',
+    title: '원가·판매가',
+    items: [
+      { href: '/costs', label: '원가', icon: Package },
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
-      { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },
-      { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
+    ],
+  },
+  {
+    id: 'product-registration',
+    title: '상세페이지·상품등록',
+    items: [
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
+      { href: '/operations/marketplace-registration', label: '상품등록', icon: Package },
+      { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
     ],
   },
@@ -175,6 +179,14 @@ export const navSections: NavSection[] = [
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
     ],
+  },
+  {
+    id: 'order-related',
+    title: '주문관련',
+    collapsible: true,
+    defaultCollapsed: true,
+    groups: orderRelatedGroups,
+    items: orderRelatedGroups.flatMap((group) => group.items),
   },
   {
     id: 'operations',

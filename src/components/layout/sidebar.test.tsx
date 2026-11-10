@@ -43,3 +43,11 @@ describe('Sidebar navigation prefetch', () => {
     expect(prefetch).not.toHaveBeenCalled()
   })
 })
+
+it('follows the sourcing-to-sales workflow without duplicate menu destinations', async () => {
+  const { navSections } = await import('./sidebar')
+  const routes = navSections.flatMap(section => section.items.map(item => item.href))
+  const flow = ['/operations/sourcing', '/purchasing/orders', '/purchasing/china-inventory', '/inventory', '/costs', '/analytics/price-table', '/operations/detail-pages', '/operations/marketplace-registration', '/operations/coupang-registration', '/analytics/channels']
+  for (let i = 1; i < flow.length; i++) expect(routes.indexOf(flow[i])).toBeGreaterThan(routes.indexOf(flow[i - 1]))
+  expect(new Set(routes).size).toBe(routes.length)
+})

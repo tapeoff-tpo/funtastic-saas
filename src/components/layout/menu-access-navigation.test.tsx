@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Sidebar, navSections } from './sidebar'
 import { TabBar } from './tab-bar'
-import { MENU_PATHS } from '@/lib/auth/menu-permissions'
+import { MENU_PATHS, menuForPage } from '@/lib/auth/menu-permissions'
 
 const mocks = vi.hoisted(() => ({ access: { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] as string[] | null } }))
 vi.mock('./menu-access-provider', () => ({ useMenuAccess: () => mocks.access }))
@@ -34,7 +34,7 @@ describe('permission-aware navigation', () => {
   it('never loses known sidebar menu entries from the permission catalogue', () => {
     for (const item of navSections.flatMap((section) => section.items)) {
       if (item.href.startsWith('/admin/')) continue
-      expect(MENU_PATHS).toContain(item.href)
+      expect(MENU_PATHS).toContain(menuForPage(item.href))
     }
   })
   it('keeps selected children visible when their parent menu is not granted', () => {

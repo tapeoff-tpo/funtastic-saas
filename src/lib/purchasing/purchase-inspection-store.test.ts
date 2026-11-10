@@ -36,9 +36,17 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.writes).toHaveLength(0)
   })
   it('records the real inspector only after shortage verification', async () => {
-    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel], complete: true, acknowledgeMismatch: true, resolutionNote: '부족 10개 공급처 확인' } })
-    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { checkedBy: 'staff-id', resolutionNote: '부족 10개 공급처 확인', expectedQuantity: 100 } })
+    const data = { revision: 0, parcels: [parcel], complete: true, acknowledgeMismatch: true, resolutionNote: '부족 10개 공급처 확인' }
+    const context = { userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id' }
+    await expect(savePurchaseInspection({ ...context, data })).rejects.toThrow('스티커 부착 상태')
+    await savePurchaseInspection({ ...context, data: { ...data, stickerStatus: 'barcode' } })
+    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { checkedBy: 'staff-id', resolutionNote: '부족 10개 공급처 확인', expectedQuantity: 100, stickerStatus: 'barcode' } })
     expect(fixture.receive).not.toHaveBeenCalled()
+  })
+  it('preserves the recorded sticker status when another entry point only edits tracking', async () => {
+    fixture.current.purchaseInspection = { ...inspection, stickerStatus: 'quality' }
+    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel] } })
+    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { stickerStatus: 'quality' } })
   })
   it('blocks generic arrival and downstream status jumps before inspection', async () => {
     for (const status of ['china_arrived', 'outbound_requested', 'completed'] as const) {

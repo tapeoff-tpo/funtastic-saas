@@ -8,12 +8,13 @@ import { MENU_PATHS, MENU_PERMISSION_GROUPS } from '@/lib/auth/menu-permissions'
 import { saveMenuPermissions } from '@/lib/admin-accounts/actions'
 
 export function MenuPermissionsDialog({ account, onClose }: {
-  account: { id: string; email: string; allowedMenus: string[] | null }
+  account: { id: string; email: string; allowedMenus: string[] | null; canDeletePurchases?: boolean }
   onClose: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const router = useRouter()
   const [unrestricted, setUnrestricted] = useState(account.allowedMenus === null)
+  const [canDeletePurchases, setCanDeletePurchases] = useState(account.canDeletePurchases ?? false)
   const [selected, setSelected] = useState<string[]>(account.allowedMenus ?? [...MENU_PATHS])
   const [pending, startTransition] = useTransition()
   useEffect(() => { ref.current?.showModal() }, [])
@@ -28,7 +29,7 @@ export function MenuPermissionsDialog({ account, onClose }: {
       event.preventDefault()
       startTransition(async () => {
         try {
-          const result = await saveMenuPermissions({ targetId: account.id, allowedMenus: unrestricted ? null : selected })
+          const result = await saveMenuPermissions({ targetId: account.id, allowedMenus: unrestricted ? null : selected, canDeletePurchases })
           if (!result.success) { toast.error(result.error); return }
           toast.success('메뉴 권한을 저장했습니다.')
           router.refresh()
@@ -66,6 +67,10 @@ export function MenuPermissionsDialog({ account, onClose }: {
           </div>
         </div>)}
       </fieldset>
+      <label className="flex items-center gap-2 border-t p-4 text-sm font-medium">
+        <input type="checkbox" checked={canDeletePurchases} disabled={pending} onChange={(event) => setCanDeletePurchases(event.target.checked)} />
+        발주 삭제 허용 (개별·일괄)
+      </label>
       <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background p-4">
         <Button type="button" variant="outline" disabled={pending} onClick={() => ref.current?.close()}>취소</Button>
         <Button type="submit" disabled={pending}>{pending ? '저장 중…' : '권한 저장'}</Button>

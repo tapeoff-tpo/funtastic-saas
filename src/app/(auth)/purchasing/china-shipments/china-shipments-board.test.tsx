@@ -550,6 +550,20 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('navigation', { name: '중국출고 작업 단계' })).not.toBeInTheDocument()
   })
 
+  it('opens a request with the arrival warehouse and item visible while leaving the outbound quantity for the user', () => {
+    const inventoryItems = [
+      { id: 'selected', warehouseCode: '쿠팡창고', sku: 'SKU-1', productName: '입고 품목', optionName: null, onHandQuantity: 20, reservedQuantity: 5, availableQuantity: 15 },
+      { id: 'other', warehouseCode: '대량창고', sku: 'SKU-2', productName: '다른 품목', optionName: null, onHandQuantity: 10, reservedQuantity: 0, availableQuantity: 10 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={inventoryItems} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate initialInventoryId="selected" />)
+
+    expect(screen.getByRole('checkbox', { name: /쿠팡창고/ })).toBeChecked()
+    expect(screen.getByText('입고 품목')).toBeInTheDocument()
+    expect(screen.queryByText('다른 품목')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('이번 출고')).toHaveDisplayValue('')
+    expect(createShipment).not.toHaveBeenCalled()
+  })
+
   it('submits a new request while existing requests are still in progress', async () => {
     createShipment.mockResolvedValue({ ok: false, error: '테스트 종료' })
     const inventoryItems = [{ id: 'inventory-new', warehouseCode: '중국창고', sku: 'NEW-1', productName: '새 상품', optionName: null, onHandQuantity: 20, reservedQuantity: 5, availableQuantity: 15 }]

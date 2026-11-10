@@ -37,7 +37,7 @@ export const MENU_PERMISSION_GROUPS = [
 ] as const
 
 export const MENU_PATHS: readonly string[] = MENU_PERMISSION_GROUPS.flatMap((group) => group.items.map(([path]) => path))
-export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null }
+export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null; canDeletePurchases?: boolean }
 export const UNRESTRICTED_MENU_ACCESS: MenuAccess = { superAdmin: true, allowedMenus: null }
 
 const matches = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`)
@@ -63,6 +63,12 @@ export function menuForPage(href: string): string | null {
 export function canUseMenu(access: MenuAccess, menu: string): boolean {
   if (matches(menu, '/admin/accounts')) return access.superAdmin
   return access.superAdmin || access.allowedMenus === null || access.allowedMenus.includes(menu)
+}
+
+export function canDeletePurchaseRequests(access: MenuAccess | null): boolean {
+  return Boolean(access && (access.superAdmin || (
+    access.canDeletePurchases && ['/purchasing/orders', '/purchasing/purchases', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
+  )))
 }
 
 export function canAccessPage(access: MenuAccess, href: string): boolean {
@@ -110,7 +116,7 @@ const API_MENU_RULES: Array<[string, string[]]> = [
 export function canAccessApi(access: MenuAccess, href: string, method = 'GET'): boolean {
   const path = normalizeMenuPath(href)
   if (path === '/api/menu-access' || path === '/api/settings/menu-order' || path === '/api/check-ip') return true
-  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection$/.test(path)) {
+  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection(?:\/labels)?$/.test(path)) {
     return ['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
   }
   if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/bulk-payment-deposit$/.test(path)) {

@@ -2,6 +2,8 @@
 import type { Metadata } from 'next'
 import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { getUserAuthorization } from '@/lib/auth/menu-access'
+import { canDeletePurchaseRequests, canUseMenu } from '@/lib/auth/menu-permissions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
@@ -39,8 +41,11 @@ import { PurchaseInspectionButton } from './purchase-inspection-dialog'
 import { PurchasePriceComparisonFields } from './purchase-price-comparison-fields'
 import { readPurchasePriceComparison, resolvePurchasePriceComparison } from '@/lib/purchasing/purchase-price-comparison'
 import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import { purchaseArrivalWarehouse } from '@/lib/purchasing/purchase-arrival-warehouse'
+import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
+import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
 import {
-  PurchaseBulkBuyerApply,
+  PurchaseArrivalWarehouseField,
   PurchaseBulkDeleteButton,
   PurchaseBulk1688TrackingLookup,
   PurchaseBulkInventoryReflectedButton,
@@ -48,7 +53,6 @@ import {
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
   CompletedOutboundDateFilter,
-  PurchaseBuyerField,
   PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
@@ -126,10 +130,15 @@ export async function PurchasingOrdersView({
   const user = await getCurrentUser()
   if (!user) return null
 
-  const [workspaceUserId, exchangeRateReference] = await Promise.all([
+  const [workspaceUserId, exchangeRateReference, authorization] = await Promise.all([
     getWorkspaceUserId(user.id),
     getLatestCnyKrwReferenceRate(),
+    getUserAuthorization(user.id),
   ])
+  const access = authorization?.access ?? null
+  const canDelete = canDeletePurchaseRequests(access)
+  const canOpenChinaShipments = Boolean(access && canUseMenu(access, '/purchasing/china-shipments'))
+  const isMainOrders = basePath === '/purchasing/orders'
   const completedOutboundAutoCleanup = status === 'completed'
     ? await cleanupExpiredCompletedOutboundItems({
       userId: workspaceUserId,
@@ -159,6 +168,7 @@ export async function PurchasingOrdersView({
       order,
       outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
       exchangeRateKrw: exchangeRateReference.rate,
+      includeSaasArrival: isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status),
     })
   const [initialPurchaseRequestResult, dataFreshness, completedOutboundDates] = await Promise.all([
     getPurchaseListPage(requestedPage),
@@ -196,8 +206,12 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
-  const showPriceComparison = basePath === '/purchasing/orders' && !isRequestedStatus
-  const showPaymentControls = status === 'purchased' || status === 'purchase_completed'
+  const showPriceComparison = isMainOrders && (status === 'purchase_completed' || status === 'inspecting')
+  const isSsj = authorization?.email?.trim().toLowerCase().split('@')[0] === 'ssj'
+  const showPaymentControls = !isSsj && (status === 'purchased' || status === 'purchase_completed')
+  const showArrivalWarehouse = isMainOrders
+  const showPurchaseDateColumn = isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status)
+  const showCostColumns = isMainOrders || showCosts
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
     : []
@@ -206,16 +220,32 @@ export async function PurchasingOrdersView({
   const showRecommendationBasis = recommendationBasisParam === undefined
     ? isRequestedStatus
     : recommendationBasisParam === '1'
-  const visibleColumnCount =
-    8 +
-    (showCosts ? (isRequestedStatus ? 3 : 4) : 0) +
-    (isRequestedStatus ? 1 : 0) +
-    (isRequestedStatus ? 1 : 0) +
-    (showRecommendationBasis ? 1 : 0) +
-    (showPurchaseUrlColumn ? 1 : 0) +
-    (showPriceComparison ? 1 : 0) +
-    (isRequestedStatus ? 0 : (showPaymentControls ? 3 : 2)) +
-    (overdueOnly ? 1 : 0)
+  const showBasisColumn = isMainOrders || showRecommendationBasis
+  const columns: PurchaseColumn[] = [
+    { id: 'select', label: '선택' },
+    { id: 'number', label: 'No.' },
+    { id: 'status', label: isPurchaseReviewList ? '발주상태' : '상태' },
+    { id: 'product', label: '상품' },
+    ...(showPurchaseUrlColumn ? [{ id: 'url', label: 'URL' }] : []),
+    { id: 'quantity', label: isPurchaseReviewList ? '발주수량' : quantityColumn.label },
+    ...(showArrivalWarehouse ? [{ id: 'warehouse', label: '입고 창고' }] : []),
+    ...(isRequestedStatus ? [{ id: 'history', label: '최근 구매 이력' }, { id: 'amount', label: '총 금액(₩)' }] : []),
+    ...(showCostColumns ? [
+      { id: 'unit-yuan', label: '개당 원가(元)', initiallyHidden: !showCosts },
+      { id: 'unit-krw', label: '개당 원가(₩)', initiallyHidden: !showCosts },
+      { id: 'total-yuan', label: '총 원가(元)', initiallyHidden: !showCosts },
+      ...(!isRequestedStatus ? [{ id: 'total-krw', label: '총 원가(₩)', initiallyHidden: !showCosts }] : []),
+    ] : []),
+    ...(showBasisColumn ? [{ id: 'basis', label: '추천근거', initiallyHidden: !showRecommendationBasis }] : []),
+    ...(!isRequestedStatus ? [{ id: 'management', label: '구입관리코드' }, { id: 'purchase-info', label: '구매 정보' }] : []),
+    ...(showPurchaseDateColumn ? [{ id: 'purchase-date', label: '구매날짜' }] : []),
+    ...(isMainOrders && (status === 'purchase_completed' || status === 'inspecting') ? [{ id: 'purchase-date', label: '구매날짜', field: true }] : []),
+    ...(showPriceComparison ? [{ id: 'price', label: '구매가격' }] : []),
+    ...(showPaymentControls ? [{ id: 'payment', label: '결제 상태 / 대량' }] : []),
+    ...(overdueOnly ? [{ id: 'delay', label: '지연 사유' }] : []),
+    { id: 'actions', label: '상태 변경' },
+    ...(canDelete ? [{ id: 'delete', label: '삭제' }] : []),
+  ]
   const listLabel = isPurchaseReviewList
     ? '발주검토'
     : overdueOnly
@@ -463,7 +493,8 @@ export async function PurchasingOrdersView({
       ) : null}
 
       <PurchaseBulkSelectionProvider ids={items.flatMap((item) => item.id ? [item.id] : [])} nextStatus={nextStatus}>
-        <section className="min-w-0 overflow-hidden rounded-md border bg-background">
+        <PurchaseColumns scope={`${user.id}:${basePath}:${status}`} columns={columns}>
+        <section className="min-w-0 rounded-md border bg-background">
           <div className="flex min-w-0 flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div className="shrink-0">
               <h2 className="text-sm font-semibold">{isPurchaseReviewList ? '전상품 발주검토' : listLabel} 목록</h2>
@@ -484,21 +515,21 @@ export async function PurchasingOrdersView({
                 />
               ) : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
-              {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
-              <Link
+              <PurchaseColumnPicker />
+              {!isMainOrders && <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
                 {showCosts ? <EyeOff /> : <Eye />}
                 {showCosts ? '원가 닫기' : '원가 보기'}
-              </Link>
-              <Link
+              </Link>}
+              {!isMainOrders && <Link
                 href={basisToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
                 {showRecommendationBasis ? <EyeOff /> : <Eye />}
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
-              </Link>
+              </Link>}
               {showPaymentControls ? <PurchaseBulkPaymentDialog /> : null}
               {status === 'purchase_completed' || status === 'inspecting' ? (
                 <PurchaseBulk1688TrackingLookup
@@ -513,7 +544,7 @@ export async function PurchasingOrdersView({
                   mode={status === 'inspecting' ? 'recollect' : 'initial'}
                 />
               ) : null}
-              <PurchaseBulkDeleteButton />
+              {canDelete && <PurchaseBulkDeleteButton />}
               {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
               {overdueOnly || status === 'purchase_completed' || status === 'inspecting' ? null : <PurchaseBulkStatusButton />}
             </div>
@@ -539,72 +570,71 @@ export async function PurchasingOrdersView({
           </div>
 
           <div className="max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="min-w-[1180px] w-full table-auto text-left text-sm">
+            <table className="w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
-                  <th className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
+                  <th data-purchase-column="select" className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
-                  <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
+                  <th data-purchase-column="number" className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
+                  <th data-purchase-column="status" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={isPurchaseReviewList ? '발주상태' : '상태'} column="status" {...sortHeaderProps} align="center" />
                   </th>
-                  <th className="min-w-[280px] px-3 py-2 font-medium">
+                  <th data-purchase-column="product" className="min-w-[280px] px-3 py-2 font-medium">
                     <SortHeader label="상품" column="productName" {...sortHeaderProps} />
                   </th>
                   {showPurchaseUrlColumn ? (
-                    <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">URL</th>
+                    <th data-purchase-column="url" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">URL</th>
                   ) : null}
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
+                  <th data-purchase-column="quantity" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={isPurchaseReviewList ? '발주수량' : quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
                   </th>
-                  {isRequestedStatus ? <th className="min-w-[176px] px-3 py-2 text-center font-medium">최근 구매 이력</th> : null}
+                  {showArrivalWarehouse && <th data-purchase-column="warehouse" className="min-w-36 whitespace-nowrap px-3 py-2 text-center font-medium">입고 창고</th>}
+                  {isRequestedStatus ? <th data-purchase-column="history" className="min-w-[176px] px-3 py-2 text-center font-medium">최근 구매 이력</th> : null}
                   {isRequestedStatus ? (
-                    <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                    <th data-purchase-column="amount" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                       <SortHeader label="총 금액(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
                     </th>
                   ) : null}
-                  {showCosts ? (
+                  {showCostColumns ? (
                     <>
-                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                      <th data-purchase-column="unit-yuan" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="개당 원가(元)" column="unitCostYuan" {...sortHeaderProps} align="right" />
                       </th>
-                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                      <th data-purchase-column="unit-krw" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="개당 원가(₩)" column="unitCostKrw" {...sortHeaderProps} align="right" />
                       </th>
-                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                      <th data-purchase-column="total-yuan" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="총 원가(元)" column="totalCostYuan" {...sortHeaderProps} align="right" />
                       </th>
                       {isRequestedStatus ? null : (
-                        <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                        <th data-purchase-column="total-krw" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                           <SortHeader label="총 원가(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
                         </th>
                       )}
                     </>
                   ) : null}
-                  {showRecommendationBasis ? <th className="min-w-[520px] px-3 py-2 text-center font-medium">추천근거</th> : null}
+                  {showBasisColumn ? <th data-purchase-column="basis" className="min-w-[520px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
-                    <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
+                    <th data-purchase-column="management" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
-                  {showPriceComparison && <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
-                  {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
-                  {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" {...sortHeaderProps} align="center" />
-                  </th>
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
-                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
+                  {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] px-3 py-2 font-medium">구매 정보</th>}
+                  {showPurchaseDateColumn && <th data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center font-medium">구매날짜</th>}
+                  {showPriceComparison && <th data-purchase-column="price" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
+                  {showPaymentControls ? <th data-purchase-column="payment" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
+                  {overdueOnly ? <th data-purchase-column="delay" className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
+                  <th data-purchase-column="actions" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
+                  {canDelete && <th data-purchase-column="delete" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>}
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={visibleColumnCount} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <PurchaseEmptyCell fallbackCount={columns.length}>
                       조건에 맞는 발주 항목이 없습니다.
-                    </td>
+                    </PurchaseEmptyCell>
                   </tr>
                 ) : (
                   items.map((item, index) => {
@@ -653,13 +683,13 @@ export async function PurchasingOrdersView({
                         key={item.id ?? item.sku}
                         className={`border-t align-middle ${!isRequestedStatus ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
                       >
-                      <td className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
+                      <td data-purchase-column="select" className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         {item.id ? <PurchaseRowCheckbox id={item.id} /> : null}
                       </td>
-                      <td className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
+                      <td data-purchase-column="number" className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
-                      <td className="px-2 py-2 text-center align-middle">
+                      <td data-purchase-column="status" className="px-2 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
@@ -695,7 +725,7 @@ export async function PurchasingOrdersView({
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 align-middle">
+                      <td data-purchase-column="product" className="px-3 py-2 align-middle">
                         {item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
                           ? <PurchaseInspectionButton id={item.id} productName={item.productName} imageData={productImages[item.id]} mode="image" />
                           : <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>}
@@ -704,7 +734,7 @@ export async function PurchasingOrdersView({
                         </div>
                       </td>
                       {showPurchaseUrlColumn ? (
-                        <td className="px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="url" className="px-2 py-2 text-center align-middle">
                           {purchaseUrlHref ? (
                             <a
                               href={purchaseUrlHref}
@@ -721,7 +751,7 @@ export async function PurchasingOrdersView({
                           )}
                         </td>
                       ) : null}
-                      <td className="px-2 py-2 text-center tabular-nums align-middle">
+                      <td data-purchase-column="quantity" className="px-2 py-2 text-center tabular-nums align-middle">
                         {isSaasChinaOutbound ? (
                           <div className="mx-auto w-[112px] py-1 text-sm font-medium tabular-nums">
                             {formatNumber(stageQuantity)}
@@ -757,26 +787,31 @@ export async function PurchasingOrdersView({
                             </div>
                           ) : null}
                       </td>
+                      {showArrivalWarehouse && <td data-purchase-column="warehouse" className="whitespace-nowrap px-3 py-2 text-center align-middle">
+                        {item.id && ['purchased', 'purchase_completed', 'inspecting'].includes(item.status)
+                          ? <PurchaseArrivalWarehouseField key={purchaseArrivalWarehouse(item.rawData)} id={item.id} warehouse={purchaseArrivalWarehouse(item.rawData)} />
+                          : <span data-no-translate>{('arrivalInventoryWarehouse' in item ? item.arrivalInventoryWarehouse : null) ?? purchaseArrivalWarehouse(item.rawData) ?? '–'}</span>}
+                      </td>}
                       {isRequestedStatus ? (
-                        <td className="px-3 py-2 text-center align-middle">
+                        <td data-purchase-column="history" className="px-3 py-2 text-center align-middle">
                           <PurchaseReviewHistorySummary history={item.purchaseReviewHistory} />
                         </td>
                       ) : null}
                       {isRequestedStatus ? (
-                        <td className="px-3 py-2 text-right font-medium tabular-nums align-middle">
+                        <td data-purchase-column="amount" className="px-3 py-2 text-right font-medium tabular-nums align-middle">
                           {formatCost(costs.totalCostKrw, 0)}
                         </td>
                       ) : null}
-                      {showCosts ? (
+                      {showCostColumns ? (
                         <>
-                          <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
-                          <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
-                          {isRequestedStatus ? null : <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>}
+                          <td data-purchase-column="unit-yuan" className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
+                          <td data-purchase-column="unit-krw" className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
+                          <td data-purchase-column="total-yuan" className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
+                          {isRequestedStatus ? null : <td data-purchase-column="total-krw" className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>}
                         </>
                       ) : null}
-                      {showRecommendationBasis ? (
-                        <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
+                      {showBasisColumn ? (
+                        <td data-purchase-column="basis" className="px-3 py-2 text-xs text-muted-foreground align-middle">
                           <RecommendationBasisGrid
                             rawData={item.rawData}
                             metrics={item.purchaseReviewMetrics}
@@ -784,10 +819,10 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       {isRequestedStatus ? null : (
-                        <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                        <td data-purchase-column="management" className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
                       {isRequestedStatus ? null : (
-                        <td data-purchase-plan className="px-3 py-2 align-middle">
+                        <td data-purchase-column="purchase-info" data-purchase-plan className="px-3 py-2 align-middle">
                           {item.id ? (
                             <>
                               <PurchasePlanFieldsV2
@@ -805,15 +840,18 @@ export async function PurchasingOrdersView({
                                   : item.status === 'outbound_requested' || item.status === 'completed'
                                     ? '출고날짜'
                                     : '구매날짜'}
-                                purchaseMethod={item.purchaseMethod}
+                                dateColumn={item.status === 'purchase_completed' || item.status === 'inspecting' ? 'purchase-date' : undefined}
+                                afterFields={item.status === 'china_arrived' ? <PurchaseInspectionButton id={item.id} productName={item.productName} /> : undefined}
                               />
-                              {item.status === 'china_arrived' ? <div className="mt-2"><PurchaseInspectionButton id={item.id} productName={item.productName} /></div> : null}
                             </>
                           ) : '-'}
                         </td>
                       )}
+                      {showPurchaseDateColumn && <td data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
+                        {readArrivedPurchaseDate(item) ?? '–'}
+                      </td>}
                       {showPriceComparison && (
-                        <td className="whitespace-nowrap px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="price" className="whitespace-nowrap px-2 py-2 text-center align-middle">
                           {item.id && purchasePrices && (
                             <PurchasePriceComparisonFields
                               key={JSON.stringify(purchasePrices)}
@@ -828,7 +866,7 @@ export async function PurchasingOrdersView({
                         </td>
                       )}
                       {showPaymentControls ? (
-                        <td className="px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="payment" className="px-2 py-2 text-center align-middle">
                           {item.id ? (
                             <PurchasePaymentStatusField
                               key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`}
@@ -843,7 +881,7 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       {overdueOnly ? (
-                        <td className="px-3 py-2 align-middle">
+                        <td data-purchase-column="delay" className="px-3 py-2 align-middle">
                           {item.id ? (
                             <PurchaseDelayReasonField
                               id={item.id}
@@ -855,21 +893,20 @@ export async function PurchasingOrdersView({
                           ) : '-'}
                         </td>
                       ) : null}
-                      <td className="px-2 py-2 text-center align-middle">
-                        {item.id ? <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} /> : '-'}
-                      </td>
-                      <td className="px-3 py-2 text-center align-middle">
+                      <td data-purchase-column="actions" className="px-3 py-2 text-center align-middle">
                         {item.id && (item.status === 'purchase_completed' || item.status === 'inspecting') ? <PurchaseInspectionButton id={item.id} productName={item.productName} /> : item.id ? (
                           <PurchaseStatusButton
                             id={item.id}
                             nextStatus={getNextPurchaseStatus(item.status)}
                             saasChinaMode={item.rawData.saasChinaMode === true}
+                            arrivalInventoryId={'arrivalInventoryId' in item ? item.arrivalInventoryId : null}
+                            canOpenChinaShipments={canOpenChinaShipments}
                           />
                         ) : '-'}
                       </td>
-                      <td className="px-3 py-2 text-center align-middle">
+                      {canDelete && <td data-purchase-column="delete" className="px-3 py-2 text-center align-middle">
                         {item.id ? <PurchaseDeleteButton id={item.id} productName={item.productName} /> : '-'}
-                      </td>
+                      </td>}
                       </tr>
                     )
                   })
@@ -896,6 +933,7 @@ export async function PurchasingOrdersView({
             />
           </div>
         </section>
+        </PurchaseColumns>
       </PurchaseBulkSelectionProvider>
     </div>
   )
@@ -1356,6 +1394,18 @@ function formatNumber(value: unknown) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return '-'
   return number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+}
+
+function readArrivedPurchaseDate(item: {
+  status: PurchaseRequestStatus
+  rawData: Record<string, unknown>
+  requestDate: string | null
+  outboundExpectedDate: string | null
+}) {
+  const recordedDate = item.rawData.purchaseDate
+  if (typeof recordedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(recordedDate)) return recordedDate
+  if (item.rawData.source === ECOUNT_CHINA_ARRIVED_SOURCE) return item.requestDate
+  return item.status === 'china_arrived' ? item.outboundExpectedDate : null
 }
 
 function formatPurchaseHistoryDate(value: string) {

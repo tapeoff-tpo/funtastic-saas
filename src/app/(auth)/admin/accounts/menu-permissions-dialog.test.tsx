@@ -23,7 +23,7 @@ describe('menu permission editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '선택 해제' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '중국출고' }))
     fireEvent.click(screen.getByRole('button', { name: '권한 저장' }))
-    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ targetId: account.id, allowedMenus: ['/purchasing/china-shipments'] }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ targetId: account.id, allowedMenus: ['/purchasing/china-shipments'], canDeletePurchases: false }))
     expect(mocks.refresh).toHaveBeenCalled()
   })
   it('keeps a failed save open with the selection intact', async () => {
@@ -31,7 +31,13 @@ describe('menu permission editor', () => {
     const onClose = vi.fn()
     render(<MenuPermissionsDialog account={{ ...account, allowedMenus: [] }} onClose={onClose} />)
     fireEvent.click(screen.getByRole('button', { name: '권한 저장' }))
-    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ targetId: account.id, allowedMenus: [] }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ targetId: account.id, allowedMenus: [], canDeletePurchases: false }))
     expect(onClose).not.toHaveBeenCalled()
+  })
+  it('grants delete permission independently of unrestricted menus', async () => {
+    render(<MenuPermissionsDialog account={account} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: '발주 삭제 허용 (개별·일괄)' }))
+    fireEvent.click(screen.getByRole('button', { name: '권한 저장' }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ targetId: account.id, allowedMenus: null, canDeletePurchases: true }))
   })
 })

@@ -74,7 +74,16 @@ export async function fetchSidebarMenuOrder(): Promise<SidebarMenuOrder | null> 
   }
   const order = body.order as SidebarMenuOrder | null
   if (order) saveSidebarMenuOrder(order)
+  else clearSidebarMenuOrder()
   return order
+}
+
+export function moveSidebarEntry<T>(entries: T[], from: number, to: number): T[] {
+  if (from < 0 || from >= entries.length || to < 0 || to >= entries.length || from === to) return entries
+  const next = [...entries]
+  const [entry] = next.splice(from, 1)
+  next.splice(to, 0, entry)
+  return next
 }
 
 export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection extends OrderableNavSection<TItem>>(

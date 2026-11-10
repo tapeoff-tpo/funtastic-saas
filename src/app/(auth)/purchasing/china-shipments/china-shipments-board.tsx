@@ -144,9 +144,10 @@ export function ChinaShipmentsBoard(props: {
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
   showCreate: boolean
+  initialInventoryId?: string
   outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
-  return <ChinaWorkGuardProvider key={props.showCreate ? 'create' : props.selectedShipment?.shipment.id ?? 'list'}><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
+  return <ChinaWorkGuardProvider key={props.showCreate ? `create:${props.initialInventoryId ?? ''}` : props.selectedShipment?.shipment.id ?? 'list'}><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
 }
 
 function ChinaShipmentsBoardContent({
@@ -155,6 +156,7 @@ function ChinaShipmentsBoardContent({
   selectedShipment,
   selectedStep,
   showCreate,
+  initialInventoryId,
   outboundWarehouses = [],
 }: {
   inventoryItems: ChinaShipmentStockItem[]
@@ -162,6 +164,7 @@ function ChinaShipmentsBoardContent({
   selectedShipment: ChinaShipmentDetailView | null
   selectedStep: ChinaShipmentStage
   showCreate: boolean
+  initialInventoryId?: string
   outboundWarehouses?: ChinaOutboundWarehouseView[]
 }) {
   const guard = useChinaWorkGuard()
@@ -175,8 +178,9 @@ function ChinaShipmentsBoardContent({
   const [initialDate] = useState(() => today())
   const createdShipmentId = useRef<string | null>(null)
   const creationMayExist = useRef(false)
-  const [stockSearch, setStockSearch] = useState('')
-  const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>([])
+  const initialInventory = initialInventoryId ? inventoryItems.find((item) => item.id === initialInventoryId && item.availableQuantity > 0) : undefined
+  const [stockSearch, setStockSearch] = useState(initialInventory?.sku ?? '')
+  const [selectedWarehouseCodes, setSelectedWarehouseCodes] = useState<string[]>(initialInventory ? [initialInventory.warehouseCode] : [])
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [destinationName, setDestinationName] = useState('')
   const [plannedOutboundDate, setPlannedOutboundDate] = useState(today())

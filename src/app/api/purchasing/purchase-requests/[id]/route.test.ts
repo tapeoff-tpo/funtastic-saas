@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getWorkspaceUserId: vi.fn(),
+  getUserMenuAccess: vi.fn(),
   revalidatePath: vi.fn(),
   deletePurchaseRequestItem: vi.fn(),
   updatePurchaseRequestPlanFields: vi.fn(),
@@ -9,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
-vi.mock('@/lib/supabase/server', () => ({
+vi.mock('@/lib/auth/server', () => ({
   createClient: vi.fn().mockResolvedValue({
     auth: {
       getUser: vi.fn().mockResolvedValue({
@@ -18,6 +19,8 @@ vi.mock('@/lib/supabase/server', () => ({
     },
   }),
 }))
+
+vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.getUserMenuAccess }))
 
 vi.mock('@/lib/admin-accounts/queries', () => ({
   getWorkspaceUserId: mocks.getWorkspaceUserId,
@@ -36,6 +39,7 @@ describe('PATCH /api/purchasing/purchase-requests/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getWorkspaceUserId.mockResolvedValue('workspace-user')
+    mocks.getUserMenuAccess.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/orders'] })
   })
 
   it('returns a business rule error as 409 without revalidating stale pages', async () => {
@@ -94,6 +98,7 @@ describe('PATCH /api/purchasing/purchase-requests/[id]', () => {
   })
 
   it('returns a linked SaaS purchase deletion rule as 409', async () => {
+    mocks.getUserMenuAccess.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/orders'], canDeletePurchases: true })
     mocks.deletePurchaseRequestItem.mockRejectedValue(new Error('SaaS 중국재고 또는 중국출고와 연결된 발주는 삭제할 수 없습니다.'))
     const { DELETE } = await import('./route')
 
@@ -106,5 +111,12 @@ describe('PATCH /api/purchasing/purchase-requests/[id]', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'SaaS 중국재고 또는 중국출고와 연결된 발주는 삭제할 수 없습니다.',
     })
+  })
+
+  it('denies deletion to accounts with menu access but no delete permission', async () => {
+    const { DELETE } = await import('./route')
+    const response = await DELETE(patchRequest({}) as never, { params: Promise.resolve({ id: 'purchase-item' }) })
+    expect(response.status).toBe(403)
+    expect(mocks.deletePurchaseRequestItem).not.toHaveBeenCalled()
   })
 })

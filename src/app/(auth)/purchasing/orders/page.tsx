@@ -37,6 +37,8 @@ import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 import { PurchaseInspectionButton } from './purchase-inspection-dialog'
+import { PurchasePriceComparisonFields } from './purchase-price-comparison-fields'
+import { readPurchasePriceComparison, resolvePurchasePriceComparison } from '@/lib/purchasing/purchase-price-comparison'
 import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import {
   PurchaseBulkBuyerApply,
@@ -195,6 +197,7 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const showPriceComparison = basePath === '/purchasing/orders' && !isRequestedStatus
   const showPaymentControls = status === 'purchased' || status === 'purchase_completed'
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
@@ -211,6 +214,7 @@ export async function PurchasingOrdersView({
     (isRequestedStatus ? 1 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
+    (showPriceComparison ? 1 : 0) +
     (isRequestedStatus ? 0 : (showPaymentControls ? 3 : 2)) +
     (overdueOnly ? 1 : 0)
   const listLabel = isPurchaseReviewList
@@ -587,6 +591,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
+                  {showPriceComparison && <th className="min-w-[324px] px-3 py-2 font-medium">구매가격 비교 (元)</th>}
                   {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
@@ -634,6 +639,13 @@ export async function PurchasingOrdersView({
                     })
                     const receipt = ('purchaseInspection' in item ? item.purchaseInspection : null) as PurchaseInspection | null
                     const receiptSummary = receipt ? inspectionSummary(receipt) : null
+                    const purchasePrices = showPriceComparison && 'masterPurchasePriceCny' in item
+                      ? resolvePurchasePriceComparison(
+                        readPurchasePriceComparison(item.rawData),
+                        item.masterPurchasePriceCny,
+                        item.masterPurchaseShippingCny,
+                      )
+                      : null
                     const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
@@ -799,6 +811,20 @@ export async function PurchasingOrdersView({
                               {item.status === 'china_arrived' ? <div className="mt-2"><PurchaseInspectionButton id={item.id} productName={item.productName} /></div> : null}
                             </>
                           ) : '-'}
+                        </td>
+                      )}
+                      {showPriceComparison && (
+                        <td className="px-3 py-2 align-middle">
+                          {item.id && purchasePrices && (
+                            <PurchasePriceComparisonFields
+                              key={JSON.stringify(purchasePrices)}
+                              id={item.id}
+                              prices={purchasePrices}
+                              quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
+                              canEditBaseline={['purchased', 'purchase_completed', 'inspecting'].includes(item.status)}
+                              canEditActual={item.status === 'purchase_completed' || item.status === 'inspecting'}
+                            />
+                          )}
                         </td>
                       )}
                       {showPaymentControls ? (

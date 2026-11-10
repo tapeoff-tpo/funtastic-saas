@@ -22,6 +22,7 @@ import {
   type PurchaseDelayReason,
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
+import { purchaseMasterPriceKeys, readPurchasePriceComparison, resolvePurchasePriceComparison, type PurchasePriceComparison } from './purchase-price-comparison'
 import { purchasePipelineQuantity } from './purchase-recommendations'
 import {
   getProductGroupPurchaseUrgencyStatus,
@@ -1104,6 +1105,8 @@ export async function getPurchaseRequests(input: {
         ...getTableColumns(purchaseRequestItems),
         specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
         newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+        masterPurchasePriceCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
+        masterPurchaseShippingCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
         purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
         purchasingStatus: products.purchasingStatus,
         purchasingStatusNote: products.purchasingStatusNote,
@@ -2102,6 +2105,7 @@ export async function updatePurchaseRequestPlanFields(input: {
   trackingNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
+  purchasePriceComparison?: PurchasePriceComparison
   purchaseConfirmed?: boolean
   paymentStatus?: PurchasePaymentStatus
   bulkPaymentPending?: boolean
@@ -2270,9 +2274,30 @@ export async function updatePurchaseRequestPlanFields(input: {
       throw new Error('SaaS 중국재고 연동 발주의 출고요청수량은 중국출고 작업에서만 변경할 수 있습니다.')
     }
 
-    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined) {
+    const pricePatch = input.purchasePriceComparison
+    let priceComparison: PurchasePriceComparison | undefined
+    if (pricePatch) {
+      const canEditBaseline = current.status === 'purchased' || current.status === 'purchase_completed' || current.status === 'inspecting'
+      const editsActual = pricePatch.actualUnitPriceCny !== undefined || pricePatch.actualShippingCny !== undefined
+      if (!canEditBaseline || (editsActual && current.status === 'purchased')) {
+        throw new Error('현재 발주 단계에서는 해당 구매가격을 수정할 수 없습니다.')
+      }
+      const stored = readPurchasePriceComparison(current.rawData)
+      if (editsActual && (stored.baselineUnitPriceCny === undefined || stored.baselineShippingCny === undefined)) {
+        const [master] = await tx.select({
+          unitPrice: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
+          shipping: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
+        }).from(products).where(and(eq(products.userId, input.userId), eq(products.internalSku, current.sku))).limit(1)
+        priceComparison = { ...resolvePurchasePriceComparison(stored, master?.unitPrice, master?.shipping), ...pricePatch }
+      } else {
+        priceComparison = { ...stored, ...pricePatch }
+      }
+    }
+
+    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined || priceComparison) {
       values.rawData = {
         ...current.rawData,
+        ...(priceComparison ? { purchasePriceComparison: priceComparison } : {}),
         ...(saasChinaModeChanged ? { saasChinaMode: input.saasChinaMode } : {}),
         ...(outboundRequestedQuantity !== undefined ? { outboundRequestedQuantity } : {}),
       }

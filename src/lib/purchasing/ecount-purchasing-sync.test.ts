@@ -2,8 +2,10 @@ import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import {
   applyBulkPaymentOverride,
+  applyPurchasePriceComparison,
   classifyEcountPurchasingUpload,
   collectBulkPaymentOverrides,
+  collectPurchasePriceComparisons,
   excludeSaasChinaProtectedSnapshotItems,
   getEcountChinaInventorySnapshotDate,
   getEcountPurchasingRefreshScope,
@@ -14,6 +16,20 @@ import {
   resolveChinaInventorySnapshotAsOfDate,
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
+
+it('preserves price comparisons across a refresh without crossing management codes on the same supplier order', () => {
+  const comparison = { baselineUnitPriceCny: 10, actualUnitPriceCny: 11, actualShippingCny: 0 }
+  const supplierOrderNumber = '3316362603001063953'
+  const stored = { sku: 'SKU-A', purchaseManagementCode: 'PM-001', supplierOrderNumber, rawData: { purchasePriceComparison: comparison } }
+  const overrides = collectPurchasePriceComparisons([stored])
+  const next = { userId: 'owner', rowNumber: 1, sku: 'SKU-A', productName: '상품', supplierOrderNumber, rawData: { source: 'refreshed' } }
+  expect(applyPurchasePriceComparison({ ...next, purchaseManagementCode: 'PM-001' }, overrides).rawData)
+    .toEqual({ source: 'refreshed', purchasePriceComparison: comparison })
+  expect(applyPurchasePriceComparison({ ...next, purchaseManagementCode: 'PM-002' }, overrides).rawData).toEqual(next.rawData)
+  expect(applyPurchasePriceComparison(next, overrides).rawData).toEqual(next.rawData)
+  expect(applyPurchasePriceComparison(next, collectPurchasePriceComparisons([{ ...stored, purchaseManagementCode: null }])).rawData)
+    .toEqual({ source: 'refreshed', purchasePriceComparison: comparison })
+})
 
 it('preserves inspected purchases and suppresses only the same management code and SKU in refreshed snapshots', () => {
   const keys = getSaasChinaProtectedPurchaseKeys([{ sku: 'SKU-A', purchaseManagementCode: 'PM-001', rawData: {}, purchaseInspection: { version: 1 } }])

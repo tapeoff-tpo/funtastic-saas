@@ -29,6 +29,7 @@ import {
   normalizeSupplierOrderReference,
 } from './supplier-order-reference'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { readPurchasePriceComparison, type PurchasePriceComparison } from './purchase-price-comparison'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -1933,6 +1934,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       .orderBy(desc(purchaseRequestItems.updatedAt))
     const replaceableRowsToDelete = replaceableRows.filter((row) => !isSaasChinaMode(row.rawData))
     const bulkPaymentOverrides = collectBulkPaymentOverrides(replaceableRowsToDelete)
+    const purchasePriceComparisons = collectPurchasePriceComparisons(replaceableRowsToDelete)
     if (replaceableRowsToDelete.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
         purchaseRequestItems.id,
@@ -2124,7 +2126,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       ...chinaArrivedRows,
       ...outboundRows,
       ...outboundCompletedRows,
-    ].map((row) => applyBulkPaymentOverride(row, bulkPaymentOverrides))
+    ].map((row) => applyPurchasePriceComparison(applyBulkPaymentOverride(row, bulkPaymentOverrides), purchasePriceComparisons))
     for (const rows of chunks(rowsToInsert, 500)) {
       await tx.insert(purchaseRequestItems).values(rows)
     }
@@ -2393,6 +2395,30 @@ type BulkPaymentIdentity = {
   sku: string
   purchaseManagementCode: string | null
   supplierOrderNumber: string | null
+}
+
+function purchasePriceIdentity(item: { sku: string; purchaseManagementCode?: string | null; supplierOrderNumber?: string | null }) {
+  const managementCode = item.purchaseManagementCode?.trim()
+  if (managementCode) return `management:${purchaseKey(managementCode, item.sku)}`
+  const supplier = supplierKey(item.supplierOrderNumber?.trim() ?? null, item.sku)
+  return supplier ? `supplier:${supplier}` : null
+}
+
+export function collectPurchasePriceComparisons(rows: ReadonlyArray<BulkPaymentIdentity & { rawData: Record<string, unknown> }>) {
+  const comparisons = new Map<string, PurchasePriceComparison>()
+  for (const row of rows) {
+    const key = purchasePriceIdentity(row)
+    if (!key || comparisons.has(key)) continue
+    const comparison = readPurchasePriceComparison(row.rawData)
+    if (Object.keys(comparison).length > 0) comparisons.set(key, comparison)
+  }
+  return comparisons
+}
+
+export function applyPurchasePriceComparison(row: PurchaseRequestItemInsert, comparisons: Map<string, PurchasePriceComparison>): PurchaseRequestItemInsert {
+  const key = purchasePriceIdentity(row)
+  const comparison = key ? comparisons.get(key) : undefined
+  return comparison ? { ...row, rawData: { ...row.rawData, purchasePriceComparison: comparison } } : row
 }
 
 function bulkPaymentIdentityKeys(item: BulkPaymentIdentity) {

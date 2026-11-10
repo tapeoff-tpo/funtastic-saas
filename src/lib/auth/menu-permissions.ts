@@ -116,7 +116,7 @@ const API_MENU_RULES: Array<[string, string[]]> = [
 export function canAccessApi(access: MenuAccess, href: string, method = 'GET'): boolean {
   const path = normalizeMenuPath(href)
   if (path === '/api/menu-access' || path === '/api/settings/menu-order' || path === '/api/check-ip') return true
-  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection$/.test(path)) {
+  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection(?:\/labels)?$/.test(path)) {
     return ['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
   }
   if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/bulk-payment-deposit$/.test(path)) {

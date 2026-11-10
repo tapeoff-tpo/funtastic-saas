@@ -7,7 +7,8 @@ import { ExternalLink } from 'lucide-react'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
-import { blankInspectionBox, inspectionSummary, type InspectionParcel, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import { blankInspectionBox, inspectionSummary, STICKER_STATUS_LABELS, type InspectionParcel, type InspectionStickerStatus, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import { PurchaseInspectionLabelPanel } from './purchase-inspection-label-panel'
 
 type Detail = { id: string; status: string; productName: string; sku: string; inspection: PurchaseInspection; imageUrls: string[] }
 
@@ -17,21 +18,18 @@ function withSingleParcelQuantityDefault(detail: Detail) {
   const [box] = parcel?.boxes ?? []
   const editable = detail.status === 'purchase_completed' || detail.status === 'inspecting'
   if (!editable || inspection.parcels.length !== 1 || !parcel || parcel.boxes.length !== 1 || !box || box.quantity !== null) {
-    return { detail, prefilled: false }
+    return detail
   }
 
   return {
-    detail: {
-      ...detail,
-      inspection: {
-        ...inspection,
-        parcels: [{
-          ...parcel,
-          boxes: [{ ...box, quantity: inspection.expectedQuantity }],
-        }],
-      },
+    ...detail,
+    inspection: {
+      ...inspection,
+      parcels: [{
+        ...parcel,
+        boxes: [{ ...box, quantity: inspection.expectedQuantity }],
+      }],
     },
-    prefilled: true,
   }
 }
 
@@ -52,7 +50,6 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const [pending, setPending] = useState(false)
   const [acknowledgeMismatch, setAcknowledgeMismatch] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [quantityPrefilled, setQuantityPrefilled] = useState(false)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => { ref.current?.showModal() }, [])
   useEffect(() => {
@@ -64,9 +61,8 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         if (!response.ok) throw new Error(body.error || '검수 정보를 불러오지 못했습니다.')
         if (!controller.signal.aborted) {
           const initial = withSingleParcelQuantityDefault(body as Detail)
-          setData(initial.detail)
-          setQuantityPrefilled(initial.prefilled)
-          setAcknowledgeMismatch(Boolean(initial.detail.inspection.checkedAt))
+          setData(initial)
+          setAcknowledgeMismatch(Boolean(initial.inspection.checkedAt))
           setError('')
           setDirty(false)
         }
@@ -80,7 +76,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const summary = inspection ? inspectionSummary(inspection) : null
   function changeParcels(parcels: InspectionParcel[]) {
     setData((current) => current ? { ...current, inspection: { ...current.inspection, parcels, checkedAt: null } } : current)
-    setDirty(true); setQuantityPrefilled(false); setAcknowledgeMismatch(false)
+    setDirty(true); setAcknowledgeMismatch(false)
   }
   function close() {
     if (dirty && !confirm('저장하지 않은 검수 입력을 닫으시겠습니까?')) return
@@ -88,16 +84,20 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   }
   async function save(complete: boolean) {
     if (!data || !inspection) return
+    if (complete && !inspection.stickerStatus) {
+      toast.error('스티커 부착 상태를 선택해주세요.')
+      return
+    }
     setPending(true)
     try {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: inspection.revision, parcels: inspection.parcels, complete, acknowledgeMismatch, resolutionNote: inspection.resolutionNote }),
+        body: JSON.stringify({ revision: inspection.revision, parcels: inspection.parcels, complete, acknowledgeMismatch, resolutionNote: inspection.resolutionNote, stickerStatus: inspection.stickerStatus }),
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || '검수 저장에 실패했습니다.')
       setData((current) => current ? { ...current, status: 'inspecting', inspection: body.inspection } : current)
-      setDirty(false); setQuantityPrefilled(false)
+      setDirty(false)
       if (complete) {
         const moved = await fetch(`/api/purchasing/purchase-requests/${id}/status`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'china_arrived' }),
@@ -116,16 +116,26 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
     className="fixed inset-0 m-auto max-h-[92dvh] w-[min(64rem,96vw)] rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/40">
     <div className="sticky top-0 z-10 border-b bg-background p-4">
       <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
-      {data && <p className="mt-2 text-sm" data-no-translate>{data.sku} · {data.productName}</p>}
+      {data && inspection && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p data-no-translate>{data.sku} · {data.productName}</p>
+        <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
+          스티커 부착 상태
+          <select value={inspection.stickerStatus ?? ''} disabled={pending || !editable} className="h-8 rounded-md border bg-background px-2 text-sm"
+            onChange={(event) => {
+              const stickerStatus = event.target.value as InspectionStickerStatus
+              setData({ ...data, inspection: { ...inspection, stickerStatus } })
+              setDirty(true)
+            }}>
+            <option value="" disabled>미확인</option>
+            {Object.entries(STICKER_STATUS_LABELS).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+          </select>
+        </label>
+      </div>}
     </div>
     <div className="space-y-4 p-4">
       {error ? <div role="alert" className="text-sm text-red-700">{error}<Button type="button" variant="outline" className="ml-3" onClick={() => setAttempt((value) => value + 1)}>다시 불러오기</Button></div> : !data ? <p>불러오는 중…</p> : null}
       {data && inspection && summary && <>
-        <div className={`rounded-lg border p-3 text-sm ${summary.hasError && inspection.parcels.length ? 'border-red-300 bg-red-50 text-red-800' : 'bg-muted/30'}`}>
-          <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
-          {inspection.parcels.length && summary.hasError ? <p role="status" className="mt-1 font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p className="mt-1">입고수량 미입력</p> : null}
-          {quantityPrefilled ? <p className="mt-1 text-muted-foreground">구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.</p> : null}
-        </div>
+        <PurchaseInspectionLabelPanel id={id} canUpload={editable || data.status === 'china_arrived'} />
         <fieldset disabled={pending || !editable} className="space-y-4">
           {inspection.parcels.map((parcel, parcelIndex) => <section key={parcel.id} className="space-y-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-end gap-3">
@@ -163,21 +173,24 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
                 <td><Button type="button" variant="ghost" size="sm" disabled={parcel.boxes.length === 1} onClick={() => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: row.boxes.filter((entry) => entry.id !== box.id) } : row))}>삭제</Button></td>
               </tr>)}</tbody>
             </table></div>
-            <Button type="button" variant="outline" size="sm" onClick={() => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: [...row.boxes, blankInspectionBox(crypto.randomUUID())] } : row))}>박스 추가</Button>
           </section>)}
-          <Button type="button" variant="outline" onClick={() => changeParcels([...inspection.parcels, { id: crypto.randomUUID(), trackingNumber: '', boxes: [blankInspectionBox(crypto.randomUUID())] }])}>송장 추가</Button>
-          {inspection.parcels.length > 0 && <div className={`space-y-2 rounded-lg border p-3 ${summary.hasError ? 'border-red-200 bg-red-50/50' : 'bg-muted/20'}`}>
-            {summary.hasError ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledgeMismatch} onChange={(event) => setAcknowledgeMismatch(event.target.checked)} />구매수량과 실제 입고수량의 차이를 확인했습니다.</label> : <p className="text-sm text-muted-foreground">실제 입고수량이 구매수량과 다르면 아래 비고를 입력해주세요.</p>}
-            <label className="block text-sm">수량 차이 비고<textarea value={inspection.resolutionNote} maxLength={2_000} placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
-            {summary.hasError ? <p className="text-xs text-red-700">수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p> : null}
+          {editable && <Button type="button" variant="outline" onClick={() => changeParcels([...inspection.parcels, { id: crypto.randomUUID(), trackingNumber: '', boxes: [blankInspectionBox(crypto.randomUUID())] }])}>송장 추가</Button>}
+          {((inspection.parcels.length > 0 && summary.hasError) || inspection.resolutionNote) && <div className={`space-y-2 rounded-lg border p-3 ${summary.hasError ? 'border-red-200 bg-red-50/50' : 'bg-muted/20'}`}>
+            {editable && summary.hasError && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledgeMismatch} onChange={(event) => setAcknowledgeMismatch(event.target.checked)} />구매수량과 실제 입고수량의 차이를 확인했습니다.</label>}
+            <label className="block text-sm">수량 차이 비고<textarea value={inspection.resolutionNote} maxLength={2_000} className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
           </div>}
         </fieldset>
-        {!editable && <p className="text-sm text-muted-foreground">검수가 완료된 입고 기록입니다.</p>}
       </>}
     </div>
-    {data && editable && <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background p-4">
-      <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장 · 검수로 이동</Button>
-      <Button type="button" disabled={pending} onClick={() => void save(true)}>{pending ? '저장 중…' : '검수완료 · 중국창고도착'}</Button>
+    {inspection && summary && <div className="sticky bottom-0 z-10 space-y-2 border-t bg-background p-4">
+      <div className={`flex flex-wrap items-center justify-between gap-2 text-sm ${summary.hasError && inspection.parcels.length ? 'text-red-800' : ''}`}>
+        <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
+        {inspection.parcels.length && summary.hasError ? <p role="status" className="font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p>입고수량 미입력</p> : null}
+      </div>
+      {editable && <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장 · 검수로 이동</Button>
+        <Button type="button" disabled={pending} onClick={() => void save(true)}>{pending ? '저장 중…' : '검수완료 · 중국창고도착'}</Button>
+      </div>}
     </div>}
   </dialog>
 }

@@ -1982,13 +1982,16 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
     if (!current) return null
     if (!['purchase_completed', 'inspecting'].includes(current.status)) throw new Error('구매완료·검수 단계에서만 송장과 박스를 수정할 수 있습니다.')
     if ((current.purchaseInspection?.revision ?? 0) !== parsed.revision) throw new Error('다른 작업자가 검수 정보를 변경했습니다. 다시 열어 확인해주세요.')
+    const stickerStatus = parsed.stickerStatus === undefined ? current.purchaseInspection?.stickerStatus : parsed.stickerStatus
     const inspection: PurchaseInspection = {
       version: 1, revision: parsed.revision + 1,
       expectedQuantity: current.purchaseInspection?.expectedQuantity ?? current.actualPurchaseQuantity ?? current.requestedQuantity,
       parcels: parsed.parcels, resolutionNote: parsed.resolutionNote,
+      ...(stickerStatus === undefined ? {} : { stickerStatus }),
       checkedAt: parsed.complete ? new Date().toISOString() : null, checkedBy: parsed.complete ? input.actorId : null,
     }
     const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : inspectionSummary(inspection)
+    if (parsed.complete && !stickerStatus) throw new Error('스티커 부착 상태를 선택해주세요.')
     await tx.update(purchaseRequestItems).set({
       status: 'inspecting', purchaseInspection: inspection,
       trackingNumber: inspection.parcels[0].trackingNumber,
@@ -2455,7 +2458,8 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
       }
 
       const replacementInspection: PurchaseInspection = {
-        ...createPurchaseInspection(previousInspection.expectedQuantity, trackingNumbers.join('\n')),
+        ...previousInspection,
+        parcels: createPurchaseInspection(previousInspection.expectedQuantity, trackingNumbers.join('\n')).parcels,
         revision: previousInspection.revision + 1,
       }
       const trackingNumber = replacementInspection.parcels[0]?.trackingNumber ?? null

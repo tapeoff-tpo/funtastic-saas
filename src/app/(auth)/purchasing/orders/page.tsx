@@ -821,9 +821,7 @@ export async function PurchasingOrdersView({
                               productName={item.productName}
                               sku={item.sku}
                               prices={purchasePrices}
-                              legacyShipping={storedPurchasePrices?.baselineShippingCny}
                               quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
-                              canEditBaseline={['purchased', 'purchase_completed', 'inspecting'].includes(item.status)}
                               canEditActual={item.status === 'purchase_completed' || item.status === 'inspecting'}
                             />
                           )}

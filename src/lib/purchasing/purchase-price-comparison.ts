@@ -7,6 +7,7 @@ export const PURCHASE_PRICE_FIELDS = [
 
 export type PurchasePriceField = typeof PURCHASE_PRICE_FIELDS[number]
 export type PurchasePriceComparison = Partial<Record<PurchasePriceField, number | null>>
+export type ActualPurchasePrices = Pick<PurchasePriceComparison, 'actualUnitPriceCny' | 'actualShippingCny'>
 export type StoredPurchasePriceComparison = PurchasePriceComparison & { baselineShippingCny?: number | null }
 
 export const purchaseMasterPriceKeys = {
@@ -19,19 +20,11 @@ export function resolvePurchasePriceComparison(
   masterUnitPrice: string | null | undefined,
   masterShipping: string | null | undefined,
 ): Required<PurchasePriceComparison> {
-  const { baselineShippingCny: legacyShipping, ...prices } = stored
-  const masterUnitShipping = readPurchaseMasterPrice(masterShipping)
-  // The old field could hold either a copied master value or a manually
-  // entered total. Only the matching master value establishes a unit basis.
-  const baselineUnitShippingCny = legacyShipping === undefined || legacyShipping === masterUnitShipping
-    ? masterUnitShipping
-    : null
   return {
     baselineUnitPriceCny: readPurchaseMasterPrice(masterUnitPrice),
-    baselineUnitShippingCny,
-    actualUnitPriceCny: null,
-    actualShippingCny: null,
-    ...prices,
+    baselineUnitShippingCny: readPurchaseMasterPrice(masterShipping),
+    actualUnitPriceCny: stored.actualUnitPriceCny ?? null,
+    actualShippingCny: stored.actualShippingCny ?? null,
   }
 }
 

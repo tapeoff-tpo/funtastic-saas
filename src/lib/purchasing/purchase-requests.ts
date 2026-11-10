@@ -22,7 +22,7 @@ import {
   type PurchaseDelayReason,
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
-import { purchaseMasterPriceKeys, readPurchasePriceComparison, resolvePurchasePriceComparison, type PurchasePriceComparison } from './purchase-price-comparison'
+import { purchaseMasterPriceKeys, readPurchasePriceComparison, type ActualPurchasePrices } from './purchase-price-comparison'
 import { purchasePipelineQuantity } from './purchase-recommendations'
 import {
   getProductGroupPurchaseUrgencyStatus,
@@ -2105,7 +2105,7 @@ export async function updatePurchaseRequestPlanFields(input: {
   trackingNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
-  purchasePriceComparison?: PurchasePriceComparison
+  purchasePriceComparison?: ActualPurchasePrices
   purchaseConfirmed?: boolean
   paymentStatus?: PurchasePaymentStatus
   bulkPaymentPending?: boolean
@@ -2275,29 +2275,14 @@ export async function updatePurchaseRequestPlanFields(input: {
     }
 
     const pricePatch = input.purchasePriceComparison
-    let priceComparison: PurchasePriceComparison | undefined
-    if (pricePatch) {
-      const canEditBaseline = current.status === 'purchased' || current.status === 'purchase_completed' || current.status === 'inspecting'
-      const editsActual = pricePatch.actualUnitPriceCny !== undefined || pricePatch.actualShippingCny !== undefined
-      if (!canEditBaseline || (editsActual && current.status === 'purchased')) {
-        throw new Error('현재 발주 단계에서는 해당 구매가격을 수정할 수 없습니다.')
-      }
-      const stored = readPurchasePriceComparison(current.rawData)
-      if (editsActual && (stored.baselineUnitPriceCny === undefined || stored.baselineUnitShippingCny === undefined)) {
-        const [master] = await tx.select({
-          unitPrice: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
-          shipping: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
-        }).from(products).where(and(eq(products.userId, input.userId), eq(products.internalSku, current.sku))).limit(1)
-        priceComparison = { ...stored, ...resolvePurchasePriceComparison(stored, master?.unitPrice, master?.shipping), ...pricePatch }
-      } else {
-        priceComparison = { ...stored, ...pricePatch }
-      }
+    if (pricePatch && current.status !== 'purchase_completed' && current.status !== 'inspecting') {
+      throw new Error('현재 발주 단계에서는 해당 구매가격을 수정할 수 없습니다.')
     }
 
-    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined || priceComparison) {
+    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined || pricePatch) {
       values.rawData = {
         ...current.rawData,
-        ...(priceComparison ? { purchasePriceComparison: priceComparison } : {}),
+        ...(pricePatch ? { purchasePriceComparison: { ...readPurchasePriceComparison(current.rawData), ...pricePatch } } : {}),
         ...(saasChinaModeChanged ? { saasChinaMode: input.saasChinaMode } : {}),
         ...(outboundRequestedQuantity !== undefined ? { outboundRequestedQuantity } : {}),
       }

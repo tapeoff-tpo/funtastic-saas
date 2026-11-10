@@ -19,14 +19,12 @@ const labels: Record<PurchasePriceField, string> = {
 }
 const cny = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 })
 
-export function PurchasePriceComparisonFields({ id, productName, sku, prices, legacyShipping, quantity, canEditBaseline, canEditActual }: {
+export function PurchasePriceComparisonFields({ id, productName, sku, prices, quantity, canEditActual }: {
   id: string
   productName: string
   sku: string
   prices: Required<PurchasePriceComparison>
-  legacyShipping?: number | null
   quantity: number
-  canEditBaseline: boolean
   canEditActual: boolean
 }) {
   const router = useRouter()
@@ -40,12 +38,12 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, le
   const savedUnitShipping = purchaseShippingPerUnit(saved.actualShippingCny, quantity)
   const exceedsBaseline = (purchasePriceDifference(saved.actualUnitPriceCny, saved.baselineUnitPriceCny) ?? 0) > 0
     || (purchasePriceDifference(savedUnitShipping, saved.baselineUnitShippingCny, 4) ?? 0) > 0
-  const keys = Object.keys(labels) as PurchasePriceField[]
+  const keys = ['actualUnitPriceCny', 'actualShippingCny'] as const
   const changed = keys.filter((key) => draft[key] !== saved[key])
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (saving || changed.length === 0) return
+    if (!canEditActual || saving || changed.length === 0) return
     setSaving(true)
     setMessage('')
     try {
@@ -71,7 +69,7 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, le
   }
 
   function field(key: PurchasePriceField) {
-    const editable = key.startsWith('baseline') ? canEditBaseline : canEditActual
+    const editable = canEditActual && (key === 'actualUnitPriceCny' || key === 'actualShippingCny')
     return (
       <label className="grid min-w-0 gap-1 text-xs">
         <span className="whitespace-nowrap text-muted-foreground">{labels[key]}</span>
@@ -127,9 +125,6 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, le
               <span>개당 배송비</span>
               <span data-no-translate>{formatShipping(draft.baselineUnitShippingCny)} → {formatShipping(actualUnitShipping)}</span>
             </div>
-            {draft.baselineUnitShippingCny === null && legacyShipping != null && (
-              <p className="text-xs text-amber-700"><span>이전에 저장한 배송비 단위를 확인해주세요.</span> <span data-no-translate>{formatShipping(legacyShipping)}</span></p>
-            )}
             <div className="flex flex-wrap items-center gap-1.5">
               <PriceDifference label="단가 차이" amount={unitDifference} />
               <PriceDifference label="개당 배송비 차이" amount={shippingDifference} />
@@ -137,7 +132,7 @@ export function PurchasePriceComparisonFields({ id, productName, sku, prices, le
             <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
               <span role="status" className="mr-auto text-xs text-muted-foreground">{message}</span>
               <Dialog.Close render={<Button type="button" variant="outline" size="sm" />}>닫기</Dialog.Close>
-              {canEditBaseline && <Button type="submit" size="sm" disabled={saving || changed.length === 0}>{saving ? '저장 중' : '저장'}</Button>}
+              {canEditActual && <Button type="submit" size="sm" disabled={saving || changed.length === 0}>{saving ? '저장 중' : '저장'}</Button>}
             </div>
           </form>
         </Dialog.Popup>

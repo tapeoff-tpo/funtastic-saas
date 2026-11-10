@@ -27,11 +27,9 @@ export const purchaseRequestPlanFieldsBodySchema = z.object({
   outboundExpectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   purchaseMethod: z.string().max(100).nullable().optional(),
   purchasePriceComparison: z.object({
-    baselineUnitPriceCny: price,
-    baselineUnitShippingCny: price,
     actualUnitPriceCny: price,
     actualShippingCny: price,
-  }).refine((values) => Object.keys(values).length > 0).optional(),
+  }).strict().refine((values) => Object.keys(values).length > 0).optional(),
   purchaseConfirmed: z.boolean().optional(),
   paymentStatus: z.enum(PURCHASE_PAYMENT_STATUSES).optional(),
   bulkPaymentPending: z.boolean().optional(),

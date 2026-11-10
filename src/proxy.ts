@@ -28,6 +28,7 @@ export async function proxy(request: NextRequest) {
 
   if (
     pathname === '/api/health'
+    || pathname === '/set-password'
     || pathname.startsWith('/api/debug/')
     || pathname.startsWith('/auth/callback')
     || isSmsBridgeDeviceEndpoint
@@ -39,7 +40,7 @@ export async function proxy(request: NextRequest) {
 
   const hasAuthCookie = request.cookies
     .getAll()
-    .some((cookie) => cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'))
+    .some((cookie) => process.env.AUTH_PROVIDER === 'local' ? cookie.name === 'funtastic_session' : cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'))
 
   if (!hasAuthCookie) {
     if (pathname === '/login') {
@@ -53,7 +54,7 @@ export async function proxy(request: NextRequest) {
 
   const sessionMode = request.cookies.get(LOGIN_SESSION_MODE_COOKIE)?.value
   const sessionProof = request.cookies.get(LOGIN_SESSION_PROOF_COOKIE)?.value
-  if (hasExpiredManagedLoginSession(sessionMode, sessionProof)) {
+  if (process.env.AUTH_PROVIDER !== 'local' && hasExpiredManagedLoginSession(sessionMode, sessionProof)) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { error: '로그인 세션이 만료되었습니다. 다시 로그인해주세요.' },

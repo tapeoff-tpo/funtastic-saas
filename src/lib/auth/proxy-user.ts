@@ -1,8 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import type { NextRequest, NextResponse } from 'next/server'
+import { LOCAL_SESSION_COOKIE, validateLocalSession } from './local-session'
 
 /** Proxy has its own request context: use request.cookies, not next/headers. */
 export async function getProxyUser(request: NextRequest, response: NextResponse): Promise<{ id: string } | null> {
+  if (process.env.AUTH_PROVIDER === 'local') return validateLocalSession(request.cookies.get(LOCAL_SESSION_COOKIE)?.value)
   const client = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll: () => request.cookies.getAll(),

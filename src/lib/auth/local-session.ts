@@ -14,7 +14,7 @@ export async function createLocalSession(userId: string) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
   const rows = await sql`
     INSERT INTO app_auth_sessions(token_hash, user_id, expires_at)
-    SELECT ${digest(token)}, a.user_id, ${expiresAt}
+    SELECT ${digest(token)}, a.user_id, ${expiresAt.toISOString()}::timestamptz
     FROM app_auth_accounts a JOIN user_profiles p ON p.id = a.user_id
     WHERE a.user_id = ${userId}::uuid AND a.approval_status = 'approved'
       AND p.deactivated_at IS NULL

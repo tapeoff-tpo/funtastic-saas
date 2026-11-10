@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { formatPriceNumberDate } from '@/lib/analytics/price-number-date'
@@ -7,6 +8,7 @@ import { listPriceTableRows } from '@/lib/analytics/price-table'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { getPriceTableSourceNumber } from './price-table-columns'
+import { priceTableHref, priceTablePages, type PriceTableNavigation } from './price-table-navigation'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
 import { PriceQueuePanel } from '@/components/product-linking/price-queue-panel'
@@ -41,6 +43,7 @@ export default async function PriceTablePage({
   const sortKey = params?.sort?.trim() || 'importedAt'
   const sortOrder = params?.order === 'asc' ? 'asc' : 'desc'
   const activeView = params?.view === 'products' ? 'products' : 'compare'
+  const navigation: PriceTableNavigation = { sheetName: activeSheet, search, sortKey, sortOrder, view: activeView }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
@@ -66,6 +69,7 @@ export default async function PriceTablePage({
   })
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize))
+  if (page > totalPages) redirect(priceTableHref({ ...navigation, page: totalPages }))
   const sheetCounts = [...data.sheetCounts].sort((left, right) => (
     SHEET_ORDER.indexOf(left.name) - SHEET_ORDER.indexOf(right.name)
   ))
@@ -98,14 +102,16 @@ export default async function PriceTablePage({
 
       <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-2 py-1.5">
         <div className="flex items-center gap-1" aria-label="원본 시트">
-          {sheetCounts.map(sheet => <Link key={sheet.name} href={sheetHref(sheet.name, search, activeView)} className={`rounded px-2 py-1 text-xs font-medium ${activeSheet === sheet.name ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{sheet.name} <span className="tabular-nums opacity-75">{sheet.count.toLocaleString('ko-KR')}</span></Link>)}
+          {sheetCounts.map(sheet => <Link key={sheet.name} href={priceTableHref({ ...navigation, sheetName: sheet.name })} className={`rounded px-2 py-1 text-xs font-medium ${activeSheet === sheet.name ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{sheet.name} <span className="tabular-nums opacity-75">{sheet.count.toLocaleString('ko-KR')}</span></Link>)}
         </div>
         <form className="flex min-w-0 flex-1 items-center gap-1 sm:max-w-md">
           <input type="hidden" name="sheet" value={activeSheet} />
           <input type="hidden" name="view" value={activeView} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="order" value={sortOrder} />
           <input aria-label="판매가 상품 검색" name="q" defaultValue={search} placeholder="상품코드 · 상품명 · 등록번호 검색" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs" />
           <button type="submit" aria-label="검색" className="inline-flex size-8 items-center justify-center rounded border hover:bg-muted"><Search className="size-3.5" /></button>
-          {search && <Link aria-label="검색 초기화" href={sheetHref(activeSheet, '', activeView)} className="inline-flex size-8 items-center justify-center rounded border"><X className="size-3.5" /></Link>}
+          {search && <Link aria-label="검색 초기화" href={priceTableHref({ ...navigation, search: '' })} className="inline-flex size-8 items-center justify-center rounded border"><X className="size-3.5" /></Link>}
         </form>
         <PriceQueuePanel />
         <details className="group relative ml-auto">
@@ -123,40 +129,27 @@ export default async function PriceTablePage({
       </div>
 
       <PriceTableWorkspace
-        key={`${activeSheet}:${params?.view ?? 'products'}`}
+        key={activeSheet}
         rows={gridRows}
-        initialView={activeView}
+        navigation={navigation}
+        page={page}
       />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="text-muted-foreground">
           {data.total.toLocaleString('ko-KR')}건 중 {data.rows.length.toLocaleString('ko-KR')}건 표시
         </div>
-        <div className="flex items-center gap-2">
-          <PageLink
-            page={page - 1}
-            disabled={page <= 1}
-            search={search}
-            sheetName={activeSheet}
-            sortKey={sortKey}
-            sortOrder={sortOrder}
-            view={activeView}
-          >
-            이전
-          </PageLink>
-          <span className="min-w-[70px] text-center text-muted-foreground">{page} / {totalPages}</span>
-          <PageLink
-            page={page + 1}
-            disabled={page >= totalPages}
-            search={search}
-            sheetName={activeSheet}
-            sortKey={sortKey}
-            sortOrder={sortOrder}
-            view={activeView}
-          >
-            다음
-          </PageLink>
-        </div>
+        <nav aria-label="판매가 테이블 페이지" className="flex flex-wrap items-center gap-1 sm:justify-end">
+          <PageLink page={1} disabled={page === 1} label="처음 페이지" navigation={navigation}>처음</PageLink>
+          <PageLink page={Math.max(1, page - 10)} disabled={page === 1} label="10페이지 이전" navigation={navigation}>{'<<'}</PageLink>
+          <PageLink page={page - 1} disabled={page === 1} label="이전 페이지" navigation={navigation}>{'‹'}</PageLink>
+          {priceTablePages(page, totalPages).map((target) => (
+            <PageLink key={target} page={target} current={target === page} label={`${target}페이지`} navigation={navigation}>{target}</PageLink>
+          ))}
+          <PageLink page={page + 1} disabled={page === totalPages} label="다음 페이지" navigation={navigation}>{'›'}</PageLink>
+          <PageLink page={Math.min(totalPages, page + 10)} disabled={page === totalPages} label="10페이지 다음" navigation={navigation}>{'>>'}</PageLink>
+          <PageLink page={totalPages} disabled={page === totalPages} label="마지막 페이지" navigation={navigation}>마지막</PageLink>
+        </nav>
       </div>
     </div>
   )
@@ -171,47 +164,22 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
   )
 }
 
-function PageLink({
-  page,
-  disabled,
-  search,
-  sheetName,
-  sortKey,
-  sortOrder,
-  view,
-  children,
-}: {
+function PageLink({ page, disabled, current, label, navigation, children }: {
   page: number
-  disabled: boolean
-  search: string
-  sheetName: string
-  sortKey: string
-  sortOrder: 'asc' | 'desc'
-  view: 'products' | 'compare'
+  disabled?: boolean
+  current?: boolean
+  label: string
+  navigation: PriceTableNavigation
   children: React.ReactNode
 }) {
-  if (disabled) {
-    return <span className="rounded-md border px-3 py-1.5 text-muted-foreground opacity-50">{children}</span>
-  }
-  const params = new URLSearchParams()
-  if (page > 1) params.set('page', String(page))
-  if (search) params.set('q', search)
-  params.set('sheet', sheetName)
-  if (sortKey !== 'productCode') params.set('sort', sortKey)
-  if (sortOrder !== 'asc') params.set('order', sortOrder)
-  if (view !== 'products') params.set('view', view)
+  const style = 'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-1.5 text-xs tabular-nums'
+  if (current) return <span aria-label={label} aria-current="page" className={`${style} bg-primary text-primary-foreground`}>{children}</span>
+  if (disabled) return <span aria-label={label} aria-disabled="true" className={`${style} text-muted-foreground opacity-50`}>{children}</span>
   return (
-    <Link href={`/analytics/price-table?${params}`} className="rounded-md border bg-background px-3 py-1.5 hover:bg-muted">
+    <Link aria-label={label} href={priceTableHref({ ...navigation, page })} prefetch={false} className={`${style} bg-background hover:bg-muted`}>
       {children}
     </Link>
   )
-}
-
-function sheetHref(sheetName: string, search: string, view: 'products' | 'compare') {
-  const params = new URLSearchParams({ sheet: sheetName })
-  if (search) params.set('q', search)
-  if (view !== 'products') params.set('view', view)
-  return `/analytics/price-table?${params}`
 }
 
 function formatDateTime(value: Date | null) {

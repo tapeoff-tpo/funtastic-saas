@@ -16,8 +16,8 @@ export type PriceTableDisplayColumn = {
   showProductId?: boolean
 }
 
-const PRODUCT_ID_FIELD_PATTERN = /(?:등록\s*)?(?:상품|제품)\s*(?:번호|코드|id)|판매자\s*상품\s*코드/i
-const CORE_PRODUCT_ID_KEYS = new Set(['상품코드', '사방넷상품코드', '제품코드'])
+export const PRODUCT_ID_FIELD_PATTERN = /(?:등록\s*)?(?:상품|제품)\s*(?:번호|코드|id)|판매자\s*상품\s*코드/i
+export const CORE_PRODUCT_ID_KEYS = new Set(['상품코드', '사방넷상품코드', '제품코드'])
 const TOKEN_NOISE_PATTERN = /(?:판매가격?|공급가격?|정산희망\s*가격|매입가|배송비|추가금|신사이트|현재|기준|등록|가격으로|상품|제품|번호|코드|id|사이트|판매중단)/gi
 
 const productRegistrationColumns: PriceTableDisplayColumn[] = [
@@ -153,12 +153,16 @@ const wholesaleColumns: PriceTableDisplayColumn[] = [
   priceColumn('new-tobizon', '투비즈온', '투비즈온 공급가격', '투비즈온 배송비', true),
 ]
 
+export const PRICE_TABLE_SOURCE_NUMBER_KEYS = ['no', 'NO', 'No', 'no.', 'NO.', 'No.'] as const
+
 export function getPriceTableSourceNumber(sheetName: string, rawData: Record<string, unknown>) {
   if (sheetName !== '상품등록' && sheetName !== '뉴도매') return null
-  const key = Object.keys(rawData).find((header) => /^no\.?$/i.test(header))
-  const value = key ? rawData[key] : undefined
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  return typeof value === 'string' ? value.trim() || null : null
+  for (const key of PRICE_TABLE_SOURCE_NUMBER_KEYS) {
+    const value = rawData[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
 }
 
 export function getPriceTableDisplayColumns(sheetName: string) {

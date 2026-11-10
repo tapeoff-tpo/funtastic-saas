@@ -3,7 +3,7 @@
 import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, PackageSearch, Table2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, PackageSearch, Table2 } from 'lucide-react'
 import {
   findMarketplaceProductIds,
   getInactiveRegistrationMarketplaceColumns,
@@ -12,20 +12,21 @@ import {
 import type { PriceTableGridRow } from './price-table-grid'
 import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
 
-type WorkspaceView = 'compare' | 'products'
+import { priceTableHref, type PriceTableNavigation, type PriceTableView } from './price-table-navigation'
 
 const NUMBER_WIDTH = 52
 
-const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string; icon: typeof Table2 }> = [
+const VIEW_ITEMS: Array<{ id: PriceTableView; label: string; icon: typeof Table2 }> = [
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
   { id: 'products', label: '상품 기준', icon: Table2 },
 ]
 
 export function PriceTableWorkspace(props: {
   rows: PriceTableGridRow[]
-  initialView: WorkspaceView
+  navigation: PriceTableNavigation
+  page: number
 }) {
-  const [view, setView] = useState<WorkspaceView>(props.initialView)
+  const { view } = props.navigation
 
   return (
     <div className="space-y-1.5">
@@ -33,27 +34,29 @@ export function PriceTableWorkspace(props: {
         {VIEW_ITEMS.map((item) => {
           const Icon = item.icon
           return (
-            <button
+            <Link
               key={item.id}
-              type="button"
-              onClick={() => setView(item.id)}
+              href={priceTableHref({ ...props.navigation, view: item.id, page: props.page })}
+              aria-current={view === item.id ? 'page' : undefined}
+              prefetch={false}
+              scroll={false}
               className={`flex h-10 items-center gap-1.5 border-b-2 px-3 text-sm font-medium ${
                 view === item.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               <Icon className="size-4" />
               {item.label}
-            </button>
+            </Link>
           )
         })}
       </div>
 
-      {view === 'compare' ? <PriceCompareView rows={props.rows} /> : <ProductMarketplaceView rows={props.rows} />}
+      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} /> : <ProductMarketplaceView rows={props.rows} navigation={props.navigation} />}
     </div>
   )
 }
 
-function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
+function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
   const { width, resize } = usePriceColumnWidths('price-table-compare-widths-v1')
   const activeColumns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const inactiveColumns = useMemo(() => getInactiveRegistrationMarketplaceColumns(), [])
@@ -146,10 +149,10 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
           </colgroup>
           <thead>
             <tr className="bg-muted text-left text-xs text-muted-foreground">
-              <th scope="col" title="원본 엑셀 번호" className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2 text-center">No.</th>
-              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }}>상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
-              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }}>상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
-              {selectedColumns.map((column) => <th key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><span className="block truncate">{column.label}</span><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
+              <th scope="col" aria-sort={sortDirection(navigation, 'sourceNumber')} className="sticky left-0 z-20 border-r border-b bg-muted px-1 py-2"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }} aria-sort={sortDirection(navigation, 'productCode')}><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }} aria-sort={sortDirection(navigation, 'productName')}><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
+              {selectedColumns.map((column) => <th key={column.id} aria-sort={sortDirection(navigation, `raw:${column.valueKey}`)} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><SortLink sortKey={`raw:${column.valueKey}`} label={column.label} navigation={navigation} /><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
             </tr>
           </thead>
           <tbody>
@@ -190,7 +193,7 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
   )
 }
 
-function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
+function ProductMarketplaceView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
   const { width, resize } = usePriceColumnWidths('price-table-products-widths-v1')
   const codeWidth = width('productCode', 96)
   const productWidth = width('product', 240)
@@ -201,10 +204,10 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
   return (
     <div className="overflow-auto rounded-md border bg-card">
       <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-        <span title="원본 엑셀 번호" className="border-r text-center">No.</span>
-        <span className="relative border-r px-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
-        <span className="relative border-r px-2">상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
-        <span className="px-2">등록 현황 · 클릭하면 전체 판매가 / 등록번호</span><span />
+        <span className="border-r"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></span>
+        <span className="relative border-r px-2"><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
+        <span className="relative border-r px-2"><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
+        <span className="px-2"><SortLink sortKey="registrationCount" label="등록 현황" navigation={navigation} /></span><span />
       </div>
       {rows.map((row) => {
         const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
@@ -260,6 +263,29 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
         )
       })}
     </div>
+  )
+}
+
+function sortDirection(navigation: PriceTableNavigation, sortKey: string) {
+  if (navigation.sortKey !== sortKey) return undefined
+  return navigation.sortOrder === 'asc' ? 'ascending' : 'descending'
+}
+
+function SortLink({ sortKey, label, navigation }: { sortKey: string; label: string; navigation: PriceTableNavigation }) {
+  const direction = sortDirection(navigation, sortKey)
+  const sortOrder = direction === 'ascending' ? 'desc' : 'asc'
+  const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowUpDown
+  return (
+    <Link
+      href={priceTableHref({ ...navigation, sortKey, sortOrder })}
+      prefetch={false}
+      scroll={false}
+      title={`${label} ${sortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+      className={`inline-flex max-w-full items-center gap-0.5 rounded hover:text-foreground ${direction ? 'text-foreground' : ''}`}
+    >
+      <span className="truncate">{label}</span>
+      <Icon aria-hidden="true" className="size-3 shrink-0" />
+    </Link>
   )
 }
 

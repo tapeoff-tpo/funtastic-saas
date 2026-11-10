@@ -2,8 +2,8 @@ import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
-import { findMarketplaceProductIds, getPriceTableDisplayColumns } from '@/app/(auth)/analytics/price-table/price-table-columns'
-import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, priceNumberDateKey } from './price-number-date'
+import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
+import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
 
 const TARGET_SHEETS = ['상품등록', '메인', '뉴도매']
 const PAGE_SIZE = 100
@@ -314,6 +314,14 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string) {
 
 function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   const direction = sortOrder === 'desc' ? desc : asc
+  if (sortKey === 'registrationCount') {
+    const registered = sql`(SELECT count(*) FROM jsonb_each_text(${analyticsPriceTableRows.rawData}) AS item(key, value)
+      WHERE key ~* ${PRODUCT_ID_FIELD_PATTERN.source}
+        AND NOT starts_with(key, ${PRICE_NUMBER_DATE_PREFIX})
+        AND regexp_replace(key, '[[:space:]]', '', 'g') NOT IN (${sql.join([...CORE_PRODUCT_ID_KEYS].map((key) => sql`${key}`), sql`, `)})
+        AND lower(regexp_replace(value, '[[:space:]]', '', 'g')) NOT IN ('', '0', '-', '미등록', '없음', 'null', 'undefined'))`
+    return [direction(registered), asc(analyticsPriceTableRows.rowNumber)]
+  }
   const coreColumn = (() => {
     switch (sortKey) {
       case 'importedAt': return analyticsPriceTableRows.importedAt
@@ -330,21 +338,28 @@ function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
     return [
       asc(sql`${coreColumn} IS NULL`),
       direction(coreColumn),
+      ...(sortKey === 'productName' ? [sql`${direction(analyticsPriceTableRows.optionName)} NULLS LAST`] : []),
       asc(analyticsPriceTableRows.rowNumber),
     ]
   }
 
   const rawKey = sortKey?.startsWith('raw:') ? sortKey.slice(4).trim() : ''
-  if (rawKey && rawKey.length <= 180) {
-    const rawValue = sql<string>`NULLIF(${analyticsPriceTableRows.rawData} ->> ${rawKey}, '')`
+  const rawValue = sortKey === 'sourceNumber'
+    ? sql<string>`CASE WHEN ${analyticsPriceTableRows.sourceSheetName} IN ('상품등록', '뉴도매')
+        THEN COALESCE(${sql.join(PRICE_TABLE_SOURCE_NUMBER_KEYS.map((key) => sql`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${key}), '')`), sql`, `)})
+      END`
+    : rawKey && rawKey.length <= 180
+      ? sql<string>`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${rawKey}), '')`
+      : null
+  if (rawValue) {
+    const cleaned = sql<string>`replace(${rawValue}, ',', '')`
     const numericValue = sql<number>`CASE
-      WHEN ${rawValue} ~ '^-?[0-9]+([.][0-9]+)?$' THEN (${rawValue})::numeric
+      WHEN ${cleaned} ~ '^-?[0-9]+([.][0-9]+)?$' THEN (${cleaned})::numeric
       ELSE NULL
     END`
     return [
-      asc(sql`${rawValue} IS NULL`),
-      direction(numericValue),
-      direction(sql`LOWER(${rawValue})`),
+      sql`${direction(numericValue)} NULLS LAST`,
+      sql`${direction(sql`lower(${rawValue})`)} NULLS LAST`,
       asc(analyticsPriceTableRows.rowNumber),
     ]
   }

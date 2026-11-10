@@ -1,12 +1,12 @@
-const DATE_KEY_PREFIX = '__priceNumberDate:'
+export const PRICE_NUMBER_DATE_PREFIX = '__priceNumberDate:'
 const seoulDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' })
 
 export function priceNumberDateKey(identifierKey: string) {
-  return DATE_KEY_PREFIX + identifierKey
+  return PRICE_NUMBER_DATE_PREFIX + identifierKey
 }
 
 export function isPriceNumberDateKey(key: string) {
-  return key.startsWith(DATE_KEY_PREFIX)
+  return key.startsWith(PRICE_NUMBER_DATE_PREFIX)
 }
 
 export function formatPriceNumberDate(date: Date) {

@@ -175,12 +175,15 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
                   return (
                     <td key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-10 bg-card" : ""} h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums`}>
                       <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
-                      {identifiers.length ? identifiers.map((identifier) => (
-                        <div key={identifier.key} className="text-[11px] leading-4 text-muted-foreground">
-                          <div className="truncate" title={identifier.value}>{identifier.value}</div>
-                          <div>입력일 {getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate ?? '미기록'}</div>
-                        </div>
-                      )) : <div className="h-4 text-[11px] leading-4 text-muted-foreground">-</div>}
+                      {identifiers.length ? identifiers.map((identifier) => {
+                        const enteredDate = getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate
+                        return (
+                          <div key={identifier.key} className="text-[11px] leading-4 text-muted-foreground">
+                            <div className="truncate" title={identifier.value}>{identifier.value}</div>
+                            {enteredDate && <div>입력일 {enteredDate}</div>}
+                          </div>
+                        )
+                      }) : <div className="h-4 text-[11px] leading-4 text-muted-foreground">-</div>}
                     </td>
                   )
                 })}
@@ -251,7 +254,7 @@ function ProductMarketplaceView({ rows, navigation }: { rows: PriceTableGridRow[
                       <div key={`${item.marketplace}-${item.productId}`} className="rounded-md border bg-background px-3 py-2">
                         <div className="text-xs font-medium">{item.marketplace}</div>
                         <div className="mt-1 font-mono text-xs text-muted-foreground">상품번호 {item.productId}</div>
-                        <div className="text-xs text-muted-foreground">입력일 {item.enteredDate ?? '미기록'}</div>
+                        {item.enteredDate && <div className="text-xs text-muted-foreground">입력일 {item.enteredDate}</div>}
                         <div className="mt-1 text-sm font-semibold tabular-nums">판매가 {formatMoney(item.price)}</div>
                       </div>
                     ))}

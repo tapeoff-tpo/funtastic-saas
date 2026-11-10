@@ -47,12 +47,14 @@ it('shows the date for each product number in price comparison and product detai
     productName: '테스트 상품',
     optionName: null,
     registeredProductName: null,
-    rawData: { [key]: '123456', [priceNumberDateKey(key)]: '2026-11-10' },
+    rawData: { [key]: '123456', [priceNumberDateKey(key)]: '2026-11-10', '오늘의집 상품번호': '789012' },
   }]
   const { rerender } = render(<PriceTableWorkspace {...defaultProps} rows={rows} />)
   expect(screen.getByRole('columnheader', { name: 'No.' })).toBeVisible()
   expect(screen.getByRole('cell', { name: '27' })).toBeVisible()
+  expect(screen.getAllByText('789012')[0]).toBeVisible()
   expect(screen.getByText('입력일 2026-11-10')).toBeVisible()
+  expect(screen.queryByText('입력일 미기록')).not.toBeInTheDocument()
   const sortParams = new URL(screen.getByRole('link', { name: 'No.' }).getAttribute('href')!, 'https://example.com').searchParams
   expect(Object.fromEntries(sortParams)).toEqual({ sheet: '상품등록', sort: 'sourceNumber', order: 'desc', view: 'compare', q: '테스트' })
   expect(screen.getByRole('link', { name: '상품 기준' })).toHaveAttribute('href', expect.stringContaining('page=14'))
@@ -60,7 +62,9 @@ it('shows the date for each product number in price comparison and product detai
   expect(screen.getByText('27')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: /테스트 상품/ }))
   expect(screen.getByText('상품번호 123456')).toBeVisible()
+  expect(screen.getAllByText('상품번호 789012')[0]).toBeVisible()
   expect(screen.getByText('입력일 2026-11-10')).toBeVisible()
+  expect(screen.queryByText('입력일 미기록')).not.toBeInTheDocument()
 })
 
 

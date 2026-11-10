@@ -38,7 +38,7 @@ it('shows the date for each product number in price comparison and product detai
   render(<PriceTableWorkspace initialView="compare" rows={[{
     id: 'row-1',
     rowNumber: 4,
-    registrationNumber: 27,
+    sourceNumber: '27',
     productCode: 'SKU-1',
     productName: '테스트 상품',
     optionName: null,

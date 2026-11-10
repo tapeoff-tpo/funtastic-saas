@@ -146,7 +146,7 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
           </colgroup>
           <thead>
             <tr className="bg-muted text-left text-xs text-muted-foreground">
-              <th scope="col" title="등록순 번호" className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2 text-center">No.</th>
+              <th scope="col" title="원본 엑셀 번호" className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2 text-center">No.</th>
               <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }}>상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
               <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }}>상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
               {selectedColumns.map((column) => <th key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><span className="block truncate">{column.label}</span><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
@@ -155,7 +155,7 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t hover:bg-muted/30">
-                <td className="sticky left-0 z-10 border-r border-b bg-card px-1 text-center text-xs tabular-nums text-muted-foreground">{row.registrationNumber}</td>
+                <td className="sticky left-0 z-10 border-r border-b bg-card px-1 text-center text-xs tabular-nums text-muted-foreground">{row.sourceNumber ?? '–'}</td>
                 <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle font-mono text-xs font-medium" style={{ left: NUMBER_WIDTH }}>
                   {row.productCode ? (
                     <Link data-no-translate title={row.productCode} href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="block truncate text-primary hover:underline">
@@ -201,7 +201,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
   return (
     <div className="overflow-auto rounded-md border bg-card">
       <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-        <span title="등록순 번호" className="border-r text-center">No.</span>
+        <span title="원본 엑셀 번호" className="border-r text-center">No.</span>
         <span className="relative border-r px-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
         <span className="relative border-r px-2">상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
         <span className="px-2">등록 현황 · 클릭하면 전체 판매가 / 등록번호</span><span />
@@ -222,7 +222,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
               style={gridStyle}
               className="grid h-12 w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted/30"
             >
-              <span className="border-r text-center text-xs tabular-nums text-muted-foreground">{row.registrationNumber}</span>
+              <span className="border-r text-center text-xs tabular-nums text-muted-foreground">{row.sourceNumber ?? '–'}</span>
               <span data-no-translate title={row.productCode ?? ''} className="truncate border-r px-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
               <span className="min-w-0 border-r px-2">
                 <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>

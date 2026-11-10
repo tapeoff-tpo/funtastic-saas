@@ -6,6 +6,7 @@ import { formatPriceNumberDate } from '@/lib/analytics/price-number-date'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
+import { getPriceTableSourceNumber } from './price-table-columns'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
 import { PriceQueuePanel } from '@/components/product-linking/price-queue-panel'
@@ -71,7 +72,7 @@ export default async function PriceTablePage({
   const gridRows: PriceTableGridRow[] = data.rows.map((row) => ({
     id: row.id,
     rowNumber: row.rowNumber,
-    registrationNumber: row.registrationNumber,
+    sourceNumber: getPriceTableSourceNumber(row.sourceSheetName, row.rawData),
     productCode: row.productCode,
     productName: row.productName,
     optionName: row.optionName,

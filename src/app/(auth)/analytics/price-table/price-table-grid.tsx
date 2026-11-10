@@ -19,7 +19,7 @@ import {
 export type PriceTableGridRow = {
   id: string
   rowNumber: number
-  registrationNumber: number
+  sourceNumber: string | null
   productCode: string | null
   productName: string | null
   optionName: string | null

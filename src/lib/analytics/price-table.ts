@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { and, asc, count, desc, eq, getTableColumns, ilike, or, sql, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
 import { findMarketplaceProductIds, getPriceTableDisplayColumns } from '@/app/(auth)/analytics/price-table/price-table-columns'
@@ -17,7 +17,7 @@ export interface PriceTableImportResult {
 }
 
 export interface PriceTableListResult {
-  rows: Array<PriceTableRow & { registrationNumber: number }>
+  rows: PriceTableRow[]
   total: number
   overallTotal: number
   page: number
@@ -109,30 +109,17 @@ export async function listPriceTableRows(data: {
   const page = Math.max(1, data.page ?? 1)
   const whereClause = buildWhereClause(data.userId, data.search, data.sheetName)
   const orderBy = buildOrderBy(data.sortKey, data.sortOrder)
-  const table = analyticsPriceTableRows
-  const registrationOrder = db.$with('registration_order').as(
-    db.select({
-      id: table.id,
-      number: sql<number>`(row_number() OVER (
-        PARTITION BY ${table.sourceSheetName}
-        ORDER BY ${table.importedAt}, ${table.rowNumber}, ${table.id}
-      ))::int`.as('registration_number'),
-    })
-      .from(table)
-      .where(buildWhereClause(data.userId, undefined, data.sheetName)),
-  )
 
   const [totalRows, rows, sheetRows, latestRows] = await Promise.all([
     db
       .select({ value: count() })
       .from(analyticsPriceTableRows)
       .where(whereClause),
-    db.with(registrationOrder)
-      .select({ ...getTableColumns(table), registrationNumber: registrationOrder.number })
-      .from(table)
-      .innerJoin(registrationOrder, eq(table.id, registrationOrder.id))
+    db
+      .select()
+      .from(analyticsPriceTableRows)
       .where(whereClause)
-      .orderBy(...orderBy, asc(table.id))
+      .orderBy(...orderBy, asc(analyticsPriceTableRows.id))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db

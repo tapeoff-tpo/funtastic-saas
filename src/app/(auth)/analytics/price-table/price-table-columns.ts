@@ -153,6 +153,14 @@ const wholesaleColumns: PriceTableDisplayColumn[] = [
   priceColumn('new-tobizon', '투비즈온', '투비즈온 공급가격', '투비즈온 배송비', true),
 ]
 
+export function getPriceTableSourceNumber(sheetName: string, rawData: Record<string, unknown>) {
+  if (sheetName !== '상품등록' && sheetName !== '뉴도매') return null
+  const key = Object.keys(rawData).find((header) => /^no\.?$/i.test(header))
+  const value = key ? rawData[key] : undefined
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return typeof value === 'string' ? value.trim() || null : null
+}
+
 export function getPriceTableDisplayColumns(sheetName: string) {
   if (sheetName === '메인') return mainColumns
   if (sheetName === '뉴도매') return wholesaleColumns

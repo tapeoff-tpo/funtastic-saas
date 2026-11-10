@@ -9,6 +9,7 @@ import {
   getRegistrationMarketplaceColumns,
 } from './price-table-columns'
 import type { PriceTableGridRow } from './price-table-grid'
+import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
 
 type WorkspaceView = 'compare' | 'products'
 
@@ -50,12 +51,16 @@ export function PriceTableWorkspace(props: {
 }
 
 function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
+  const { width, resize } = usePriceColumnWidths('price-table-compare-widths-v1')
   const activeColumns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const inactiveColumns = useMemo(() => getInactiveRegistrationMarketplaceColumns(), [])
   const columns = [...activeColumns, ...inactiveColumns]
   const defaults = activeColumns.filter((column) => column.defaultVisible).slice(0, 4).map((column) => column.id)
   const [selected, setSelected] = useState<string[]>(defaults)
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
+  const codeWidth = width('productCode', 96)
+  const productWidth = width('product', 240)
+  const tableWidth = codeWidth + productWidth + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
 
   function toggle(id: string) {
     setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 6 ? [...current, id] : current)
@@ -101,32 +106,36 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
         </details>
       </div>
       <div className="overflow-auto rounded-md border bg-card">
-        <table className="w-full min-w-[680px] text-sm">
+        <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
+          <colgroup>
+            <col style={{ width: codeWidth }} /><col style={{ width: productWidth }} />
+            {selectedColumns.map(column => <col key={column.id} style={{ width: width(column.id, 132) }} />)}
+          </colgroup>
           <thead>
             <tr className="bg-muted text-left text-xs text-muted-foreground">
-              <th className="sticky left-0 z-10 w-[130px] min-w-[130px] bg-muted px-3 py-2">상품코드</th>
-              <th className="sticky left-[130px] z-10 min-w-[220px] bg-muted px-3 py-2">상품 / 옵션</th>
-              {selectedColumns.map((column) => <th key={column.id} className="min-w-[132px] px-3 py-2 text-right">{column.label}</th>)}
+              <th className="sticky left-0 z-20 border-r border-b bg-muted px-2 py-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: codeWidth }}>상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
+              {selectedColumns.map((column) => <th key={column.id} className="relative border-r border-b px-2 py-2 text-right"><span className="block truncate">{column.label}</span><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t hover:bg-muted/30">
-                <td className="sticky left-0 bg-card px-3 py-2 font-mono text-xs font-medium">
+                <td className="sticky left-0 z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle font-mono text-xs font-medium">
                   {row.productCode ? (
-                    <Link data-no-translate href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="text-primary hover:underline">
+                    <Link data-no-translate title={row.productCode} href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="block truncate text-primary hover:underline">
                       {row.productCode}
                     </Link>
                   ) : '-'}
                 </td>
-                <td className="sticky left-[130px] max-w-[320px] bg-card px-3 py-2">
-                  <div data-no-translate className="truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</div>
-                  {row.optionName ? <div data-no-translate className="truncate text-xs text-muted-foreground">{row.optionName}</div> : null}
+                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle" style={{ left: codeWidth }}>
+                  <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
+                  <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
                 {selectedColumns.map((column) => (
-                  <td key={column.id} className="px-3 py-2 text-right tabular-nums">
-                    <div className="font-semibold">{formatMoney(row.rawData[column.valueKey])}</div>
-                    <div className="text-[11px] text-muted-foreground">{findMarketplaceProductIds(row.rawData, column).length ? '등록번호 있음' : '-'}</div>
+                  <td key={column.id} className="h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums">
+                    <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
+                    <div className="h-4 truncate text-[11px] leading-4 text-muted-foreground">{findMarketplaceProductIds(row.rawData, column).length ? '등록번호 있음' : '-'}</div>
                   </td>
                 ))}
               </tr>
@@ -139,13 +148,19 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
 }
 
 function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
+  const { width, resize } = usePriceColumnWidths('price-table-products-widths-v1')
+  const codeWidth = width('productCode', 96)
+  const productWidth = width('product', 240)
+  const gridStyle = { gridTemplateColumns: `${codeWidth}px ${productWidth}px 170px 36px`, minWidth: codeWidth + productWidth + 230 }
   const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const [openRow, setOpenRow] = useState<string | null>(null)
 
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
-      <div className="grid grid-cols-[minmax(0,1fr)_28px] border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]">
-        <span className="hidden lg:block">상품코드</span><span>상품 / 옵션</span><span className="hidden lg:block">등록된 몰</span><span />
+    <div className="overflow-auto rounded-md border bg-card">
+      <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+        <span className="relative border-r pr-2">상품코드<ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
+        <span className="relative border-r px-2">상품 / 옵션<ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
+        <span className="px-2">등록된 몰</span><span />
       </div>
       {rows.map((row) => {
         const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
@@ -155,14 +170,15 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
         })))
         const open = openRow === row.id
         return (
-          <div key={row.id} className="border-b last:border-b-0">
+          <div key={row.id} style={{ minWidth: gridStyle.minWidth }} className="border-b last:border-b-0">
             <button
               type="button"
               onClick={() => setOpenRow(open ? null : row.id)}
-              className="grid w-full grid-cols-[minmax(0,1fr)_28px] items-center px-3 py-2.5 text-left text-sm hover:bg-muted/30 lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]"
+              style={gridStyle}
+              className="grid h-12 w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted/30"
             >
-              <span data-no-translate className="hidden font-mono text-xs font-medium lg:block">{row.productCode || '-'}</span>
-              <span className="min-w-0 pr-4">
+              <span data-no-translate title={row.productCode ?? ''} className="truncate border-r pr-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
+              <span className="min-w-0 border-r px-2">
                 <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
                 {row.optionName || row.productCode ? (
                   <span className="block truncate text-xs text-muted-foreground">
@@ -171,7 +187,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
                   </span>
                 ) : null}
               </span>
-              <span className="hidden min-w-0 flex-wrap gap-1 lg:flex">
+              <span className="flex min-w-0 flex-wrap gap-1 px-2">
                 {registrations.length ? registrations.slice(0, 3).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
                 {registrations.length > 3 ? <span className="text-xs text-muted-foreground">+{registrations.length - 3}</span> : null}
               </span>

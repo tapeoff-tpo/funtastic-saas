@@ -6,6 +6,7 @@
  */
 
 import { db } from '@/lib/db'
+import { cache } from 'react'
 import {
   products,
   productVariants,
@@ -22,7 +23,7 @@ const DEFAULT_PAGE_SIZE = 50
 /**
  * Get paginated product list with variant count, search, and sorting.
  */
-export async function getProducts(
+export const getProducts = cache(async function getProducts(
   userId: string,
   filters: ProductFilters = {},
 ): Promise<{ items: ProductListItem[]; total: number }> {
@@ -149,7 +150,7 @@ export async function getProducts(
     })) as ProductListItem[],
     total,
   }
-}
+})
 
 /**
  * Get a single product by ID with all variants and marketplace links.

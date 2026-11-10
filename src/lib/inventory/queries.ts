@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { cache } from 'react'
 import { inventory, inventoryHistory, orders } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, sql } from 'drizzle-orm'
 import type { AnyColumn, SQL } from 'drizzle-orm'
@@ -14,7 +15,7 @@ export function buildWarehouseSelectionHaving(warehouseZone: string | undefined,
   return sql`BOOL_OR(${column} = ${warehouseZone})`
 }
 
-export async function getInventoryList(
+export const getInventoryList = cache(async function getInventoryList(
   userId: string,
   filters: InventoryFilters = {},
 ) {
@@ -106,7 +107,7 @@ export async function getInventoryList(
     }),
     total: Number(countRow?.total ?? 0),
   }
-}
+})
 
 /**
  * Get a single inventory record by SKU for a user.

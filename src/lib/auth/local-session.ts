@@ -1,6 +1,7 @@
 import 'server-only'
 import { createHash, randomBytes } from 'node:crypto'
 import { client } from '@/lib/db'
+import { cache } from 'react'
 
 export const LOCAL_SESSION_COOKIE = 'funtastic_session'
 export function authDatabase() {
@@ -24,18 +25,18 @@ export async function createLocalSession(userId: string) {
   return { token, expiresAt }
 }
 
-export async function validateLocalSession(token?: string) {
+export const validateLocalSession = cache(async (token?: string) => {
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null
   const sql = authDatabase()
   const [row] = await sql`
-    SELECT a.user_id::text AS id
+    SELECT a.user_id::text AS id, a.email
     FROM app_auth_sessions s JOIN app_auth_accounts a ON a.user_id = s.user_id
     JOIN user_profiles p ON p.id = a.user_id
     WHERE s.token_hash = ${digest(token)} AND s.expires_at > now()
       AND a.approval_status = 'approved' AND p.deactivated_at IS NULL
   `
-  return row ? { id: String(row.id), mustChangePassword: false } : null
-}
+  return row ? { id: String(row.id), email: String(row.email), mustChangePassword: false } : null
+})
 
 export async function revokeLocalSession(token: string) {
   const sql = authDatabase()

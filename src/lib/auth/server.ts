@@ -9,9 +9,7 @@ export async function createClient() {
   const current = async () => {
     const session = await validateLocalSession(store.get(LOCAL_SESSION_COOKIE)?.value)
     if (!session) return null
-    const sql = authDatabase()
-    const [profile] = await sql`SELECT email FROM app_auth_accounts WHERE user_id=${session.id}::uuid`
-    return { id: session.id, email: String(profile.email), app_metadata: {} as Record<string,unknown>, user_metadata: {} as Record<string,unknown> }
+    return { id: session.id, email: session.email, app_metadata: {} as Record<string,unknown>, user_metadata: {} as Record<string,unknown> }
   }
   return { auth: {
     getUser: async () => ({ data: { user: await current() }, error: null }),

@@ -221,7 +221,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
             </button>
             {open ? (
               <div className="border-t bg-muted/15 px-4 py-3">
-                <div className="mb-3 flex gap-6 text-sm"><span>B2B <strong>{formatMoney(row.rawData['B2B 판매가'])}</strong></span><span>B2C <strong>{formatMoney(row.rawData['B2C 판매가'])}</strong></span><span className="text-muted-foreground">등록 {registrations.length}건</span></div>
+                <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>원가 <strong>{formatMoney(row.rawData['원가'])}</strong></span><span>B2B <strong>{formatMoney(row.rawData['B2B 판매가'])}</strong></span><span>B2C <strong>{formatMoney(row.rawData['B2C 판매가'])}</strong></span><span className="text-muted-foreground">등록 {registrations.length}건</span></div>
                 {registrations.length ? (
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {registrations.map((item) => (

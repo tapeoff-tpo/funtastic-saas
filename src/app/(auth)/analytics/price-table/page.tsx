@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
+import { PriceQueuePanel } from '@/components/product-linking/price-queue-panel'
 import { ManualPriceProduct } from './manual-price-product'
 import { PriceTableUpload } from './price-table-upload'
 
@@ -102,6 +103,7 @@ export default async function PriceTablePage({
           <button type="submit" aria-label="검색" className="inline-flex size-8 items-center justify-center rounded border hover:bg-muted"><Search className="size-3.5" /></button>
           {search && <Link aria-label="검색 초기화" href={sheetHref(activeSheet, '', activeView)} className="inline-flex size-8 items-center justify-center rounded border"><X className="size-3.5" /></Link>}
         </form>
+        <PriceQueuePanel />
         <details className="group relative ml-auto">
           <summary className="cursor-pointer list-none rounded border px-2 py-1.5 text-xs [&::-webkit-details-marker]:hidden">등록·업로드 ▾</summary>
           <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-[min(900px,calc(100vw-2rem))] space-y-3 overflow-auto rounded-md border bg-popover p-3 shadow-lg">

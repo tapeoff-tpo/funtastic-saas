@@ -47,7 +47,7 @@ export async function importPriceTableRows(data: {
   const parsed = parsePriceTableWorkbook(data.fileBuffer)
   const importedAt = new Date()
 
-  await db.delete(analyticsPriceTableRows).where(and(eq(analyticsPriceTableRows.userId, data.userId), or(sql`${analyticsPriceTableRows.sourceFileName} IS NULL`, ne(analyticsPriceTableRows.sourceFileName, '직접 등록'))))
+  await db.delete(analyticsPriceTableRows).where(and(eq(analyticsPriceTableRows.userId, data.userId), or(sql`${analyticsPriceTableRows.sourceFileName} IS NULL`, and(ne(analyticsPriceTableRows.sourceFileName, '직접 등록'), ne(analyticsPriceTableRows.sourceFileName, '상품업무 연계')))))
 
   for (const chunk of chunks(parsed.rows, 500)) {
     await db.insert(analyticsPriceTableRows).values(chunk.map((row) => ({

@@ -1107,7 +1107,10 @@ export async function getPurchaseRequests(input: {
         newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         masterPurchasePriceCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
         masterPurchaseShippingCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
-        purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
+        purchaseUrl: sql<string | null>`COALESCE(
+          NULLIF(BTRIM(${purchaseRequestItems.rawData}->'productWorkflow'->>'purchaseUrl'), ''),
+          NULLIF(BTRIM(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}), '')
+        )`,
         purchasingStatus: products.purchasingStatus,
         purchasingStatusNote: products.purchasingStatusNote,
         chinaCurrentStock,

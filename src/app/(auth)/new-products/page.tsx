@@ -15,7 +15,8 @@ export const metadata: Metadata = {
   title: '상품관리',
 }
 
-export default async function NewProductsPage() {
+export default async function NewProductsPage({ searchParams }: { searchParams: Promise<{ item?: string }> }) {
+  const { item } = await searchParams
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
@@ -35,6 +36,7 @@ export default async function NewProductsPage() {
       </header>
       <div className="flex flex-wrap items-start gap-2"><CatalogueImageSyncButton />{setup.viewer.isMain && <WorksQualityImportButton />}</div>
       <NewProductBoard
+        initialItemId={item && /^[0-9a-f-]{36}$/i.test(item) ? item : undefined}
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}
     canManageSettings={setup.viewer.isMain}

@@ -22,6 +22,7 @@ export default async function MarketplaceRegistrationPage({
   const rows = query
     ? allRows.filter((row) => [
       row.productCode,
+      row.productName,
       ...row.salesCodes,
       ...row.inventorySkus,
       ...row.options.map((option) => option.barcode ?? ''),

@@ -37,7 +37,7 @@ export const MENU_PERMISSION_GROUPS = [
 ] as const
 
 export const MENU_PATHS: readonly string[] = MENU_PERMISSION_GROUPS.flatMap((group) => group.items.map(([path]) => path))
-export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null }
+export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null; canDeletePurchases?: boolean }
 export const UNRESTRICTED_MENU_ACCESS: MenuAccess = { superAdmin: true, allowedMenus: null }
 
 const matches = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`)
@@ -63,6 +63,12 @@ export function menuForPage(href: string): string | null {
 export function canUseMenu(access: MenuAccess, menu: string): boolean {
   if (matches(menu, '/admin/accounts')) return access.superAdmin
   return access.superAdmin || access.allowedMenus === null || access.allowedMenus.includes(menu)
+}
+
+export function canDeletePurchaseRequests(access: MenuAccess | null): boolean {
+  return Boolean(access && (access.superAdmin || (
+    access.canDeletePurchases && ['/purchasing/orders', '/purchasing/purchases', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
+  )))
 }
 
 export function canAccessPage(access: MenuAccess, href: string): boolean {

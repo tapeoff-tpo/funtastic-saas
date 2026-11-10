@@ -7,9 +7,10 @@ const mocks = vi.hoisted(() => ({
   writes: [] as Array<Record<string, unknown>>,
   transaction: vi.fn(), revalidate: vi.fn(),
 }))
-vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'owner-id' } } }) } }) }))
-vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: vi.fn() }))
-vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
+vi.mock('@/lib/auth/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'owner-id' } } }) } }) }))
+vi.mock('@/lib/auth/admin', () => ({ createAdminClient: vi.fn() }))
+vi.mock('@/lib/auth/local-session', () => ({ authDatabase: vi.fn() }))
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate, unstable_cache: (fn: unknown) => fn }))
 vi.mock('@/lib/db', () => ({ db: {
   select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ role: mocks.actorRole, deactivatedAt: mocks.actorInactive ? new Date() : null }] }) }) }),
   transaction: mocks.transaction,
@@ -60,5 +61,10 @@ describe('menu permission management', () => {
     mocks.writes = []
     await saveMenuPermissions({ targetId: mocks.targetId, allowedMenus: null })
     expect(mocks.writes[0].allowedMenus).toBeNull()
+  })
+  it('writes and audits the separate delete permission for an unrestricted account', async () => {
+    expect(await saveMenuPermissions({ targetId: mocks.targetId, allowedMenus: null, canDeletePurchases: true })).toEqual({ success: true })
+    expect(mocks.writes[0]).toMatchObject({ allowedMenus: null, canDeletePurchases: true })
+    expect(mocks.writes[1]).toMatchObject({ metadata: { purchaseDeleteBefore: false, purchaseDeleteAfter: true } })
   })
 })

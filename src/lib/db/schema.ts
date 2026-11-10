@@ -1739,6 +1739,7 @@ export type UserRole = (typeof userRoleEnum.enumValues)[number]
 export const userMenuPermissions = pgTable('user_menu_permissions', {
   userId: uuid('user_id').primaryKey().references(() => userProfiles.id, { onDelete: 'cascade' }),
   allowedMenus: jsonb('allowed_menus').$type<string[] | null>(),
+  canDeletePurchases: boolean('can_delete_purchases').notNull().default(false),
   updatedBy: uuid('updated_by').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })

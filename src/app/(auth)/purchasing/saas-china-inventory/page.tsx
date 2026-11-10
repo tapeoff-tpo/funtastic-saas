@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { canUseMenu } from '@/lib/auth/menu-permissions'
 import {
   getSaasChinaInventory,
   listSaasChinaOutboundWarehouses,
@@ -18,10 +20,12 @@ export default async function SaasChinaInventoryPage() {
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [{ items, summary }, outboundWarehouses] = await Promise.all([
+  const [{ items, summary }, outboundWarehouses, access] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
     listSaasChinaOutboundWarehouses(workspaceUserId),
+    getUserMenuAccess(user.id),
   ])
+  const canRequestOutbound = Boolean(access && canUseMenu(access, '/purchasing/china-shipments'))
   const defaultWarehouseCode = outboundWarehouses.find((warehouse) => warehouse.isDefault)?.warehouseCode
     ?? SAAS_CHINA_DEFAULT_WAREHOUSE_CODE
   const viewItems: SaasChinaInventoryViewItem[] = items.map((item) => ({
@@ -46,12 +50,12 @@ export default async function SaasChinaInventoryPage() {
             <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">개발용 독립 재고</span>
           </div>
         </div>
-        <Link
+        {canRequestOutbound && <Link
           href="/purchasing/china-shipments"
           className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:w-auto"
         >
           중국출고 작업하기
-        </Link>
+        </Link>}
       </header>
 
       <SaasChinaInventoryBoard
@@ -59,6 +63,7 @@ export default async function SaasChinaInventoryPage() {
         summary={summary}
         defaultWarehouseCode={defaultWarehouseCode}
         warehouseCodes={outboundWarehouses.map((warehouse) => warehouse.warehouseCode)}
+        canRequestOutbound={canRequestOutbound}
       />
     </div>
   )

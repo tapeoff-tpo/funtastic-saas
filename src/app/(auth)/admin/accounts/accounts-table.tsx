@@ -20,9 +20,10 @@ interface Props {
   workspaceOwnerId: string
   canDeleteAccounts: boolean
   menuPermissions: Record<string, string[] | null>
+  purchaseDeletePermissions: Record<string, boolean>
 }
 
-export function AccountsTable({ accounts, currentUserId, workspaceOwnerId, canDeleteAccounts, menuPermissions }: Props) {
+export function AccountsTable({ accounts, currentUserId, workspaceOwnerId, canDeleteAccounts, menuPermissions, purchaseDeletePermissions }: Props) {
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState<UserProfile | null>(null)
 
@@ -84,7 +85,7 @@ export function AccountsTable({ accounts, currentUserId, workspaceOwnerId, canDe
 
   return (
     <>
-      {editing && <MenuPermissionsDialog key={editing.id} account={{ id: editing.id, email: editing.email, allowedMenus: menuPermissions[editing.id] ?? null }} onClose={() => setEditing(null)} />}
+      {editing && <MenuPermissionsDialog key={editing.id} account={{ id: editing.id, email: editing.email, allowedMenus: menuPermissions[editing.id] ?? null, canDeletePurchases: purchaseDeletePermissions[editing.id] ?? false }} onClose={() => setEditing(null)} />}
       <div className="space-y-3 md:hidden">
         {accounts.map((a) => {
           const isSelf = a.id === currentUserId

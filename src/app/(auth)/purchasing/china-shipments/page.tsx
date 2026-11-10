@@ -61,6 +61,7 @@ export default async function ChinaShipmentsPage({
         selectedShipment={selectedShipment}
         selectedStep={selectedStep}
         showCreate={showCreate}
+        initialInventoryId={showCreate ? parseShipmentId(stringParam(params.inventoryId)) : undefined}
         outboundWarehouses={outboundWarehouses}
       />
     </div>

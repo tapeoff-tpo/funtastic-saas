@@ -2,6 +2,7 @@
 
 import { type FormEvent, type ReactNode, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Box, Download, Loader2, Pencil, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -47,11 +48,13 @@ export function SaasChinaInventoryBoard({
   summary,
   defaultWarehouseCode = '중국창고',
   warehouseCodes = [],
+  canRequestOutbound = false,
 }: {
   items: SaasChinaInventoryViewItem[]
   summary: Summary
   defaultWarehouseCode?: string
   warehouseCodes?: string[]
+  canRequestOutbound?: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -66,15 +69,15 @@ export function SaasChinaInventoryBoard({
   const [adjustDelta, setAdjustDelta] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
   const [search, setSearch] = useState('')
+  const [warehouseFilter, setWarehouseFilter] = useState('')
+  const filterWarehouses = [...new Set(items.map((item) => item.warehouseCode))]
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase('ko-KR')
-    if (!keyword) return items
-    return items.filter((item) => (
-      [item.sku, item.productName, item.optionName ?? '']
-        .some((value) => value.toLocaleLowerCase('ko-KR').includes(keyword))
+    return items.filter((item) => (!warehouseFilter || item.warehouseCode === warehouseFilter) && (
+      !keyword || [item.sku, item.productName, item.optionName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(keyword))
     ))
-  }, [items, search])
+  }, [items, search, warehouseFilter])
 
   function receiveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -183,6 +186,10 @@ export function SaasChinaInventoryBoard({
               <Download className="size-4" />
               현재 목록 다운로드
             </a>
+            <select aria-label="창고 필터" value={warehouseFilter} onChange={(event) => setWarehouseFilter(event.target.value)} className="h-9 min-w-32 rounded-md border bg-background px-2 text-sm">
+              <option value="">전체 창고</option>
+              {filterWarehouses.map((warehouse) => <option key={warehouse} value={warehouse}>{warehouse}</option>)}
+            </select>
             <input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm sm:w-64" placeholder="품목코드, 상품명, 옵션 검색" />
           </div>
         </div>
@@ -194,6 +201,7 @@ export function SaasChinaInventoryBoard({
               <div className="min-w-0">
                 <p data-no-translate className="truncate font-medium">{item.productName}</p>
                 <p data-no-translate className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
+                <p data-no-translate className="mt-1 text-sm">{item.warehouseCode}</p>
               </div>
               <dl className="mt-3 grid grid-cols-3 divide-x rounded-md border bg-muted/20 text-center">
                 <StockMetric label="현재고" value={item.onHandQuantity} />
@@ -202,9 +210,12 @@ export function SaasChinaInventoryBoard({
               </dl>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <p className="min-w-0 truncate text-xs text-muted-foreground">최근 입고 {formatDateTime(item.lastReceivedAt)}</p>
-                <button type="button" onClick={() => { setAdjusting(item); setAdjustDelta(''); setAdjustNote('') }} className="inline-flex h-10 shrink-0 items-center gap-1 rounded-md border px-3 text-sm font-medium hover:bg-muted">
-                  <Pencil className="size-4" /> 수량 조정
-                </button>
+                <div className="flex flex-wrap justify-end gap-1">
+                  {canRequestOutbound && item.availableQuantity > 0 && <InventoryOutboundLink id={item.id} />}
+                  <button type="button" onClick={() => { setAdjusting(item); setAdjustDelta(''); setAdjustNote('') }} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted">
+                    <Pencil className="size-4" /> 수량 조정
+                  </button>
+                </div>
               </div>
             </article>
           ))}
@@ -214,6 +225,7 @@ export function SaasChinaInventoryBoard({
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">품목</th>
+                <th className="min-w-28 whitespace-nowrap px-3 py-2 font-medium">창고</th>
                 <th className="px-3 py-2 text-right font-medium">현재고</th>
                 <th className="px-3 py-2 text-right font-medium">출고 예약</th>
                 <th className="px-3 py-2 text-right font-medium">작업 가능</th>
@@ -223,18 +235,20 @@ export function SaasChinaInventoryBoard({
             </thead>
             <tbody>
               {filteredItems.length === 0 ? (
-                <tr><td colSpan={6} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-16 text-center text-sm text-muted-foreground">등록된 SaaS 중국재고가 없습니다. 위에서 재고를 추가해주세요.</td></tr>
               ) : filteredItems.map((item) => (
                 <tr key={item.id} className="border-t">
                   <td className="px-3 py-2">
                     <div data-no-translate className="font-medium">{item.productName}</div>
                     <div data-no-translate className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div>
                   </td>
+                  <td data-no-translate className="whitespace-nowrap px-3 py-2 text-sm">{item.warehouseCode}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{item.onHandQuantity.toLocaleString('ko-KR')}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700">{item.reservedQuantity.toLocaleString('ko-KR')}</td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums text-emerald-700">{item.availableQuantity.toLocaleString('ko-KR')}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{formatDateTime(item.lastReceivedAt)}</td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="space-x-1 whitespace-nowrap px-3 py-2 text-center">
+                    {canRequestOutbound && item.availableQuantity > 0 && <InventoryOutboundLink id={item.id} />}
                     <button type="button" onClick={() => { setAdjusting(item); setAdjustDelta(''); setAdjustNote('') }} className="inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted">
                       <Pencil className="size-3" /> 수량 조정
                     </button>
@@ -270,6 +284,11 @@ export function SaasChinaInventoryBoard({
       ) : null}
     </div>
   )
+}
+
+function InventoryOutboundLink({ id }: { id: string }) {
+  return <Link href={`/purchasing/china-shipments?create=1&inventoryId=${encodeURIComponent(id)}`}
+    className="inline-flex h-8 items-center justify-center rounded-md border px-2 text-xs font-medium hover:bg-muted">중국출고요청</Link>
 }
 
 function SummaryCard({ label, value, description, emphasis = false }: { label: string; value: number; description: string; emphasis?: boolean }) {

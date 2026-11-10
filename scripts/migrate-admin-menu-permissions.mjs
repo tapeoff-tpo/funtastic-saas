@@ -6,6 +6,8 @@ const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1 })
 try {
   const migration = await readFile(new URL('../supabase/migrations/20261030000000_admin_menu_permissions.sql', import.meta.url), 'utf8')
   await sql.unsafe(migration)
+  const purchaseDeletePermission = await readFile(new URL('../supabase/migrations/20261110000000_purchase_delete_permission.sql', import.meta.url), 'utf8')
+  await sql.unsafe(purchaseDeletePermission)
   const [table] = await sql`SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'user_menu_permissions'`
   if (!table?.rowsecurity) throw new Error('메뉴 권한 테이블과 RLS를 확인해주세요.')
   const [audit] = await sql`SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid

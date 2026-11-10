@@ -33,9 +33,10 @@ const BAN_FOREVER = '876000h' // ~100 years (Supabase ban_duration is a Go durat
 const menuPermissionSchema = z.object({
   targetId: z.string().uuid(),
   allowedMenus: z.array(z.string().refine((path) => MENU_PATHS.includes(path), '알 수 없는 메뉴입니다.')).max(MENU_PATHS.length).nullable(),
+  canDeletePurchases: z.boolean().optional(),
 })
 
-export async function saveMenuPermissions(input: { targetId: string; allowedMenus: string[] | null }): Promise<ActionResult> {
+export async function saveMenuPermissions(input: { targetId: string; allowedMenus: string[] | null; canDeletePurchases?: boolean }): Promise<ActionResult> {
   const guard = await assertSuperAdmin()
   if (!guard.ok) return { success: false, error: guard.error }
   const parsed = menuPermissionSchema.safeParse(input)
@@ -47,11 +48,19 @@ export async function saveMenuPermissions(input: { targetId: string; allowedMenu
       if (!target) throw new Error('계정을 찾을 수 없습니다.')
       if (target.role === 'super_admin') throw new Error('최고관리자는 모든 메뉴에 접근할 수 있습니다.')
       const [before] = await tx.select().from(userMenuPermissions).where(eq(userMenuPermissions.userId, target.id))
-      await tx.insert(userMenuPermissions).values({ userId: target.id, allowedMenus, updatedBy: guard.callerId })
-        .onConflictDoUpdate({ target: userMenuPermissions.userId, set: { allowedMenus, updatedBy: guard.callerId, updatedAt: new Date() } })
+      const deletePermission = parsed.data.canDeletePurchases === undefined ? {} : { canDeletePurchases: parsed.data.canDeletePurchases }
+      await tx.insert(userMenuPermissions).values({ userId: target.id, allowedMenus, ...deletePermission, updatedBy: guard.callerId })
+        .onConflictDoUpdate({ target: userMenuPermissions.userId, set: { allowedMenus, ...deletePermission, updatedBy: guard.callerId, updatedAt: new Date() } })
       await tx.insert(auditLogs).values({
         actorId: guard.callerId, targetId: target.id, action: 'account.menu_permissions_change',
-        metadata: { before: before?.allowedMenus ?? null, after: allowedMenus },
+        metadata: {
+          before: before?.allowedMenus ?? null,
+          after: allowedMenus,
+          ...(deletePermission.canDeletePurchases === undefined ? {} : {
+            purchaseDeleteBefore: before?.canDeletePurchases ?? false,
+            purchaseDeleteAfter: deletePermission.canDeletePurchases,
+          }),
+        },
       })
     })
     revalidatePath('/', 'layout')

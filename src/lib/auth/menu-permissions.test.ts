@@ -87,4 +87,13 @@ describe('menu authorization policy', () => {
     expect(canAccessApi({ superAdmin: false, allowedMenus: ['/purchasing/purchases'] }, api, 'POST')).toBe(false)
     expect(canAccessApi({ superAdmin: false, allowedMenus: ['/purchasing/orders'] }, api, 'POST')).toBe(true)
   })
+  it('lets invoice users prepare and export documents without granting shipment editing', () => {
+    const access = { superAdmin: false, allowedMenus: ['/purchasing/import-documents'] }
+    expect(canAccessPage(access, '/purchasing/import-documents')).toBe(true)
+    expect(canAccessPage(access, '/purchasing/china-shipments')).toBe(false)
+    expect(canAccessApi(access, '/api/purchasing/china-shipments/1/import-documents', 'GET')).toBe(true)
+    expect(canAccessApi(access, '/api/purchasing/china-shipments/1/import-documents', 'POST')).toBe(true)
+    expect(canAccessApi(access, '/api/purchasing/china-shipments/1/workbook', 'POST')).toBe(false)
+    expect(canAccessApi(access, '/api/purchasing/china-shipments/1/import-documents/other', 'POST')).toBe(false)
+  })
 })

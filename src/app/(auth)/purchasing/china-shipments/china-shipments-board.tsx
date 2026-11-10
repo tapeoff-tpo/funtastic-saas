@@ -17,7 +17,8 @@ import { ManualSamplePanel } from './manual-sample-panel'
 import { PalletContentsPanel } from './pallet-contents-panel'
 import { SavedBoxContentsPanel } from './saved-box-contents-panel'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
-import { ChinaImportDocumentDialog } from './china-import-document-dialog'
+import { useMenuAccess } from '@/components/layout/menu-access-provider'
+import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
@@ -501,6 +502,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
+  const canOpenImportDocuments = canUseMenu(useMenuAccess(), '/purchasing/import-documents')
   const [boxPage, setBoxPage] = useState(1)
   const [boxSplitItemFilter, setBoxSplitItemFilter] = useState<BoxSplitItemFilter>('all')
   const [savedBoxFilter, setSavedBoxFilter] = useState<SavedBoxFilter>('saved')
@@ -661,7 +663,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
           ))}
           {[{ type: 'boxes', label: '박스 쉽먼트 바로 인쇄', enabled: canDownloadShipmentLabels }, { type: 'pallets', label: '파렛트 쉽먼트 바로 인쇄', enabled: canDownloadPalletLabels }].map(({ type, label, enabled }) => enabled ? <a key={type} href={`${shipmentLabelsHref}?type=${type}&format=print`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Printer className="size-4" />{label}</a> : <button key={type} type="button" disabled className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:opacity-50"><Printer className="size-4" />{label}</button>)}
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
-          <ChinaImportDocumentDialog shipmentId={shipment.id} />
+          {canOpenImportDocuments && <button type="button" onClick={() => guard.requestNavigation(() => router.push(`/purchasing/import-documents?shipment=${encodeURIComponent(shipment.id)}`))}
+            className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
           {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
           {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>

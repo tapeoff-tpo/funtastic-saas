@@ -18,6 +18,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/purchasing/raw-data', '발주 로우데이터'], ['/outbound-reflection', '출고반영'],
     ['/purchasing/china-inventory', '중국재고'], ['/purchasing/saas-china-inventory', '중국재고(SaaS)'],
     ['/purchasing/china-shipments', '중국출고'], ['/inventory', '재고관리'],
+    ['/purchasing/import-documents', '인보이스·패킹리스트'],
     ['/inventory/adjustments', '입출고관리'], ['/purchasing/overdue', '구매/입고지연'],
   ] },
   { title: '상품등록·광고', items: [
@@ -116,6 +117,9 @@ const API_MENU_RULES: Array<[string, string[]]> = [
 export function canAccessApi(access: MenuAccess, href: string, method = 'GET'): boolean {
   const path = normalizeMenuPath(href)
   if (path === '/api/menu-access' || path === '/api/settings/menu-order' || path === '/api/check-ip') return true
+  if (/^\/api\/purchasing\/china-shipments\/[^/]+\/import-documents$/.test(path)) {
+    return ['/purchasing/china-shipments', '/purchasing/import-documents'].some((menu) => canUseMenu(access, menu))
+  }
   if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection(?:\/labels)?$/.test(path)) {
     return ['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
   }

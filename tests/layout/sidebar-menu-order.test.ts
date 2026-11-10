@@ -37,6 +37,21 @@ describe('sidebar menu order', () => {
     })
   })
 
+  it('restores moved menus once and keeps newly added default menus in their original category', () => {
+    const updatedSections = [
+      ...sections.slice(0, 2),
+      { ...sections[2], items: [...sections[2].items, { href: '/settings/new' }] },
+    ]
+    const saved = createSidebarMenuOrder([
+      sections[0],
+      { ...sections[1], items: [{ href: '/orders' }, { href: '/settings/menu' }, { href: '/orders/collect' }] },
+      { ...sections[2], items: [{ href: '/settings' }] },
+    ])
+    const ordered = applySidebarMenuOrder(updatedSections, saved)
+    expect(ordered[1].items.map(({ href }) => href)).toEqual(['/orders', '/settings/menu', '/orders/collect'])
+    expect(ordered[2].items.map(({ href }) => href)).toEqual(['/settings', '/settings/new'])
+  })
+
   it('keeps new sections in their default position when they are missing from saved order', () => {
     const nextSections = [
       { id: 'dashboard', items: [{ href: '/dashboard' }] },

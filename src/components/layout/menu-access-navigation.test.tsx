@@ -13,7 +13,12 @@ vi.mock('./nav-state', async () => ({
   useNavState: () => ({ favorites: ['/costs', '/purchasing/china-shipments'], toggleFavorite: vi.fn(), isFavorite: () => false,
     tabs: [{ href: '/costs', label: '품목' }, { href: '/purchasing/china-shipments', label: '중국출고' }], closeTab: vi.fn() }),
 }))
-vi.mock('./sidebar-menu-order', () => ({ applySidebarMenuOrder: (sections: unknown) => sections, readSidebarMenuOrder: () => null, fetchSidebarMenuOrder: async () => null, SIDEBAR_MENU_ORDER_EVENT: 'test-menu-order' }))
+vi.mock('./sidebar-menu-order', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sidebar-menu-order')>(),
+  readSidebarMenuOrder: () => null,
+  fetchSidebarMenuOrder: async () => null,
+  SIDEBAR_MENU_ORDER_EVENT: 'test-menu-order',
+}))
 
 describe('permission-aware navigation', () => {
   beforeEach(() => { mocks.access = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] } })

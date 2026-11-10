@@ -169,6 +169,9 @@ export function findMarketplaceProductIds(
   rawData: Record<string, string>,
   column: PriceTableDisplayColumn,
 ) {
+  const manualIdentifierKey = `${column.label} 상품번호`
+  if (isProductIdentifier(rawData[manualIdentifierKey])) return [{ key: manualIdentifierKey, value: rawData[manualIdentifierKey] }]
+  if (column.id === 'b2b' || column.id === 'b2c') return []
   const exactKeys = column.productIdKeys ?? []
   const exactMatches = exactKeys
     .map((key) => ({ key, value: rawData[key] }))

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { createLocalAdmin } from '@/lib/auth/local-admin'
 
 /**
  * Service-role Supabase client -- NEVER expose to browser.
@@ -11,6 +12,7 @@ import { createClient } from '@supabase/supabase-js'
  * The service_role key bypasses Row Level Security and has full DB access.
  */
 export function createAdminClient() {
+  if (process.env.AUTH_PROVIDER === 'local') return createLocalAdmin() as unknown as ReturnType<typeof createClient>
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 

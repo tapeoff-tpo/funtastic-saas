@@ -21,7 +21,7 @@ import { MENU_PATHS } from '@/lib/auth/menu-permissions'
 import { z } from 'zod'
 import { eq, and, isNull, sql, ne } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { authDatabase } from '@/lib/auth/local-session'
 import {
   getTemporaryResetAuthPassword,
@@ -146,6 +146,19 @@ export async function createAccount(input: {
   const email = input.email.trim().toLowerCase()
   if (!email || !email.includes('@')) {
     return { success: false, error: 'Invalid email' }
+  }
+
+  if (process.env.AUTH_PROVIDER === 'local') {
+    const newId = randomUUID()
+    const auth = authDatabase()
+    await auth.begin(async tx => {
+      await tx.unsafe('INSERT INTO auth.users(id) VALUES($1::uuid)', [newId])
+      await tx.unsafe('INSERT INTO user_profiles(id,email,role,display_name,created_by) VALUES($1::uuid,$2,$3,$4,$5::uuid)', [newId,email,input.role,input.displayName ?? null,guard.callerId])
+      await tx.unsafe("INSERT INTO app_auth_accounts(user_id,email,approval_status,approved_by,approved_at) VALUES($1::uuid,$2,'approved',$3::uuid,now())", [newId,email,guard.callerId])
+    })
+    await db.insert(auditLogs).values({ actorId: guard.callerId, targetId: newId, action: 'account.create', metadata: { email, role: input.role, provider: 'local' } })
+    revalidatePath('/admin/accounts')
+    return { success: true, data: { id: newId } }
   }
 
   const admin = createAdminClient()

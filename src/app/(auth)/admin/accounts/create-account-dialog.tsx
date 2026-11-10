@@ -25,7 +25,7 @@ export function CreateAccountDialog() {
         displayName: displayName || undefined,
       })
       if (res.success) {
-        toast.success(`계정 생성 완료: ${email}`)
+        toast.success(`계정 생성 완료: ${email}. 비번초기화 버튼에서 설정 링크를 발급해주세요.`)
         setOpen(false)
       } else {
         toast.error(res.error)
@@ -45,7 +45,7 @@ export function CreateAccountDialog() {
         <Dialog.Popup className="fixed left-1/2 top-1/2 max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:p-6">
           <Dialog.Title className="text-lg font-semibold mb-1">새 관리자 추가</Dialog.Title>
           <Dialog.Description className="text-sm text-muted-foreground mb-4">
-            초기 비밀번호는 환경변수 <code className="rounded bg-muted px-1">INITIAL_USER_PASSWORD</code>로 자동 적용됩니다.
+            계정 생성 후 목록의 비번초기화 버튼에서 일회용 비밀번호 설정 링크를 발급해 전달해주세요.
           </Dialog.Description>
 
           <form action={onSubmit} className="space-y-4">

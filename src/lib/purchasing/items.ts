@@ -173,7 +173,7 @@ export async function getPurchasingItems(input: {
   pageSize: number
   search?: string
   filters?: Partial<Record<Esa009mHeader, string>>
-  sort?: Esa009mHeader | 'updatedAt'
+  sort?: Esa009mHeader | 'createdAt' | 'updatedAt'
   direction?: PurchasingItemSortDirection
   includeOutgoingMetrics?: boolean
 }) {
@@ -189,7 +189,7 @@ export async function getPurchasingItems(input: {
       purchasingStatus: products.purchasingStatus,
       purchasingStatusNote: products.purchasingStatusNote,
       updatedAt: products.updatedAt,
-    }).from(products).where(where).orderBy(orderBy)
+    }).from(products).where(where).orderBy(orderBy, asc(products.internalSku))
       .limit(input.pageSize).offset((input.page - 1) * input.pageSize),
     db.select({ total: count() }).from(products).where(where),
   ])
@@ -1160,9 +1160,10 @@ function purchasingItemConditions(
 }
 
 function purchasingItemOrderBy(
-  sort: Esa009mHeader | 'updatedAt' = '품목코드',
+  sort: Esa009mHeader | 'createdAt' | 'updatedAt' = '품목코드',
   direction: PurchasingItemSortDirection = 'asc',
 ) {
+  if (sort === 'createdAt') return direction === 'desc' ? desc(products.createdAt) : asc(products.createdAt)
   const field = sort === 'updatedAt'
     ? products.updatedAt
     : sort === '품목코드'

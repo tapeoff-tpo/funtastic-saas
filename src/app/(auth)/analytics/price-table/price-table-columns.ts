@@ -1,3 +1,5 @@
+import { isPriceNumberDateKey } from '@/lib/analytics/price-number-date'
+
 export type PriceTableDisplayColumn = {
   id: string
   label: string
@@ -182,7 +184,7 @@ export function findMarketplaceProductIds(
   if (!tokens.length) return []
 
   const candidates = Object.entries(rawData)
-    .filter(([key, value]) => isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
+    .filter(([key, value]) => !isPriceNumberDateKey(key) && isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
     .map(([key, value]) => ({ key, value, score: identifierKeyScore(key, tokens) }))
   const namedMatches = candidates
     .filter((entry) => entry.score > 0)

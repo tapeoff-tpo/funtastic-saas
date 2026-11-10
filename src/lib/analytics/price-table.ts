@@ -2,6 +2,8 @@ import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
+import { findMarketplaceProductIds, getPriceTableDisplayColumns } from '@/app/(auth)/analytics/price-table/price-table-columns'
+import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, priceNumberDateKey } from './price-number-date'
 
 const TARGET_SHEETS = ['상품등록', '메인', '뉴도매']
 const PAGE_SIZE = 100
@@ -45,25 +47,48 @@ export async function importPriceTableRows(data: {
 }): Promise<PriceTableImportResult> {
   await ensurePriceTableSchema()
   const parsed = parsePriceTableWorkbook(data.fileBuffer)
-  const importedAt = new Date()
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`product-link:${data.userId}`}))`)
+    const importedAt = new Date()
+    const enteredDate = formatPriceNumberDate(importedAt)
+    const replacedRows = and(
+      eq(analyticsPriceTableRows.userId, data.userId),
+      or(
+        sql`${analyticsPriceTableRows.sourceFileName} IS NULL`,
+        and(ne(analyticsPriceTableRows.sourceFileName, '직접 등록'), ne(analyticsPriceTableRows.sourceFileName, '상품업무 연계')),
+      ),
+    )
+    const previousRows = await tx.delete(analyticsPriceTableRows).where(replacedRows).returning({
+      sourceSheetName: analyticsPriceTableRows.sourceSheetName,
+      productCode: analyticsPriceTableRows.productCode,
+      productName: analyticsPriceTableRows.productName,
+      optionName: analyticsPriceTableRows.optionName,
+      rawData: analyticsPriceTableRows.rawData,
+    })
+    const previousDates = new Map<string, string | null>()
+    for (const row of previousRows) {
+      const rawData = row.rawData as Record<string, string>
+      for (const identifier of priceNumberEntries({ ...row, rawData })) {
+        const date = getPriceNumberDate(rawData, identifier.key)
+        const previous = previousDates.get(identifier.identity)
+        previousDates.set(identifier.identity, previous && (!date || previous < date) ? previous : date)
+      }
+    }
 
-  await db.delete(analyticsPriceTableRows).where(and(eq(analyticsPriceTableRows.userId, data.userId), or(sql`${analyticsPriceTableRows.sourceFileName} IS NULL`, and(ne(analyticsPriceTableRows.sourceFileName, '직접 등록'), ne(analyticsPriceTableRows.sourceFileName, '상품업무 연계')))))
-
-  for (const chunk of chunks(parsed.rows, 500)) {
-    await db.insert(analyticsPriceTableRows).values(chunk.map((row) => ({
-      userId: data.userId,
-      sourceFileName: data.sourceFileName,
-      sourceSheetName: row.sourceSheetName,
-      rowNumber: row.rowNumber,
-      productCode: row.productCode,
-      productName: row.productName,
-      optionName: row.optionName,
-      registeredProductName: row.registeredProductName,
-      rawData: row.rawData,
-      importedAt,
-      updatedAt: importedAt,
-    })))
-  }
+    for (const chunk of chunks(parsed.rows, 500)) {
+      await tx.insert(analyticsPriceTableRows).values(chunk.map((row) => {
+        const rawData = { ...row.rawData }
+        for (const identifier of priceNumberEntries(row)) {
+          const date = previousDates.get(identifier.identity)
+          if (date !== null) rawData[priceNumberDateKey(identifier.key)] = date ?? enteredDate
+        }
+        return {
+          ...row, rawData, userId: data.userId, sourceFileName: data.sourceFileName,
+          importedAt, updatedAt: importedAt,
+        }
+      }))
+    }
+  })
 
   return {
     imported: parsed.rows.length,
@@ -129,6 +154,18 @@ export async function listPriceTableRows(data: {
     latestImport: latest?.importedAt ?? null,
     sourceFileName: latest?.sourceFileName ?? null,
   }
+}
+
+function priceNumberEntries(row: Pick<ParsedPriceTableRow, 'sourceSheetName' | 'productCode' | 'productName' | 'optionName' | 'rawData'>) {
+  const columns = getPriceTableDisplayColumns(row.sourceSheetName)
+  const registrationColumns = row.sourceSheetName === '상품등록' ? [] : getPriceTableDisplayColumns('상품등록')
+  return [...columns, ...registrationColumns]
+    .filter((column) => column.showProductId)
+    .flatMap((column) => findMarketplaceProductIds(row.rawData, column))
+    .map(({ key, value }) => ({
+      key,
+      identity: JSON.stringify([row.sourceSheetName, row.productCode ?? row.productName, row.optionName, key, value]),
+    }))
 }
 
 function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
@@ -215,7 +252,7 @@ function rowToObject(headers: string[], values: Array<string | number | boolean 
   const rawData: Record<string, string> = {}
   for (let index = 0; index < headers.length; index += 1) {
     const value = cellText(values[index])
-    if (value) rawData[headers[index]] = value
+    if (value && !isPriceNumberDateKey(headers[index])) rawData[headers[index]] = value
   }
   return rawData
 }

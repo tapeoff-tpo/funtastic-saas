@@ -1,5 +1,6 @@
 'use client'
 
+import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, PackageSearch, Table2 } from 'lucide-react'
@@ -158,12 +159,20 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
                   <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
                   <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
-                {selectedColumns.map((column) => (
-                  <td key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-10 bg-card" : ""} h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums`}>
-                    <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
-                    <div title={findMarketplaceProductIds(row.rawData, column).map(item => item.value).join(', ')} className="h-4 truncate text-[11px] leading-4 text-muted-foreground">{findMarketplaceProductIds(row.rawData, column).map(item => item.value).join(', ') || '-'}</div>
-                  </td>
-                ))}
+                {selectedColumns.map((column) => {
+                  const identifiers = findMarketplaceProductIds(row.rawData, column)
+                  return (
+                    <td key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-10 bg-card" : ""} h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums`}>
+                      <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
+                      {identifiers.length ? identifiers.map((identifier) => (
+                        <div key={identifier.key} className="text-[11px] leading-4 text-muted-foreground">
+                          <div className="truncate" title={identifier.value}>{identifier.value}</div>
+                          <div>입력일 {getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate ?? '미기록'}</div>
+                        </div>
+                      )) : <div className="h-4 text-[11px] leading-4 text-muted-foreground">-</div>}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>
@@ -192,6 +201,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
         const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
           marketplace: column.label,
           productId: id.value,
+          enteredDate: getPriceNumberDate(row.rawData, id.key) ?? row.directEntryDate,
           price: row.rawData[column.valueKey],
         })))
         const open = openRow === row.id
@@ -214,7 +224,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
                 ) : null}
               </span>
               <span className="flex min-w-0 flex-wrap gap-1 px-2">
-                {registrations.length ? registrations.slice(0, 4).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace} · {item.productId}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
+                {registrations.length ? registrations.slice(0, 4).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace} · {item.productId}{item.enteredDate ? ` · ${item.enteredDate}` : null}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
                 {registrations.length > 4 ? <span className="text-xs text-muted-foreground">+{registrations.length - 4}</span> : null}
               </span>
               <ChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -228,6 +238,7 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
                       <div key={`${item.marketplace}-${item.productId}`} className="rounded-md border bg-background px-3 py-2">
                         <div className="text-xs font-medium">{item.marketplace}</div>
                         <div className="mt-1 font-mono text-xs text-muted-foreground">상품번호 {item.productId}</div>
+                        <div className="text-xs text-muted-foreground">입력일 {item.enteredDate ?? '미기록'}</div>
                         <div className="mt-1 text-sm font-semibold tabular-nums">판매가 {formatMoney(item.price)}</div>
                       </div>
                     ))}

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { formatPriceNumberDate } from '@/lib/analytics/price-number-date'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
@@ -75,6 +76,7 @@ export default async function PriceTablePage({
     optionName: row.optionName,
     registeredProductName: row.registeredProductName,
     rawData: row.rawData as Record<string, string>,
+    directEntryDate: row.sourceFileName === '직접 등록' ? formatPriceNumberDate(row.importedAt) : undefined,
   }))
   return (
     <div className="space-y-2">

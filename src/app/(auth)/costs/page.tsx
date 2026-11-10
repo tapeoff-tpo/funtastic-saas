@@ -23,6 +23,8 @@ export default async function CostsPage({
     page,
     pageSize,
     search,
+    sort: 'createdAt',
+    direction: 'desc',
   })
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
 

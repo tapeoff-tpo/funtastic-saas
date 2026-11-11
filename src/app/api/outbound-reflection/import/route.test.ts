@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
-vi.mock('@/lib/supabase/server', () => ({
+vi.mock('@/lib/auth/server', () => ({
   createClient: vi.fn().mockResolvedValue({
     auth: {
       getUser: vi.fn().mockResolvedValue({

@@ -46,7 +46,7 @@ const REPORT_KINDS: EcountReportKind[] = ['purchaseRequest', 'purchasePlan', 'pu
 type PurchasingRawDataRequest = Awaited<ReturnType<typeof readPurchasingRawDataRequest>>
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()

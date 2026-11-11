@@ -3,7 +3,8 @@
 import { type ChangeEvent, type FormEvent, type ReactNode, useEffect, useRef, useState, useTransition } from 'react'
 import { nextAvailableBoxNumbers, planAutomaticBoxSplit, type InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Printer, Send, Trash2, Upload } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload, X } from 'lucide-react'
+import { Dialog } from '@base-ui/react/dialog'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
@@ -17,6 +18,7 @@ import { matchesChinaStockPeriod, chinaStockDate } from '@/lib/purchasing/china-
 import { ManualSamplePanel } from './manual-sample-panel'
 import { PalletContentsPanel } from './pallet-contents-panel'
 import { SavedBoxContentsPanel } from './saved-box-contents-panel'
+import { ShipmentLabelMenu } from './shipment-label-menu'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
 import { useMenuAccess } from '@/components/layout/menu-access-provider'
 import { canUseMenu } from '@/lib/auth/menu-permissions'
@@ -593,7 +595,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadShipmentLabels = boxesWithItems.length > 0
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
-  const shipmentLabelsHref = `/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/labels`
   const sortedBoxSplitItems = [...items].sort((left, right) => {
     const leftComplete = left.packedQuantity === left.reservedQuantity
     const rightComplete = right.packedQuantity === right.reservedQuantity
@@ -701,7 +702,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 
   return (
     <section className="space-y-4 rounded-lg border bg-card p-4">
-      <div className="flex flex-col gap-3 border-b pb-3 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex flex-col gap-3 border-b pb-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="text-lg font-semibold">{shipmentDisplayName(shipment)}</h2>
@@ -711,21 +712,20 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
           </div>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
-        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
-          {[
-            { type: 'boxes', label: '박스 쉽먼트 일괄 다운로드', enabled: canDownloadShipmentLabels, reason: '박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다.' },
-            { type: 'pallets', label: '파렛트 쉽먼트 일괄 다운로드', enabled: canDownloadPalletLabels, reason: '상품이 담긴 박스를 파렛트에 배정한 뒤 다운로드할 수 있습니다.' },
-          ].map(({ type, label, enabled, reason }) => enabled ? (
-            <a key={type} href={`${shipmentLabelsHref}?type=${type}`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" /> {label}</a>
-          ) : (
-            <button key={type} type="button" disabled title={reason} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="size-4" /> {label}</button>
-          ))}
-          {[{ type: 'boxes', label: '박스 쉽먼트 바로 인쇄', enabled: canDownloadShipmentLabels }, { type: 'pallets', label: '파렛트 쉽먼트 바로 인쇄', enabled: canDownloadPalletLabels }].map(({ type, label, enabled }) => enabled ? <a key={type} href={`${shipmentLabelsHref}?type=${type}&format=print`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Printer className="size-4" />{label}</a> : <button key={type} type="button" disabled className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium disabled:opacity-50"><Printer className="size-4" />{label}</button>)}
+        <div className="flex max-w-full flex-wrap items-center gap-3">
+          <div role="group" aria-label="쉽먼트 출력" className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+            <span className="mr-1 text-xs font-semibold text-blue-800">쉽먼트 출력</span>
+            <ShipmentLabelMenu shipmentId={shipment.id} kind="boxes" enabled={canDownloadShipmentLabels} disabledReason="박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다." />
+            <ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="상품이 담긴 박스를 파렛트에 배정한 뒤 다운로드할 수 있습니다." />
+          </div>
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
-          {canOpenImportDocuments && <button type="button" onClick={() => guard.requestNavigation(() => router.push(`/purchasing/import-documents?shipment=${encodeURIComponent(shipment.id)}`))}
-            className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
-          {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><Download className="size-4" /> 적재현황 엑셀</a> : null}
-          {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
+          {(canOpenImportDocuments || stage === 'summary') && <div role="group" aria-label="출고 문서" className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+            <span className="mr-1 text-xs font-semibold text-violet-800">출고 문서</span>
+            {canOpenImportDocuments && <button type="button" onClick={() => guard.requestNavigation(() => router.push(`/purchasing/import-documents?shipment=${encodeURIComponent(shipment.id)}`))}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
+            {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a> : null}
+          </div>}
+          {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>
       </div>
 
@@ -1280,6 +1280,7 @@ function WorkbookActions({ shipmentId, editable }: {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<WorkbookPreview | null>(null)
   const [isWorking, setIsWorking] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
 
   async function uploadWorkbook(mode: 'preview' | 'apply') {
     if (!selectedFile) { toast.error('업로드할 엑셀 파일을 선택해주세요.'); return false }
@@ -1309,6 +1310,7 @@ function WorkbookActions({ shipmentId, editable }: {
         toast.success('엑셀 작업 내용을 반영했습니다.')
         setSelectedFile(null)
         setPreview(null)
+        setEditorOpen(false)
         guard.setDraft('workbook', null)
         if (fileInputRef.current) fileInputRef.current.value = ''
         router.refresh()
@@ -1339,37 +1341,58 @@ function WorkbookActions({ shipmentId, editable }: {
 
   const toolbar = (
     <>
-      <a
-        href={'/api/purchasing/china-shipments/' + encodeURIComponent(shipmentId) + '/workbook'}
-        className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"
-      >
-        <Download className="size-4" />
-        작업용 엑셀
-      </a>
-      <label className={'inline-flex h-9 max-w-48 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted ' + (!editable ? 'pointer-events-none opacity-50' : '')}>
-        <Upload className="size-4 shrink-0" />
-        <span className="truncate">{selectedFile ? selectedFile.name : '엑셀 선택'}</span>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={chooseFile}
-          disabled={!editable || isWorking}
-          className="sr-only"
-        />
-      </label>
-      {selectedFile ? <button type="button" disabled={isWorking} onClick={clearWorkbook} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">선택 취소</button> : null}
-      <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('preview'))} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">
-        {isWorking ? <Loader2 className="size-4 animate-spin" /> : <FileSpreadsheet className="size-4" />}
-        엑셀 검토
-      </button>
-      {preview ? <div className={'basis-full w-full rounded-md border px-3 py-2 text-xs ' + (preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900')}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>
-          {preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('apply'))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}
-        </div>
-        {preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={error.sheet + ':' + error.row + ':' + index}>{error.sheet}{error.row ? ' ' + error.row + '행' : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}
-      </div> : null}
+      <div role="group" aria-label="엑셀 작업" className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+        <span className="mr-1 text-xs font-semibold text-emerald-800">엑셀 작업</span>
+        <a
+          href={'/api/purchasing/china-shipments/' + encodeURIComponent(shipmentId) + '/workbook'}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-100 px-3 text-sm font-medium text-emerald-950 transition-colors hover:bg-emerald-200"
+        >
+          <Download className="size-4" />
+          작업용 엑셀
+        </a>
+        {editable && <button type="button" onClick={() => setEditorOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white transition-colors hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
+          <Upload className="size-4" />엑셀로 수정
+          {selectedFile && <span aria-hidden="true" className="size-2 rounded-full bg-amber-300" />}
+        </button>}
+      </div>
+      <Dialog.Root open={editorOpen} onOpenChange={(open) => { if (!isWorking) setEditorOpen(open) }}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 text-foreground shadow-xl">
+            <div className="mb-4 flex items-center justify-between gap-3 border-b pb-3">
+              <Dialog.Title className="flex items-center gap-2 text-lg font-semibold"><FileSpreadsheet className="size-5 text-emerald-700" />작업용 엑셀 수정</Dialog.Title>
+              <Dialog.Close disabled={isWorking} aria-label="닫기" className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50"><X className="size-4" /></Dialog.Close>
+            </div>
+            <Dialog.Description className="sr-only">수정한 작업용 엑셀을 검토한 뒤 반영합니다.</Dialog.Description>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className={'inline-flex h-9 max-w-48 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted ' + (!editable ? 'pointer-events-none opacity-50' : '')}>
+                <Upload className="size-4 shrink-0" />
+                <span className="truncate">{selectedFile ? selectedFile.name : '엑셀 선택'}</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={chooseFile}
+                  disabled={!editable || isWorking}
+                  className="sr-only"
+                />
+              </label>
+              {selectedFile ? <button type="button" disabled={isWorking} onClick={clearWorkbook} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">선택 취소</button> : null}
+              <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('preview'))} className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+                {isWorking ? <Loader2 className="size-4 animate-spin" /> : <FileSpreadsheet className="size-4" />}
+                엑셀 검토
+              </button>
+              {preview ? <div className={'basis-full w-full rounded-md border px-3 py-2 text-xs ' + (preview.errors.length ? 'border-red-200 bg-red-50 text-red-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900')}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>박스분할 {preview.summary.boxSplitItemCount.toLocaleString('ko-KR')}개 품목 · {preview.summary.boxSplitRowCount.toLocaleString('ko-KR')}개 행 · 파렛트 배정 {preview.summary.palletAssignmentCount.toLocaleString('ko-KR')}건</p>
+                  {preview.errors.length === 0 ? <button type="button" disabled={!editable || isWorking || !selectedFile} onClick={() => void guard.runTask(() => uploadWorkbook('apply'))} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isWorking ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} 검토 결과 반영</button> : null}
+                </div>
+                {preview.errors.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-4">{preview.errors.slice(0, 10).map((error, index) => <li key={error.sheet + ':' + error.row + ':' + index}>{error.sheet}{error.row ? ' ' + error.row + '행' : ''}: {error.message}</li>)}{preview.errors.length > 10 ? <li>외 {preview.errors.length - 10}건</li> : null}</ul> : null}
+              </div> : null}
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   )
 

@@ -663,21 +663,25 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('button', { name: '출고 B' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('enables pallet download only when a saved nonempty box is assigned to a pallet', () => {
+  it('enables pallet output only when a saved nonempty box is assigned to a pallet', async () => {
     const detail = makeShipmentWithBox()
     const unassigned = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: null })) }
     const { rerender } = renderShipment(unassigned)
-    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '파렛트 쉽먼트 일괄 다운로드' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
+    expect(await screen.findByRole('menuitem', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="pallets" showCreate={false} />)
-    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 쉽먼트' }))
+    expect(await screen.findByRole('menuitem', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
   })
 
   it('shows saved box contents and lets users include empty boxes', () => {
     renderShipment(makeShipmentWithCompletionFilters())
 
-    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
-    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
+    expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeEnabled()
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '전체 펼치기' }))
@@ -955,11 +959,13 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('button', { name: '박스 전체 저장' })).not.toBeInTheDocument()
   })
 
-  it('opens label printing in a separate tab without discarding drafts', () => {
+  it('opens label printing in a separate tab without discarding drafts', async () => {
     renderShipment(makeShipmentWithBox())
-    const link = screen.getByRole('link', { name: '박스 쉽먼트 바로 인쇄' })
+    fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
+    const link = await screen.findByRole('menuitem', { name: '박스 쉽먼트 바로 인쇄' })
     expect(link).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes&format=print')
     expect(link).toHaveAttribute('target', '_blank')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: '전체 펼치기' }))
     expect(screen.getByRole('link', { name: 'A-01 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-1&format=print')
   })
@@ -1416,13 +1422,17 @@ describe('ChinaShipmentsBoard', () => {
     try {
       renderShipment()
       const file = new File(['workbook'], '작성중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
+      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
       selectOtherShipment()
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
       await waitFor(() => expect(toastError).toHaveBeenCalled())
       expect(fetchSpy).not.toHaveBeenCalled()
       expect(navigate).not.toHaveBeenCalled()
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       expect(screen.getByText('작성중.xlsx')).toBeInTheDocument()
     } finally {
       fetchSpy.mockRestore()
@@ -1437,12 +1447,15 @@ describe('ChinaShipmentsBoard', () => {
     try {
       renderShipment()
       const file = new File(['workbook'], '검토중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
       fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
       expect(await screen.findByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
 
+      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
       selectOtherShipment()
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
       expect(fetchSpy).toHaveBeenCalledTimes(1)
       expect(navigate).not.toHaveBeenCalled()
@@ -1502,13 +1515,25 @@ describe('ChinaShipmentsBoard', () => {
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
   })
 
-  it('shows compact workbook controls in the top actions for every work stage', () => {
+  it('keeps workbook editing controls inside the editor dialog', () => {
     renderShipment(shipmentA, 'items')
 
     expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀 검토' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
+    expect(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).toBeInTheDocument()
     expect(screen.getByLabelText('엑셀 선택')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '엑셀 검토' })).toBeDisabled()
     expect(screen.queryByText('현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.')).not.toBeInTheDocument()
+  })
+
+  it('keeps workbook download available after dispatch without offering edits', () => {
+    renderShipment({ ...shipmentA, shipment: { ...shipmentA.shipment, status: 'dispatched' } }, 'items')
+
+    expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀로 수정' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
   })
 
   it('warns on browser unload only while a box draft is unsaved', () => {

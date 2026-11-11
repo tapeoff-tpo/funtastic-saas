@@ -309,6 +309,7 @@ function ChinaShipmentsBoardContent({
           showCreate={showCreate}
           outboundWarehouses={outboundWarehouses}
           listPeriod={listPeriod}
+          onBack={() => guard.requestNavigation(() => startSelecting(() => navigateChinaWork('/purchasing/china-shipments')))}
           onToggleCreate={() => guard.requestNavigation(() => navigateChinaWork(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1'))}
           onSelect={(id) => {
             if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => startSelecting(() => navigateChinaWork(shipmentHref(id, 'items'))))
@@ -402,12 +403,13 @@ function ChinaShipmentsBoardContent({
   )
 }
 
-function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWarehouses, listPeriod, onToggleCreate, onSelect }: {
+function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWarehouses, listPeriod, onBack, onToggleCreate, onSelect }: {
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView['shipment'] | null
   showCreate: boolean
   outboundWarehouses: ChinaOutboundWarehouseView[]
   listPeriod: ChinaShipmentPeriod
+  onBack: () => void
   onToggleCreate: () => void
   onSelect: (id: string) => void
 }) {
@@ -489,8 +491,11 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   }
 
   return (
-    <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
+    <section className={selectedShipment ? '' : 'rounded-md border bg-card p-3'} aria-busy={isPending}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        {selectedShipment ? (
+          <button type="button" disabled={isPending} onClick={onBack} className="mr-auto inline-flex h-9 items-center justify-center gap-1 rounded-md border bg-muted/50 px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><ChevronLeft className="size-4" />목록으로</button>
+        ) : <>
         <h2 className="min-w-0 flex-1 text-sm font-semibold">중국출고요청 목록</h2>
         <div className="flex shrink-0 flex-wrap gap-2">
           <ChinaShipmentExcelDialog onApplied={(shipmentId) => {
@@ -499,11 +504,13 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           <ChinaShipmentWarehouseDialog warehouses={outboundWarehouses} />
           <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> {showCreate ? '요청 닫기' : '새 중국출고요청'}</button>
         </div>
+        </>}
         {selectedShipment ? <div className="flex shrink-0 gap-2">
           <button type="button" disabled={isPending} onClick={() => isEditing ? guard.requestNavigation(() => setIsEditing(false), ['details']) : setIsEditing(true)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
         </div> : null}
       </div>
+      {!selectedShipment && <>
       <form onSubmit={searchPeriod} className="mt-3 flex flex-wrap items-end gap-2 border-t pt-3">
         <label className="space-y-1 text-xs">
           <span>조회 기간</span>
@@ -524,10 +531,9 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
             {['출고작업명', '요청일', '출고예정일', '도착지', '상태', '상품 수', '출고수량', '포장수량'].map((label) => <th key={label} className="whitespace-nowrap px-3 py-2 font-medium">{label}</th>)}
           </tr></thead>
           <tbody>{visibleShipments.length === 0 ? <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">선택한 기간에 중국출고요청이 없습니다.</td></tr> : visibleShipments.map((shipment) => {
-            const selected = shipment.id === selectedShipment?.id
-            return <tr key={shipment.id} className={`border-t ${selected ? 'bg-primary/5' : 'hover:bg-muted/30'}`}>
+            return <tr key={shipment.id} className="border-t hover:bg-muted/30">
               <td className="px-3 py-2">
-                <button type="button" aria-pressed={selected} disabled={isPending} onClick={() => onSelect(shipment.id)}
+                <button type="button" disabled={isPending} onClick={() => onSelect(shipment.id)}
                   data-no-translate className="text-left font-medium text-blue-700 underline-offset-2 hover:underline disabled:opacity-50">{shipmentDisplayName(shipment)}</button>
                 <p data-no-translate className="mt-0.5 text-xs text-muted-foreground">{shipment.shipmentNo}</p>
               </td>
@@ -542,12 +548,13 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           })}</tbody>
         </table>
       </div>
+      {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
+      </>}
       {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
         <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>
         <Field label="출고예정일"><input type="date" value={draftPlannedOutboundDate} onChange={(event) => setDraftPlannedOutboundDate(event.target.value)} className={inputClass} /></Field>
         <div className="flex gap-2 sm:justify-end"><button type="button" disabled={isPending} onClick={() => { setDraftDisplayName(selectedShipment.displayName ?? defaultShipmentDisplayName(selectedShipment.plannedOutboundDate)); setDraftPlannedOutboundDate(selectedShipment.plannedOutboundDate ?? ''); setIsEditing(false) }} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={isPending} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 저장</button></div>
       </form> : null}
-      {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
     </section>
   )
 }

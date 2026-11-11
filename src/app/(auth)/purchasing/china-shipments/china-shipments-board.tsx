@@ -7,6 +7,7 @@ import { Check, ChevronLeft, ChevronRight, Download, FileSpreadsheet, Loader2, P
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
+import { CHINA_SHIPMENT_PERIODS, resolveChinaShipmentPeriod, withChinaShipmentPeriod, type ChinaShipmentPeriod } from '@/lib/purchasing/china-shipment-period'
 import { useChinaWorkNavigation } from './china-work-navigation'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
@@ -147,6 +148,7 @@ export function ChinaShipmentsBoard(props: {
   showCreate: boolean
   initialInventoryId?: string
   outboundWarehouses?: ChinaOutboundWarehouseView[]
+  listPeriod?: ChinaShipmentPeriod
 }) {
   return <ChinaWorkGuardProvider key={props.showCreate ? `create:${props.initialInventoryId ?? ''}` : props.selectedShipment?.shipment.id ?? 'list'}><ChinaShipmentsBoardContent {...props} /></ChinaWorkGuardProvider>
 }
@@ -159,6 +161,7 @@ function ChinaShipmentsBoardContent({
   showCreate,
   initialInventoryId,
   outboundWarehouses = [],
+  listPeriod = resolveChinaShipmentPeriod({}, today()),
 }: {
   inventoryItems: ChinaShipmentStockItem[]
   shipments: ChinaShipmentListItem[]
@@ -167,6 +170,7 @@ function ChinaShipmentsBoardContent({
   showCreate: boolean
   initialInventoryId?: string
   outboundWarehouses?: ChinaOutboundWarehouseView[]
+  listPeriod?: ChinaShipmentPeriod
 }) {
   const guard = useChinaWorkGuard()
   const navigateChinaWork = useChinaWorkNavigation()
@@ -297,11 +301,12 @@ function ChinaShipmentsBoardContent({
       {isSelecting && <p role="status" aria-live="polite" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />출고요청 불러오는 중</p>}
       <div className="space-y-3">
         <ShipmentSelector
-          key={`selector:${showCreate ? 'new-shipment' : selectedShipment?.shipment.id ?? 'no-shipment'}`}
+          key={`selector:${showCreate ? 'new-shipment' : selectedShipment?.shipment.id ?? 'no-shipment'}:${listPeriod.preset}:${listPeriod.from}:${listPeriod.to}`}
           shipments={shipments}
           selectedShipment={showCreate ? null : selectedShipment?.shipment ?? null}
           showCreate={showCreate}
           outboundWarehouses={outboundWarehouses}
+          listPeriod={listPeriod}
           onToggleCreate={() => guard.requestNavigation(() => navigateChinaWork(showCreate ? '/purchasing/china-shipments' : '/purchasing/china-shipments?create=1'))}
           onSelect={(id) => {
             if (id !== selectedShipment?.shipment.id) guard.requestNavigation(() => startSelecting(() => navigateChinaWork(shipmentHref(id, 'items'))))
@@ -387,7 +392,7 @@ function ChinaShipmentsBoardContent({
           startTransition={startTransition}
           onStageChange={(stage) => selectedShipment && stage !== activeStep && guard.requestNavigation(() => {
             // All four stages use this shipment snapshot; switching stages needs no server request.
-            window.history.replaceState(null, '', shipmentHref(selectedShipment.shipment.id, stage))
+            window.history.replaceState(null, '', withChinaShipmentPeriod(shipmentHref(selectedShipment.shipment.id, stage), searchParams.toString()))
           })}
         /> : null}
       </div>
@@ -395,11 +400,12 @@ function ChinaShipmentsBoardContent({
   )
 }
 
-function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWarehouses, onToggleCreate, onSelect }: {
+function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWarehouses, listPeriod, onToggleCreate, onSelect }: {
   shipments: ChinaShipmentListItem[]
   selectedShipment: ChinaShipmentDetailView['shipment'] | null
   showCreate: boolean
   outboundWarehouses: ChinaOutboundWarehouseView[]
+  listPeriod: ChinaShipmentPeriod
   onToggleCreate: () => void
   onSelect: (id: string) => void
 }) {
@@ -411,7 +417,20 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   const [draftDisplayName, setDraftDisplayName] = useState(() => selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null))
   const [draftPlannedOutboundDate, setDraftPlannedOutboundDate] = useState(() => selectedShipment?.plannedOutboundDate ?? '')
   const [detailsBaseline, setDetailsBaseline] = useState(() => ({ displayName: selectedShipment?.displayName ?? defaultShipmentDisplayName(selectedShipment?.plannedOutboundDate ?? null), plannedOutboundDate: selectedShipment?.plannedOutboundDate ?? '' }))
+  const [periodPreset, setPeriodPreset] = useState(listPeriod.preset)
+  const [periodFrom, setPeriodFrom] = useState(listPeriod.from)
+  const [periodTo, setPeriodTo] = useState(listPeriod.to)
   const visibleShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+
+  function searchPeriod(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const range = resolveChinaShipmentPeriod({ period: periodPreset, from: periodFrom, to: periodTo }, today())
+    if (range.error) { toast.error(range.error); return }
+    const params = new URLSearchParams({ period: range.preset })
+    if (range.preset === 'custom') { params.set('from', range.from); params.set('to', range.to) }
+    if (showCreate) params.set('create', '1')
+    guard.requestNavigation(() => startTransition(() => navigateChinaWork(`/purchasing/china-shipments?${params}`)))
+  }
   async function saveShipmentDetailsDraft() {
       if (!selectedShipment) return false
       const result = await updateChinaOutboundShipmentAction({
@@ -470,13 +489,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   return (
     <section className="rounded-md border bg-card p-3" aria-busy={isPending}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
-          <div className="flex items-center text-xs font-medium text-muted-foreground"><label htmlFor="china-shipment-selection">중국출고요청 선택</label><TitleHelp title="중국출고요청 선택">선택한 출고작업만 화면에 표시됩니다. 저장하지 않은 내용이 있으면 이동 전에 확인합니다.</TitleHelp></div>
-          <select id="china-shipment-selection" value={selectedShipment?.id ?? ''} onChange={(event) => event.target.value && onSelect(event.target.value)} className={inputClass} disabled={isPending}>
-            <option value="">{visibleShipments.length === 0 ? '등록된 중국출고요청이 없습니다.' : '중국출고요청을 선택해주세요.'}</option>
-            {visibleShipments.map((shipment) => <option key={shipment.id} value={shipment.id}>{shipmentDisplayName(shipment)} · {shipment.plannedOutboundDate || '출고예정일 미입력'} · {statusLabels[shipment.status] ?? shipment.status}</option>)}
-          </select>
-        </div>
+        <h2 className="min-w-0 flex-1 text-sm font-semibold">중국출고요청 목록</h2>
         <div className="flex shrink-0 flex-wrap gap-2">
           <ChinaShipmentExcelDialog onApplied={(shipmentId) => {
             if (shipmentId) guard.requestNavigation(() => navigateChinaWork(shipmentHref(shipmentId, 'items')))
@@ -488,6 +501,44 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           <button type="button" disabled={isPending} onClick={() => isEditing ? guard.requestNavigation(() => setIsEditing(false), ['details']) : setIsEditing(true)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
         </div> : null}
+      </div>
+      <form onSubmit={searchPeriod} className="mt-3 flex flex-wrap items-end gap-2 border-t pt-3">
+        <label className="space-y-1 text-xs">
+          <span>조회 기간</span>
+          <select value={periodPreset} onChange={(event) => setPeriodPreset(event.target.value as ChinaShipmentPeriod['preset'])} className={inputClass}>
+            {CHINA_SHIPMENT_PERIODS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
+          </select>
+        </label>
+        {periodPreset === 'custom' ? <>
+          <label className="space-y-1 text-xs"><span>조회 시작일</span><input type="date" required value={periodFrom} max={periodTo || undefined} onChange={(event) => setPeriodFrom(event.target.value)} className={inputClass} /></label>
+          <label className="space-y-1 text-xs"><span>조회 종료일</span><input type="date" required value={periodTo} min={periodFrom || undefined} onChange={(event) => setPeriodTo(event.target.value)} className={inputClass} /></label>
+        </> : <p data-no-translate className="pb-2 text-xs text-muted-foreground">{listPeriod.from} ~ {listPeriod.to}</p>}
+        <button type="submit" disabled={isPending} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">조회</button>
+      </form>
+      {listPeriod.error && <p role="alert" className="mt-2 text-sm text-red-700">{listPeriod.error}</p>}
+      <div className="mt-3 max-h-[360px] overflow-auto rounded-md border">
+        <table className="w-full min-w-[760px] text-left text-sm" aria-label="중국출고요청 목록">
+          <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground"><tr>
+            {['출고작업명', '요청일', '출고예정일', '도착지', '상태', '상품 수', '출고수량', '포장수량'].map((label) => <th key={label} className="whitespace-nowrap px-3 py-2 font-medium">{label}</th>)}
+          </tr></thead>
+          <tbody>{visibleShipments.length === 0 ? <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">선택한 기간에 중국출고요청이 없습니다.</td></tr> : visibleShipments.map((shipment) => {
+            const selected = shipment.id === selectedShipment?.id
+            return <tr key={shipment.id} className={`border-t ${selected ? 'bg-primary/5' : 'hover:bg-muted/30'}`}>
+              <td className="px-3 py-2">
+                <button type="button" aria-pressed={selected} disabled={isPending} onClick={() => onSelect(shipment.id)}
+                  data-no-translate className="text-left font-medium text-blue-700 underline-offset-2 hover:underline disabled:opacity-50">{shipmentDisplayName(shipment)}</button>
+                <p data-no-translate className="mt-0.5 text-xs text-muted-foreground">{shipment.shipmentNo}</p>
+              </td>
+              <td className="whitespace-nowrap px-3 py-2 tabular-nums" data-no-translate>{new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(shipment.createdAt))}</td>
+              <td className="whitespace-nowrap px-3 py-2 tabular-nums" data-no-translate>{shipment.plannedOutboundDate || '-'}</td>
+              <td className="px-3 py-2" data-no-translate>{shipment.destinationName || '-'}</td>
+              <td className="whitespace-nowrap px-3 py-2"><StatusBadge status={shipment.status} /></td>
+              <td className="px-3 py-2 text-right tabular-nums">{shipment.itemCount.toLocaleString('ko-KR')}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{shipment.reservedQuantity.toLocaleString('ko-KR')}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{shipment.packedQuantity.toLocaleString('ko-KR')}</td>
+            </tr>
+          })}</tbody>
+        </table>
       </div>
       {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
         <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>

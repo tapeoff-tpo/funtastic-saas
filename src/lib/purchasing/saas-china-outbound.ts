@@ -1012,11 +1012,13 @@ export async function renameSaasChinaOutboundWarehouse(input: {
 
 export async function listChinaOutboundShipments(
   userId: string,
-  options: { includeCancelled?: boolean } = {},
+  options: { includeCancelled?: boolean; createdFrom?: string; createdTo?: string } = {},
 ) {
   await ensureSaasChinaOutboundSchema()
   const shipmentConditions = [eq(chinaOutboundShipments.userId, userId)]
   if (!options.includeCancelled) shipmentConditions.push(ne(chinaOutboundShipments.status, 'cancelled'))
+  if (options.createdFrom) shipmentConditions.push(sql`${chinaOutboundShipments.createdAt} >= ${`${options.createdFrom}T00:00:00+09:00`}::timestamptz`)
+  if (options.createdTo) shipmentConditions.push(sql`${chinaOutboundShipments.createdAt} < ${`${options.createdTo}T00:00:00+09:00`}::timestamptz + interval '1 day'`)
   const [shipments, itemCounts] = await Promise.all([
     db
       .select()
@@ -1031,7 +1033,11 @@ export async function listChinaOutboundShipments(
         packedQuantity: sql<number>`COALESCE(SUM(${chinaOutboundShipmentItems.packedQuantity}), 0)::int`,
       })
       .from(chinaOutboundShipmentItems)
-      .where(eq(chinaOutboundShipmentItems.userId, userId))
+      .innerJoin(chinaOutboundShipments, and(
+        eq(chinaOutboundShipments.id, chinaOutboundShipmentItems.shipmentId),
+        eq(chinaOutboundShipments.userId, chinaOutboundShipmentItems.userId),
+      ))
+      .where(and(eq(chinaOutboundShipmentItems.userId, userId), ...shipmentConditions))
       .groupBy(chinaOutboundShipmentItems.shipmentId),
   ])
 

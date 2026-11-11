@@ -5,7 +5,7 @@ import { chinaOutboundShipmentItems, chinaOutboundShipments, chinaOutboundBoxes,
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), select: vi.fn(), transaction: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: mocks }))
-import { getChinaOutboundShipmentDetail, listSaasChinaOutboundWarehouses } from './saas-china-outbound'
+import { getChinaOutboundShipmentDetail, listChinaOutboundShipments, listSaasChinaOutboundWarehouses } from './saas-china-outbound'
 
 beforeEach(() => vi.clearAllMocks())
 describe('China outbound selection reads', () => {
@@ -18,6 +18,32 @@ describe('China outbound selection reads', () => {
     const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls.at(-1)![0])
     expect(query.params.every((param) => param === 'owner')).toBe(true)
     expect(query.sql).not.toMatch(/pg_advisory|\b(INSERT|UPDATE)\b/)
+  })
+
+  it('filters the request list and its item totals by the same workspace and inclusive Korean date range', async () => {
+    mocks.execute.mockResolvedValue([{ ready: true }])
+    const clauses: SQL[] = []
+    mocks.select.mockImplementation(() => {
+      const builder = {
+        from: () => builder,
+        innerJoin: (_table: unknown, condition: SQL) => { clauses.push(condition); return builder },
+        where: (condition: SQL) => { clauses.push(condition); return builder },
+        orderBy: async () => [],
+        groupBy: async () => [],
+      }
+      return builder
+    })
+    await listChinaOutboundShipments('owner', { createdFrom: '2026-10-11', createdTo: '2026-11-11' })
+    const dateClauses = clauses.map((clause) => new PgDialect().sqlToQuery(clause)).filter((query) => query.sql.includes('timestamptz'))
+    expect(dateClauses).toHaveLength(2)
+    for (const query of dateClauses) {
+      expect(query.params).toContain('owner')
+      expect(query.params).toContain('2026-10-11T00:00:00+09:00')
+      expect(query.params).toContain('2026-11-11T00:00:00+09:00')
+      expect(query.sql).toContain("interval '1 day'")
+      expect(query.sql).toContain('"created_at" <')
+      expect(query.params).toContain('cancelled')
+    }
   })
 
   it('loads package and receipt allocations together and keeps all reads workspace scoped', async () => {

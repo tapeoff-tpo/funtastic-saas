@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { resolveChinaShipmentPeriod } from '@/lib/purchasing/china-shipment-period'
 import {
   listSaasChinaOutboundWarehouses,
   listChinaOutboundShipments,
@@ -22,13 +23,17 @@ export default async function ChinaShipmentsPage({
   if (!user) return null
 
   const params = await searchParams
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const listPeriod = resolveChinaShipmentPeriod({
+    period: stringParam(params.period), from: stringParam(params.from), to: stringParam(params.to),
+  }, today)
   const showCreate = stringParam(params.create) === '1'
   const selectedShipmentId = showCreate ? undefined : parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [stockItems, shipments, selectedShipment, outboundWarehouses] = await Promise.all([
     showCreate ? loadChinaShipmentStockItems(workspaceUserId) : Promise.resolve([]),
-    listChinaOutboundShipments(workspaceUserId),
+    listPeriod.error ? Promise.resolve([]) : listChinaOutboundShipments(workspaceUserId, { createdFrom: listPeriod.from, createdTo: listPeriod.to }),
     selectedShipmentId ? loadChinaShipmentDetailView(workspaceUserId, selectedShipmentId) : Promise.resolve(null),
     listSaasChinaOutboundWarehouses(workspaceUserId),
   ])
@@ -61,6 +66,7 @@ export default async function ChinaShipmentsPage({
         selectedShipment={selectedShipment}
         selectedStep={selectedStep}
         showCreate={showCreate}
+        listPeriod={listPeriod}
         initialInventoryId={showCreate ? parseShipmentId(stringParam(params.inventoryId)) : undefined}
         outboundWarehouses={outboundWarehouses}
       />

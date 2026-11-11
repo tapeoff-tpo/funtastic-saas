@@ -140,7 +140,7 @@ function selectOtherShipment() {
   const assignment = screen.queryByRole('dialog', { name: '파렛트 배정 수정' })
   if (assignment) fireEvent.click(within(assignment).getByRole('button', { name: '닫기' }))
   parkEditor()
-  fireEvent.change(screen.getByLabelText('중국출고요청 선택'), { target: { value: 'b' } })
+  fireEvent.click(screen.getByRole('button', { name: '출고 B' }))
 }
 
 function editBox(quantity = '3') {
@@ -567,8 +567,8 @@ describe('ChinaShipmentsBoard', () => {
     render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
 
     expect(screen.getByRole('button', { name: '새 중국출고요청' })).toBeEnabled()
-    expect(screen.getByRole('option', { name: /출고 A/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /출고 B/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 A' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeInTheDocument()
     expect(screen.queryByText(/새 요청은 만들 수 없습니다/)).not.toBeInTheDocument()
   })
 
@@ -579,6 +579,17 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('button', { name: '요청 닫기' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: '출고 A' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '중국출고 작업 단계' })).not.toBeInTheDocument()
+  })
+
+  it('lists requests as selectable rows and submits custom calendar filters', () => {
+    renderShipment(shipmentA, 'items')
+    expect(screen.getByRole('table', { name: '중국출고요청 목록' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('중국출고요청 선택')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText('조회 시작일'), { target: { value: '2026-09-01' } })
+    fireEvent.change(screen.getByLabelText('조회 종료일'), { target: { value: '2026-09-30' } })
+    fireEvent.click(screen.getByRole('button', { name: '조회' }))
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?period=custom&from=2026-09-01&to=2026-09-30')
   })
 
   it('opens a request with the arrival warehouse and item visible while leaving the outbound quantity for the user', () => {
@@ -649,7 +660,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('heading', { name: '출고 B' })).toBeInTheDocument()
     expect(screen.getAllByRole('navigation', { name: '중국출고 작업 단계' })).toHaveLength(1)
     expect(itemEditor('SKU-B').getByPlaceholderText('1')).toHaveValue('')
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('b')
+    expect(screen.getByRole('button', { name: '출고 B' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('enables pallet download only when a saved nonempty box is assigned to a pallet', () => {
@@ -1076,7 +1087,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '계속 작업' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('button', { name: '출고 A' })).toHaveAttribute('aria-pressed', 'true')
     expect(itemEditor('SKU-A').getByPlaceholderText('1')).toHaveValue('1')
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
     expect(saveBoxSplits).not.toHaveBeenCalled()
@@ -1107,14 +1118,14 @@ describe('ChinaShipmentsBoard', () => {
       shipmentItemId: 'shared-item-id',
       allocations: [{ boxNo: '1', quantity: 4, lengthCm: null, widthCm: null, heightCm: null }],
     })))
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('button', { name: '출고 A' })).toHaveAttribute('aria-pressed', 'true')
     expect(navigate).not.toHaveBeenCalled()
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: '저장하지 않고 이동' })).toBeDisabled()
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' })).toBeDisabled()
 
     await act(async () => { finishSave({ ok: false, error: '저장 실패' }) })
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('button', { name: '출고 A' })).toHaveAttribute('aria-pressed', 'true')
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(4)
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -1143,7 +1154,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(navigate).not.toHaveBeenCalled()
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(4)
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('button', { name: '출고 A' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('asks before switching when shipment name or date is edited', () => {
@@ -1473,7 +1484,7 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment()
     editBox()
     fireEvent.click(screen.getByRole('button', { name: '박스분할 저장' }))
-    expect(screen.getByLabelText('중국출고요청 선택')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeDisabled()
     selectOtherShipment()
     expect(navigate).not.toHaveBeenCalled()
     await act(async () => { finishSave({ ok: true }) })

@@ -194,7 +194,7 @@ function groupBoxItemsByBox(detail: ChinaOutboundShipmentLabelDetail) {
 }
 
 const BOX_LABEL_FILL: ExcelJS.FillPattern = {
-  type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCFE8D0' },
+  type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' },
 }
 const BOX_LABEL_EDGE: Partial<ExcelJS.Border> = { style: 'thin', color: { argb: 'FF000000' } }
 

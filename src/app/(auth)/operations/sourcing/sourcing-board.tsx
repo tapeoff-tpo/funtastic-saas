@@ -1162,7 +1162,7 @@ function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourc
   return (
     <div className="space-y-1">
       <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', className)}>{manualSourcingReviewStatusLabels[status]}</span>
-      {status === 'passed' && passedNewProductId ? <a className="text-[11px] text-emerald-700 underline" href={`/new-products?item=${encodeURIComponent(row.passedNewProductId)}`}>샘플·정식발주 열기</a> : null}
+      {status === 'passed' && passedNewProductId ? <a className="text-[11px] text-emerald-700 underline" href={`/new-products?item=${encodeURIComponent(passedNewProductId)}`}>샘플·정식발주 열기</a> : null}
     </div>
   )
 }

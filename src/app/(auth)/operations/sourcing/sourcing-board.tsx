@@ -994,8 +994,8 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                   <TableCell><SingleLineCellInput type="url" value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
                   <TableCell><NumericCell value={row.domesticSalePrice} onChange={(value) => updateRow(row.clientId, { domesticSalePrice: value })} placeholder="원" /></TableCell>
                   <TableCell><SingleLineCellInput type="url" value={row.detailPageUrl} onChange={(value) => updateRow(row.clientId, { detailPageUrl: value })} placeholder="상세페이지 참고 URL" /></TableCell>
-                  <TableCell><SingleLineCellInput value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
-                  <TableCell><SingleLineCellInput value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
                   {showOwnerColumn ? (
                     <TableCell>
                       <select value={row.ownerOperatorId ?? ''} onChange={(event) => updateRow(row.clientId, { ownerOperatorId: event.target.value || null })} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
@@ -1146,9 +1146,7 @@ function ReadOnlyLink({ value, label }: { value: string | null | undefined; labe
         <span className="truncate">{label}</span>
       </a>
     </div>
-  ) : value ? (
-    <span className="block truncate leading-5" title={value}>{value}</span>
-  ) : <span className="text-muted-foreground">-</span>
+  ) : <ReadOnlyText value={value} />
 }
 
 function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourcingReviewStatus; passedNewProductId: string | null }) {

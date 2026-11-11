@@ -10,6 +10,8 @@ import {
   SAAS_CHINA_DEFAULT_WAREHOUSE_CODE,
 } from '@/lib/purchasing/saas-china-outbound'
 import { SaasChinaInventoryBoard, type SaasChinaInventoryViewItem } from './saas-china-inventory-board'
+import { ChinaShipmentWarehouseDialog } from '../china-shipments/china-shipment-warehouse-dialog'
+import { ChinaWorkGuardProvider } from '../china-shipments/unsaved-china-work'
 
 export const metadata: Metadata = {
   title: '중국재고(SaaS)',
@@ -50,12 +52,17 @@ export default async function SaasChinaInventoryPage() {
             <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">개발용 독립 재고</span>
           </div>
         </div>
-        {canRequestOutbound && <Link
-          href="/purchasing/china-shipments"
-          className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:w-auto"
-        >
-          중국출고 작업하기
-        </Link>}
+        <div className="flex flex-wrap items-center gap-2">
+          <ChinaWorkGuardProvider>
+            <ChinaShipmentWarehouseDialog warehouses={outboundWarehouses} />
+          </ChinaWorkGuardProvider>
+          {canRequestOutbound && <Link
+            href="/purchasing/china-shipments"
+            className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:w-auto"
+          >
+            중국출고 작업하기
+          </Link>}
+        </div>
       </header>
 
       <SaasChinaInventoryBoard

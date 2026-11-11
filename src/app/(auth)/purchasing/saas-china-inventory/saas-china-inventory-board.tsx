@@ -65,25 +65,29 @@ export function SaasChinaInventoryBoard({
     ...warehouseCodes.map((warehouseCode) => warehouseCode.trim()).filter(Boolean),
   ])]
   const [receiveForm, setReceiveForm] = useState(() => emptyReceiveForm(resolvedDefaultWarehouseCode))
+  const receiveWarehouseCode = receiveWarehouseCodes.includes(receiveForm.warehouseCode)
+    ? receiveForm.warehouseCode : resolvedDefaultWarehouseCode
   const [adjusting, setAdjusting] = useState<SaasChinaInventoryViewItem | null>(null)
   const [adjustDelta, setAdjustDelta] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
   const [search, setSearch] = useState('')
   const [warehouseFilter, setWarehouseFilter] = useState('')
   const filterWarehouses = [...new Set(items.map((item) => item.warehouseCode))]
+  const activeWarehouseFilter = filterWarehouses.includes(warehouseFilter) ? warehouseFilter : ''
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase('ko-KR')
-    return items.filter((item) => (!warehouseFilter || item.warehouseCode === warehouseFilter) && (
+    return items.filter((item) => (!activeWarehouseFilter || item.warehouseCode === activeWarehouseFilter) && (
       !keyword || [item.sku, item.productName, item.optionName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(keyword))
     ))
-  }, [items, search, warehouseFilter])
+  }, [items, search, activeWarehouseFilter])
 
   function receiveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     startTransition(async () => {
       const result = await receiveSaasChinaInventoryAction({
         ...receiveForm,
+        warehouseCode: receiveWarehouseCode,
         quantity: Number(receiveForm.quantity),
       })
       if (!result.ok) {
@@ -144,7 +148,7 @@ export function SaasChinaInventoryBoard({
         {showReceive ? (
           <form onSubmit={receiveStock} className="grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
             <Field label="창고">
-              <select value={receiveForm.warehouseCode} onChange={(event) => setReceiveForm((form) => ({ ...form, warehouseCode: event.target.value }))} required data-no-translate className={inputClass}>
+              <select value={receiveWarehouseCode} onChange={(event) => setReceiveForm((form) => ({ ...form, warehouseCode: event.target.value }))} required data-no-translate className={inputClass}>
                 {receiveWarehouseCodes.map((warehouseCode) => <option key={warehouseCode} value={warehouseCode}>{warehouseCode}</option>)}
               </select>
             </Field>
@@ -186,7 +190,7 @@ export function SaasChinaInventoryBoard({
               <Download className="size-4" />
               현재 목록 다운로드
             </a>
-            <select aria-label="창고 필터" value={warehouseFilter} onChange={(event) => setWarehouseFilter(event.target.value)} className="h-9 min-w-32 rounded-md border bg-background px-2 text-sm">
+            <select aria-label="창고 필터" value={activeWarehouseFilter} onChange={(event) => setWarehouseFilter(event.target.value)} className="h-9 min-w-32 rounded-md border bg-background px-2 text-sm">
               <option value="">전체 창고</option>
               {filterWarehouses.map((warehouse) => <option key={warehouse} value={warehouse}>{warehouse}</option>)}
             </select>

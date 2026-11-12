@@ -37,6 +37,7 @@ import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 import { PurchaseInspectionButton } from './purchase-inspection-dialog'
+import { PurchaseInspectionIssueButton } from './purchase-inspection-issues'
 import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import {
   PurchaseBulkBuyerApply,
@@ -211,7 +212,7 @@ export async function PurchasingOrdersView({
     (isRequestedStatus ? 1 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
-    (isRequestedStatus ? 0 : (showPaymentControls ? 3 : 2)) +
+    (isRequestedStatus ? 0 : (showPaymentControls ? 4 : 3)) +
     (overdueOnly ? 1 : 0)
   const listLabel = isPurchaseReviewList
     ? '발주검토'
@@ -586,6 +587,7 @@ export async function PurchasingOrdersView({
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
                     </th>
                   )}
+                  {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">검수 오류</th>}
                   {isRequestedStatus ? null : <th className="min-w-[560px] px-3 py-2 font-medium">구매 정보</th>}
                   {showPaymentControls ? <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
@@ -771,6 +773,13 @@ export async function PurchasingOrdersView({
                       ) : null}
                       {isRequestedStatus ? null : (
                         <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                      )}
+                      {isRequestedStatus ? null : (
+                        <td className="px-2 py-2 text-center align-middle">
+                          {item.id && Number(item.inspectionIssueCount ?? 0) > 0 ? (
+                            <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={Number(item.inspectionIssueCount)} />
+                          ) : <span className="text-xs text-muted-foreground">-</span>}
+                        </td>
                       )}
                       {isRequestedStatus ? null : (
                         <td className="px-3 py-2 align-middle">

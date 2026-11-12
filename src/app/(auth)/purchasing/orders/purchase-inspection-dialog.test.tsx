@@ -45,6 +45,52 @@ describe('purchase tracking and inspection editor', () => {
       parcels: [{ boxes: [{ quantity: 100 }] }],
     })
   })
+  it('copies a completed box under the same tracking number with sequential box numbers and editable values', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(detail)))
+    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
+    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '박스 복사' }))
+    fireEvent.change(screen.getByLabelText('1번 송장 1번 박스 복사 개수'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: '복사 추가' }))
+
+    expect(screen.getByLabelText('1번 송장 6번 박스 quantity')).toHaveValue(90)
+    expect(screen.getByLabelText('1번 송장 6번 박스 lengthCm')).toHaveValue(50)
+    expect(screen.getByLabelText('1번 송장 6번 박스 widthCm')).toHaveValue(40)
+    expect(screen.getByLabelText('1번 송장 6번 박스 heightCm')).toHaveValue(30)
+    expect(screen.getByLabelText('1번 송장 6번 박스 weightKg')).toHaveValue(10)
+
+    fireEvent.change(screen.getByLabelText('1번 송장 4번 박스 lengthCm'), { target: { value: '60' } })
+    expect(screen.getByLabelText('1번 송장 1번 박스 lengthCm')).toHaveValue(50)
+    expect(screen.getByLabelText('1번 송장 4번 박스 lengthCm')).toHaveValue(60)
+    expect(screen.getByLabelText('1번 송장 6번 박스 lengthCm')).toHaveValue(50)
+  })
+  it('keeps an unsaved box draft and its original revision after registering a description-only inspection issue', async () => {
+    // A response with a newer revision must not silently rebase local boxes:
+    // a real concurrent parcel save should still be rejected by the server.
+    const registeredInspection = { ...inspection, revision: 8, hasReportedIssue: true }
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(detail))
+      .mockResolvedValueOnce(json({
+        inspection: registeredInspection,
+        issue: { id: 'issue-1', description: '외관 파손', createdAt: '2026-11-12T01:00:00.000Z', createdByUserId: 'staff-id', attachments: [] },
+      }))
+      .mockResolvedValueOnce(json({ inspection: { ...registeredInspection, revision: 2 } }))
+    vi.stubGlobal('fetch', fetcher)
+    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
+    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
+
+    fireEvent.change(await screen.findByLabelText('1번 송장 1번 박스 lengthCm'), { target: { value: '77' } })
+    fireEvent.change(screen.getByLabelText('오류 설명'), { target: { value: '외관 파손' } })
+    fireEvent.click(screen.getByRole('button', { name: '오류 등록' }))
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
+    const savedBody = JSON.parse(fetcher.mock.calls[2][1].body)
+    expect(savedBody.revision).toBe(0)
+    expect(savedBody.parcels[0].boxes[0].lengthCm).toBe(77)
+  })
   it('shows the shortage in inspection and completes in save-then-arrival order', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ inspection: { ...inspection, revision: 1 } })).mockResolvedValueOnce(json({ id, status: 'china_arrived' }))
     vi.stubGlobal('fetch', fetcher)

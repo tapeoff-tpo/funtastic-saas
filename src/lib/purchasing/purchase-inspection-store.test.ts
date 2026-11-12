@@ -29,6 +29,11 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.writes[0]).toMatchObject({ status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { expectedQuantity: 100, revision: 1, checkedBy: null } })
     expect(fixture.receive).not.toHaveBeenCalled()
   })
+  it('preserves the reported-issue protection marker on later inspection saves', async () => {
+    fixture.current.purchaseInspection = { ...inspection, hasReportedIssue: true }
+    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel] } })
+    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { hasReportedIssue: true, revision: 2 } })
+  })
   it('rejects stale edits and cannot complete an unexplained shortage', async () => {
     fixture.current.purchaseInspection = inspection
     await expect(savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel] } })).rejects.toThrow('다른 작업자')

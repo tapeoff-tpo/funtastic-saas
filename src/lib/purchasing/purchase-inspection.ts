@@ -32,6 +32,8 @@ export type InspectionParcel = z.infer<typeof inspectionParcelsSchema>[number]
 export type PurchaseInspection = {
   version: 1; revision: number; expectedQuantity: number; parcels: InspectionParcel[]
   checkedAt: string | null; checkedBy: string | null; resolutionNote: string
+  /** Kept on the inspection record so raw logistics refreshes never replace a row with a reported issue. */
+  hasReportedIssue?: boolean
 }
 
 export function inspectionSummary(inspection: Pick<PurchaseInspection, 'expectedQuantity' | 'parcels'>) {

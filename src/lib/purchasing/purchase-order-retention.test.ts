@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { getPurchaseOrderRetentionCutoffDate } from './purchase-order-retention'
+import { describe, expect, it, vi } from 'vitest'
+import type { SQL } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import { cleanupExpiredEcountPurchaseOrderRowsInTransaction, getPurchaseOrderRetentionCutoffDate } from './purchase-order-retention'
 
 describe('getPurchaseOrderRetentionCutoffDate', () => {
   it('calculates the date using the Korean calendar day', () => {
@@ -28,5 +30,15 @@ describe('getPurchaseOrderRetentionCutoffDate', () => {
     expect(cutoffDate).toBe('2026-07-11')
     expect('2026-07-11' < cutoffDate).toBe(false)
     expect('2026-07-10' < cutoffDate).toBe(true)
+  })
+
+  it('excludes rows with reported inspection issues from automatic deletion', async () => {
+    const execute = vi.fn(async (_query: SQL) => [{ deletedCount: 0, skippedMovementCount: 0 }])
+    await cleanupExpiredEcountPurchaseOrderRowsInTransaction(
+      { execute } as unknown as Parameters<typeof cleanupExpiredEcountPurchaseOrderRowsInTransaction>[0],
+      { userId: '00000000-0000-4000-8000-000000000001', now: new Date('2026-11-12T00:00:00Z') },
+    )
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0][0])
+    expect(query.sql).toContain(`COALESCE("purchase_request_items"."purchase_inspection"->>'hasReportedIssue', 'false') <> 'true'`)
   })
 })

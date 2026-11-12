@@ -114,6 +114,7 @@ export async function cleanupExpiredEcountPurchaseOrderRowsInTransaction(
         WHERE ${purchaseRequestItems.userId} = ${input.userId}::uuid
           AND NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL
           AND COALESCE(${purchaseRequestItems.bulkPaymentPending}, false) = false
+          AND COALESCE(${purchaseRequestItems.purchaseInspection}->>'hasReportedIssue', 'false') <> 'true'
           AND ${purchaseRequestItems.status} <> 'completed'
           AND (
             starts_with(

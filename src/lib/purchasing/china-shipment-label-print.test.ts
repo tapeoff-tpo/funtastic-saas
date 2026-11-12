@@ -25,6 +25,12 @@ describe('direct shipment label printing', () => {
     expect(document.querySelector('script')?.getAttribute('nonce')).toBe('test-nonce')
     expect(html).toContain('size:A4 landscape')
     expect(html).toContain('window.print()')
+    // The script is rendered after the label sections, so :last-child never
+    // matches a page. Keep the terminal page break on the actual last label
+    // only, otherwise Chrome emits an empty trailing sheet.
+    expect(document.querySelector('.page:last-child')).toBeNull()
+    expect(document.querySelectorAll('.page:last-of-type')).toHaveLength(1)
+    expect(html).toContain('.page:last-of-type{break-after:auto;page-break-after:auto}')
   })
   it('scopes per-box and per-pallet output without including empty or unrelated labels', () => {
     const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html')

@@ -45,6 +45,15 @@ function InspectionTranslationFixture() {
         <label htmlFor="inspection-note">수량 차이 비고</label>
         <textarea id="inspection-note" placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" />
         <p>수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p>
+        <button type="button">박스 복사</button>
+        <p>1번 박스 복사</p>
+        <label htmlFor="copy-count">추가할 박스 개수</label><input id="copy-count" type="number" />
+        <h3>검수 오류 등록</h3>
+        <p>오류 설명만으로 등록할 수 있으며, 사진은 선택입니다.</p>
+        <button type="button">사진 첨부 (선택)</button>
+        <p>자동 압축 후 장당 700KB 이하로 저장 · 최대 5장</p>
+        <h3>구매 정보 수정</h3><button type="button">구매수량 정정 저장</button>
+        <p data-no-translate>수량 부족 · 파손 신고 원문</p>
       </div>
     </div>
   )
@@ -161,6 +170,13 @@ describe('PurchasingLanguageSwitcher', () => {
       expect(screen.getByText('实际收货数量与采购数量不一致时，请在下方填写备注。')).toBeInTheDocument()
       expect(screen.getByText('数量差异备注')).toBeInTheDocument()
       expect(screen.getByText('数量不一致时，只有勾选确认并填写备注后才能完成验货。')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '复制箱子' })).toBeInTheDocument()
+      expect(screen.getByText('复制第 1 箱')).toBeInTheDocument()
+      expect(screen.getByText('登记验货异常')).toBeInTheDocument()
+      expect(screen.getByText('仅填写异常说明即可登记，照片为选填。')).toBeInTheDocument()
+      expect(screen.getByText('自动压缩后每张不超过 700KB · 最多 5 张')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '保存采购数量更正' })).toBeInTheDocument()
+      expect(screen.getByText('수량 부족 · 파손 신고 원문')).toBeInTheDocument()
     })
     expect(screen.getByPlaceholderText('例如：供应商漏发 10 个，下次发货补齐。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '在百度查询运单号' })).toHaveAttribute('title', '在百度查询运单号')

@@ -34,6 +34,7 @@ import {
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, type PurchaseInspection } from './purchase-inspection'
+import { ensurePurchaseInspectionIssueSchema, getPurchaseInspectionIssues } from './purchase-inspection-issues'
 import {
   ensurePurchaseFundLedgerSchema,
   reconcilePurchaseFundDebitsInTransaction,
@@ -1008,7 +1009,10 @@ export async function getPurchaseRequests(input: {
   outboundDates?: readonly string[]
   exchangeRateKrw?: number
 }) {
-  await ensurePurchasePaymentTrackingSchema()
+  await Promise.all([
+    ensurePurchasePaymentTrackingSchema(),
+    ensurePurchaseInspectionIssueSchema(),
+  ])
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
@@ -1108,6 +1112,12 @@ export async function getPurchaseRequests(input: {
         purchasingStatus: products.purchasingStatus,
         purchasingStatusNote: products.purchasingStatusNote,
         chinaCurrentStock,
+        inspectionIssueCount: sql<number>`(
+          SELECT COUNT(*)::int
+          FROM purchase_inspection_issues issue
+          WHERE issue.user_id = ${purchaseRequestItems.userId}
+            AND issue.purchase_request_item_id = ${purchaseRequestItems.id}
+        )`,
       })
       .from(purchaseRequestItems)
       .leftJoin(products, and(
@@ -1936,14 +1946,27 @@ export function purchaseTrackingSearchCondition(pattern: string): SQL {
 }
 
 export async function getPurchaseInspection(userId: string, id: string) {
-  await ensurePurchasePaymentTrackingSchema()
+  await Promise.all([
+    ensurePurchasePaymentTrackingSchema(),
+    ensurePurchaseInspectionIssueSchema(),
+  ])
   const [row] = await db.select({ item: purchaseRequestItems, images: products.images })
     .from(purchaseRequestItems).leftJoin(products, and(eq(products.userId, purchaseRequestItems.userId), eq(products.internalSku, purchaseRequestItems.sku)))
     .where(and(eq(purchaseRequestItems.userId, userId), eq(purchaseRequestItems.id, id))).limit(1)
   if (!row) return null
+  const inspectionIssues = await getPurchaseInspectionIssues({ userId, purchaseRequestItemId: id })
   return {
     id: row.item.id, status: row.item.status, productName: row.item.productName, sku: row.item.sku,
     inspection: row.item.purchaseInspection ?? createPurchaseInspection(row.item.actualPurchaseQuantity ?? row.item.requestedQuantity, row.item.trackingNumber),
+    inspectionIssues,
+    purchaseFields: {
+      requestedQuantity: row.item.requestedQuantity,
+      actualPurchaseQuantity: row.item.actualPurchaseQuantity,
+      supplierOrderNumber: row.item.supplierOrderNumber,
+      outboundExpectedDate: row.item.outboundExpectedDate,
+      purchaseMethod: row.item.purchaseMethod,
+      purchaseNote: row.item.purchaseNote,
+    },
     imageUrls: (row.images ?? []).sort((a, b) => a.sortOrder - b.sortOrder).map((image) => image.url).filter((url) => /^https?:\/\//i.test(url) || /^\/(?!\/)/.test(url)),
   }
 }
@@ -1963,6 +1986,7 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
       expectedQuantity: current.purchaseInspection?.expectedQuantity ?? current.actualPurchaseQuantity ?? current.requestedQuantity,
       parcels: parsed.parcels, resolutionNote: parsed.resolutionNote,
       checkedAt: parsed.complete ? new Date().toISOString() : null, checkedBy: parsed.complete ? input.actorId : null,
+      hasReportedIssue: current.purchaseInspection?.hasReportedIssue === true,
     }
     const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : inspectionSummary(inspection)
     await tx.update(purchaseRequestItems).set({
@@ -2399,7 +2423,8 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
       }
 
       const previousInspection = current.purchaseInspection
-      const isUntouchedInspection = !previousInspection.checkedAt
+      const isUntouchedInspection = !previousInspection.hasReportedIssue
+        && !previousInspection.checkedAt
         && !previousInspection.checkedBy
         && !previousInspection.resolutionNote.trim()
         && current.chinaReceivedQuantity === null

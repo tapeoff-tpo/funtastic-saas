@@ -15,6 +15,7 @@ import {
 } from './supplier-order-reference'
 
 export const PURCHASE_FUND_MANUAL_ENTRY_TYPES = ['deposit', 'opening_balance'] as const
+export const PURCHASE_FUND_DEBIT_START_DATE = '2026-11-01'
 
 export type PurchaseFundManualEntryType = (typeof PURCHASE_FUND_MANUAL_ENTRY_TYPES)[number]
 export type PurchaseFundEntryType = PurchaseFundManualEntryType | 'purchase_debit'
@@ -258,7 +259,8 @@ export function buildPurchaseDebitSnapshots(
         lines,
       },
     }
-  }).sort((left, right) => (
+  }).filter((snapshot) => snapshot.occurredOn >= PURCHASE_FUND_DEBIT_START_DATE)
+    .sort((left, right) => (
     left.occurredOn.localeCompare(right.occurredOn)
       || left.supplierOrderNumber.localeCompare(right.supplierOrderNumber)
       || left.sourceKey.localeCompare(right.sourceKey)
@@ -519,9 +521,12 @@ export async function getPurchaseFundLedgerData(
   const latestOpeningBalanceIndex = rows.reduce((latestIndex, row, index) => (
     row.entryType === 'opening_balance' ? index : latestIndex
   ), -1)
-  const effectiveRows = latestOpeningBalanceIndex >= 0
+  const effectiveRows = (latestOpeningBalanceIndex >= 0
     ? rows.slice(latestOpeningBalanceIndex)
-    : rows
+    : rows).filter((row) => (
+      row.entryType !== 'purchase_debit'
+      || String(row.occurredOn).slice(0, 10) >= PURCHASE_FUND_DEBIT_START_DATE
+    ))
 
   let balanceKrw = 0
   let balanceCny = 0

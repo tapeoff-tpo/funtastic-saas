@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
+import { normalizePasswordProtectedExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
 
 export type ShortMeetingUploadItem = {
   sku: string
@@ -44,9 +44,10 @@ function quantityValue(cell: ExcelJS.Cell): number | null {
 }
 
 /** Parse the first sheet as a complete meeting snapshot, without filtering order dates. */
-export async function parseShortMeetingWorkbook(buffer: Buffer): Promise<ShortMeetingUpload> {
+export async function parseShortMeetingWorkbook(buffer: Buffer, password?: string): Promise<ShortMeetingUpload> {
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(normalizeExcelWorkbookBuffer(buffer) as unknown as ExcelJS.Buffer)
+  const normalized = await normalizePasswordProtectedExcelWorkbookBuffer(buffer, password)
+  await workbook.xlsx.load(normalized as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new Error('엑셀에 워크시트가 없습니다.')
   const header = sheet.getRow(1)

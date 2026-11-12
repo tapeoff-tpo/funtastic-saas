@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs'
+import officeCrypto from 'officecrypto-tool'
 import { describe, expect, it } from 'vitest'
+import { ExcelWorkbookPasswordInvalidError, ExcelWorkbookPasswordRequiredError } from '@/lib/orders/excel-workbook-buffer'
 import { parseShortMeetingWorkbook } from './short-meeting-upload-parser'
 
 async function workbookWithRows(rows: unknown[][]): Promise<Buffer> {
@@ -10,6 +12,16 @@ async function workbookWithRows(rows: unknown[][]): Promise<Buffer> {
 }
 
 describe('short meeting workbook parser', () => {
+  it('requires the correct password for a real encrypted workbook', async () => {
+    const plain = await workbookWithRows([
+      ['사방넷 상품코드', '사방넷 상품명', '사방넷 옵션', '실 출고수량'],
+      ['001234-0001', '상품', '옵션', 12],
+    ])
+    const encrypted = officeCrypto.encrypt(plain, { password: 'test secret' })
+    await expect(parseShortMeetingWorkbook(encrypted)).rejects.toBeInstanceOf(ExcelWorkbookPasswordRequiredError)
+    await expect(parseShortMeetingWorkbook(encrypted, 'wrong')).rejects.toBeInstanceOf(ExcelWorkbookPasswordInvalidError)
+    expect(await parseShortMeetingWorkbook(encrypted, 'test secret')).toMatchObject({ rowCount: 1, totalQuantity: 12, items: [{ sku: '001234-0001', quantity: 12 }] })
+  })
   it('aggregates all valid order lines by exact SKU without filtering dates', async () => {
     const file = await workbookWithRows([
       ['사방넷 상품코드', '사방넷 상품명', '사방넷 옵션', '실 출고수량', '수집일시'],

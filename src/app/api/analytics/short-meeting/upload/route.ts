@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { parseShortMeetingWorkbook } from '@/lib/analytics/short-meeting-upload-parser'
 import { isMeetingDate, saveShortMeetingUpload } from '@/lib/analytics/short-meeting-uploads'
+import { ExcelWorkbookPasswordInvalidError, ExcelWorkbookPasswordRequiredError } from '@/lib/orders/excel-workbook-buffer'
 
 export const runtime = 'nodejs'
 
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest) {
     const file = form.get('file')
     const action = form.get('action')
     const meetingDate = String(form.get('meetingDate') ?? '')
+    const filePasswordValue = form.get('filePassword')
+    const filePassword = typeof filePasswordValue === 'string' ? filePasswordValue : undefined
     if (!(file instanceof File) || !file.name.toLowerCase().endsWith('.xlsx')) {
       return NextResponse.json({ error: '.xlsx 주문서 파일을 선택해 주세요.' }, { status: 400 })
     }
@@ -29,7 +32,13 @@ export async function POST(request: NextRequest) {
     if (action !== 'preview' && action !== 'apply') return NextResponse.json({ error: '올바른 작업을 선택해 주세요.' }, { status: 400 })
     const buffer = Buffer.from(await file.arrayBuffer())
     let parsed
-    try { parsed = await parseShortMeetingWorkbook(buffer) } catch (parseError) {
+    try { parsed = await parseShortMeetingWorkbook(buffer, filePassword) } catch (parseError) {
+      if (parseError instanceof ExcelWorkbookPasswordRequiredError) {
+        return NextResponse.json({ code: 'excel_password_required', error: parseError.message }, { status: 400 })
+      }
+      if (parseError instanceof ExcelWorkbookPasswordInvalidError) {
+        return NextResponse.json({ code: 'excel_password_invalid', error: parseError.message }, { status: 400 })
+      }
       return NextResponse.json({ error: parseError instanceof Error ? parseError.message : '주문서 파일을 읽지 못했습니다.' }, { status: 400 })
     }
     if (action === 'apply') {

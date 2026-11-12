@@ -110,7 +110,7 @@ export function PurchaseFundLedgerPanel({
             발주금액 · 입금/잔액 현황
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            입금은 직접 기록하며, 발주요청에서 구매완료로 넘어간 발주부터 자동 차감됩니다.
+            입금은 직접 기록하며, 2026년 11월 1일 이후 발주요청일인 건 중 구매완료 단계에 도달한 발주부터 자동 차감됩니다.
           </p>
         </div>
         <Dialog.Root

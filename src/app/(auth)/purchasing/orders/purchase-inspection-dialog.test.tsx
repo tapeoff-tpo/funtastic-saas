@@ -10,6 +10,10 @@ const box = { id: '00000000-0000-4000-8000-000000000003', quantity: 90, lengthCm
 const inspection = { version: 1, revision: 0, expectedQuantity: 100, checkedAt: null, checkedBy: null, resolutionNote: '', parcels: [{ id: '00000000-0000-4000-8000-000000000002', trackingNumber: 'SF001', boxes: [box] }] }
 const detail = { id, status: 'purchase_completed', productName: '유리컵', sku: 'SKU-A', inspection, imageUrls: ['https://images.example/cup.png'] }
 const json = (data: unknown, ok = true) => ({ ok, json: async () => structuredClone(data) })
+function stubInspectionFetch(fetcher: (url: string, init?: RequestInit) => Promise<ReturnType<typeof json>>, files: unknown[] = []) {
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+    url.endsWith('/inspection/labels') ? Promise.resolve(json({ files })) : fetcher(url, init))
+}
 describe('purchase tracking and inspection editor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -30,13 +34,15 @@ describe('purchase tracking and inspection editor', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ ...detail, inspection: blankInspection }))
       .mockResolvedValueOnce(json({ inspection: { ...blankInspection, revision: 1 } }))
-    vi.stubGlobal('fetch', fetcher)
+    stubInspectionFetch(fetcher)
 
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
 
     expect(await screen.findByLabelText('1번 송장 1번 박스 quantity')).toHaveValue(100)
-    expect(screen.getByText('구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.')).toBeTruthy()
+    expect(screen.queryByText(/임시 기본값/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '박스 추가' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '송장 추가' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
@@ -46,7 +52,7 @@ describe('purchase tracking and inspection editor', () => {
     })
   })
   it('copies a completed box under the same tracking number with sequential box numbers and editable values', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(detail)))
+    stubInspectionFetch(vi.fn(async () => json(detail)))
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
 
@@ -76,7 +82,7 @@ describe('purchase tracking and inspection editor', () => {
         issue: { id: 'issue-1', description: '외관 파손', createdAt: '2026-11-12T01:00:00.000Z', createdByUserId: 'staff-id', attachments: [] },
       }))
       .mockResolvedValueOnce(json({ inspection: { ...registeredInspection, revision: 2 } }))
-    vi.stubGlobal('fetch', fetcher)
+    stubInspectionFetch(fetcher)
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
 
@@ -93,33 +99,48 @@ describe('purchase tracking and inspection editor', () => {
   })
   it('shows the shortage in inspection and completes in save-then-arrival order', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ inspection: { ...inspection, revision: 1 } })).mockResolvedValueOnce(json({ id, status: 'china_arrived' }))
-    vi.stubGlobal('fetch', fetcher)
+    stubInspectionFetch(fetcher)
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     expect(await screen.findByRole('status')).toHaveTextContent('입고오류 · 부족 10개')
     fireEvent.click(screen.getByRole('checkbox', { name: '구매수량과 실제 입고수량의 차이를 확인했습니다.' }))
     fireEvent.change(screen.getByLabelText('수량 차이 비고'), { target: { value: '공급처와 부족수량 확인' } })
+    fireEvent.change(screen.getByLabelText('스티커 부착 상태'), { target: { value: 'quality' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료 · 중국창고도착' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
-    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ complete: true, acknowledgeMismatch: true, resolutionNote: '공급처와 부족수량 확인' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ complete: true, acknowledgeMismatch: true, resolutionNote: '공급처와 부족수량 확인', stickerStatus: 'quality' })
     expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ status: 'china_arrived' }) })
     expect(mocks.refresh).toHaveBeenCalled()
   })
   it('does not advance to arrival when verification is rejected', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ error: '입고오류를 확인해주세요.' }, false))
-    vi.stubGlobal('fetch', fetcher)
+    stubInspectionFetch(fetcher)
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     await screen.findByRole('status')
+    fireEvent.change(screen.getByLabelText('스티커 부착 상태'), { target: { value: 'none' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료 · 중국창고도착' }))
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('입고오류를 확인해주세요.'))
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
   it('shows completed receipts as read-only', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ...detail, status: 'china_arrived' })))
+    stubInspectionFetch(vi.fn(async () => json({ ...detail, status: 'china_arrived' })))
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     expect(await screen.findByLabelText('운송장번호 1')).toBeDisabled()
     expect(screen.queryByRole('button', { name: '검수완료 · 중국창고도착' })).not.toBeInTheDocument()
+  })
+  it('shows both sticker file controls above the parcels and the purchase summary below them', async () => {
+    const fileId = '00000000-0000-4000-8000-000000000010'
+    stubInspectionFetch(vi.fn(async () => json(detail)), [{ id: fileId, kind: 'quality', source: 'works', fileName: '라벨.pdf', contentType: 'application/pdf' }])
+    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
+    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
+    const print = await screen.findByRole('link', { name: '품질표시사항 인쇄' })
+    const tracking = screen.getByLabelText('운송장번호 1')
+    expect(print).toHaveAttribute('href', `/api/purchasing/purchase-requests/${id}/inspection/labels?file=${fileId}&source=works&print=1`)
+    expect(print.compareDocumentPosition(tracking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const summary = screen.getByText((_, element) => element?.tagName === 'P' && element.textContent?.startsWith('구매수량 ') === true)
+    expect(tracking.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByLabelText('바코드 스티커 파일 등록')).toBeEnabled()
   })
 })

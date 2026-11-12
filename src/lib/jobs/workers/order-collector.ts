@@ -9,7 +9,7 @@ import {
   jobLogs,
   marketplaceConnections,
 } from '@/lib/db/schema'
-import { readCredential, storeCredential } from '@/lib/supabase/admin'
+import { readCredential, storeCredential } from '@/lib/auth/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'

@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { exportChinaImportDocument, prepareImportDocument } from '@/lib/purchasing/china-import-document'
 import { getPurchasingItemTradeDataBySku } from '@/lib/purchasing/items'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
@@ -27,7 +29,11 @@ type Context = { params: Promise<{ shipmentId: string }> }
 
 async function load(context: Context) {
   const user = await getCurrentUser()
-  if (!user) return { response: NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 }) }
+  if (!user || user.mustChangePassword) return { response: NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 }) }
+  const access = await getUserMenuAccess(user.id)
+  if (!access || !['/purchasing/china-shipments', '/purchasing/import-documents'].some((menu) => canUseMenu(access, menu))) {
+    return { response: NextResponse.json({ error: '인보이스·패킹리스트를 사용할 권한이 없습니다.' }, { status: 403 }) }
+  }
   const { shipmentId } = await context.params
   if (!z.string().uuid().safeParse(shipmentId).success) return { response: NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 }) }
   const userId = await getWorkspaceUserId(user.id)
@@ -56,7 +62,7 @@ export async function POST(request: Request, context: Context) {
     if (loaded.response) return loaded.response
     const parsed = schema.safeParse(await request.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
-    if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 창을 닫고 인보이스·패킹리스트를 다시 열어주세요.' }, { status: 409 })
+    if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 인보이스·패킹리스트를 새로고침해주세요.' }, { status: 409 })
     const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data)
     const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {

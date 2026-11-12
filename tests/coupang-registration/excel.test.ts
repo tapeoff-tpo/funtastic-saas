@@ -1,0 +1,113 @@
+// @vitest-environment node
+import { describe, expect, it } from 'vitest'
+import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
+import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
+import { blankDraft, calculatePrice, LABEL_FIELD, rowIssues } from '@/lib/coupang-registration/model'
+import { draftSchema } from '@/lib/coupang-registration/schema'
+
+async function fixture() {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('QF_100_test')
+  const hidden = workbook.addWorksheet('HQF_100', { state: 'veryHidden' })
+  hidden.getCell('A1').value = 'protected metadata'
+  sheet.getCell('B1').value = 'Retail_Categorized_Excel:Version186'
+  const headers = ['상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD, '제조국', '고시명']
+  headers.forEach((header, index) => { sheet.getCell(5, index + 2).value = header; sheet.getCell(6, index + 2).value = header === 'HTML 상품 상세 컨텐츠' || header === '고시명' ? '선택' : '필수' })
+  for (const [index, name] of ['샘플 베이지', '제외할 상품'].entries()) {
+    sheet.getCell(index + 9, 2).value = name
+    sheet.getCell(index + 9, 3).value = 15000
+    sheet.getCell(index + 9, 4).value = 20000
+    sheet.getCell(index + 9, 5).value = 'old-front'
+    sheet.getCell(index + 9, 6).value = 'old-detail'
+    sheet.getCell(index + 9, 8).value = 'old-label'
+    sheet.getCell(index + 9, 9).value = '중국'
+    sheet.getCell(index + 9, 10).value = { formula: '"기타 재화"', result: '기타 재화' }
+    sheet.getCell(index + 9, 9).dataValidation = { type: 'list', formulae: ['"중국,한국"'] }
+  }
+  const parsed = await readTemplate(Buffer.from(await workbook.xlsx.writeBuffer()), 'sample.xlsx')
+  const row = { ...parsed.rows[0], primaryImage: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], label: 'https://cdn.tapeoff.kr/label.jpg' }
+  return { draft: { ...blankDraft(), templates: [parsed.template], rows: [row] }, parsed }
+}
+
+describe('official Coupang template round trip', () => {
+  it('imports only populated products and preserves metadata, validation and formulas while replacing prices/images', async () => {
+    const { draft, parsed } = await fixture()
+    expect(parsed.rows).toHaveLength(2)
+    expect(parsed.rows[0]).toMatchObject({ saleMode: 'manual', manualSalePrice: 20000 })
+    expect(rowIssues(draft.rows[0], draft)).toEqual([])
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
+    const file = zip.file('견적서/sample_등록용.xlsx')!
+    const result = new ExcelJS.Workbook()
+    await result.xlsx.load(await file.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    const sheet = result.getWorksheet('QF_100_test')!
+    expect(sheet.getCell('B1').value).toBe('Retail_Categorized_Excel:Version186')
+    expect(result.getWorksheet('HQF_100')!.state).toBe('veryHidden')
+    expect(sheet.getCell('C9').value).toBe(15000)
+    expect(sheet.getCell('D9').value).toBe(20000)
+    expect(sheet.getCell('F9').value).toBeNull()
+    expect(sheet.getCell('G9').value).toContain('<img ')
+    expect(sheet.getCell('B10').value).toBeNull()
+    expect(sheet.getCell('I9').dataValidation.type).toBe('list')
+    expect(sheet.getCell('J10').formula).toBe('"기타 재화"')
+  })
+  it('exports direct price edits and blocks missing or below-supply retail', async () => {
+    const { draft } = await fixture()
+    Object.assign(draft.rows[0], { manualSupplyPrice: 12000, manualSalePrice: 19000 })
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('QF_100_test')!.getCell('C9').value).toBe(12000)
+    expect(workbook.getWorksheet('QF_100_test')!.getCell('D9').value).toBe(19000)
+    draft.rows[0].manualSalePrice = null
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('판매가')
+    draft.rows[0].manualSalePrice = 11000
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('공급가 이상')
+  })
+  it('blocks missing label attachments and requires a bundle review', async () => {
+    const { draft } = await fixture()
+    draft.rows[0].label = '찾을 수 없는 라벨'
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('파일 또는 URL 확인')
+    draft.rows[0].label = 'https://cdn.tapeoff.kr/label.jpg'
+    draft.rows[0].name = '샘플 2개입 세트'
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('묶음 구성')
+    draft.rows[0].bundleReviewed = true
+    expect(rowIssues(draft.rows[0], draft)).toEqual([])
+  })
+  it('exports the quantity-weighted set prices as one row after saving and reopening', async () => {
+    const { draft } = await fixture()
+    Object.assign(draft.rows[0], {
+      name: '마미백 베이지 2개입', priceMode: 'wholesale', saleMode: 'auto', bundleReviewed: true,
+      bundleComponents: [{
+        sourceCode: '1471', optionName: '베이지', name: '마미백 플러스 베이지',
+        internalSku: '112361-0001', quantity: 2, unitCost: 8776, unitWholesale: 14500,
+      }],
+    })
+    const reopened = draftSchema.parse(JSON.parse(JSON.stringify(draft)))
+    expect(calculatePrice(reopened.rows[0])).toMatchObject({ cost: 17552, wholesale: 29000, supply: 29000, sale: 48334 })
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(reopened))
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    const sheet = workbook.getWorksheet('QF_100_test')!
+    expect(sheet.getCell('B9').value).toBe('마미백 베이지 2개입')
+    expect(sheet.getCell('C9').value).toBe(29000)
+    expect(sheet.getCell('D9').value).toBe(48334)
+    expect(sheet.getCell('B10').value).toBeNull()
+    reopened.rows[0].bundleComponents!.push({
+      sourceCode: '1480', optionName: '', name: '파우치', internalSku: 'POUCH-1',
+      quantity: 3, unitCost: 500, unitWholesale: 2000,
+    })
+    expect(calculatePrice(reopened.rows[0], 100)).toMatchObject({ cost: 19052, wholesale: 35000, supply: 35000, sale: 58400 })
+    reopened.rows[0].bundleComponents![0].unitCost = null
+    expect(calculatePrice(reopened.rows[0]).profit).toBeNull()
+    await expect(buildRegistrationArchive(reopened)).rejects.toThrow('구성품 원가')
+  })
+  it('revalidates actual template headers and rejects forged file identity', async () => {
+    const { draft } = await fixture()
+    draft.templates[0].sheets[0].columns = []
+    draft.rows[0].fields['제조국'] = ''
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('제조국 누락')
+    draft.templates[0].id = 'changed'; draft.rows[0].templateId = 'changed'
+    await expect(buildRegistrationArchive(draft)).rejects.toThrow('다시 불러와주세요')
+  })
+})

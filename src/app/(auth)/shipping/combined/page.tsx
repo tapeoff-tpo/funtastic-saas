@@ -11,7 +11,7 @@ import type { ShipmentGroupWithCount } from '@/lib/shipping/combined-queries'
 import type { Metadata } from 'next'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { CombinedShippingClient } from './client'
 
 export const metadata: Metadata = {

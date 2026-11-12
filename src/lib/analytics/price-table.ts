@@ -1,7 +1,9 @@
 import * as XLSX from 'xlsx'
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
+import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
+import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
 
 const TARGET_SHEETS = ['상품등록', '메인', '뉴도매']
 const PAGE_SIZE = 100
@@ -45,25 +47,48 @@ export async function importPriceTableRows(data: {
 }): Promise<PriceTableImportResult> {
   await ensurePriceTableSchema()
   const parsed = parsePriceTableWorkbook(data.fileBuffer)
-  const importedAt = new Date()
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`product-link:${data.userId}`}))`)
+    const importedAt = new Date()
+    const enteredDate = formatPriceNumberDate(importedAt)
+    const replacedRows = and(
+      eq(analyticsPriceTableRows.userId, data.userId),
+      or(
+        sql`${analyticsPriceTableRows.sourceFileName} IS NULL`,
+        and(ne(analyticsPriceTableRows.sourceFileName, '직접 등록'), ne(analyticsPriceTableRows.sourceFileName, '상품업무 연계')),
+      ),
+    )
+    const previousRows = await tx.delete(analyticsPriceTableRows).where(replacedRows).returning({
+      sourceSheetName: analyticsPriceTableRows.sourceSheetName,
+      productCode: analyticsPriceTableRows.productCode,
+      productName: analyticsPriceTableRows.productName,
+      optionName: analyticsPriceTableRows.optionName,
+      rawData: analyticsPriceTableRows.rawData,
+    })
+    const previousDates = new Map<string, string | null>()
+    for (const row of previousRows) {
+      const rawData = row.rawData as Record<string, string>
+      for (const identifier of priceNumberEntries({ ...row, rawData })) {
+        const date = getPriceNumberDate(rawData, identifier.key)
+        const previous = previousDates.get(identifier.identity)
+        previousDates.set(identifier.identity, previous && (!date || previous < date) ? previous : date)
+      }
+    }
 
-  await db.delete(analyticsPriceTableRows).where(eq(analyticsPriceTableRows.userId, data.userId))
-
-  for (const chunk of chunks(parsed.rows, 500)) {
-    await db.insert(analyticsPriceTableRows).values(chunk.map((row) => ({
-      userId: data.userId,
-      sourceFileName: data.sourceFileName,
-      sourceSheetName: row.sourceSheetName,
-      rowNumber: row.rowNumber,
-      productCode: row.productCode,
-      productName: row.productName,
-      optionName: row.optionName,
-      registeredProductName: row.registeredProductName,
-      rawData: row.rawData,
-      importedAt,
-      updatedAt: importedAt,
-    })))
-  }
+    for (const chunk of chunks(parsed.rows, 500)) {
+      await tx.insert(analyticsPriceTableRows).values(chunk.map((row) => {
+        const rawData = { ...row.rawData }
+        for (const identifier of priceNumberEntries(row)) {
+          const date = previousDates.get(identifier.identity)
+          if (date !== null) rawData[priceNumberDateKey(identifier.key)] = date ?? enteredDate
+        }
+        return {
+          ...row, rawData, userId: data.userId, sourceFileName: data.sourceFileName,
+          importedAt, updatedAt: importedAt,
+        }
+      }))
+    }
+  })
 
   return {
     imported: parsed.rows.length,
@@ -94,7 +119,7 @@ export async function listPriceTableRows(data: {
       .select()
       .from(analyticsPriceTableRows)
       .where(whereClause)
-      .orderBy(...orderBy)
+      .orderBy(...orderBy, asc(analyticsPriceTableRows.id))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db
@@ -129,6 +154,18 @@ export async function listPriceTableRows(data: {
     latestImport: latest?.importedAt ?? null,
     sourceFileName: latest?.sourceFileName ?? null,
   }
+}
+
+function priceNumberEntries(row: Pick<ParsedPriceTableRow, 'sourceSheetName' | 'productCode' | 'productName' | 'optionName' | 'rawData'>) {
+  const columns = getPriceTableDisplayColumns(row.sourceSheetName)
+  const registrationColumns = row.sourceSheetName === '상품등록' ? [] : getPriceTableDisplayColumns('상품등록')
+  return [...columns, ...registrationColumns]
+    .filter((column) => column.showProductId)
+    .flatMap((column) => findMarketplaceProductIds(row.rawData, column))
+    .map(({ key, value }) => ({
+      key,
+      identity: JSON.stringify([row.sourceSheetName, row.productCode ?? row.productName, row.optionName, key, value]),
+    }))
 }
 
 function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
@@ -215,7 +252,7 @@ function rowToObject(headers: string[], values: Array<string | number | boolean 
   const rawData: Record<string, string> = {}
   for (let index = 0; index < headers.length; index += 1) {
     const value = cellText(values[index])
-    if (value) rawData[headers[index]] = value
+    if (value && !isPriceNumberDateKey(headers[index])) rawData[headers[index]] = value
   }
   return rawData
 }
@@ -277,8 +314,17 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string) {
 
 function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   const direction = sortOrder === 'desc' ? desc : asc
+  if (sortKey === 'registrationCount') {
+    const registered = sql`(SELECT count(*) FROM jsonb_each_text(${analyticsPriceTableRows.rawData}) AS item(key, value)
+      WHERE key ~* ${PRODUCT_ID_FIELD_PATTERN.source}
+        AND NOT starts_with(key, ${PRICE_NUMBER_DATE_PREFIX})
+        AND regexp_replace(key, '[[:space:]]', '', 'g') NOT IN (${sql.join([...CORE_PRODUCT_ID_KEYS].map((key) => sql`${key}`), sql`, `)})
+        AND lower(regexp_replace(value, '[[:space:]]', '', 'g')) NOT IN ('', '0', '-', '미등록', '없음', 'null', 'undefined'))`
+    return [direction(registered), asc(analyticsPriceTableRows.rowNumber)]
+  }
   const coreColumn = (() => {
     switch (sortKey) {
+      case 'importedAt': return analyticsPriceTableRows.importedAt
       case 'productCode': return analyticsPriceTableRows.productCode
       case 'productName': return analyticsPriceTableRows.productName
       case 'optionName': return analyticsPriceTableRows.optionName
@@ -292,21 +338,28 @@ function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
     return [
       asc(sql`${coreColumn} IS NULL`),
       direction(coreColumn),
+      ...(sortKey === 'productName' ? [sql`${direction(analyticsPriceTableRows.optionName)} NULLS LAST`] : []),
       asc(analyticsPriceTableRows.rowNumber),
     ]
   }
 
   const rawKey = sortKey?.startsWith('raw:') ? sortKey.slice(4).trim() : ''
-  if (rawKey && rawKey.length <= 180) {
-    const rawValue = sql<string>`NULLIF(${analyticsPriceTableRows.rawData} ->> ${rawKey}, '')`
+  const rawValue = sortKey === 'sourceNumber'
+    ? sql<string>`CASE WHEN ${analyticsPriceTableRows.sourceSheetName} IN ('상품등록', '뉴도매')
+        THEN COALESCE(${sql.join(PRICE_TABLE_SOURCE_NUMBER_KEYS.map((key) => sql`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${key}), '')`), sql`, `)})
+      END`
+    : rawKey && rawKey.length <= 180
+      ? sql<string>`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${rawKey}), '')`
+      : null
+  if (rawValue) {
+    const cleaned = sql<string>`replace(${rawValue}, ',', '')`
     const numericValue = sql<number>`CASE
-      WHEN ${rawValue} ~ '^-?[0-9]+([.][0-9]+)?$' THEN (${rawValue})::numeric
+      WHEN ${cleaned} ~ '^-?[0-9]+([.][0-9]+)?$' THEN (${cleaned})::numeric
       ELSE NULL
     END`
     return [
-      asc(sql`${rawValue} IS NULL`),
-      direction(numericValue),
-      direction(sql`LOWER(${rawValue})`),
+      sql`${direction(numericValue)} NULLS LAST`,
+      sql`${direction(sql`lower(${rawValue})`)} NULLS LAST`,
       asc(analyticsPriceTableRows.rowNumber),
     ]
   }

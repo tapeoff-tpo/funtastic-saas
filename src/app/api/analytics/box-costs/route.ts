@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createBoxCostRate, listBoxCostRates, parseBoxCostRateInput } from '@/lib/analytics/box-costs'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function GET() {
   const userId = await authenticatedWorkspaceUserId()

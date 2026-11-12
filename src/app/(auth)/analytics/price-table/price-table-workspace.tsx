@@ -1,72 +1,112 @@
 'use client'
 
+import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
-import { ChevronDown, PackageSearch, Table2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, PackageSearch, Table2 } from 'lucide-react'
 import {
   findMarketplaceProductIds,
   getInactiveRegistrationMarketplaceColumns,
   getRegistrationMarketplaceColumns,
 } from './price-table-columns'
 import type { PriceTableGridRow } from './price-table-grid'
+import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
 
-type WorkspaceView = 'compare' | 'products'
+import { priceTableHref, type PriceTableNavigation, type PriceTableView } from './price-table-navigation'
 
-const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string; icon: typeof Table2 }> = [
+const NUMBER_WIDTH = 52
+
+const VIEW_ITEMS: Array<{ id: PriceTableView; label: string; icon: typeof Table2 }> = [
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
   { id: 'products', label: '상품 기준', icon: Table2 },
 ]
 
 export function PriceTableWorkspace(props: {
   rows: PriceTableGridRow[]
-  initialView: WorkspaceView
+  navigation: PriceTableNavigation
+  page: number
 }) {
-  const [view, setView] = useState<WorkspaceView>(props.initialView)
+  const { view } = props.navigation
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1.5">
       <div className="flex border-b">
         {VIEW_ITEMS.map((item) => {
           const Icon = item.icon
           return (
-            <button
+            <Link
               key={item.id}
-              type="button"
-              onClick={() => setView(item.id)}
+              href={priceTableHref({ ...props.navigation, view: item.id, page: props.page })}
+              aria-current={view === item.id ? 'page' : undefined}
+              prefetch={false}
+              scroll={false}
               className={`flex h-10 items-center gap-1.5 border-b-2 px-3 text-sm font-medium ${
                 view === item.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               <Icon className="size-4" />
               {item.label}
-            </button>
+            </Link>
           )
         })}
       </div>
 
-      {view === 'compare' ? <PriceCompareView rows={props.rows} /> : <ProductMarketplaceView rows={props.rows} />}
+      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} /> : <ProductMarketplaceView rows={props.rows} navigation={props.navigation} />}
     </div>
   )
 }
 
-function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
+function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
+  const { width, resize } = usePriceColumnWidths('price-table-compare-widths-v1')
   const activeColumns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const inactiveColumns = useMemo(() => getInactiveRegistrationMarketplaceColumns(), [])
   const columns = [...activeColumns, ...inactiveColumns]
-  const defaults = activeColumns.filter((column) => column.defaultVisible).slice(0, 4).map((column) => column.id)
+  const defaults = columns.map((column) => column.id)
   const [selected, setSelected] = useState<string[]>(defaults)
+  const [groups, setGroups] = useState<Record<string, string[]>>({})
+  const [groupName, setGroupName] = useState('B2B몰')
+  useEffect(() => {
+    try { const saved: unknown = JSON.parse(localStorage.getItem('price-table-mall-groups-v1') || '{}'); if (saved && typeof saved === 'object' && !Array.isArray(saved)) setGroups(Object.fromEntries(Object.entries(saved).filter(([, ids]) => Array.isArray(ids) && ids.every(id => typeof id === 'string')))) } catch { /* Keep empty groups if storage is unavailable. */ }
+  }, [])
+  function saveGroup() {
+    const name = groupName.trim().slice(0, 40)
+    if (!name) return
+    const next = { ...groups, [name]: selected }
+    setGroups(next)
+    try { localStorage.setItem('price-table-mall-groups-v1', JSON.stringify(next)) } catch { /* Selection remains usable without storage. */ }
+  }
+  function applyGroup(ids: string[]) { setSelected([...new Set(['b2b', 'b2c', ...ids.filter(id => columns.some(column => column.id === id))])]) }
+  function pinnedLeft(id: string) {
+    const priceStart = NUMBER_WIDTH + codeWidth + productWidth
+    if (id === 'b2b') return priceStart
+    if (id === 'b2c') return priceStart + width('b2b', 132)
+  }
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
+  const codeWidth = width('productCode', 96)
+  const productWidth = width('product', 240)
+  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
 
   function toggle(id: string) {
-    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 6 ? [...current, id] : current)
+    if (id === 'b2b' || id === 'b2c') return
+    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
   return (
-    <div className="space-y-3">
-      <div className="border-b bg-muted/15 px-3 py-2.5">
+    <div className="space-y-1.5">
+      <details className="group rounded-md border bg-muted/15">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5 text-xs [&::-webkit-details-marker]:hidden"><span className="font-medium">몰 선택·그룹 ▾</span><span className="text-muted-foreground">{selected.length}개 선택 · B2B / B2C 고정</span></summary>
+        <div className="border-t px-3 py-2">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm font-medium">이용 중인 몰</p>
-          <span className="text-xs text-muted-foreground">최대 6개</span>
+          <span className="text-xs text-muted-foreground">{selected.length}개 선택 · B2B / B2C 항상 표시</span>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setSelected(defaults)}>전체 선택</button>
+          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setSelected(['b2b', 'b2c'])}>몰 선택 해제</button>
+          {Object.entries(groups).filter(([, ids]) => Array.isArray(ids)).map(([name, ids]) => <span key={name} className="inline-flex rounded border bg-background"><button type="button" className="px-2 py-1 text-xs font-medium" onClick={() => applyGroup(ids)}>{name}</button><button type="button" aria-label={`${name} 그룹 삭제`} className="px-1 text-xs" onClick={() => { const next = { ...groups }; delete next[name]; setGroups(next); try { localStorage.setItem('price-table-mall-groups-v1', JSON.stringify(next)) } catch {} }}>×</button></span>)}
+          <input aria-label="몰 그룹 이름" value={groupName} onChange={event => setGroupName(event.target.value)} className="h-7 w-32 rounded border bg-background px-2 text-xs" placeholder="B2B몰 / B2C몰" />
+          <button type="button" onClick={saveGroup} className="rounded border px-2 py-1 text-xs">현재 선택을 그룹 저장</button>
+          <span className="text-[11px] text-muted-foreground">그룹은 이 브라우저에 저장됩니다.</span>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-2">
           {activeColumns.map((column) => (
@@ -75,7 +115,7 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
                 type="checkbox"
                 checked={selected.includes(column.id)}
                 onChange={() => toggle(column.id)}
-                disabled={!selected.includes(column.id) && selected.length >= 6}
+                disabled={column.id === 'b2b' || column.id === 'b2c'}
                 className="size-3.5 accent-primary"
               />
               {column.label}
@@ -91,7 +131,7 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
                   type="checkbox"
                   checked={selected.includes(column.id)}
                   onChange={() => toggle(column.id)}
-                  disabled={!selected.includes(column.id) && selected.length >= 6}
+                  disabled={column.id === 'b2b' || column.id === 'b2c'}
                   className="size-3.5 accent-primary"
                 />
                 {column.label}
@@ -99,36 +139,54 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
             ))}
           </div>
         </details>
-      </div>
+        </div>
+      </details>
       <div className="overflow-auto rounded-md border bg-card">
-        <table className="w-full min-w-[680px] text-sm">
+        <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
+          <colgroup>
+            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} />
+            {selectedColumns.map(column => <col key={column.id} style={{ width: width(column.id, 132) }} />)}
+          </colgroup>
           <thead>
             <tr className="bg-muted text-left text-xs text-muted-foreground">
-              <th className="sticky left-0 z-10 w-[130px] min-w-[130px] bg-muted px-3 py-2">상품코드</th>
-              <th className="sticky left-[130px] z-10 min-w-[220px] bg-muted px-3 py-2">상품 / 옵션</th>
-              {selectedColumns.map((column) => <th key={column.id} className="min-w-[132px] px-3 py-2 text-right">{column.label}</th>)}
+              <th scope="col" aria-sort={sortDirection(navigation, 'sourceNumber')} className="sticky left-0 z-20 border-r border-b bg-muted px-1 py-2"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }} aria-sort={sortDirection(navigation, 'productCode')}><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }} aria-sort={sortDirection(navigation, 'productName')}><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
+              {selectedColumns.map((column) => <th key={column.id} aria-sort={sortDirection(navigation, `raw:${column.valueKey}`)} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><SortLink sortKey={`raw:${column.valueKey}`} label={column.label} navigation={navigation} /><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t hover:bg-muted/30">
-                <td className="sticky left-0 bg-card px-3 py-2 font-mono text-xs font-medium">
+                <td className="sticky left-0 z-10 border-r border-b bg-card px-1 text-center text-xs tabular-nums text-muted-foreground">{row.sourceNumber ?? '–'}</td>
+                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle font-mono text-xs font-medium" style={{ left: NUMBER_WIDTH }}>
                   {row.productCode ? (
-                    <Link data-no-translate href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="text-primary hover:underline">
+                    <Link data-no-translate title={row.productCode} href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="block truncate text-primary hover:underline">
                       {row.productCode}
                     </Link>
                   ) : '-'}
                 </td>
-                <td className="sticky left-[130px] max-w-[320px] bg-card px-3 py-2">
-                  <div data-no-translate className="truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</div>
-                  {row.optionName ? <div data-no-translate className="truncate text-xs text-muted-foreground">{row.optionName}</div> : null}
+                <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle" style={{ left: NUMBER_WIDTH + codeWidth }}>
+                  <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
+                  <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
-                {selectedColumns.map((column) => (
-                  <td key={column.id} className="px-3 py-2 text-right tabular-nums">
-                    <div className="font-semibold">{formatMoney(row.rawData[column.valueKey])}</div>
-                    <div className="text-[11px] text-muted-foreground">{findMarketplaceProductIds(row.rawData, column).length ? '등록번호 있음' : '-'}</div>
-                  </td>
-                ))}
+                {selectedColumns.map((column) => {
+                  const identifiers = findMarketplaceProductIds(row.rawData, column)
+                  return (
+                    <td key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-10 bg-card" : ""} h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums`}>
+                      <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
+                      {identifiers.length ? identifiers.map((identifier) => {
+                        const enteredDate = getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate
+                        return (
+                          <div key={identifier.key} className="text-[11px] leading-4 text-muted-foreground">
+                            <div className="truncate" title={identifier.value}>{identifier.value}</div>
+                            {enteredDate && <div>입력일 {enteredDate}</div>}
+                          </div>
+                        )
+                      }) : <div className="h-4 text-[11px] leading-4 text-muted-foreground">-</div>}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>
@@ -138,31 +196,41 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
   )
 }
 
-function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
+function ProductMarketplaceView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
+  const { width, resize } = usePriceColumnWidths('price-table-products-widths-v1')
+  const codeWidth = width('productCode', 96)
+  const productWidth = width('product', 240)
+  const gridStyle = { gridTemplateColumns: `${NUMBER_WIDTH}px ${codeWidth}px ${productWidth}px minmax(300px, 1fr) 36px`, minWidth: NUMBER_WIDTH + codeWidth + productWidth + 360 }
   const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
   const [openRow, setOpenRow] = useState<string | null>(null)
 
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
-      <div className="grid grid-cols-[minmax(0,1fr)_28px] border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]">
-        <span className="hidden lg:block">상품코드</span><span>상품 / 옵션</span><span className="hidden lg:block">등록된 몰</span><span />
+    <div className="overflow-auto rounded-md border bg-card">
+      <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+        <span className="border-r"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></span>
+        <span className="relative border-r px-2"><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
+        <span className="relative border-r px-2"><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
+        <span className="px-2"><SortLink sortKey="registrationCount" label="등록 현황" navigation={navigation} /></span><span />
       </div>
       {rows.map((row) => {
         const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
           marketplace: column.label,
           productId: id.value,
+          enteredDate: getPriceNumberDate(row.rawData, id.key) ?? row.directEntryDate,
           price: row.rawData[column.valueKey],
         })))
         const open = openRow === row.id
         return (
-          <div key={row.id} className="border-b last:border-b-0">
+          <div key={row.id} style={{ minWidth: gridStyle.minWidth }} className="border-b last:border-b-0">
             <button
               type="button"
               onClick={() => setOpenRow(open ? null : row.id)}
-              className="grid w-full grid-cols-[minmax(0,1fr)_28px] items-center px-3 py-2.5 text-left text-sm hover:bg-muted/30 lg:grid-cols-[130px_minmax(220px,1fr)_170px_36px]"
+              style={gridStyle}
+              className="grid h-12 w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted/30"
             >
-              <span data-no-translate className="hidden font-mono text-xs font-medium lg:block">{row.productCode || '-'}</span>
-              <span className="min-w-0 pr-4">
+              <span className="border-r text-center text-xs tabular-nums text-muted-foreground">{row.sourceNumber ?? '–'}</span>
+              <span data-no-translate title={row.productCode ?? ''} className="truncate border-r px-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
+              <span className="min-w-0 border-r px-2">
                 <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
                 {row.optionName || row.productCode ? (
                   <span className="block truncate text-xs text-muted-foreground">
@@ -171,20 +239,22 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
                   </span>
                 ) : null}
               </span>
-              <span className="hidden min-w-0 flex-wrap gap-1 lg:flex">
-                {registrations.length ? registrations.slice(0, 3).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
-                {registrations.length > 3 ? <span className="text-xs text-muted-foreground">+{registrations.length - 3}</span> : null}
+              <span className="flex min-w-0 flex-wrap gap-1 px-2">
+                {registrations.length ? registrations.slice(0, 4).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace} · {item.productId}{item.enteredDate ? ` · ${item.enteredDate}` : null}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
+                {registrations.length > 4 ? <span className="text-xs text-muted-foreground">+{registrations.length - 4}</span> : null}
               </span>
               <ChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
             </button>
             {open ? (
               <div className="border-t bg-muted/15 px-4 py-3">
+                <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>원가 <strong>{formatMoney(row.rawData['원가'])}</strong></span><span>B2B <strong>{formatMoney(row.rawData['B2B 판매가'])}</strong></span><span>B2C <strong>{formatMoney(row.rawData['B2C 판매가'])}</strong></span><span className="text-muted-foreground">등록 {registrations.length}건</span></div>
                 {registrations.length ? (
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {registrations.map((item) => (
                       <div key={`${item.marketplace}-${item.productId}`} className="rounded-md border bg-background px-3 py-2">
                         <div className="text-xs font-medium">{item.marketplace}</div>
                         <div className="mt-1 font-mono text-xs text-muted-foreground">상품번호 {item.productId}</div>
+                        {item.enteredDate && <div className="text-xs text-muted-foreground">입력일 {item.enteredDate}</div>}
                         <div className="mt-1 text-sm font-semibold tabular-nums">판매가 {formatMoney(item.price)}</div>
                       </div>
                     ))}
@@ -196,6 +266,29 @@ function ProductMarketplaceView({ rows }: { rows: PriceTableGridRow[] }) {
         )
       })}
     </div>
+  )
+}
+
+function sortDirection(navigation: PriceTableNavigation, sortKey: string) {
+  if (navigation.sortKey !== sortKey) return undefined
+  return navigation.sortOrder === 'asc' ? 'ascending' : 'descending'
+}
+
+function SortLink({ sortKey, label, navigation }: { sortKey: string; label: string; navigation: PriceTableNavigation }) {
+  const direction = sortDirection(navigation, sortKey)
+  const sortOrder = direction === 'ascending' ? 'desc' : 'asc'
+  const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowUpDown
+  return (
+    <Link
+      href={priceTableHref({ ...navigation, sortKey, sortOrder })}
+      prefetch={false}
+      scroll={false}
+      title={`${label} ${sortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+      className={`inline-flex max-w-full items-center gap-0.5 rounded hover:text-foreground ${direction ? 'text-foreground' : ''}`}
+    >
+      <span className="truncate">{label}</span>
+      <Icon aria-hidden="true" className="size-3 shrink-0" />
+    </Link>
   )
 }
 

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
+import { largestChinaOutboundBox } from './china-outbound-packaging'
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { nextAvailableBoxNumbers, planInspectionPacking, type InspectionPackingPiece } from './china-outbound-auto-packing'
 import {
@@ -536,6 +538,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE china_outbound_shipment_items
     ADD COLUMN IF NOT EXISTS item_category varchar(100);
   ALTER TABLE china_outbound_shipment_items
+    ADD COLUMN IF NOT EXISTS chinese_product_name text;
+  ALTER TABLE china_outbound_shipment_items
     ADD COLUMN IF NOT EXISTS box_split_status varchar(20);
   ALTER TABLE china_outbound_shipment_items
     ADD COLUMN IF NOT EXISTS origin_warehouse_code varchar(100);
@@ -841,19 +845,9 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   REVOKE ALL ON TABLE saas_china_shipment_purchase_allocations FROM anon, authenticated;
 `
 
-let ensureSaasChinaOutboundSchemaPromise: Promise<void> | null = null
-
-export function ensureSaasChinaOutboundSchema() {
-  ensureSaasChinaOutboundSchemaPromise ??= db
-    .execute(SAAS_CHINA_OUTBOUND_SCHEMA_SQL)
-    .then(() => undefined)
-    .catch((error) => {
-      ensureSaasChinaOutboundSchemaPromise = null
-      throw error
-    })
-
-  return ensureSaasChinaOutboundSchemaPromise
-}
+export const ensureSaasChinaOutboundSchema = createChinaOutboundSchemaInitializer(
+  (query) => db.execute(query), SAAS_CHINA_OUTBOUND_SCHEMA_SQL,
+)
 
 export async function getSaasChinaInventory(userId: string) {
   await ensureSaasChinaOutboundSchema()
@@ -896,6 +890,24 @@ export async function getSaasChinaInventory(userId: string) {
  */
 export async function listSaasChinaOutboundWarehouses(userId: string): Promise<SaasChinaOutboundWarehouse[]> {
   await ensureSaasChinaOutboundSchema()
+  const result = await db.execute(sql`
+    SELECT warehouse_code AS "warehouseCode", is_default AS "isDefault", true AS configured,
+      EXISTS (SELECT 1 FROM saas_china_inventory i WHERE i.user_id = ${userId}::uuid
+        AND i.archived_at IS NULL AND i.warehouse_code = w.warehouse_code) AS "hasActiveInventory"
+    FROM saas_china_outbound_warehouses w WHERE w.user_id = ${userId}::uuid
+    UNION ALL
+    SELECT i.warehouse_code, false, false, true FROM saas_china_inventory i
+    WHERE i.user_id = ${userId}::uuid AND i.archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM saas_china_outbound_warehouses w WHERE w.user_id = ${userId}::uuid AND w.warehouse_code = i.warehouse_code)
+    GROUP BY i.warehouse_code
+  `)
+  const rows = (Array.isArray(result) ? result : (result as { rows?: unknown[] } | undefined)?.rows ?? []) as Array<SaasChinaOutboundWarehouse & { configured: boolean }>
+  const visible = rows.filter((row) => !isSaasChinaInventoryExcludedWarehouseCode(row.warehouseCode))
+  if (visible.some((row) => row.isDefault) && visible.every((row) => row.configured)) {
+    return visible.map(({ warehouseCode, isDefault, hasActiveInventory }) => ({ warehouseCode, isDefault, hasActiveInventory }))
+      .sort((left, right) => left.warehouseCode.localeCompare(right.warehouseCode, 'ko-KR', { numeric: true }))
+  }
+  // Seed only new/changed catalogs. Ordinary shipment selection takes no workspace lock.
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, userId)
     const catalog = await ensureSaasChinaOutboundWarehouseCatalog(tx, { userId })
@@ -1000,11 +1012,13 @@ export async function renameSaasChinaOutboundWarehouse(input: {
 
 export async function listChinaOutboundShipments(
   userId: string,
-  options: { includeCancelled?: boolean } = {},
+  options: { includeCancelled?: boolean; createdFrom?: string; createdTo?: string } = {},
 ) {
   await ensureSaasChinaOutboundSchema()
   const shipmentConditions = [eq(chinaOutboundShipments.userId, userId)]
   if (!options.includeCancelled) shipmentConditions.push(ne(chinaOutboundShipments.status, 'cancelled'))
+  if (options.createdFrom) shipmentConditions.push(sql`${chinaOutboundShipments.createdAt} >= ${`${options.createdFrom}T00:00:00+09:00`}::timestamptz`)
+  if (options.createdTo) shipmentConditions.push(sql`${chinaOutboundShipments.createdAt} < ${`${options.createdTo}T00:00:00+09:00`}::timestamptz + interval '1 day'`)
   const [shipments, itemCounts] = await Promise.all([
     db
       .select()
@@ -1019,7 +1033,11 @@ export async function listChinaOutboundShipments(
         packedQuantity: sql<number>`COALESCE(SUM(${chinaOutboundShipmentItems.packedQuantity}), 0)::int`,
       })
       .from(chinaOutboundShipmentItems)
-      .where(eq(chinaOutboundShipmentItems.userId, userId))
+      .innerJoin(chinaOutboundShipments, and(
+        eq(chinaOutboundShipments.id, chinaOutboundShipmentItems.shipmentId),
+        eq(chinaOutboundShipments.userId, chinaOutboundShipmentItems.userId),
+      ))
+      .where(and(eq(chinaOutboundShipmentItems.userId, userId), ...shipmentConditions))
       .groupBy(chinaOutboundShipmentItems.shipmentId),
   ])
 
@@ -1034,24 +1052,29 @@ export async function listChinaOutboundShipments(
 
 export async function getChinaOutboundShipmentDetail(input: { userId: string; shipmentId: string }) {
   await ensureSaasChinaOutboundSchema()
-  const [shipment] = await db
-    .select()
-    .from(chinaOutboundShipments)
-    .where(and(
-      eq(chinaOutboundShipments.userId, input.userId),
-      eq(chinaOutboundShipments.id, input.shipmentId),
-    ))
-    .limit(1)
-
-  if (!shipment) return null
-
-  const [items, pallets, boxes] = await Promise.all([
+  // All reads are scoped independently; package reads need not wait for the
+  // shipment header or a second inventory lookup to finish first.
+  const [shipmentRows, items, pallets, boxes, packingAllocations, allBoxItems] = await Promise.all([
     db
       .select()
+      .from(chinaOutboundShipments)
+      .where(and(
+        eq(chinaOutboundShipments.userId, input.userId),
+        eq(chinaOutboundShipments.id, input.shipmentId),
+      ))
+      .limit(1),
+    db
+      .select({
+        ...getTableColumns(chinaOutboundShipmentItems),
+        onHandQuantity: saasChinaInventory.onHandQuantity,
+        availableQuantity: saasChinaInventory.availableQuantity,
+        inventoryWarehouseCode: saasChinaInventory.warehouseCode,
+      })
       .from(chinaOutboundShipmentItems)
+      .leftJoin(saasChinaInventory, and(eq(saasChinaInventory.id, chinaOutboundShipmentItems.inventoryId), eq(saasChinaInventory.userId, input.userId)))
       .where(and(
         eq(chinaOutboundShipmentItems.userId, input.userId),
-        eq(chinaOutboundShipmentItems.shipmentId, shipment.id),
+        eq(chinaOutboundShipmentItems.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundShipmentItems.sortOrder), asc(chinaOutboundShipmentItems.createdAt)),
     db
@@ -1059,7 +1082,7 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .from(chinaOutboundPallets)
       .where(and(
         eq(chinaOutboundPallets.userId, input.userId),
-        eq(chinaOutboundPallets.shipmentId, shipment.id),
+        eq(chinaOutboundPallets.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
     db
@@ -1067,52 +1090,31 @@ export async function getChinaOutboundShipmentDetail(input: { userId: string; sh
       .from(chinaOutboundBoxes)
       .where(and(
         eq(chinaOutboundBoxes.userId, input.userId),
-        eq(chinaOutboundBoxes.shipmentId, shipment.id),
+        eq(chinaOutboundBoxes.shipmentId, input.shipmentId),
       ))
       .orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.createdAt)),
+    db.select({ shipmentItemId: saasChinaShipmentPurchaseAllocations.shipmentItemId, inspectionBoxes: saasChinaShipmentPurchaseAllocations.inspectionBoxes })
+      .from(saasChinaShipmentPurchaseAllocations).where(and(eq(saasChinaShipmentPurchaseAllocations.userId, input.userId), eq(saasChinaShipmentPurchaseAllocations.shipmentId, input.shipmentId))),
+    db.select().from(chinaOutboundBoxItems)
+      .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId)))
+      .orderBy(asc(chinaOutboundBoxItems.sortOrder), asc(chinaOutboundBoxItems.createdAt)),
   ])
 
-  // New shipment rows carry their warehouse snapshot. Keep the inventory
-  // lookup only as a compatibility fallback for rows created before that
-  // column was introduced.
-  const inventoryIds = [...new Set(items.map((item) => item.inventoryId))]
-  const inventoryRows = inventoryIds.length === 0
-    ? []
-    : await db
-      .select({ id: saasChinaInventory.id, warehouseCode: saasChinaInventory.warehouseCode, onHandQuantity: saasChinaInventory.onHandQuantity, availableQuantity: saasChinaInventory.availableQuantity })
-      .from(saasChinaInventory)
-      .where(and(
-        eq(saasChinaInventory.userId, input.userId),
-        inArray(saasChinaInventory.id, inventoryIds),
-      ))
-  const warehouseCodeByInventoryId = new Map(inventoryRows.map((inventory) => [inventory.id, inventory.warehouseCode]))
-  const stockById = new Map(inventoryRows.map((inventory) => [inventory.id, inventory]))
-  const packingAllocations = await db.select({ shipmentItemId: saasChinaShipmentPurchaseAllocations.shipmentItemId, inspectionBoxes: saasChinaShipmentPurchaseAllocations.inspectionBoxes })
-    .from(saasChinaShipmentPurchaseAllocations).where(and(eq(saasChinaShipmentPurchaseAllocations.userId, input.userId), eq(saasChinaShipmentPurchaseAllocations.shipmentId, shipment.id)))
-  const boxIds = boxes.map((box) => box.id)
-  const itemIds = items.map((item) => item.id)
-  const boxItems = boxIds.length === 0 || itemIds.length === 0
-    ? []
-    : await db
-      .select()
-      .from(chinaOutboundBoxItems)
-      .where(and(
-        eq(chinaOutboundBoxItems.userId, input.userId),
-        eq(chinaOutboundBoxItems.shipmentId, shipment.id),
-        inArray(chinaOutboundBoxItems.boxId, boxIds),
-        inArray(chinaOutboundBoxItems.shipmentItemId, itemIds),
-      ))
-      .orderBy(asc(chinaOutboundBoxItems.sortOrder), asc(chinaOutboundBoxItems.createdAt))
+  const shipment = shipmentRows[0]
+  if (!shipment) return null
+  const boxIds = new Set(boxes.map((box) => box.id))
+  const itemIds = new Set(items.map((item) => item.id))
+  const boxItems = allBoxItems.filter((row) => boxIds.has(row.boxId) && itemIds.has(row.shipmentItemId))
+  const packingByItem = new Map<string, InspectionPackingPiece[]>()
+  for (const allocation of packingAllocations) packingByItem.set(allocation.shipmentItemId, [...(packingByItem.get(allocation.shipmentItemId) ?? []), ...(allocation.inspectionBoxes ?? [])])
 
   return {
     shipment,
-    items: items.map((item) => ({
+    items: items.map(({ inventoryWarehouseCode, ...item }) => ({
       ...item,
-      onHandQuantity: stockById.get(item.inventoryId)?.onHandQuantity ?? null,
-      availableQuantity: stockById.get(item.inventoryId)?.availableQuantity ?? null,
-      receiptPacking: packingAllocations.filter((allocation) => allocation.shipmentItemId === item.id).flatMap((allocation) => allocation.inspectionBoxes ?? []),
+      receiptPacking: packingByItem.get(item.id) ?? [],
       warehouseCode: item.originWarehouseCode
-        || warehouseCodeByInventoryId.get(item.inventoryId)
+        || inventoryWarehouseCode
         || shipment.originWarehouseCode,
     })),
     pallets,
@@ -2335,7 +2337,7 @@ export async function addChinaOutboundShipmentItems(input: {
 /** Manual samples are received and reserved atomically, without touching purchase lots. */
 export async function addChinaOutboundSample(input: {
   userId: string; createdBy: string; shipmentId: string; requestId: string
-  productName: string; optionName?: string | null; quantity: number; warehouseCode: string; note?: string | null
+  productName: string; chineseProductName?: string | null; optionName?: string | null; quantity: number; warehouseCode: string; note?: string | null
 }) {
   await ensureSaasChinaOutboundSchema()
   const quantity = positiveInteger(input.quantity, '샘플 수량')
@@ -2361,7 +2363,7 @@ export async function addChinaOutboundSample(input: {
     if (!inventory) throw new Error('샘플 재고를 저장하지 못했습니다.')
     const [item] = await tx.insert(chinaOutboundShipmentItems).values({
       userId: input.userId, shipmentId: shipment.id, inventoryId: inventory.id, sku, productName,
-      itemCategory: '샘플', optionKey: optionName ?? '', optionName, originWarehouseCode: warehouseCode,
+      itemCategory: '샘플', chineseProductName: optionalText(input.chineseProductName), optionKey: optionName ?? '', optionName, originWarehouseCode: warehouseCode,
       reservedQuantity: quantity, boxSplitStatus: 'in_progress',
       sortOrder: existing.reduce((maximum, row) => Math.max(maximum, row.sortOrder), -1) + 1,
       note: optionalText(input.note),
@@ -2402,6 +2404,66 @@ export async function saveChinaOutboundPalletDimensions(input: {
       lengthCm: String(input.lengthCm), widthCm: String(input.widthCm), heightCm: String(input.heightCm), updatedAt: new Date(),
     }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
     return pallet
+  })
+}
+
+export async function saveChinaOutboundPackageWeight(input: {
+  userId: string; shipmentId: string; packageId: string; kind: 'box' | 'pallet'; grossWeightKg: number
+}) {
+  await ensureSaasChinaOutboundSchema()
+  if (!Number.isFinite(input.grossWeightKg) || input.grossWeightKg <= 0 || input.grossWeightKg > 999_999_999) throw new Error('총중량은 0보다 큰 숫자로 입력해주세요.')
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const table = input.kind === 'box' ? chinaOutboundBoxes : chinaOutboundPallets
+    if (input.kind === 'box') {
+      const box = await getChinaOutboundBox(tx, input.userId, input.shipmentId, input.packageId)
+      if (box.status === 'sealed') throw new Error('봉인된 박스는 수정할 수 없습니다.')
+    } else await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.packageId)
+    await tx.update(table).set({ grossWeightKg: String(input.grossWeightKg), updatedAt: new Date() })
+      .where(and(eq(table.userId, input.userId), eq(table.shipmentId, input.shipmentId), eq(table.id, input.packageId)))
+  })
+}
+
+export async function saveChinaOutboundItemChineseName(input: { userId: string; shipmentId: string; shipmentItemId: string; chineseProductName: string }) {
+  await ensureSaasChinaOutboundSchema()
+  const chineseProductName = requiredText(input.chineseProductName, '중국어 상품명')
+  if (chineseProductName.length > 1000) throw new Error('중국어 상품명은 1,000자 이하로 입력해주세요.')
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const [item] = await tx.update(chinaOutboundShipmentItems).set({ chineseProductName, updatedAt: new Date() })
+      .where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.shipmentId, input.shipmentId), eq(chinaOutboundShipmentItems.id, input.shipmentItemId))).returning()
+    if (!item) throw new Error('출고품목을 찾을 수 없습니다.')
+  })
+}
+
+/** Move allocations only; stock quantities and purchase-lot links remain unchanged. */
+export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentId: string; boxIds: string[] }) {
+  await ensureSaasChinaOutboundSchema()
+  const ids = [...new Set(input.boxIds)]
+  if (ids.length < 2 || ids.length > 5000) throw new Error('합칠 박스를 2개 이상 선택해주세요.')
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const boxes = await tx.select().from(chinaOutboundBoxes).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids))).orderBy(asc(chinaOutboundBoxes.sortOrder), asc(chinaOutboundBoxes.id))
+    if (boxes.length !== ids.length || boxes.some((box) => box.status === 'sealed')) throw new Error('수정 가능한 박스인지 확인해주세요.')
+    const target = largestChinaOutboundBox(boxes)!
+    const allocations = await tx.select().from(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), inArray(chinaOutboundBoxItems.boxId, ids)))
+    // Empty source boxes make a retry a no-op, including the measured weight.
+    if (!allocations.some((row) => row.boxId !== target.id)) return target
+    const quantities = new Map<string, number>()
+    for (const row of allocations) quantities.set(row.shipmentItemId, (quantities.get(row.shipmentItemId) ?? 0) + row.quantity)
+    await tx.delete(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), inArray(chinaOutboundBoxItems.boxId, ids)))
+    for (const [shipmentItemId, quantity] of quantities) await tx.insert(chinaOutboundBoxItems).values({ userId: input.userId, shipmentId: input.shipmentId, boxId: target.id, shipmentItemId, quantity })
+    // Repacked contents require a fresh physical gross-weight measurement.
+    const grossWeightKg = null
+    await tx.update(chinaOutboundBoxes).set({ grossWeightKg, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
+    // Retain emptied box records for references, but exclude their former weight and pallet.
+    await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))
+    await markChinaOutboundBoxesChanged(tx, input.userId, input.shipmentId, ids)
+    await markChinaOutboundPalletsChanged(tx, input.userId, input.shipmentId, boxes.flatMap((box) => box.palletId ? [box.palletId] : []))
+    return target
   })
 }
 
@@ -3695,7 +3757,6 @@ async function assertShipmentFullyPacked(
   for (const item of items) {
     if (quantityByItem.get(item.id) !== item.reservedQuantity) throw new Error(`${item.sku}의 실제 박스 수량이 출고수량과 다릅니다. 박스분할을 다시 확인해주세요.`)
   }
-  if (boxes.some((box) => packedBoxIds.has(box.id) && !box.palletId)) throw new Error('상품이 담긴 박스는 파렛트 번호를 지정해주세요.')
   const usedPalletIds = new Set(boxes.flatMap((box) => packedBoxIds.has(box.id) && box.palletId ? [box.palletId] : []))
   if ([...usedPalletIds].some((id) => !pallets.some((pallet) => pallet.id === id))) throw new Error('배정된 파렛트를 찾을 수 없습니다.')
 }
@@ -4419,15 +4480,13 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
     if (current) {
       if (current.existingBoxId && allocation.existingBoxId && current.existingBoxId !== allocation.existingBoxId) throw new Error('서로 다른 박스를 같은 번호로 변경할 수 없습니다.')
       const currentDimensions = normalizeOptionalChinaOutboundBoxDimensions(current)
-      if (dimensions && currentDimensions && !sameChinaOutboundBoxDimensions(dimensions, currentDimensions)) {
-        throw new Error(`${boxNo}의 가로·세로·높이가 서로 다릅니다.`)
-      }
+
       allocationsByBoxNo.set(boxNo, {
         boxNo,
         ...(current.existingBoxId || allocation.existingBoxId ? { existingBoxId: current.existingBoxId ?? allocation.existingBoxId } : {}),
         ...(current.autoNumber || allocation.autoNumber ? { autoNumber: true } : {}),
         quantity: current.quantity + quantity,
-        ...(currentDimensions ?? dimensions ?? {}),
+        ...(largestChinaOutboundBox([currentDimensions, dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? {}),
       })
       continue
     }
@@ -4466,15 +4525,6 @@ function normalizeOptionalChinaOutboundBoxDimensions(input: {
     widthCm: input.widthCm ?? null,
     heightCm: input.heightCm ?? null,
   })
-}
-
-function sameChinaOutboundBoxDimensions(
-  left: ChinaOutboundBoxDimensionsInput,
-  right: ChinaOutboundBoxDimensionsInput,
-) {
-  return left.lengthCm === right.lengthCm
-    && left.widthCm === right.widthCm
-    && left.heightCm === right.heightCm
 }
 
 async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
@@ -4542,7 +4592,10 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
 
   for (const allocation of input.allocations) {
     let box = boxesByNo.get(allocation.boxNo)
-    const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    let dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    if (box && dimensions && input.boxItems.some((row) => row.boxId === box!.id && row.shipmentItemId !== input.shipmentItem.id)) {
+      dimensions = largestChinaOutboundBox([normalizeOptionalChinaOutboundBoxDimensions({ lengthCm: box.lengthCm == null ? null : Number(box.lengthCm), widthCm: box.widthCm == null ? null : Number(box.widthCm), heightCm: box.heightCm == null ? null : Number(box.heightCm) }), dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? dimensions
+    }
     if (!box) {
       const [created] = await input.tx
         .insert(chinaOutboundBoxes)

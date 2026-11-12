@@ -181,18 +181,6 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
       setError('엑셀과 직접 입력한 박스·파렛트 내용이 함께 있습니다. 덮어쓰지 않도록 각 내용을 확인하고 개별 저장하거나 취소한 뒤 이동해주세요.')
       return
     }
-    const dimensionsByBox = new Map<string, string>()
-    for (const [, draft] of currentDrafts) {
-      for (const box of draft.boxDimensions ?? []) {
-        const previous = dimensionsByBox.get(box.boxNo)
-        if (previous && previous !== box.dimensions) {
-          setError(`${box.boxNo} 박스에 서로 다른 규격이 입력돼 있습니다. 규격을 일치시킨 뒤 저장해주세요.`)
-          return
-        }
-        dimensionsByBox.set(box.boxNo, box.dimensions)
-      }
-    }
-
     const succeeded = await runTask(async () => {
       for (const [id, draft] of currentDrafts) {
         if (!await draft.save()) {

@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { db } from '@/lib/db'
 import { inventory } from '@/lib/db/schema'
 import { eq, max } from 'drizzle-orm'
@@ -30,7 +29,6 @@ export default async function PurchasingRawDataPage() {
 
   return (
     <div className="space-y-4">
-      <ProductFlowNav />
       <header>
         <h1 className="text-2xl font-semibold">발주 로우데이터</h1>
       </header>

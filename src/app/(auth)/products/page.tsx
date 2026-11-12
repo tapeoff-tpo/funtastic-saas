@@ -60,7 +60,7 @@ export default async function ProductsPage({
   // 검색 버튼 누르기 전엔 fetch 하지 않음. searched sentinel 이 켜졌을 때만 조회.
   const searched = !!params.searched
   const { items, total } = searched
-    ? await getProducts(workspaceUserId, filters)
+    ? await getProducts(workspaceUserId, filters, { includeDescription: false })
     : { items: [] as Awaited<ReturnType<typeof getProducts>>['items'], total: 0 }
 
   const data: ProductRow[] = items.map((item) => ({

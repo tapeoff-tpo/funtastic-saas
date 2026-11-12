@@ -4,7 +4,7 @@ import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createDealEvent, updateDealChecklist, updateDealPerformance, updateDealStatus } from '@/lib/operations/deal-calendar'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 async function workspaceId() {
   const supabase = await createClient()

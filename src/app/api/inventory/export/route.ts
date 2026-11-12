@@ -8,22 +8,28 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
 import { eq, and, ne, sql, inArray } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getInventoryPeriod, isHistoricalInventoryMonth } from '@/lib/inventory/period'
+import { inventoryMonthEndStock } from '@/lib/inventory/snapshot-schema'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const skusParam = req.nextUrl.searchParams.get('skus')
   const skus = skusParam ? skusParam.split(',').filter(Boolean) : null
 
-  const now = new Date()
-  const year = parseInt(req.nextUrl.searchParams.get('year') ?? String(now.getFullYear()), 10)
-  const month = parseInt(req.nextUrl.searchParams.get('month') ?? String(now.getMonth() + 1), 10)
+  const now = getInventoryPeriod()
+  const year = parseInt(req.nextUrl.searchParams.get('year') ?? String(now.year), 10)
+  const month = parseInt(req.nextUrl.searchParams.get('month') ?? String(now.month), 10)
+
+  const historical = isHistoricalInventoryMonth(getInventoryPeriod(year, month).key)
 
   // Build month range in KST (UTC+9)
   const monthStart = `${year}-${String(month).padStart(2, '0')}-01 00:00:00+09`
@@ -32,8 +38,8 @@ export async function GET(req: NextRequest) {
   const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01 00:00:00+09`
 
   const conditions = [
-    eq(products.userId, user.id),
-    eq(inventory.userId, user.id),
+    eq(products.userId, workspaceUserId),
+    eq(inventory.userId, workspaceUserId),
     ne(products.status, 'deleted'),
     eq(productVariants.isActive, true),
   ]
@@ -41,7 +47,17 @@ export async function GET(req: NextRequest) {
     conditions.push(inArray(inventory.sku, skus))
   }
 
-  const rows = await db
+  const snapshot = inventoryMonthEndStock
+  const rows = historical ? await db.select({
+    sku: snapshot.sku, productName: snapshot.productName, optionName: snapshot.optionName,
+    packagingUnit: snapshot.packagingUnit, warehouseZone: snapshot.warehouseZone, sectorCode: snapshot.sectorCode,
+    totalStock: snapshot.totalStock, reservedStock: snapshot.reservedStock, availableStock: snapshot.availableStock,
+    monthlyIncoming: snapshot.monthlyIncoming, monthlyOutgoing: snapshot.monthlyOutgoing,
+    lastIncomingAt: sql<Date | null>`NULL`, lastOutgoingAt: sql<Date | null>`NULL`,
+  }).from(snapshot).where(and(
+    eq(snapshot.userId, workspaceUserId), eq(snapshot.referenceMonth, getInventoryPeriod(year, month).key),
+    skus?.length ? inArray(snapshot.sku, skus) : undefined,
+  )).orderBy(snapshot.sku, snapshot.warehouseZone) : await db
     .select({
       sku: inventory.sku,
       productName: inventory.productName,
@@ -79,9 +95,11 @@ export async function GET(req: NextRequest) {
     { header: '포장', key: 'packagingUnit', width: 14 },
     { header: '창고', key: 'warehouseZone', width: 10 },
     { header: '피킹위치', key: 'sectorCode', width: 14 },
-    { header: '현재고(총)', key: 'totalStock', width: 10 },
-    { header: '예약', key: 'reservedStock', width: 8 },
-    { header: '가용', key: 'availableStock', width: 8 },
+    ...(historical ? [{ header: '월말재고(가용)', key: 'availableStock', width: 16 }] : [
+      { header: '현재고(총)', key: 'totalStock', width: 10 },
+      { header: '예약', key: 'reservedStock', width: 8 },
+      { header: '가용', key: 'availableStock', width: 8 },
+    ]),
     { header: `${monthLabel} 입고`, key: 'monthlyIncoming', width: 14 },
     { header: `${monthLabel} 출고`, key: 'monthlyOutgoing', width: 14 },
     { header: '최종입고일', key: 'lastIncomingAt', width: 14 },

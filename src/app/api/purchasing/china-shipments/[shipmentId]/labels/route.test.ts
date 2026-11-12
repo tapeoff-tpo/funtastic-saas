@@ -65,6 +65,14 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     expect(mocks.exportChinaOutboundShipmentLabelWorkbook).not.toHaveBeenCalled()
   })
 
+  it('keeps a manually saved outbound Chinese name in both print and Excel labels', async () => {
+    mocks.getChinaOutboundShipmentDetail.mockResolvedValue({ shipment: { shipmentNo: 'OUT-1' }, items: [{ id: 'one', sku: 'SKU-1', productName: '물품', chineseProductName: '手动名称' }], boxes: [] })
+    await GET(new Request('http://localhost/labels?format=print'), { params: Promise.resolve({ shipmentId }) })
+    expect(mocks.renderChinaShipmentLabelPrint).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ chineseProductName: '手动名称', location: 'A-01' })] }), {}, expect.any(String))
+    await GET(new Request('http://localhost/labels'), { params: Promise.resolve({ shipmentId }) })
+    expect(mocks.exportChinaOutboundShipmentLabelWorkbook).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ chineseProductName: '手动名称', location: 'A-01' })] }))
+  })
+
   it('rejects unknown output formats and unauthenticated printing', async () => {
     expect((await GET(new Request('http://localhost/labels?format=unknown'), { params: Promise.resolve({ shipmentId }) })).status).toBe(400)
     mocks.getCurrentUser.mockResolvedValue(null)

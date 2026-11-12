@@ -24,6 +24,7 @@ export function tabPathname(tab: { href: string }): string {
 }
 
 const ROUTE_LABELS: Record<string, string> = {
+  '/operations/coupang-registration': '쿠팡상품등록',
   '/access-denied': '접근 권한 안내',
   '/admin/accounts': '계정관리',
   '/dashboard': '대시보드',
@@ -31,10 +32,11 @@ const ROUTE_LABELS: Record<string, string> = {
   '/orders/collect': '주문 수집',
   '/orders/import': '주문 가져오기',
   '/orders/claims': '클레임 관리',
-  '/costs': '품목',
+  '/costs': '원가',
   '/purchasing/china-inventory': '중국재고',
   '/purchasing/saas-china-inventory': '중국재고(SaaS)',
   '/purchasing/china-shipments': '중국출고',
+  '/purchasing/import-documents': '인보이스·패킹리스트',
   '/purchasing/orders': '발주',
   '/purchasing/payment-flow': '발주금액',
   '/purchasing/purchases': '발주검토',
@@ -67,7 +69,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/new-products': '상품관리',
   '/operations/deal-calendar': '딜 캘린더',
   '/operations/sourcing': '소싱',
-  '/operations/marketplace-registration': '상품 등록 관리',
+  '/operations/marketplace-registration': '상품등록',
   '/operations/detail-pages': '상세페이지 제작',
   '/operations/ai-accounts': 'AI 계정공유',
   '/settings': '설정',

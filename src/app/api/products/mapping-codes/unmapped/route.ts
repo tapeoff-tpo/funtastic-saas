@@ -6,7 +6,7 @@
  * 쇼핑몰 ID가 달라도 같은 상품코드가 한 매핑코드에만 연결되어 있으면 매핑된 것으로 본다.
  */
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'

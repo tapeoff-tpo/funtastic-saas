@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { completeOutstandingPurchaseRequestItems } from '@/lib/purchasing/purchase-requests'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export const purchaseRequestBulkCompleteBodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),

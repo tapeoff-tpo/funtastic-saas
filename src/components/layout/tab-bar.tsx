@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useIntentPrefetch } from './use-intent-prefetch'
 import { usePathname } from 'next/navigation'
 import { Home, X } from 'lucide-react'
 import { getRouteLabel, tabPathname, useNavState } from './nav-state'
@@ -9,6 +10,7 @@ import { canAccessPage, MENU_PATHS } from '@/lib/auth/menu-permissions'
 
 export function TabBar() {
   const pathname = usePathname()
+  const intent = useIntentPrefetch()
   const { tabs, closeTab } = useNavState()
   const access = useMenuAccess()
   const home = MENU_PATHS.find((path) => canAccessPage(access, path)) ?? '/access-denied'
@@ -20,6 +22,11 @@ export function TabBar() {
       {/* Home / Dashboard tab — always present, not closable */}
       <Link
         href={home}
+        prefetch={false}
+        onMouseEnter={() => intent.prepare(home)}
+        onFocus={() => intent.prepare(home)}
+        onMouseLeave={intent.cancel}
+        onBlur={intent.cancel}
         className={`flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
           isHome
             ? 'border-t-2 border-blue-500 bg-white text-gray-900'
@@ -45,6 +52,11 @@ export function TabBar() {
           >
             <Link
               href={tab.href}
+              prefetch={false}
+              onMouseEnter={() => intent.prepare(tab.href)}
+              onFocus={() => intent.prepare(tab.href)}
+              onMouseLeave={intent.cancel}
+              onBlur={intent.cancel}
               className="flex items-center px-3 py-1 text-xs font-medium"
               title={tab.label}
             >

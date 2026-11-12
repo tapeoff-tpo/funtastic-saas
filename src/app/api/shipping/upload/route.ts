@@ -8,11 +8,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { shipments, orders, marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray, isNotNull, gte, or } from 'drizzle-orm'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential } from '@/lib/auth/admin'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'

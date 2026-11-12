@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn() }))
 vi.mock('@/lib/auth/proxy-user', () => ({ getProxyUser: mocks.user }))
 vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.access }))
 function request(path: string, method = 'GET') {
-  return new NextRequest(`https://app.example${path}`, { method, headers: { cookie: 'sb-test-auth-token=untrusted-cookie', referer: 'https://app.example/purchasing/china-shipments' } })
+  return new NextRequest(`https://app.example${path}`, { method, headers: { cookie: 'funtastic_session=untrusted-cookie', referer: 'https://app.example/purchasing/china-shipments' } })
 }
 describe('request menu authorization', () => {
   beforeEach(() => {
@@ -28,13 +28,13 @@ describe('request menu authorization', () => {
   })
   it('forwards refreshed auth cookies to both the route request and browser', async () => {
     mocks.user.mockImplementationOnce(async (req, res) => {
-      req.cookies.set('sb-test-auth-token', 'refreshed-cookie')
-      res.cookies.set('sb-test-auth-token', 'refreshed-cookie')
+      req.cookies.set('funtastic_session', 'refreshed-cookie')
+      res.cookies.set('funtastic_session', 'refreshed-cookie')
       return { id: 'staff-id' }
     })
     const response = await proxy(request('/purchasing/china-shipments'))
     expect(response.headers.get('x-middleware-request-cookie')).toContain('refreshed-cookie')
-    expect(response.cookies.get('sb-test-auth-token')?.value).toBe('refreshed-cookie')
+    expect(response.cookies.get('funtastic_session')?.value).toBe('refreshed-cookie')
   })
   it('validates identity instead of trusting the mere presence of an auth cookie', async () => {
     mocks.user.mockResolvedValue(null)

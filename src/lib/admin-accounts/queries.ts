@@ -7,12 +7,18 @@ import { cache } from 'react'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { marketplaceConnections, orders, products, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
-import { and, asc, desc, eq, ilike, isNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+
+export const deletedAccountLog = sql`${auditLogs.action} = 'account.deactivate' AND ${auditLogs.metadata}->>'deleted' = 'true'`
 
 export async function listAdmins(): Promise<UserProfile[]> {
   return db
     .select()
     .from(userProfiles)
+    .where(sql`NOT EXISTS (
+      SELECT 1 FROM ${auditLogs}
+      WHERE ${auditLogs.targetId} = ${userProfiles.id} AND ${deletedAccountLog}
+    )`)
     .orderBy(desc(userProfiles.createdAt))
 }
 
@@ -35,51 +41,27 @@ export const getProfile = cache(async (userId: string): Promise<UserProfile | nu
  * Super admins own the marketplace connections/orders; regular admin accounts read/write
  * through that owner id so staff see the same synced orders after logging in.
  */
+const getSharedOperationalOwner = unstable_cache(async (): Promise<string | null> => {
+  // COALESCE evaluates only until an owner is found. A renamed canonical
+  // account must not cause unused order/product scans on every cold request.
+  const [owner] = await db.execute<{ id: string | null }>(sql`
+    SELECT COALESCE(
+      (SELECT ${userProfiles.id} FROM ${userProfiles}
+        WHERE ${userProfiles.deactivatedAt} IS NULL AND (${userProfiles.email} ILIKE ${'admin123%'} OR ${userProfiles.displayName} ILIKE ${'admin123%'})
+        ORDER BY ${userProfiles.createdAt} ASC LIMIT 1),
+      (SELECT ${marketplaceConnections.userId} FROM ${marketplaceConnections} ORDER BY ${marketplaceConnections.createdAt} ASC LIMIT 1),
+      (SELECT ${orders.userId} FROM ${orders} ORDER BY ${orders.createdAt} ASC LIMIT 1),
+      (SELECT ${products.userId} FROM ${products} ORDER BY ${products.createdAt} ASC LIMIT 1)
+    ) AS id
+  `)
+  return owner?.id ?? null
+}, ['shared-operational-workspace-owner-v1'], { revalidate: 60 })
+
 async function resolveWorkspaceUserId(userId: string): Promise<string> {
+  const operationalOwner = await getSharedOperationalOwner()
+  if (operationalOwner) return operationalOwner
+
   const profile = await getProfile(userId)
-
-  // Keep the existing owner precedence, but avoid serial database round trips
-  // on every server-rendered page.
-  const [admin123Rows, connectionRows, orderRows, productRows] = await Promise.all([
-    db
-      .select({ id: userProfiles.id })
-      .from(userProfiles)
-      .where(and(
-        isNull(userProfiles.deactivatedAt),
-        or(
-          ilike(userProfiles.email, 'admin123%'),
-          ilike(userProfiles.displayName, 'admin123%'),
-        ),
-      ))
-      .orderBy(asc(userProfiles.createdAt))
-      .limit(1),
-    db
-      .select({ id: marketplaceConnections.userId })
-      .from(marketplaceConnections)
-      .orderBy(asc(marketplaceConnections.createdAt))
-      .limit(1),
-    db
-      .select({ id: orders.userId })
-      .from(orders)
-      .orderBy(asc(orders.createdAt))
-      .limit(1),
-    db
-      .select({ id: products.userId })
-      .from(products)
-      .orderBy(asc(products.createdAt))
-      .limit(1),
-  ])
-
-  const admin123Owner = admin123Rows[0]
-  const connectionOwner = connectionRows[0]
-  const orderOwner = orderRows[0]
-  const productOwner = productRows[0]
-
-  if (admin123Owner?.id) return admin123Owner.id
-  if (connectionOwner?.id) return connectionOwner.id
-  if (orderOwner?.id) return orderOwner.id
-  if (productOwner?.id) return productOwner.id
-
   if (profile?.createdBy) return profile.createdBy
 
   if (profile?.role === 'super_admin') return userId
@@ -94,16 +76,9 @@ async function resolveWorkspaceUserId(userId: string): Promise<string> {
   return owner?.id ?? userId
 }
 
-// The workspace owner changes rarely, but resolving it used four database
-// lookups on every route transition. Keep operational data uncached while
-// sharing this stable routing decision for a short time across requests.
-const getCachedWorkspaceUserId = unstable_cache(
-  resolveWorkspaceUserId,
-  ['workspace-user-id'],
-  { revalidate: 60 },
-)
-
-export const getWorkspaceUserId = cache((userId: string) => getCachedWorkspaceUserId(userId))
+// Only the shared ownership decision is cached across accounts. Permissions
+// and operational stock/order data retain their existing freshness checks.
+export const getWorkspaceUserId = cache(resolveWorkspaceUserId)
 
 export async function getProfileByEmail(email: string): Promise<UserProfile | null> {
   const [row] = await db

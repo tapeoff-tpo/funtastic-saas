@@ -3,12 +3,6 @@ import { db } from '@/lib/db'
 import { getProfile } from '@/lib/admin-accounts/queries'
 import { calculateCnyCostKrw } from './cny-cost'
 import {
-  buildNewProductItemMasterData,
-  shouldSyncNewProductToItemMaster,
-  type NewProductItemMasterStage,
-  type NewProductItemMasterValues,
-} from './item-master-sync'
-import {
   normalizeNewProductOptionDetails,
   type NewProductOptionDetail,
 } from './option-details'
@@ -18,6 +12,8 @@ import {
   type DaouWorksImportItem,
   type DaouWorksSourceData,
 } from './daou-works-import'
+import { createHash } from 'node:crypto'
+import { getR2Object, newProductObjectKey, putR2Object } from '@/lib/storage/r2'
 
 export type { NewProductOptionDetail } from './option-details'
 
@@ -99,6 +95,7 @@ export type NewProductItem = {
   ownerOperatorId: string | null
   ownerName: string | null
   sourcingItemId: string | null
+  linkedPurchaseId?: string | null
   sampleCode: string | null
   productName: string
   productOption: string | null
@@ -417,7 +414,7 @@ async function createNewProductWorkflowSchema() {
       product_name text NOT NULL,
       product_option text,
       china_unit_price_cny numeric(14, 2),
-      unit_shipping_cny numeric(14, 2),
+      unit_shipping_cny numeric(18, 6),
       exchange_rate_krw numeric(14, 4),
       calculated_cost_krw integer,
       domestic_sale_url text,
@@ -471,7 +468,7 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS sourcing_item_id uuid,
       ADD COLUMN IF NOT EXISTS product_option text,
       ADD COLUMN IF NOT EXISTS china_unit_price_cny numeric(14, 2),
-      ADD COLUMN IF NOT EXISTS unit_shipping_cny numeric(14, 2),
+      ADD COLUMN IF NOT EXISTS unit_shipping_cny numeric(18, 6),
       ADD COLUMN IF NOT EXISTS exchange_rate_krw numeric(14, 4),
       ADD COLUMN IF NOT EXISTS calculated_cost_krw integer,
       ADD COLUMN IF NOT EXISTS domestic_sale_url text,
@@ -495,6 +492,17 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS notice_food_safety text,
       ADD COLUMN IF NOT EXISTS notice_components text,
       ADD COLUMN IF NOT EXISTS notice_special_notes text
+  `)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'new_product_workflow_items'
+          AND column_name = 'unit_shipping_cny' AND numeric_scale < 6
+      ) THEN
+        ALTER TABLE new_product_workflow_items ALTER COLUMN unit_shipping_cny TYPE numeric(18, 6);
+      END IF;
+    END $$
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_owner_updated_idx
@@ -555,6 +563,8 @@ async function createNewProductWorkflowSchema() {
     CREATE INDEX IF NOT EXISTS new_product_workflow_attachments_item_kind_idx
     ON new_product_workflow_attachments(item_id, kind, created_at)
   `)
+  await db.execute(sql`ALTER TABLE new_product_workflow_attachments ADD COLUMN IF NOT EXISTS object_key text`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_attachments ALTER COLUMN file_data DROP NOT NULL`)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_preferences (
       user_id uuid PRIMARY KEY,
@@ -788,6 +798,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       item.owner_operator_id AS "ownerOperatorId",
       operator.display_name AS "ownerName",
       item.sourcing_item_id AS "sourcingItemId",
+      item.metadata->'purchaseLink'->>'requestId' AS "linkedPurchaseId",
       item.sample_code AS "sampleCode",
       item.product_name AS "productName",
       item.product_option AS "productOption",
@@ -853,7 +864,8 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
           'createdAt', attachment.created_at::text
         ) ORDER BY attachment.created_at)
         FROM new_product_workflow_attachments attachment
-        WHERE attachment.item_id = item.id
+        WHERE attachment.item_id = item.id AND attachment.user_id = item.user_id
+          AND NOT (COALESCE(item.metadata->'worksArchivedAttachmentIds', '[]'::jsonb) ? attachment.id::text)
       ), '[]'::jsonb) AS attachments,
       COALESCE((
         SELECT jsonb_agg(history_row ORDER BY history_row."changedAt" DESC)
@@ -987,7 +999,8 @@ export async function getNewProductWorkflow(userId: string) {
             'createdAt', attachment.created_at::text
           ) ORDER BY attachment.created_at)
           FROM new_product_workflow_attachments attachment
-          WHERE attachment.item_id = item.id
+          WHERE attachment.item_id = item.id AND attachment.user_id = item.user_id
+            AND NOT (COALESCE(item.metadata->'worksArchivedAttachmentIds', '[]'::jsonb) ? attachment.id::text)
         ), '[]'::jsonb) AS attachments,
         COALESCE((
           SELECT jsonb_agg(history_row ORDER BY history_row."changedAt" DESC)
@@ -1490,7 +1503,7 @@ export async function createNewProduct(input: {
   const estimatedCost = values.estimatedCost ?? calculatedCostKrw
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
-    const stage = await assertStage(tx, input.userId, input.values.stageId)
+    await assertStage(tx, input.userId, input.values.stageId)
     await assertNewProductSampleCodeAvailable({
       tx,
       userId: input.userId,
@@ -1554,12 +1567,7 @@ export async function createNewProduct(input: {
         '신상품 등록', ${input.requestedByUserId}::uuid
       )
     `)
-    const itemMasterSync = await syncNewProductToItemMaster(tx, {
-      userId: input.userId,
-      itemId: created!.id,
-      stage,
-      values: { ...values, calculatedCostKrw },
-    })
+    const itemMasterSync: ItemMasterSyncResult = { status: 'not_required' }
     return { id: created!.id, productNumber: nextNumber, itemMasterSync }
   })
 }
@@ -1580,7 +1588,7 @@ export async function updateNewProduct(input: {
       FOR UPDATE
     `))
     if (!current) throw new Error('신상품을 찾을 수 없습니다.')
-    const stage = await assertStage(tx, input.userId, input.values.stageId)
+    await assertStage(tx, input.userId, input.values.stageId)
     await assertNewProductSampleCodeAvailable({
       tx,
       userId: input.userId,
@@ -1667,12 +1675,7 @@ export async function updateNewProduct(input: {
         note: '상품 상세에서 단계 변경',
       })
     }
-    return syncNewProductToItemMaster(tx, {
-      userId: input.userId,
-      itemId: input.itemId,
-      stage,
-      values: { ...values, calculatedCostKrw },
-    })
+    return { status: 'not_required' as const }
   })
 }
 
@@ -1732,7 +1735,7 @@ export async function moveNewProducts(input: {
   if (itemIds.length === 0) return { moved: 0 }
 
   return db.transaction(async (tx) => {
-    const stage = await assertStage(tx, input.userId, input.stageId)
+    await assertStage(tx, input.userId, input.stageId)
     const currentRows = resultRows<{ id: string; stageId: string }>(await tx.execute(sql`
       SELECT id, stage_id AS "stageId"
       FROM new_product_workflow_items
@@ -1741,7 +1744,6 @@ export async function moveNewProducts(input: {
       FOR UPDATE
     `))
     if (currentRows.length !== itemIds.length) throw new Error('이동할 신상품을 찾을 수 없습니다.')
-    const syncResults: ItemMasterSyncResult[] = []
     for (const item of currentRows) {
       if (item.stageId !== input.stageId) {
         await tx.execute(sql`
@@ -1758,16 +1760,11 @@ export async function moveNewProducts(input: {
           note: input.note ?? (currentRows.length > 1 ? '일괄 단계 변경' : '목록에서 단계 변경'),
         })
       }
-      syncResults.push(await syncStoredNewProductToItemMaster(tx, {
-        userId: input.userId,
-        itemId: item.id,
-        stage,
-      }))
     }
     return {
       moved: currentRows.filter((item) => item.stageId !== input.stageId).length,
-      itemMasterSynced: syncResults.filter((result) => result.status === 'created' || result.status === 'updated').length,
-      itemMasterPendingCodes: syncResults.filter((result) => result.status === 'pending_code').length,
+      itemMasterSynced: 0,
+      itemMasterPendingCodes: 0,
     }
   })
 }
@@ -1898,14 +1895,17 @@ export async function addNewProductAttachment(input: {
     LIMIT 1
   `))
   if (!item) throw new Error('첨부할 신상품을 찾을 수 없습니다.')
-  const base64 = Buffer.from(input.fileBuffer).toString('base64')
+  const bytes = Buffer.from(input.fileBuffer)
+  const id = crypto.randomUUID()
+  const objectKey = newProductObjectKey(input.userId, 'attachments', id, createHash('sha256').update(bytes).digest('hex'))
+  await putR2Object(objectKey, bytes, input.contentType)
   const [created] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO new_product_workflow_attachments (
-      user_id, item_id, kind, file_name, content_type, file_size, file_data, uploaded_by_user_id
+      id, user_id, item_id, kind, file_name, content_type, file_size, file_data, object_key, uploaded_by_user_id
     )
     SELECT
-      ${input.userId}::uuid, item.id, ${input.kind}, ${input.fileName}, ${input.contentType},
-      ${input.fileBuffer.byteLength}, decode(${base64}, 'base64'), ${input.requestedByUserId}::uuid
+      ${id}::uuid, ${input.userId}::uuid, item.id, ${input.kind}, ${input.fileName}, ${input.contentType},
+      ${input.fileBuffer.byteLength}, NULL, ${objectKey}, ${input.requestedByUserId}::uuid
     FROM new_product_workflow_items item
     WHERE item.id = ${input.itemId}::uuid AND item.user_id = ${input.userId}::uuid
     RETURNING id
@@ -1923,18 +1923,25 @@ export async function getNewProductAttachment(input: { userId: string; requested
   const [attachment] = resultRows<{
     fileName: string
     contentType: string
-    fileDataBase64: string
+    fileDataBase64: string | null
+    objectKey: string | null
   }>(await db.execute(sql`
     SELECT
       attachment.file_name AS "fileName",
       attachment.content_type AS "contentType",
-      encode(attachment.file_data, 'base64') AS "fileDataBase64"
+      encode(attachment.file_data, 'base64') AS "fileDataBase64",
+      attachment.object_key AS "objectKey"
     FROM new_product_workflow_attachments attachment
     JOIN new_product_workflow_items item ON item.id = attachment.item_id
     WHERE attachment.id = ${input.attachmentId}::uuid
       AND attachment.user_id = ${input.userId}::uuid
   `))
-  return attachment ?? null
+  if (!attachment) return null
+  if (attachment.objectKey) {
+    const response = await getR2Object(attachment.objectKey)
+    return { ...attachment, fileDataBase64: Buffer.from(await response.arrayBuffer()).toString('base64') }
+  }
+  return attachment
 }
 
 export async function deleteNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
@@ -1981,89 +1988,6 @@ async function assertStage(tx: WorkflowTransaction, userId: string, stageId: str
   }>(result)
   if (!stage) throw new Error('선택한 단계를 찾을 수 없습니다.')
   return stage
-}
-
-async function syncStoredNewProductToItemMaster(
-  tx: WorkflowTransaction,
-  input: { userId: string; itemId: string; stage: NewProductItemMasterStage },
-) {
-  const [values] = resultRows<NewProductItemMasterValues>(await tx.execute(sql`
-    SELECT
-      product_name AS "productName",
-      registered_product_name AS "registeredProductName",
-      english_name AS "englishName",
-      source_url AS "sourceUrl",
-      product_option AS "productOption",
-      sabangnet_code AS "sabangnetCode",
-      purchase_reference_notes AS "purchaseReferenceNotes",
-      china_unit_price_cny::float8 AS "chinaUnitPriceCny",
-      calculated_cost_krw AS "calculatedCostKrw",
-      previous_cost_krw AS "previousCostKrw",
-      exchange_rate_krw::float8 AS "exchangeRateKrw",
-      b2b_option_surcharge AS "b2bOptionSurcharge",
-      b2c_option_surcharge AS "b2cOptionSurcharge",
-      b2b_price AS "b2bPrice",
-      b2c_price AS "b2cPrice",
-      notice_material AS "noticeMaterial",
-      notice_size AS "noticeSize",
-      notice_manufacturer AS "noticeManufacturer",
-      notice_weight AS "noticeWeight",
-      notice_country AS "noticeCountry",
-      notice_capacity AS "noticeCapacity",
-      notice_food_safety AS "noticeFoodSafety",
-      notice_components AS "noticeComponents",
-      notice_special_notes AS "noticeSpecialNotes"
-    FROM new_product_workflow_items
-    WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
-  `))
-  if (!values) throw new Error('품목에 반영할 신상품을 찾을 수 없습니다.')
-  return syncNewProductToItemMaster(tx, { ...input, values })
-}
-
-async function syncNewProductToItemMaster(
-  tx: WorkflowTransaction,
-  input: {
-    userId: string
-    itemId: string
-    stage: NewProductItemMasterStage
-    values: NewProductItemMasterValues
-  },
-): Promise<ItemMasterSyncResult> {
-  if (!shouldSyncNewProductToItemMaster(input.stage)) return { status: 'not_required' }
-  const code = input.values.sabangnetCode?.trim()
-  if (!code) return { status: 'pending_code' }
-
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-item-master:${input.userId}:${code}`}))`)
-  const [existing] = resultRows<{ id: string }>(await tx.execute(sql`
-    SELECT id FROM products
-    WHERE user_id = ${input.userId}::uuid AND internal_sku = ${code}
-  `))
-  const itemData = buildNewProductItemMasterData(input.values)
-  const itemName = input.values.registeredProductName?.trim() || input.values.productName.trim()
-  const basePrice = input.values.b2cPrice ?? input.values.b2bPrice ?? 0
-  const metadata = {
-    esa009m: itemData,
-    newProductWorkflow: { itemId: input.itemId, syncedAt: new Date().toISOString() },
-  }
-  const [product] = resultRows<{ id: string }>(await tx.execute(sql`
-    INSERT INTO products (
-      user_id, internal_sku, name, base_price, cost_price, status, metadata, updated_at
-    ) VALUES (
-      ${input.userId}::uuid, ${code}, ${itemName}, ${basePrice}, ${input.values.calculatedCostKrw},
-      'draft', ${JSON.stringify(metadata)}::jsonb, now()
-    )
-    ON CONFLICT (user_id, internal_sku) DO UPDATE SET
-      name = EXCLUDED.name,
-      base_price = CASE WHEN EXCLUDED.base_price > 0 THEN EXCLUDED.base_price ELSE products.base_price END,
-      cost_price = COALESCE(EXCLUDED.cost_price, products.cost_price),
-      metadata = COALESCE(products.metadata, '{}'::jsonb) || jsonb_build_object(
-        'esa009m', COALESCE(products.metadata -> 'esa009m', '{}'::jsonb) || (EXCLUDED.metadata -> 'esa009m'),
-        'newProductWorkflow', EXCLUDED.metadata -> 'newProductWorkflow'
-      ),
-      updated_at = now()
-    RETURNING id
-  `))
-  return { status: existing ? 'updated' : 'created', productId: product!.id }
 }
 
 async function insertStageHistory(

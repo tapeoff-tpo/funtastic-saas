@@ -11,6 +11,27 @@ const LANGUAGE_EVENT = 'funtastic-purchasing-language-change'
 const EXACT_TRANSLATIONS: Record<string, string> = {
   ...APP_CHROME_KO_TO_ZH,
   '동일 상품 박스': '同款商品箱',
+  '중국출고 선택': '选择中国出库单',
+  '중국출고요청 목록': '中国出库申请列表',
+  '목록으로': '返回列表',
+  '조회 기간': '查询期间',
+  '조회 시작일': '查询开始日期',
+  '조회 종료일': '查询结束日期',
+  '1개월': '1个月',
+  '3개월': '3个月',
+  '6개월': '6个月',
+  '1년': '1年',
+  '날짜 지정': '指定日期',
+  '조회': '查询',
+  '요청일': '申请日期',
+  '상품 수': '商品种数',
+  '포장수량': '装箱数量',
+  '선택한 기간에 중국출고요청이 없습니다.': '所选期间没有中国出库申请。',
+  '출고 건 선택': '选择出库单',
+  '인보이스·패킹리스트 작성': '编制发票和装箱单',
+  '출고작업을 찾을 수 없습니다.': '找不到出库作业。',
+  '등록된 중국출고 요청이 없습니다.': '暂无中国出库申请。',
+  '입력한 문서 내용을 닫고 다른 출고 건으로 이동할까요?': '关闭当前输入的单证并切换到其他出库单吗？',
   '혼합박스': '混装箱',
   '혼합박스 ·': '混装箱 ·',
   '기타 박스': '其他箱子',
@@ -49,6 +70,13 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '박스 쉽먼트 바로 인쇄': '直接打印装箱标签',
   '파렛트 쉽먼트 바로 인쇄': '直接打印托盘标签',
   '바로 인쇄': '直接打印',
+  '파렛트 쉽먼트': '托盘货运单',
+  '쉽먼트 출력': '货运标签输出',
+  '엑셀 작업': 'Excel 作业',
+  '출고 문서': '出库单证',
+  '엑셀로 수정': '通过 Excel 修改',
+  '작업용 엑셀 수정': '修改作业 Excel',
+  '수정한 작업용 엑셀을 검토한 뒤 반영합니다.': '检查修改后的作业 Excel 后应用。',
   '수량 부족': '数量不足',
   '수량 일치': '数量一致',
   '박스별 적재 상품, 수량, 파렛트 위치, 쉽먼트 인쇄 및 다운로드': '每箱装载商品、数量、托盘位置、货运标签打印及下载',
@@ -76,6 +104,7 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '총 박스 수': '总箱数',
   '박스당 수량': '每箱数量',
   '자동 분할 미리보기': '预览自动拆分',
+  '첫 박스 규격 전체 적용': '将首箱尺寸应用到全部箱',
   '자동 계산': '自动计算',
   '자동 분배': '自动分配',
   '저장하지 않은 박스분할이 있습니다.': '有尚未保存的装箱拆分。',
@@ -91,6 +120,25 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '박스당 수량 기준은 마지막 박스에 잔량을 담고, 총 박스 수 기준은 균등 분할합니다. 저장 전에 박스번호를 수정할 수 있습니다.': '按每箱数量拆分时，剩余数量放入最后一箱；按总箱数拆分时，数量平均分配。保存前可以修改箱号。',
   '검수': '验货',
   '송장·검수': '运单·验货',
+  '스티커 부착 상태': '标签粘贴状态',
+  '미확인': '未确认',
+  '둘 다 미완료': '两种标签均未贴',
+  '품질표시 사전완료': '已贴韩文质量标签',
+  '바코드 사전완료': '已贴条形码',
+  '둘 다 사전완료': '两种标签均已贴',
+  '품질표시사항': '韩文质量标签',
+  '바코드 스티커': '条形码贴纸',
+  '파일 등록': '上传文件',
+  '등록된 파일 없음': '暂无文件',
+  '인쇄': '打印',
+  '품질표시사항 인쇄': '打印韩文质量标签',
+  '바코드 스티커 인쇄': '打印条形码贴纸',
+  '품질표시사항 파일 등록': '上传韩文质量标签',
+  '바코드 스티커 파일 등록': '上传条形码贴纸',
+  '스티커 부착 상태를 선택해주세요.': '请选择标签粘贴状态。',
+  '스티커 자료를 불러오지 못했습니다.': '无法加载标签文件。',
+  '스티커 자료를 저장하지 못했습니다.': '无法保存标签文件。',
+  'PDF 또는 이미지 파일은 4MB 이하로 선택해주세요.': '请选择不超过 4 MB 的 PDF 或图片文件。',
   '운송장번호': '运单号',
   '바이두에서 송장번호 조회': '在百度查询运单号',
   '송장 추가': '添加运单',
@@ -349,6 +397,25 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '추천근거 닫기': '隐藏推荐依据',
   '추천근거': '推荐依据',
   '구매 정보': '采购信息',
+  '구매가격 비교 (元)': '采购价格对比（元）',
+  '표시할 열': '显示列',
+  '기본값 복원': '恢复默认',
+  '입고 창고': '入库仓库',
+  '창고 선택': '选择仓库',
+  '창고 필터': '仓库筛选',
+  '전체 창고': '全部仓库',
+  '구매가격': '采购价格',
+  '가격 비교': '价格对比',
+  '가격 초과': '价格超出',
+  '기존 구매단가': '原采购单价',
+  '기존 개당 배송비': '原单件运费',
+  '신규 구매단가': '新采购单价',
+  '신규 배송비 합계': '新运费合计',
+  '개당 배송비': '单件运费',
+  '단가 차이': '单价差额',
+  '개당 배송비 차이': '单件运费差额',
+  '개당 배송비(元)': '单件运费（元）',
+  '이전에 저장한 배송비 단위를 확인해주세요.': '请确认此前保存的运费单位。',
   '지연 사유': '延迟原因',
   '사유 선택': '选择原因',
   '상세 사유 / 새 구매처': '详细原因 / 新采购渠道',
@@ -578,6 +645,8 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '보이는 상품 전체수량': '显示商品全部数量',
   '입력된 출고수량:': '已输入出库数量：',
   '출고할 재고 위치를 하나 이상 체크해주세요.': '请至少勾选一个要出库的库存位置。',
+  '등록된 출고 창고가 없습니다.': '暂无已登记的出库仓库。',
+  '선택한 창고에 작업 가능한 SaaS 재고가 없습니다.': '所选仓库暂无可操作的 SaaS 库存。',
   '출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.': '勾选至少一个要出库的库存位置后，会显示该仓库的商品和可操作数量。',
   '상품명, 상품코드, 옵션 검색': '按商品名、商品编码、选项搜索',
   '조건에 맞는 작업 가능 재고가 없습니다.': '没有符合条件的可操作库存。',
@@ -601,6 +670,30 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '선택한 상태의 파렛트가 없습니다.': '没有所选状态的托盘。',
   '사용 파렛트': '已使用托盘',
   '샘플': '样品',
+  '출고요청 불러오는 중': '正在加载出库申请',
+  '상품명(한국어)': '商品名(韩文)',
+  '상품명(중국어)': '商品名(中文)',
+  '중국어 상품명 수정': '编辑中文商品名',
+  '총중량(kg)': '毛重(kg)',
+  '총중량(kg):': '毛重(kg)：',
+  '중량 저장': '保存重量',
+  '총중량을 저장했습니다.': '已保存毛重。',
+  '총중량은 0보다 큰 숫자로 입력해주세요.': '毛重必须大于零。',
+  '박스 합치기': '合并箱子',
+  '선택 박스 합치기': '合并所选箱子',
+  '적용 박스:': '采用箱号：',
+  '큰 박스 규격으로 합쳤습니다.': '已按大箱尺寸合并。',
+  '박스·파렛트 변경사항을 먼저 저장해주세요.': '请先保存箱子和托盘的更改。',
+  '최근 입고·재고등록일 시작': '最近入库/库存登记起始日期',
+  '최근 입고·재고등록일 종료': '最近入库/库存登记截止日期',
+  '최근 입고·재고등록일:': '最近入库/库存登记日期：',
+  '입고일 시작': '入库起始日期',
+  '입고일 종료': '入库截止日期',
+  '기간 초기화': '重置日期',
+  '재고 불러오는 중': '正在加载库存',
+  '재고를 불러오지 못했습니다.': '无法加载库存。',
+  '조회 시작일과 종료일을 확인해주세요.': '请确认查询起止日期。',
+  '파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.': '未分配托盘的箱子将按散箱出库。',
   '품목구분': '商品类别',
   '출고창고': '出库仓库',
   '개는 제품 적재 CBM에서 제외됩니다.': '个未计入产品装载体积。',
@@ -743,6 +836,10 @@ const PHRASE_TRANSLATIONS: Array<[RegExp, string]> = [
   [/^미배정 박스 ([\d,]+)개$/, '未分配箱 $1 个'],
   [/^규격 미입력 박스 ([\d,]+)개는 제품 적재 CBM에서 제외됩니다\.$/, '$1 个未填写尺寸的箱子未计入产品装载体积。'],
   [/^파렛트 (.+) 규격 저장$/, '保存托盘 $1 尺寸'],
+  [/^파렛트 (.+) 총중량\(kg\)$/, '托盘 $1 毛重(kg)'],
+  [/^박스 (.+) 총중량\(kg\)$/, '箱 $1 毛重(kg)'],
+  [/^(.+) 합치기 선택$/, '选择合并 $1'],
+  [/^낱박스 ([\d,]+)개$/, '散箱 $1 个'],
   [/^파렛트 (.+) 가로\(cm\)$/, '托盘 $1 长(cm)'],
   [/^파렛트 (.+) 세로\(cm\)$/, '托盘 $1 宽(cm)'],
   [/^파렛트 (.+) 높이\(cm\)$/, '托盘 $1 高(cm)'],
@@ -1023,9 +1120,9 @@ function getTranslationRoots() {
   return roots.filter((root, index) => !roots.some((candidate, candidateIndex) => candidateIndex !== index && candidate.contains(root)))
 }
 
-function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
+function applyLanguage(root: Node, language: PurchasingLanguage) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const textNodes: Text[] = []
+  const textNodes: Text[] = root.nodeType === Node.TEXT_NODE ? [root as Text] : []
   while (walker.nextNode()) {
     textNodes.push(walker.currentNode as Text)
   }
@@ -1042,7 +1139,7 @@ function applyLanguage(root: ParentNode, language: PurchasingLanguage) {
 
   const elements = root instanceof Element
     ? [root, ...Array.from(root.querySelectorAll('*'))]
-    : Array.from(root.querySelectorAll('*'))
+    : root instanceof Document ? Array.from(root.querySelectorAll('*')) : []
 
   for (const element of elements) {
     if (shouldSkip(element)) continue
@@ -1109,21 +1206,44 @@ export function PurchasingLanguageSwitcher() {
 
     sync()
     let syncTimer: number | undefined
-    const scheduleSync = () => {
+    const dirtyNodes = new Set<Node>()
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'childList') {
+          for (const node of record.addedNodes) dirtyNodes.add(node)
+        } else dirtyNodes.add(record.target)
+      }
+      if (!dirtyNodes.size) return
       if (syncTimer !== undefined) return
       syncTimer = window.setTimeout(() => {
         syncTimer = undefined
-        sync()
+        const changed = [...dirtyNodes].filter((node) => node.isConnected)
+        const changedSet = new Set(changed)
+        dirtyNodes.clear()
+        // Translation writes are synchronous. Disconnect while applying them so
+        // our own text/attribute changes never schedule another full scan.
+        observer.disconnect()
+        try {
+          for (const node of changed) {
+            let ancestor = node.parentNode
+            while (ancestor && !changedSet.has(ancestor)) ancestor = ancestor.parentNode
+            if (ancestor) continue
+            const element = node instanceof Element ? node : node.parentElement
+            const scopes = [GLOBAL_TRANSLATION_SCOPE, EXPLICIT_TRANSLATION_SCOPE, TOAST_TRANSLATION_SCOPE].join(',')
+            if (!element || (!element.closest(scopes) && !element.querySelector(scopes))) continue
+            applyLanguage(node, language)
+          }
+        } finally { observe() }
       }, 0)
-    }
-    const observer = new MutationObserver(scheduleSync)
-    observer.observe(document.body, {
+    })
+    const observe = () => observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: [...ATTRIBUTE_NAMES, 'data-no-translate'],
+      attributeFilter: [...ATTRIBUTE_NAMES, 'data-no-translate', 'data-app-translate', 'data-purchasing-translate', 'data-sonner-toaster', 'role'],
     })
+    observe()
     return () => {
       observer.disconnect()
       if (syncTimer !== undefined) window.clearTimeout(syncTimer)

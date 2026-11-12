@@ -35,7 +35,6 @@ function renderFields(
       dateValue="2026-11-02"
       dateField="outboundExpectedDate"
       dateLabel="구매날짜"
-      purchaseMethod="개인"
       trackingSaveMode={trackingSaveMode}
     />,
   )

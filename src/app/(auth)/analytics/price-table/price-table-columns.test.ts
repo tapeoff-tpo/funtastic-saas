@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findMarketplaceProductIds, type PriceTableDisplayColumn } from './price-table-columns'
+import { getRegistrationMarketplaceColumns, findMarketplaceProductIds, getPriceTableSourceNumber, type PriceTableDisplayColumn } from './price-table-columns'
 
 function column(overrides: Partial<PriceTableDisplayColumn> = {}): PriceTableDisplayColumn {
   return {
@@ -88,4 +88,19 @@ describe('findMarketplaceProductIds', () => {
       productIdKeys: ['스마트스토어 상품코드 4'],
     }))).toEqual([])
   })
+})
+
+it('keeps explicit registration IDs separate from adjacent baseline prices', () => {
+  const columns = getRegistrationMarketplaceColumns()
+  const rawData = { 'B2B 판매가': '1000', '쿠팡 상품번호': 'CP123', '오늘의집 상품번호': 'OH456' }
+  expect(findMarketplaceProductIds(rawData, columns.find(column => column.id === 'b2b')!)).toEqual([])
+  expect(findMarketplaceProductIds(rawData, columns.find(column => column.id === 'coupang')!)).toEqual([{ key: '쿠팡 상품번호', value: 'CP123' }])
+})
+
+
+it('preserves workbook product numbers, including repeats and blank cells', () => {
+  const rows = [{ no: '2' }, { no: '4' }, { no: '4' }, { no: '5' }, {}]
+  expect(rows.map((row) => getPriceTableSourceNumber('상품등록', row))).toEqual(['2', '4', '4', '5', null])
+  expect(getPriceTableSourceNumber('뉴도매', { NO: 4 })).toBe('4')
+  expect(getPriceTableSourceNumber('메인', { NO: '4' })).toBeNull()
 })

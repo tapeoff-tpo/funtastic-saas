@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getProfile } from '@/lib/admin-accounts/queries'
 import { ChangePasswordForm } from '@/app/(auth)/settings/account/change-password-form'

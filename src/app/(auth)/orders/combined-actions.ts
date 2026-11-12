@@ -2,7 +2,7 @@
 
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'

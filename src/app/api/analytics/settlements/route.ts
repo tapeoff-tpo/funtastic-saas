@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { saveSettlementConfirmation, saveSettlementRule } from '@/lib/analytics/settlement-calendar'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const confirmationSchema = z.object({
   type: z.literal('confirmation'), marketplaceId: z.string().min(1).max(50), date: z.string().date(),

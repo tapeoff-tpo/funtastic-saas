@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+  mergeBoxes: vi.fn(),
+  saveWeight: vi.fn(),
+  saveChineseName: vi.fn(),
   addSample: vi.fn(),
   savePalletDimensions: vi.fn(),
   createShipment: vi.fn(),
@@ -29,6 +32,9 @@ vi.mock('next/navigation', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => navigate }))
 vi.mock('../saas-china-actions', () => ({
+  mergeChinaOutboundBoxesAction: mergeBoxes,
+  saveChinaOutboundPackageWeightAction: saveWeight,
+  saveChinaOutboundItemChineseNameAction: saveChineseName,
   addChinaOutboundSampleAction: addSample,
   saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
   addChinaOutboundShipmentItemsAction: addShipmentItems,
@@ -134,7 +140,7 @@ function selectOtherShipment() {
   const assignment = screen.queryByRole('dialog', { name: '파렛트 배정 수정' })
   if (assignment) fireEvent.click(within(assignment).getByRole('button', { name: '닫기' }))
   parkEditor()
-  fireEvent.change(screen.getByLabelText('중국출고요청 선택'), { target: { value: 'b' } })
+  fireEvent.click(screen.queryByRole('button', { name: '출고 B' }) ?? screen.getByRole('button', { name: '목록으로' }))
 }
 
 function editBox(quantity = '3') {
@@ -284,6 +290,7 @@ describe('ChinaShipmentsBoard', () => {
     saveBoxStatuses.mockReset()
     savePalletStatuses.mockReset()
     addShipmentItems.mockReset()
+    mergeBoxes.mockReset(); saveWeight.mockReset(); saveChineseName.mockReset()
     addSample.mockReset()
     savePalletDimensions.mockReset()
     toastError.mockReset()
@@ -330,6 +337,37 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({ shipmentItemId: 'shared-item-id', allocations: [expect.objectContaining({ boxNo: '7', quantity: 10 })] }))
     expect(screen.queryByPlaceholderText('1')).not.toBeInTheDocument()
+  })
+
+  it('applies the first box dimensions to every automatic split and saves them together', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = { ...shipmentA, items: [{ ...shipmentA.items[0], reservedQuantity: 300 }] }
+    renderShipment(detail, 'items')
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('SKU-A 박스당 수량'), { target: { value: '30' } })
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    const apply = dialog.getByRole('button', { name: '첫 박스 규격 전체 적용' })
+    expect(apply).toBeDisabled()
+    const rows = dialog.getAllByRole('row').slice(1)
+    const first = within(rows[0]).getAllByRole('spinbutton')
+    fireEvent.change(first[1], { target: { value: '10' } })
+    fireEvent.change(first[2], { target: { value: '20' } })
+    expect(apply).toBeDisabled()
+    fireEvent.change(first[3], { target: { value: '20' } })
+    fireEvent.click(apply)
+    for (const row of rows) {
+      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['30', '10', '20', '20'])
+      expect(within(row).getByText('0.0040')).toBeInTheDocument()
+    }
+    fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0]).toMatchObject({
+      shipmentItemId: shipmentA.items[0].id,
+      allocations: Array.from({ length: 10 }, (_, index) => ({
+        boxNo: String(index + 1), autoNumber: true, quantity: 30, lengthCm: 10, widthCm: 20, heightCm: 20,
+      })),
+    })
   })
 
   it('opens the selected mixed-box product and does not save or select another product', async () => {
@@ -414,7 +452,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(await screen.findByRole('button', { name: '中文' }))
 
     await waitFor(() => expect(screen.getByText('第1步 · 确认出库品项')).toBeInTheDocument())
-    expect(screen.getByRole('columnheader', { name: '商品名' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '商品名(韩文)' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '实际出库数量' })).toBeInTheDocument()
     expect(screen.getByText('添加出库品项')).toBeInTheDocument()
     expect(screen.getAllByText('SKU-KEEP').length).toBeGreaterThan(0)
@@ -525,13 +563,32 @@ describe('ChinaShipmentsBoard', () => {
     toaster.remove()
   })
 
-  it('keeps new shipment creation available while other requests are in progress', () => {
-    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+  it('keeps new shipment creation available from the request list while other requests are in progress', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
 
     expect(screen.getByRole('button', { name: '새 중국출고요청' })).toBeEnabled()
-    expect(screen.getByRole('option', { name: /출고 A/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /출고 B/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 A' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeInTheDocument()
     expect(screen.queryByText(/새 요청은 만들 수 없습니다/)).not.toBeInTheDocument()
+  })
+
+  it.each(['items', 'boxes', 'pallets', 'summary'] as const)('hides the request list and period filters while working in %s', (stage) => {
+    renderShipment(shipmentA, stage)
+
+    expect(screen.queryByRole('table', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('조회 기간')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '출고 B' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '새 중국출고요청' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '목록으로' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '이름·날짜 수정' })).toBeEnabled()
+  })
+
+  it('opens a request selected from the list', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '출고 B' }))
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items')
   })
 
   it('shows the creation form without opening an existing shipment editor', () => {
@@ -541,6 +598,31 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('button', { name: '요청 닫기' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: '출고 A' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '중국출고 작업 단계' })).not.toBeInTheDocument()
+  })
+
+  it('lists requests as selectable rows and submits custom calendar filters', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
+    expect(screen.getByRole('table', { name: '중국출고요청 목록' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('중국출고요청 선택')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText('조회 시작일'), { target: { value: '2026-09-01' } })
+    fireEvent.change(screen.getByLabelText('조회 종료일'), { target: { value: '2026-09-30' } })
+    fireEvent.click(screen.getByRole('button', { name: '조회' }))
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?period=custom&from=2026-09-01&to=2026-09-30')
+  })
+
+  it('opens a request with the arrival warehouse and item visible while leaving the outbound quantity for the user', () => {
+    const inventoryItems = [
+      { id: 'selected', warehouseCode: '쿠팡창고', sku: 'SKU-1', productName: '입고 품목', optionName: null, onHandQuantity: 20, reservedQuantity: 5, availableQuantity: 15 },
+      { id: 'other', warehouseCode: '대량창고', sku: 'SKU-2', productName: '다른 품목', optionName: null, onHandQuantity: 10, reservedQuantity: 0, availableQuantity: 10 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={inventoryItems} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate initialInventoryId="selected" />)
+
+    expect(screen.getByRole('checkbox', { name: /쿠팡창고/ })).toBeChecked()
+    expect(screen.getByText('입고 품목')).toBeInTheDocument()
+    expect(screen.queryByText('다른 품목')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('이번 출고')).toHaveDisplayValue('')
+    expect(createShipment).not.toHaveBeenCalled()
   })
 
   it('submits a new request while existing requests are still in progress', async () => {
@@ -559,6 +641,35 @@ describe('ChinaShipmentsBoard', () => {
     })))
   })
 
+  it('shows configured stock locations before they have available inventory', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate
+      outboundWarehouses={[
+        { warehouseCode: '중국창고', isDefault: true, hasActiveInventory: false },
+        { warehouseCode: '쿠팡창고', isDefault: false, hasActiveInventory: false },
+        { warehouseCode: '대량창고', isDefault: false, hasActiveInventory: false },
+      ]} />)
+    const warehouses = within(screen.getByRole('group', { name: '출고 재고 위치 선택' }))
+    expect(warehouses.getAllByRole('checkbox')).toHaveLength(3)
+    expect(warehouses.getAllByText('0개')).toHaveLength(3)
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /중국창고/ }))
+    expect(screen.getByText('선택한 창고에 작업 가능한 SaaS 재고가 없습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('spinbutton', { name: '이번 출고' })).not.toBeInTheDocument()
+  })
+
+  it('keeps fully reserved inventory locations visible and lists active warehouses once', () => {
+    const stock = [
+      { ...inventoryItem, availableQuantity: 0, reservedQuantity: 20 },
+      { ...inventoryItem, id: 'second', warehouseCode: '대량창고', availableQuantity: 15 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate
+      outboundWarehouses={[{ warehouseCode: '중국창고', isDefault: true, hasActiveInventory: true }]} />)
+    const warehouses = within(screen.getByRole('group', { name: '출고 재고 위치 선택' }))
+    expect(warehouses.getAllByRole('checkbox')).toHaveLength(2)
+    expect(warehouses.getByRole('checkbox', { name: /중국창고/ })).toBeInTheDocument()
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /대량창고/ }))
+    expect(screen.getByLabelText('이번 출고')).toHaveAttribute('max', '15')
+  })
+
   it('shows only the selected shipment when the server provides another detail', () => {
     const { rerender } = render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="boxes" showCreate={false} />)
 
@@ -568,24 +679,29 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('heading', { name: '출고 B' })).toBeInTheDocument()
     expect(screen.getAllByRole('navigation', { name: '중국출고 작업 단계' })).toHaveLength(1)
     expect(itemEditor('SKU-B').getByPlaceholderText('1')).toHaveValue('')
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('b')
+    expect(screen.queryByRole('table', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '목록으로' })).toBeInTheDocument()
   })
 
-  it('enables pallet download only when a saved nonempty box is assigned to a pallet', () => {
+  it('enables pallet output only when a saved nonempty box is assigned to a pallet', async () => {
     const detail = makeShipmentWithBox()
     const unassigned = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: null })) }
     const { rerender } = renderShipment(unassigned)
-    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '파렛트 쉽먼트 일괄 다운로드' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
+    expect(await screen.findByRole('menuitem', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="pallets" showCreate={false} />)
-    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 쉽먼트' }))
+    expect(await screen.findByRole('menuitem', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
   })
 
   it('shows saved box contents and lets users include empty boxes', () => {
     renderShipment(makeShipmentWithCompletionFilters())
 
-    expect(screen.getByRole('link', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
-    expect(screen.getByRole('link', { name: '파렛트 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=pallets')
+    expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeEnabled()
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '전체 펼치기' }))
@@ -709,6 +825,87 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [], destinationName: '인천' })))
   })
 
+  it('allows loose-box dispatch and shows PLT + BOX totals', () => {
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes.forEach((box) => { box.palletId = null })
+    renderShipment(detail, 'summary')
+    expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
+    expect(screen.getByText('낱박스 1개')).toBeInTheDocument()
+    expect(screen.getAllByText('0 PLT + 1 BOX').length).toBeGreaterThan(0)
+  })
+
+  it('saves a measured gross weight for a box and a pallet', async () => {
+    saveWeight.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
+    fireEvent.change(screen.getByLabelText('파렛트 P1 총중량(kg)'), { target: { value: '52.5' } })
+    fireEvent.click(screen.getByRole('button', { name: '중량 저장' }))
+    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'a', kind: 'pallet', packageId: 'pallet-1', grossWeightKg: 52.5 }))
+    fireEvent.click(screen.getByRole('button', { name: 'BOX-01 박스 상품 펼치기' }))
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 총중량(kg)'), { target: { value: '12.25' } })
+    const input = screen.getByLabelText('박스 BOX-01 총중량(kg)')
+    fireEvent.click(within(input.closest('div')!).getByRole('button', { name: '중량 저장' }))
+    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'a', kind: 'box', packageId: 'box-saved', grossWeightKg: 12.25 }))
+  })
+
+  it('shows Korean and Chinese product names together in the item list and split popup', () => {
+    const detail = { ...shipmentA, items: shipmentA.items.map((item) => ({ ...item, chineseProductName: '水杯' })) }
+    renderShipment(detail, 'items')
+    expect(screen.getByText('水杯')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    expect(within(screen.getByRole('dialog', { name: 'SKU-A 박스분할' })).getByText('水杯')).toBeInTheDocument()
+  })
+
+  it('stores a Chinese name for the selected outbound item only', async () => {
+    saveChineseName.mockResolvedValue({ ok: true })
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: '중국어 상품명 수정' }))
+    fireEvent.change(screen.getByLabelText('SKU-A 中文品名'), { target: { value: '样品杯' } })
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
+    await waitFor(() => expect(saveChineseName).toHaveBeenCalledWith({ shipmentId: 'a', shipmentItemId: 'shared-item-id', chineseProductName: '样品杯' }))
+  })
+
+  it('filters additional stock by inclusive Korea receipt dates and preserves hidden selections', async () => {
+    addShipmentItems.mockResolvedValue({ ok: true })
+    const stock = [
+      { ...inventoryItem, lastReceivedAt: '2026-11-02T15:00:00Z' },
+      { ...inventoryItem, id: 'older', sku: 'OLD-1', productName: '오래된 상품', lastReceivedAt: '2026-11-02T14:59:00Z' },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.change(screen.getAllByLabelText('추가 출고')[1]!, { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('입고일 시작'), { target: { value: '2026-11-03' } })
+    fireEvent.change(screen.getByLabelText('입고일 종료'), { target: { value: '2026-11-03' } })
+    expect(screen.queryByText('오래된 상품')).not.toBeInTheDocument()
+    expect(screen.getByText('새 상품')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
+    await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [{ inventoryId: 'older', quantity: 2 }] }))
+  })
+
+  it('loads current stock only when the existing shipment addition panel is opened', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [inventoryItem] })))
+    try {
+      render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+      expect(fetchSpy).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+      await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
+      expect(fetchSpy).toHaveBeenCalledWith('/api/purchasing/china-shipments/available-stock', { cache: 'no-store' })
+    } finally { fetchSpy.mockRestore() }
+  })
+
+  it('merges selected boxes using the largest physical box as the preview', async () => {
+    mergeBoxes.mockResolvedValue({ ok: true })
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    detail.boxes[0] = { ...detail.boxes[0]!, lengthCm: 50, widthCm: 40, heightCm: 30 }
+    detail.boxes[1] = { ...detail.boxes[1]!, lengthCm: 10, widthCm: 20, heightCm: 30 }
+    renderShipment(detail)
+    fireEvent.click(screen.getByRole('button', { name: '박스 합치기' }))
+    fireEvent.click(screen.getByLabelText('BOX-01 합치기 선택'))
+    fireEvent.click(screen.getByLabelText('BOX-02 합치기 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스 합치기' }))
+    await waitFor(() => expect(mergeBoxes).toHaveBeenCalledWith({ shipmentId: 'a', boxIds: ['box-saved', 'box-shared'] }))
+  })
+
   it('offers direct dispatch and removes cancellation and ready buttons', () => {
     renderShipment(makeFullyPackedInProgressShipment(), 'summary')
     expect(screen.queryByRole('button', { name: '포장완료' })).not.toBeInTheDocument()
@@ -782,11 +979,13 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('button', { name: '박스 전체 저장' })).not.toBeInTheDocument()
   })
 
-  it('opens label printing in a separate tab without discarding drafts', () => {
+  it('opens label printing in a separate tab without discarding drafts', async () => {
     renderShipment(makeShipmentWithBox())
-    const link = screen.getByRole('link', { name: '박스 쉽먼트 바로 인쇄' })
+    fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
+    const link = await screen.findByRole('menuitem', { name: '박스 쉽먼트 바로 인쇄' })
     expect(link).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes&format=print')
     expect(link).toHaveAttribute('target', '_blank')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: '전체 펼치기' }))
     expect(screen.getByRole('link', { name: 'A-01 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-1&format=print')
   })
@@ -827,7 +1026,8 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits.mock.calls.map(([input]) => input.shipmentItemId).sort()).toEqual(['item-1', 'item-2'])
   })
 
-  it('does not bulk-save conflicting dimensions for the same shared box', () => {
+  it('allows shared-box drafts to save with server-side largest-box sizing', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithSharedBoxDimensions())
     fireEvent.change(itemEditor('SHARED-01').getByDisplayValue('10'), { target: { value: '11' } })
     fireEvent.change(itemEditor('SHARED-02').getByDisplayValue('10'), { target: { value: '12' } })
@@ -835,8 +1035,8 @@ describe('ChinaShipmentsBoard', () => {
     parkEditor()
     fireEvent.click(screen.getByRole('button', { name: '전체 저장' }))
 
-    expect(saveBoxSplits).not.toHaveBeenCalled()
-    expect(toastError).toHaveBeenCalledWith('COMMON-1 박스에 서로 다른 규격이 입력돼 있습니다. 규격을 일치시킨 뒤 저장해주세요.')
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledTimes(2))
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it('keeps only failed selected drafts checked after a partial batch save', async () => {
@@ -873,7 +1073,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(itemEditor('SKU-A').getByPlaceholderText('1')).toHaveValue('')
     selectOtherShipment()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items')
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
     expect(saveBoxSplits).not.toHaveBeenCalled()
   })
 
@@ -899,7 +1099,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.change(boxNumber, { target: { value: '' } })
     selectOtherShipment()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items')
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
   })
 
   it('asks before switching a shipment with an unsaved box and keeps the draft when continuing', () => {
@@ -913,7 +1113,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '계속 작업' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('heading', { name: '출고 A' })).toBeInTheDocument()
     expect(itemEditor('SKU-A').getByPlaceholderText('1')).toHaveValue('1')
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
     expect(saveBoxSplits).not.toHaveBeenCalled()
@@ -928,7 +1128,7 @@ describe('ChinaShipmentsBoard', () => {
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장하지 않고 이동' }))
     expect(saveBoxSplits).not.toHaveBeenCalled()
-    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items')
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
   })
 
   it('waits for the box save response before proceeding and preserves the draft on failure', async () => {
@@ -944,14 +1144,14 @@ describe('ChinaShipmentsBoard', () => {
       shipmentItemId: 'shared-item-id',
       allocations: [{ boxNo: '1', quantity: 4, lengthCm: null, widthCm: null, heightCm: null }],
     })))
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('heading', { name: '출고 A' })).toBeInTheDocument()
     expect(navigate).not.toHaveBeenCalled()
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: '저장하지 않고 이동' })).toBeDisabled()
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' })).toBeDisabled()
 
     await act(async () => { finishSave({ ok: false, error: '저장 실패' }) })
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('heading', { name: '출고 A' })).toBeInTheDocument()
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(4)
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -966,7 +1166,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(navigate).not.toHaveBeenCalled()
 
     await act(async () => { finishSave({ ok: true }) })
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(saveBoxSplits).toHaveBeenCalledTimes(1)
   })
 
@@ -980,7 +1180,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(navigate).not.toHaveBeenCalled()
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(4)
-    expect(screen.getByLabelText('중국출고요청 선택')).toHaveValue('a')
+    expect(screen.getByRole('heading', { name: '출고 A' })).toBeInTheDocument()
   })
 
   it('asks before switching when shipment name or date is edited', () => {
@@ -1005,7 +1205,7 @@ describe('ChinaShipmentsBoard', () => {
     selectOtherShipment()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(updateShipment).toHaveBeenCalledWith({ shipmentId: 'a', displayName: '수정된 이름', plannedOutboundDate: '2026-10-21' })
   })
 
@@ -1028,7 +1228,7 @@ describe('ChinaShipmentsBoard', () => {
     selectOtherShipment()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(savePalletAssignments).toHaveBeenCalledWith({ shipmentId: 'a', assignments: [{ boxNo: 'A-01', palletNo: null }] })
   })
 
@@ -1046,7 +1246,7 @@ describe('ChinaShipmentsBoard', () => {
 
     selectOtherShipment()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(savePalletAssignments).toHaveBeenCalledTimes(2)
     expect(savePalletAssignments).toHaveBeenNthCalledWith(2, { shipmentId: 'a', assignments: [{ boxNo: 'BOX-02', palletNo: 'P4' }] })
   })
@@ -1212,7 +1412,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(navigate).not.toHaveBeenCalled()
     expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({ shipmentItemId: 'item-2', allocations: [expect.objectContaining({ quantity: 4 })] }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-1')).toHaveLength(1)
     expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-2')).toHaveLength(2)
   })
@@ -1232,7 +1432,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(navigate).not.toHaveBeenCalled()
     expect(addShipmentItems).toHaveBeenCalledTimes(1)
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(addShipmentItems).toHaveBeenCalledTimes(1)
     expect(updateShipment).toHaveBeenCalledTimes(2)
   })
@@ -1242,13 +1442,17 @@ describe('ChinaShipmentsBoard', () => {
     try {
       renderShipment()
       const file = new File(['workbook'], '작성중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
+      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
       selectOtherShipment()
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
       await waitFor(() => expect(toastError).toHaveBeenCalled())
       expect(fetchSpy).not.toHaveBeenCalled()
       expect(navigate).not.toHaveBeenCalled()
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       expect(screen.getByText('작성중.xlsx')).toBeInTheDocument()
     } finally {
       fetchSpy.mockRestore()
@@ -1263,12 +1467,15 @@ describe('ChinaShipmentsBoard', () => {
     try {
       renderShipment()
       const file = new File(['workbook'], '검토중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
       fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
       expect(await screen.findByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
 
+      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
       selectOtherShipment()
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
       expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
       expect(fetchSpy).toHaveBeenCalledTimes(1)
       expect(navigate).not.toHaveBeenCalled()
@@ -1310,7 +1517,7 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment()
     editBox()
     fireEvent.click(screen.getByRole('button', { name: '박스분할 저장' }))
-    expect(screen.getByLabelText('중국출고요청 선택')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '목록으로' })).toBeDisabled()
     selectOtherShipment()
     expect(navigate).not.toHaveBeenCalled()
     await act(async () => { finishSave({ ok: true }) })
@@ -1328,13 +1535,25 @@ describe('ChinaShipmentsBoard', () => {
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
   })
 
-  it('shows compact workbook controls in the top actions for every work stage', () => {
+  it('keeps workbook editing controls inside the editor dialog', () => {
     renderShipment(shipmentA, 'items')
 
     expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀 검토' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
+    expect(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).toBeInTheDocument()
     expect(screen.getByLabelText('엑셀 선택')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '엑셀 검토' })).toBeDisabled()
     expect(screen.queryByText('현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.')).not.toBeInTheDocument()
+  })
+
+  it('keeps workbook download available after dispatch without offering edits', () => {
+    renderShipment({ ...shipmentA, shipment: { ...shipmentA.shipment, status: 'dispatched' } }, 'items')
+
+    expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀로 수정' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
   })
 
   it('warns on browser unload only while a box draft is unsaved', () => {

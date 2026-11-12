@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PURCHASE_ARRIVAL_WAREHOUSES } from '@/lib/purchasing/purchase-arrival-warehouse'
 import {
   PURCHASE_PAYMENT_STATUSES,
   PURCHASE_PAYMENT_STATUS_LABELS,
@@ -1121,63 +1122,6 @@ export function CompletedOutboundDateFilter({
         {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
         선택 날짜 전체 삭제
       </Button>
-    </div>
-  )
-}
-
-const PURCHASE_BUYERS = [
-  { code: '1', name: '한상철' },
-  { code: '2', name: '김기환' },
-  { code: '3', name: '최종석' },
-  { code: '4', name: '오지은' },
-  { code: '5', name: '김소희' },
-]
-
-export function PurchaseBulkBuyerApply() {
-  const router = useRouter()
-  const context = useBulkSelection()
-  const [buyerCode, setBuyerCode] = useState('4')
-  const [message, setMessage] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-  const selectedCount = context.selectedIds.size
-  const targetCount = selectedCount || context.ids.length
-
-  function apply() {
-    const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
-    if (ids.length === 0) return
-    setMessage(null)
-    startTransition(async () => {
-      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, buyerCode }),
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setMessage(body.error ?? '담당자 적용 실패')
-        return
-      }
-      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
-      router.refresh()
-    })
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select
-        value={buyerCode}
-        onChange={(event) => setBuyerCode(event.target.value)}
-        className="h-7 rounded-md border border-input bg-background px-2 text-xs"
-      >
-        {PURCHASE_BUYERS.map((buyer) => (
-          <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
-        ))}
-      </select>
-      <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
-        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-        담당자 전체적용
-      </Button>
-      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
     </div>
   )
 }
@@ -2323,10 +2267,14 @@ export function PurchaseStatusButton({
   id,
   nextStatus,
   saasChinaMode = false,
+  arrivalInventoryId,
+  canOpenChinaShipments = true,
 }: {
   id: string
   nextStatus: PurchaseRequestStatus | null
   saasChinaMode?: boolean
+  arrivalInventoryId?: string | null
+  canOpenChinaShipments?: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -2334,16 +2282,17 @@ export function PurchaseStatusButton({
   if (!nextStatus) return null
 
   if (saasChinaMode && (nextStatus === 'outbound_requested' || nextStatus === 'completed')) {
+    if (!canOpenChinaShipments) return null
+    const href = nextStatus === 'outbound_requested' && arrivalInventoryId
+      ? `/purchasing/china-shipments?create=1&inventoryId=${encodeURIComponent(arrivalInventoryId)}`
+      : '/purchasing/china-shipments'
     return (
-      <div className="space-y-1">
         <Link
-          href="/purchasing/china-shipments"
+          href={href}
           className="inline-flex h-7 items-center justify-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
         >
-          중국출고에서 작업
+          {nextStatus === 'outbound_requested' && arrivalInventoryId ? '중국출고요청' : '중국출고에서 작업'}
         </Link>
-        <p className="text-[11px] leading-tight text-muted-foreground">기존 중국출고 작업에서 처리</p>
-      </div>
     )
   }
 
@@ -2369,6 +2318,40 @@ export function PurchaseStatusButton({
       {PURCHASE_REQUEST_STATUS_LABELS[nextStatus]}로 이동
     </Button>
   )
+}
+
+export function PurchaseArrivalWarehouseField({ id, warehouse }: { id: string; warehouse?: string }) {
+  const router = useRouter()
+  const [selected, setSelected] = useState(warehouse ?? '')
+  const [pending, startTransition] = useTransition()
+
+  return <select aria-label="입고 창고" value={selected} disabled={pending}
+    className="h-7 min-w-32 whitespace-nowrap rounded-md border border-input bg-background pl-2 pr-7 text-xs"
+    onChange={(event) => {
+      const next = event.target.value
+      const previous = selected
+      setSelected(next)
+      startTransition(async () => {
+        try {
+          const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ arrivalWarehouseCode: next }),
+          })
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}))
+            throw new Error(body.error ?? '입고 창고를 저장하지 못했습니다.')
+          }
+          router.refresh()
+        } catch (error) {
+          setSelected(previous)
+          toast.error(error instanceof Error ? error.message : '입고 창고를 저장하지 못했습니다.')
+        }
+      })
+    }}>
+    <option value="" disabled>창고 선택</option>
+    {PURCHASE_ARRIVAL_WAREHOUSES.map((option) => <option key={option} value={option}>{option}</option>)}
+  </select>
 }
 
 export function PurchasePaymentStatusField({
@@ -2624,7 +2607,8 @@ export function PurchasePlanFieldsV2({
   dateValue,
   dateField,
   dateLabel,
-  purchaseMethod,
+  dateColumn,
+  afterFields,
   trackingSaveMode = 'plan',
 }: {
   id: string
@@ -2634,21 +2618,17 @@ export function PurchasePlanFieldsV2({
   dateValue: string | Date | null
   dateField: 'requestDate' | 'outboundExpectedDate'
   dateLabel: string
-  purchaseMethod: string | null
+  dateColumn?: string
+  afterFields?: ReactNode
   /** Inspection rows update their primary parcel through the inspection API. */
   trackingSaveMode?: 'plan' | 'inspection'
 }) {
   const router = useRouter()
-  const initialMethod = purchaseMethod === '개인' || purchaseMethod === '법인' ? purchaseMethod : purchaseMethod ? '직접입력' : '개인'
-  const [methodMode, setMethodMode] = useState(initialMethod)
-  const [customMethod, setCustomMethod] = useState(initialMethod === '직접입력' ? purchaseMethod ?? '' : '')
-  const [purchaseMethodDirty, setPurchaseMethodDirty] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const [savedSupplierOrderNumber, setSavedSupplierOrderNumber] = useState(() => supplierOrderNumber?.trim() ?? '')
   const [savedTrackingNumber, setSavedTrackingNumber] = useState(() => trackingNumber?.trim() ?? '')
   const [savedDateValue, setSavedDateValue] = useState(() => formatDateInput(dateValue))
-  const [savedPurchaseMethod, setSavedPurchaseMethod] = useState(() => purchaseMethod?.trim() ?? '')
 
   async function saveInspectionTrackingNumber(nextTrackingNumber: string) {
     if (!nextTrackingNumber) {
@@ -2690,7 +2670,6 @@ export function PurchasePlanFieldsV2({
     const nextSupplierOrderNumber = String(formData.get('supplierOrderNumber') ?? '').trim()
     const nextTrackingNumber = String(formData.get('trackingNumber') ?? '').trim()
     const nextDateValue = String(formData.get(dateField) ?? '')
-    const nextPurchaseMethod = (methodMode === '직접입력' ? customMethod : methodMode).trim()
     const values: Record<string, string | null> = {}
     const trackingChanged = showTrackingNumber && nextTrackingNumber !== savedTrackingNumber
 
@@ -2702,9 +2681,6 @@ export function PurchasePlanFieldsV2({
     }
     if (nextDateValue !== savedDateValue) {
       values[dateField] = nextDateValue || null
-    }
-    if (purchaseMethodDirty && nextPurchaseMethod !== savedPurchaseMethod) {
-      values.purchaseMethod = nextPurchaseMethod || null
     }
     if (Object.keys(values).length === 0 && !trackingChanged) {
       setMessage('변경사항 없음')
@@ -2741,8 +2717,6 @@ export function PurchasePlanFieldsV2({
       setSavedSupplierOrderNumber(nextSupplierOrderNumber)
       setSavedTrackingNumber(nextTrackingNumber)
       setSavedDateValue(nextDateValue)
-      setSavedPurchaseMethod(nextPurchaseMethod)
-      setPurchaseMethodDirty(false)
       setMessage('저장됨')
       if (trackingChanged) router.refresh()
     })
@@ -2751,12 +2725,10 @@ export function PurchasePlanFieldsV2({
   return (
     <form
       onSubmit={save}
-      className={`grid min-w-0 items-start gap-1.5 ${showTrackingNumber
-        ? 'grid-cols-[minmax(120px,1fr)_minmax(120px,1fr)_126px_148px_64px]'
-        : 'grid-cols-[minmax(120px,1fr)_126px_148px_64px]'}`}
+      className="flex min-w-0 flex-wrap items-end gap-1.5"
     >
-      <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
+      <label className="min-w-28 flex-1 space-y-1">
+        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
         <Input
           name="supplierOrderNumber"
           defaultValue={supplierOrderNumber ?? ''}
@@ -2765,8 +2737,8 @@ export function PurchasePlanFieldsV2({
         />
       </label>
       {showTrackingNumber ? (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1">
+        <div className="min-w-28 flex-1 space-y-1">
+          <div className="flex h-5 items-center gap-1 whitespace-nowrap">
             <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
             {savedTrackingNumber ? (
               <a
@@ -2790,8 +2762,8 @@ export function PurchasePlanFieldsV2({
           />
         </div>
       ) : null}
-      <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
+      <label data-purchase-column={dateColumn} className="w-32 shrink-0 space-y-1">
+        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
         <Input
           name={dateField}
           type="date"
@@ -2799,42 +2771,15 @@ export function PurchasePlanFieldsV2({
           className="h-7 text-xs"
         />
       </label>
-      <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">구매방법</span>
-        <div className="flex items-center gap-1">
-          <select
-            value={methodMode}
-            onChange={(event) => {
-              setMethodMode(event.target.value)
-              setPurchaseMethodDirty(true)
-            }}
-            className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
-          >
-            <option value="개인">개인</option>
-            <option value="법인">법인</option>
-            <option value="직접입력">직접입력</option>
-          </select>
-          {methodMode === '직접입력' ? (
-            <Input
-              value={customMethod}
-              onChange={(event) => {
-                setCustomMethod(event.target.value)
-                setPurchaseMethodDirty(true)
-              }}
-              placeholder="직접입력"
-              className="h-7 w-20 text-xs"
-            />
-          ) : null}
-        </div>
-      </label>
       <div className="flex items-center gap-1">
         <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
           {isPending ? <Loader2 className="animate-spin" /> : <Save />}
           저장
         </Button>
       </div>
+      {afterFields}
       {message ? (
-        <div className="col-span-full text-[11px] text-muted-foreground" aria-live="polite">
+        <div className="basis-full text-[11px] text-muted-foreground" aria-live="polite">
           {message}
         </div>
       ) : null}
@@ -2954,45 +2899,6 @@ type PurchaseRequestExcelResult = {
   skipped: number
   duplicate?: boolean
   errors?: Array<{ row: number; message: string }>
-}
-
-export function PurchaseBuyerField({
-  id,
-  buyerCode,
-}: {
-  id: string
-  buyerCode: string | null
-}) {
-  const router = useRouter()
-  const [value, setValue] = useState(
-    buyerCode && PURCHASE_BUYERS.some((buyer) => buyer.code === buyerCode) ? buyerCode : '4',
-  )
-  const [isPending, startTransition] = useTransition()
-
-  function save(nextValue: string) {
-    setValue(nextValue)
-    startTransition(async () => {
-      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buyerCode: nextValue }),
-      })
-      if (response.ok) router.refresh()
-    })
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={(event) => save(event.target.value)}
-      disabled={isPending}
-      className="h-7 w-full min-w-[92px] rounded-md border border-input bg-background px-2 text-xs"
-    >
-      {PURCHASE_BUYERS.map((buyer) => (
-        <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
-      ))}
-    </select>
-  )
 }
 
 function parseQuantityPreview(value: string, fallback: number) {

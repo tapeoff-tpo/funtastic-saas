@@ -69,7 +69,6 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '송장번호',
   '발주요청 날짜',
   '구매날짜',
-  '구매방법',
   '담당자코드',
   '담당자',
   '지연사유',
@@ -82,6 +81,7 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
 const PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS = [
   ...PURCHASE_REQUEST_EXCEL_HEADERS,
   '중국출고요청수량',
+  '구매방법',
 ] as const
 
 type PurchaseRequestExcelHeader = (typeof PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS)[number]
@@ -189,7 +189,6 @@ export async function exportPurchaseRequestsExcel(input: {
       송장번호: ('purchaseInspection' in row ? row.purchaseInspection?.parcels.map((parcel) => parcel.trackingNumber).join('\n') : null) ?? row.trackingNumber ?? '',
       '발주요청 날짜': dateText(row.requestDate),
       구매날짜: dateText(row.outboundExpectedDate),
-      구매방법: row.purchaseMethod ?? '',
       담당자코드: row.buyerCode ?? '',
       담당자: row.buyerName ?? '',
       지연사유: purchaseDelayReasonLabel(row.delayReason),
@@ -308,13 +307,13 @@ export async function importPurchaseRequestsExcel(input: {
         supplierOrderNumber: emptyToNull(data.주문서번호),
         requestDate: optionalDate(data['발주요청 날짜']),
         outboundExpectedDate: optionalDate(data.구매날짜),
-        purchaseMethod: emptyToNull(data.구매방법),
         buyerCode,
         buyerName: buyerCode ? PURCHASE_BUYERS[buyerCode] : emptyToNull(data.담당자),
         memo: emptyToNull(data.메모),
         updatedAt: new Date(),
       }
       if (hasTrackingNumberColumn) values.trackingNumber = splitTrackingNumbers(data.송장번호)[0] ?? null
+      if (columnByHeader.has('구매방법')) values.purchaseMethod = emptyToNull(data.구매방법)
       if (status === 'purchase_completed' && data.송장번호?.trim()) {
         values.status = 'inspecting'
         values.purchaseInspection = createPurchaseInspection(values.actualPurchaseQuantity ?? requestedQuantity, data.송장번호)

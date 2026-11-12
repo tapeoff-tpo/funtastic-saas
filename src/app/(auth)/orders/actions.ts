@@ -2,7 +2,7 @@
 
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath, revalidateTag, updateTag } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
 import {

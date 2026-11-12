@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createPurchaseRequest } from '@/lib/purchasing/purchase-request-create'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const purchaseItemSchema = z.object({
   sku: z.string().trim().min(1).max(100),

@@ -5,7 +5,7 @@ import {
   applyPurchaseUrlCollectionResult,
   getPurchaseUrlCollectionQueue,
 } from '@/lib/purchasing/purchase-url-collector'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const resultSchema = z.object({
   orderNumber: z.string().trim().regex(/^\d{10,40}$/),

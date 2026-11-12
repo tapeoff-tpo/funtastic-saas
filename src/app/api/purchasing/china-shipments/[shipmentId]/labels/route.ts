@@ -61,7 +61,7 @@ export async function GET(
       items: detail.items.map((item) => ({
         ...item,
         location: labelsBySku.get(item.sku.trim())?.location ?? '',
-        chineseProductName: labelsBySku.get(item.sku.trim())?.chineseProductName ?? '',
+        chineseProductName: item.chineseProductName || labelsBySku.get(item.sku.trim())?.chineseProductName || '',
       })),
     }
 

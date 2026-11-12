@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { ArrowDown, ArrowUp, RotateCcw, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { navSections, type NavSection } from '@/components/layout/sidebar'
@@ -9,40 +9,40 @@ import {
   clearSidebarMenuOrderRemote,
   createSidebarMenuOrder,
   fetchSidebarMenuOrder,
+  moveSidebarEntry,
   readSidebarMenuOrder,
   saveSidebarMenuOrderRemote,
+  SIDEBAR_MENU_ORDER_EVENT,
 } from '@/components/layout/sidebar-menu-order'
-
-function move<T>(values: T[], index: number, direction: -1 | 1): T[] {
-  const target = index + direction
-  if (target < 0 || target >= values.length) return values
-  const next = [...values]
-  ;[next[index], next[target]] = [next[target], next[index]]
-  return next
-}
 
 export function MenuOrderSettings() {
   const [sections, setSections] = useState<NavSection[]>(() => applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
   const [isPending, startTransition] = useTransition()
+  const dirty = useRef(false)
+  const movableSections = sections.filter((section) => section.id !== 'dashboard')
 
   useEffect(() => {
+    const sync = () => {
+      if (!dirty.current) setSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
+    }
+    window.addEventListener(SIDEBAR_MENU_ORDER_EVENT, sync)
     void fetchSidebarMenuOrder()
-      .then((order) => {
-        setSections(applySidebarMenuOrder(navSections, order))
-      })
       .catch((error) => {
         toast.error(error instanceof Error ? error.message : '계정 메뉴 순서를 불러오지 못했습니다.')
       })
+    return () => window.removeEventListener(SIDEBAR_MENU_ORDER_EVENT, sync)
   }, [])
 
   function moveSection(index: number, direction: -1 | 1) {
-    if (sections[index]?.id === 'dashboard' || index + direction === 0) return
-    setSections((current) => move(current, index, direction))
+    if (sections[index]?.id === 'dashboard' || sections[index + direction]?.id === 'dashboard') return
+    dirty.current = true
+    setSections((current) => moveSidebarEntry(current, index, index + direction))
   }
 
   function moveItem(sectionId: string, index: number, direction: -1 | 1) {
+    dirty.current = true
     setSections((current) => current.map((section) => (
-      section.id === sectionId ? { ...section, items: move(section.items, index, direction) } : section
+      section.id === sectionId ? { ...section, items: moveSidebarEntry(section.items, index, index + direction) } : section
     )))
   }
 
@@ -50,6 +50,7 @@ export function MenuOrderSettings() {
     startTransition(async () => {
       try {
         await saveSidebarMenuOrderRemote(createSidebarMenuOrder(sections))
+        dirty.current = false
         toast.success('계정별 왼쪽 메뉴 순서를 저장했습니다.')
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '메뉴 순서를 저장하지 못했습니다.')
@@ -61,6 +62,7 @@ export function MenuOrderSettings() {
     startTransition(async () => {
       try {
         await clearSidebarMenuOrderRemote()
+        dirty.current = false
         setSections(applySidebarMenuOrder(navSections, null))
         toast.success('계정별 메뉴 순서를 기본값으로 복원했습니다.')
       } catch (error) {
@@ -100,8 +102,8 @@ export function MenuOrderSettings() {
               {section.id !== 'dashboard' && (
                 <OrderButtons
                   label={`${section.title} 그룹`}
-                  index={sectionIndex - 1}
-                  count={sections.length - 1}
+                  index={movableSections.indexOf(section)}
+                  count={movableSections.length}
                   onMove={(direction) => moveSection(sectionIndex, direction)}
                 />
               )}

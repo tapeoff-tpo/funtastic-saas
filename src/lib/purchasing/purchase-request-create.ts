@@ -10,7 +10,14 @@ export type CreatePurchaseRequestInput = {
   requestedQuantity: number
   buyerCode?: string | null
   memo?: string | null
-  createdFrom?: 'item_master' | 'purchasing_review'
+  createdFrom?: 'item_master' | 'purchasing_review' | 'product_workflow'
+  requestDate?: string
+  workflow?: {
+    itemId: string
+    actorId: string
+    sampleDecision: 'approved' | 'skipped'
+    purchaseUrl: string
+  }
 }
 
 const PURCHASE_BUYERS: Record<string, string> = {
@@ -22,38 +29,49 @@ const PURCHASE_BUYERS: Record<string, string> = {
 }
 
 export async function createPurchaseRequest(input: CreatePurchaseRequestInput) {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${purchaseRequestWriteLockKey(input.userId)})::bigint)`)
+  return db.transaction((tx) => insertPurchaseRequest(tx, input))
+}
 
-    const [{ maxRowNumber }] = await tx
-      .select({
-        maxRowNumber: sql<number>`COALESCE(MAX(${purchaseRequestItems.rowNumber}), 0)::int`,
-      })
-      .from(purchaseRequestItems)
-      .where(eq(purchaseRequestItems.userId, input.userId))
+export async function insertPurchaseRequest(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  input: CreatePurchaseRequestInput,
+) {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${purchaseRequestWriteLockKey(input.userId)})::bigint)`,
+  )
 
-    const [row] = await tx
-      .insert(purchaseRequestItems)
-      .values({
-        userId: input.userId,
-        rowNumber: maxRowNumber + 1,
-        status: 'requested',
-        sku: input.sku,
-        productName: input.productName,
-        optionName: input.optionName?.trim() || null,
-        requestedQuantity: input.requestedQuantity,
-        buyerCode: input.buyerCode?.trim() || null,
-        buyerName: input.buyerCode ? PURCHASE_BUYERS[input.buyerCode] ?? null : null,
-        purchaseMemo: input.memo?.trim() || null,
-        rawData: {
-          source: 'manual_purchase_request',
-          createdFrom: input.createdFrom ?? 'purchasing_review',
-        },
-      })
-      .returning({ id: purchaseRequestItems.id })
+  const [{ maxRowNumber }] = await tx
+    .select({
+      maxRowNumber: sql<number>`COALESCE(MAX(${purchaseRequestItems.rowNumber}), 0)::int`,
+    })
+    .from(purchaseRequestItems)
+    .where(eq(purchaseRequestItems.userId, input.userId))
 
-    return row
-  })
+  const [row] = await tx
+    .insert(purchaseRequestItems)
+    .values({
+      userId: input.userId,
+      rowNumber: maxRowNumber + 1,
+      status: input.workflow ? 'purchased' : 'requested',
+      requestDate: input.requestDate,
+      sku: input.sku,
+      productName: input.productName,
+      optionName: input.optionName?.trim() || null,
+      requestedQuantity: input.requestedQuantity,
+      buyerCode: input.buyerCode?.trim() || null,
+      buyerName: input.buyerCode
+        ? (PURCHASE_BUYERS[input.buyerCode] ?? null)
+        : null,
+      purchaseMemo: input.memo?.trim() || null,
+      rawData: {
+        source: 'manual_purchase_request',
+        createdFrom: input.createdFrom ?? 'purchasing_review',
+        ...(input.workflow ? { productWorkflow: input.workflow } : {}),
+      },
+    })
+    .returning({ id: purchaseRequestItems.id })
+
+  return row
 }
 
 export function purchaseRequestWriteLockKey(userId: string) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, sql } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getProfile, getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { inventory, inventoryAdjustmentSlips, inventoryHistory } from '@/lib/db/schema'

@@ -1,6 +1,6 @@
 export const SIDEBAR_MENU_ORDER_KEY = 'funtastic-sidebar-menu-order'
 export const SIDEBAR_MENU_ORDER_EVENT = 'funtastic-sidebar-menu-order-changed'
-export const SIDEBAR_MENU_ORDER_VERSION = 3
+export const SIDEBAR_MENU_ORDER_VERSION = 4
 
 export interface SidebarMenuOrder {
   version: number
@@ -15,6 +15,11 @@ export interface OrderableNavItem {
 export interface OrderableNavSection<TItem extends OrderableNavItem = OrderableNavItem> {
   id: string
   items: TItem[]
+  groups?: readonly unknown[]
+}
+
+export function canMoveSidebarItemAcrossSections(section: Pick<OrderableNavSection, 'id' | 'groups'>): boolean {
+  return section.id !== 'dashboard' && !section.groups?.length
 }
 
 export function readSidebarMenuOrder(): SidebarMenuOrder | null {
@@ -25,8 +30,10 @@ export function readSidebarMenuOrder(): SidebarMenuOrder | null {
     if (
       parsed.version !== SIDEBAR_MENU_ORDER_VERSION ||
       !Array.isArray(parsed.sections) ||
+      parsed.sections.some((section) => typeof section !== 'string') ||
       !parsed.items ||
-      typeof parsed.items !== 'object'
+      typeof parsed.items !== 'object' ||
+      Object.values(parsed.items).some((items) => !Array.isArray(items) || items.some((href) => typeof href !== 'string'))
     ) return null
     return { version: parsed.version, sections: parsed.sections, items: parsed.items }
   } catch {
@@ -74,30 +81,52 @@ export async function fetchSidebarMenuOrder(): Promise<SidebarMenuOrder | null> 
   }
   const order = body.order as SidebarMenuOrder | null
   if (order) saveSidebarMenuOrder(order)
+  else clearSidebarMenuOrder()
   return order
+}
+
+export function moveSidebarEntry<T>(entries: T[], from: number, to: number): T[] {
+  if (from < 0 || from >= entries.length || to < 0 || to >= entries.length || from === to) return entries
+  const next = [...entries]
+  const [entry] = next.splice(from, 1)
+  next.splice(to, 0, entry)
+  return next
 }
 
 export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection extends OrderableNavSection<TItem>>(
   sections: TSection[],
   order: SidebarMenuOrder | null,
 ): TSection[] {
-  if (!order) return sections.map((section) => ({ ...section, items: [...section.items] }))
+  if (!order || order.version !== SIDEBAR_MENU_ORDER_VERSION) return sections.map((section) => ({ ...section, items: [...section.items] }))
 
   const sectionRank = new Map(order.sections.map((id, index) => [id, index]))
   const defaultSectionRank = new Map(sections.map((section, index) => [section.id, index]))
   const resolvedSectionRank = (sectionId: string): number =>
     sectionRank.get(sectionId) ?? defaultSectionRank.get(sectionId) ?? Number.MAX_SAFE_INTEGER
+  const catalogue = new Map(sections.flatMap((section) => section.items.map((item) => [item.href, { item, section }] as const)))
+  const destinations = new Map<string, string>()
+  for (const section of sections) {
+    if (!canMoveSidebarItemAcrossSections(section)) continue
+    for (const href of order.items[section.id] ?? []) {
+      const original = catalogue.get(href)?.section
+      if (!original || original.id === section.id || !canMoveSidebarItemAcrossSections(original)) continue
+      if ((order.items[original.id] ?? []).includes(href) || destinations.has(href)) continue
+      destinations.set(href, section.id)
+    }
+  }
   return sections
     .map((section) => {
-      const itemRank = new Map((order.items[section.id] ?? []).map((href, index) => [href, index]))
-      const defaultItemRank = new Map(section.items.map((item, index) => [item.href, index]))
-      return {
-        ...section,
-        items: [...section.items].sort((a, b) => (
-          (itemRank.get(a.href) ?? Number.MAX_SAFE_INTEGER) - (itemRank.get(b.href) ?? Number.MAX_SAFE_INTEGER)
-          || (defaultItemRank.get(a.href) ?? Number.MAX_SAFE_INTEGER) - (defaultItemRank.get(b.href) ?? Number.MAX_SAFE_INTEGER)
-        )),
+      const items: TItem[] = []
+      const seen = new Set<string>()
+      for (const href of order.items[section.id] ?? []) {
+        const entry = catalogue.get(href)
+        if (entry && (destinations.get(href) ?? entry.section.id) === section.id && !seen.has(href)) {
+          items.push(entry.item)
+          seen.add(href)
+        }
       }
+      items.push(...section.items.filter((item) => !seen.has(item.href) && !destinations.has(item.href)))
+      return { ...section, items }
     })
     .sort((a, b) => (
       resolvedSectionRank(a.id) - resolvedSectionRank(b.id)

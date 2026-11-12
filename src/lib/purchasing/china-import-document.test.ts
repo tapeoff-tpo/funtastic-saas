@@ -52,6 +52,15 @@ describe('China import documents', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     expect(workbook.getWorksheet('sheet')!.getCell('X112').value).toBeCloseTo(1.82)
   })
+  it('uses measured pallet gross weight once and preserves an outbound Chinese-name override', async () => {
+    const measured = { ...detail, items: detail.items.map((item) => ({ ...item, chineseProductName: '出库名称' })), pallets: [{ ...detail.pallets[0]!, grossWeightKg: 25 }] }
+    expect(prepareImportDocument(measured, metadata).items[0]!.chineseName).toBe('出库名称')
+    const buffer = await exportChinaImportDocument(measured, metadata, options)
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('sheet')!.getCell('V20').value).toBe(25)
+    expect(workbook.getWorksheet('sheet')!.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 28 })
+  })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
     expect(() => prepareImportDocument({ ...detail, boxItems: detail.boxItems.slice(0, 2) }, metadata)).toThrow('출고수량')
   })

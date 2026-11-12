@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { buildClearedLoginSessionCookies } from '@/lib/auth/login-session'
 
 export async function signOut() {

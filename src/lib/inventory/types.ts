@@ -44,6 +44,8 @@ export interface InventoryHistoryRecord {
 }
 
 export interface InventoryFilters {
+  /** 조회 기준월 (YYYY-MM); 과거 월은 월말 원본, 현재 월은 실시간 재고입니다. */
+  referenceMonth?: string
   page?: number
   pageSize?: number
   /** 상품명 검색 (products.name ilike) */

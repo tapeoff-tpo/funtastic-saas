@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { exportPurchaseBudgetComparisonExcel } from '@/lib/purchasing/purchase-budget-comparison-excel'
 import { getLatestPurchaseBudgetComparison } from '@/lib/purchasing/purchase-budget-comparison-store'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function GET() {
   const supabase = await createClient()

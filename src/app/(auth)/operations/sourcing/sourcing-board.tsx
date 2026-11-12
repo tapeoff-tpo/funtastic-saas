@@ -620,7 +620,7 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
         const savedCount = results.reduce((total, result) => total + result.savedCount, 0)
         const passedCount = results.reduce((total, result) => total + result.passedCount, 0)
         toast.success(passedCount > 0
-          ? `전체 ${savedCount}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
+          ? `전체 ${savedCount}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리의 샘플 구매 단계로 보냈습니다.`
           : savedCount > 0
             ? `전체 ${savedCount}개 상품을 저장했습니다.`
             : '소싱회의 전체 변경사항을 저장했습니다.')
@@ -860,7 +860,7 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
           return
         }
         toast.success(result.passedCount > 0
-          ? `${result.savedCount}개 상품을 저장했고, 통과 ${result.passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
+          ? `${result.savedCount}개 상품을 저장했고, 통과 ${result.passedCount}개는 상품관리의 샘플 구매 단계로 보냈습니다.`
           : `${result.savedCount}개 상품을 저장했습니다.`)
         onChanged()
       } catch (error) {
@@ -994,8 +994,8 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                   <TableCell><SingleLineCellInput type="url" value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
                   <TableCell><NumericCell value={row.domesticSalePrice} onChange={(value) => updateRow(row.clientId, { domesticSalePrice: value })} placeholder="원" /></TableCell>
                   <TableCell><SingleLineCellInput type="url" value={row.detailPageUrl} onChange={(value) => updateRow(row.clientId, { detailPageUrl: value })} placeholder="상세페이지 참고 URL" /></TableCell>
-                  <TableCell><SingleLineCellInput value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
-                  <TableCell><SingleLineCellInput value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
                   {showOwnerColumn ? (
                     <TableCell>
                       <select value={row.ownerOperatorId ?? ''} onChange={(event) => updateRow(row.clientId, { ownerOperatorId: event.target.value || null })} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
@@ -1014,7 +1014,7 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                       >
                         {Object.entries(manualSourcingReviewStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
-                      {row.status === 'passed' && row.passedNewProductId ? <p className="text-[11px] text-emerald-700">신상품 1단계 등록됨</p> : null}
+                      {row.status === 'passed' && row.passedNewProductId ? <a className="text-[11px] text-emerald-700 underline" href={`/new-products?item=${encodeURIComponent(row.passedNewProductId)}`}>샘플·정식발주 열기</a> : null}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -1146,9 +1146,7 @@ function ReadOnlyLink({ value, label }: { value: string | null | undefined; labe
         <span className="truncate">{label}</span>
       </a>
     </div>
-  ) : value ? (
-    <span className="block truncate leading-5" title={value}>{value}</span>
-  ) : <span className="text-muted-foreground">-</span>
+  ) : <ReadOnlyText value={value} />
 }
 
 function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourcingReviewStatus; passedNewProductId: string | null }) {
@@ -1162,7 +1160,7 @@ function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourc
   return (
     <div className="space-y-1">
       <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', className)}>{manualSourcingReviewStatusLabels[status]}</span>
-      {status === 'passed' && passedNewProductId ? <p className="text-[11px] text-emerald-700">신상품 1단계 등록됨</p> : null}
+      {status === 'passed' && passedNewProductId ? <a className="text-[11px] text-emerald-700 underline" href={`/new-products?item=${encodeURIComponent(passedNewProductId)}`}>샘플·정식발주 열기</a> : null}
     </div>
   )
 }

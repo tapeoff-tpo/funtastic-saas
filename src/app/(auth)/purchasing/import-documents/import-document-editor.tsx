@@ -1,9 +1,7 @@
 'use client'
 
-import { TitleHelp } from './title-help'
-
-import { useRef, useState, type FormEvent } from 'react'
-import { Download, FileSpreadsheet, Loader2, X } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Download, Loader2 } from 'lucide-react'
 import type { prepareImportDocument } from '@/lib/purchasing/china-import-document'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 
@@ -18,8 +16,7 @@ const fields = [
 ] as const
 const preferenceKeys = ['exporter', 'importer', 'importerAddress', 'loadingPort', 'destinationPort', 'paymentTerms', 'palletTareKg', 'palletExtraCbm']
 
-export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }) {
-  const dialog = useRef<HTMLDialogElement>(null)
+export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void }) {
   const [data, setData] = useState<Prepared | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string }>>({})
@@ -28,14 +25,15 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
   const [error, setError] = useState('')
   const url = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/import-documents`
 
-  async function load() {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setBusy(true)
     setError('')
     setData(null)
     try {
-      const response = await fetch(url, { cache: 'no-store' })
+      const response = await fetch(url, { cache: 'no-store', signal })
       if (!response.ok) throw new Error((await response.json()).error || '인보이스·패킹리스트 정보를 불러오지 못했습니다.')
       const next: Prepared = await response.json()
+      if (signal?.aborted) return
       const preferences: Record<string, string> = {}
       try {
         const saved: unknown = JSON.parse(localStorage.getItem('china-import-document-defaults') ?? '{}')
@@ -54,9 +52,19 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
       setItems(Object.fromEntries(next.items.map((item) => [item.id, { englishName: item.englishName, unitPriceCny: item.unitPriceCny == null ? '' : String(item.unitPriceCny) }])))
       setBoxes(Object.fromEntries(next.boxes.map((box) => [box.id, { grossWeightKg: box.grossWeightKg == null ? '' : String(box.grossWeightKg), cbm: box.cbm == null ? '' : String(box.cbm) }])))
       setData(next)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '인보이스·패킹리스트 정보를 불러오지 못했습니다.') }
-    finally { setBusy(false) }
-  }
+      onDirtyChange(false)
+    } catch (cause) {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : '인보이스·패킹리스트 정보를 불러오지 못했습니다.')
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }, [url, onDirtyChange])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
+  }, [load])
 
   async function download(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -68,7 +76,7 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...settings, snapshot: data.snapshot,
-          palletTareKg: data.palletCount ? Number(settings.palletTareKg) : 0,
+          palletTareKg: data.pallets.some((pallet) => !pallet.grossWeightKg) ? Number(settings.palletTareKg) : 0,
           palletExtraCbm: data.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
           items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: Number(value.unitPriceCny) }])),
           boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: Number(value.grossWeightKg), cbm: Number(value.cbm) }])),
@@ -83,19 +91,17 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
       anchor.click()
       anchor.remove()
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+      onDirtyChange(false)
       try { localStorage.setItem('china-import-document-defaults', JSON.stringify(Object.fromEntries(preferenceKeys.map((key) => [key, settings[key] ?? ''])))) } catch { /* Optional. */ }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '인보이스·패킹리스트를 만들지 못했습니다.') }
     finally { setBusy(false) }
   }
 
-  return <>
-    <button type="button" onClick={() => { dialog.current?.showModal(); void load() }} className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>
-    <dialog ref={dialog} onCancel={(event) => { if (busy) event.preventDefault() }} className="m-auto max-h-[90vh] w-[min(1100px,95vw)] overflow-y-auto rounded-xl border bg-background p-5 text-foreground shadow-xl backdrop:bg-black/50">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">인보이스·패킹리스트<TitleHelp title="인보이스·패킹리스트">저장된 실제 포장수량과 품목의 위안화 단가로 작성합니다. / 使用已保存的装箱数量和商品人民币单价。 이 화면의 수정은 이번 문서에 적용됩니다. / 此处修改仅用于本次单证。</TitleHelp></h2><button type="button" disabled={busy} aria-label="닫기 / 关闭" onClick={() => dialog.current?.close()}><X className="size-5" /></button></div>
+  return <section aria-label="인보이스·패킹리스트 작성" className="rounded-lg border bg-background p-4">
       {error ? <p role="alert" className="my-3 rounded-md border border-red-200 p-3 text-sm text-red-700">{error}</p> : null}
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
-      {data ? <form onSubmit={download} className="space-y-5">
+      {data ? <form onSubmit={download} onChange={() => onDirtyChange(true)} className="space-y-5">
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-3">{fields.map(([key, label, type]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required maxLength={500} type={type} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} className={inputClass} /></label>)}</fieldset>
         <p className="text-sm">{data.palletCount} PLT + {data.looseBoxCount} CTN = {data.packageCount} PACKAGES · 내부 박스 / 内箱 {data.boxCount}</p>
         <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">상품 단가 확인 / 商品单价确认 (CNY)</legend>
@@ -103,11 +109,10 @@ export function ChinaImportDocumentDialog({ shipmentId }: { shipmentId: string }
         </fieldset>
         <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">박스 중량·부피 / 箱子重量和体积</legend>
           <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['박스 / 箱号', '파렛트 / 托盘', '총중량(kg) / 毛重', 'CBM / 体积'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.boxes.map((box) => <tr key={box.id} className="border-t"><td className="p-2">{box.boxNo}</td><td className="p-2">{box.palletNo ?? 'BOX'}</td>{(['grossWeightKg', 'cbm'] as const).map((key) => <td key={key} className="p-2"><input required type="number" min="0.000001" step="any" aria-label={`${box.boxNo} ${key}`} className={inputClass} value={boxes[box.id]?.[key] ?? ''} onChange={(event) => setBoxes((current) => ({ ...current, [box.id]: { ...current[box.id], [key]: event.target.value } }))} /></td>)}</tr>)}</tbody></table></div>
-          {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{[['palletTareKg', '파렛트 1개당 추가중량(kg) / 每托盘包装重量'], ...(data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? [['palletExtraCbm', '미실측 파렛트 1개당 추가부피(CBM) / 未测量托盘的额外体积']] : [])].map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
-          {data.pallets.map((pallet) => <p key={pallet.id} className="text-sm">{pallet.palletNo} · 최종 파렛트 CBM / 最终托盘体积: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(pallet)) ?? '실측 규격 미입력 / 未填写实测尺寸'}</p>)}
+          {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{[...(data.pallets.some((pallet) => !pallet.grossWeightKg) ? [['palletTareKg', '미계량 파렛트 1개당 추가중량(kg) / 未称重托盘的额外包装重量']] : []), ...(data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? [['palletExtraCbm', '미실측 파렛트 1개당 추가부피(CBM) / 未测量托盘的额外体积']] : [])].map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
+          {data.pallets.map((pallet) => <p key={pallet.id} className="text-sm">{pallet.palletNo} · 최종 파렛트 CBM / 最终托盘体积: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(pallet)) ?? '실측 규격 미입력 / 未填写实测尺寸'} · 총중량(kg) / 毛重: {pallet.grossWeightKg || '미입력 / 未填写'}</p>)}
         </fieldset>
         <button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}인보이스·패킹리스트 다운로드 / 下载发票和装箱单</button>
       </form> : null}
-    </dialog>
-  </>
+    </section>
 }

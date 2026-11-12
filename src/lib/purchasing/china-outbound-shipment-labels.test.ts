@@ -66,7 +66,7 @@ describe('China outbound shipment label workbook', () => {
     expect(cellText(boxSheet.getCell('D8'))).toBe('로케이션 / 库位:\nA-01-03')
     expect(boxSheet.getCell('D5').value).toBe(5)
     expect(cellText(boxSheet.getCell('A8'))).toBe('박스번호 / 箱子号: 박스 1')
-    expect(fillColor(boxSheet.getCell('A2'))).toBe('FFCFE8D0')
+    expect(fillColor(boxSheet.getCell('A2'))).toBe('FFFFFFFF')
     expect(boxSheet.pageSetup.printArea).toBe('A1:F9')
     expect(workbook.getWorksheet('박스 쉽먼트(装箱标签) 04')!.getCell('A1').value).toBe('TAPEOFF')
     expect(boxSheet.pageSetup.orientation).toBe('landscape')

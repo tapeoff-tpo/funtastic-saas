@@ -1125,6 +1125,7 @@ export const chinaOutboundShipmentItems = pgTable(
     sku: varchar('sku', { length: 100 }).notNull(),
     productName: text('product_name').notNull(),
     itemCategory: varchar('item_category', { length: 100 }),
+    chineseProductName: text('chinese_product_name'),
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
     // Preserve the warehouse name selected when this reservation was made.
@@ -1738,6 +1739,7 @@ export type UserRole = (typeof userRoleEnum.enumValues)[number]
 export const userMenuPermissions = pgTable('user_menu_permissions', {
   userId: uuid('user_id').primaryKey().references(() => userProfiles.id, { onDelete: 'cascade' }),
   allowedMenus: jsonb('allowed_menus').$type<string[] | null>(),
+  canDeletePurchases: boolean('can_delete_purchases').notNull().default(false),
   updatedBy: uuid('updated_by').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -2154,7 +2156,7 @@ export const sourcingItems = pgTable(
       },
     })('image_file_data'),
     chinaUnitPriceCny: numeric('china_unit_price_cny', { precision: 14, scale: 2 }),
-    unitShippingCny: numeric('unit_shipping_cny', { precision: 14, scale: 2 }),
+    unitShippingCny: numeric('unit_shipping_cny', { precision: 18, scale: 6 }),
     shippingChargeType: varchar('shipping_charge_type', { length: 20 }).notNull().default('unit'),
     shippingBundleQuantity: integer('shipping_bundle_quantity'),
     exchangeRateKrw: numeric('exchange_rate_krw', { precision: 14, scale: 4 }),

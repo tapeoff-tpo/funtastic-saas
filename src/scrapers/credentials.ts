@@ -8,7 +8,7 @@
  *   field ∈ { email | password | extras }
  */
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createAdminClient } from '@/lib/auth/admin'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'

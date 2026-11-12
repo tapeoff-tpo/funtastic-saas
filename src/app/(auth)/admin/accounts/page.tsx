@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { getProfile, listAdmins } from '@/lib/admin-accounts/queries'
+import { createClient } from '@/lib/auth/server'
+import { getProfile, getWorkspaceUserId, listAdmins } from '@/lib/admin-accounts/queries'
 import { AccountsTable } from './accounts-table'
 import { CreateAccountDialog } from './create-account-dialog'
 import { db } from '@/lib/db'
@@ -21,8 +21,10 @@ export default async function AccountsPage() {
   }
 
   const accounts = await listAdmins()
+  const workspaceOwnerId = await getWorkspaceUserId(me.id)
   const permissions = await db.select().from(userMenuPermissions)
   const menuPermissions = Object.fromEntries(permissions.map((row) => [row.userId, row.allowedMenus]))
+  const purchaseDeletePermissions = Object.fromEntries(permissions.map((row) => [row.userId, row.canDeletePurchases]))
 
   return (
     <div className="space-y-6">
@@ -33,7 +35,7 @@ export default async function AccountsPage() {
         <CreateAccountDialog />
       </div>
 
-      <AccountsTable accounts={accounts} currentUserId={me.id} menuPermissions={menuPermissions} />
+      <AccountsTable accounts={accounts} currentUserId={me.id} workspaceOwnerId={workspaceOwnerId} canDeleteAccounts={process.env.AUTH_PROVIDER === 'local'} menuPermissions={menuPermissions} purchaseDeletePermissions={purchaseDeletePermissions} />
     </div>
   )
 }

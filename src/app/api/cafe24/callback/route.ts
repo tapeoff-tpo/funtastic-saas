@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { readCredential, storeCredential } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/auth/server'
+import { readCredential, storeCredential } from '@/lib/auth/admin'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const DEFAULT_APP_URL = 'https://funtastic-saas-vercel.vercel.app'

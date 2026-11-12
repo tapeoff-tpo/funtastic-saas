@@ -7,6 +7,7 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductPageSetup } from '@/lib/new-products/workflow'
 import { NewProductBoard } from './new-product-board'
 import { CatalogueImageSyncButton } from './catalogue-image-sync-button'
+import { WorksQualityImportButton } from './works-quality-import-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,8 @@ export const metadata: Metadata = {
   title: '상품관리',
 }
 
-export default async function NewProductsPage() {
+export default async function NewProductsPage({ searchParams }: { searchParams: Promise<{ item?: string }> }) {
+  const { item } = await searchParams
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
@@ -32,8 +34,9 @@ export default async function NewProductsPage() {
           상품관리
         </h1>
       </header>
-      <CatalogueImageSyncButton />
+      <div className="flex flex-wrap items-start gap-2"><CatalogueImageSyncButton />{setup.viewer.isMain && <WorksQualityImportButton />}</div>
       <NewProductBoard
+        initialItemId={item && /^[0-9a-f-]{36}$/i.test(item) ? item : undefined}
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}
     canManageSettings={setup.viewer.isMain}

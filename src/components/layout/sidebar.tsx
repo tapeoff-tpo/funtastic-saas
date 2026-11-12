@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { useIntentPrefetch } from './use-intent-prefetch'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard,
   ShoppingCart,
   ArrowRightLeft,
   Package,
@@ -15,7 +15,6 @@ import {
   Warehouse,
   BarChart3,
   Store,
-  Settings,
   Users,
   LogOut,
   ChevronsLeft,
@@ -35,22 +34,29 @@ import {
   PanelsTopLeft,
   Sparkles,
   WalletCards,
+  GripVertical,
+  type LucideIcon,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'
 import { useMenuAccess } from './menu-access-provider'
 import { canAccessPage } from '@/lib/auth/menu-permissions'
 import {
   applySidebarMenuOrder,
+  canMoveSidebarItemAcrossSections,
+  createSidebarMenuOrder,
   fetchSidebarMenuOrder,
+  moveSidebarEntry,
   readSidebarMenuOrder,
+  saveSidebarMenuOrderRemote,
   SIDEBAR_MENU_ORDER_EVENT,
 } from './sidebar-menu-order'
 
 export interface NavItem {
   href: string
   label: string
-  icon: typeof LayoutDashboard
+  icon: LucideIcon
 }
 
 export interface NavGroup {
@@ -117,33 +123,17 @@ const orderRelatedGroups: NavGroup[] = [
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
     ],
   },
 ]
 
 export const navSections: NavSection[] = [
   {
-    id: 'dashboard',
-    items: [
-      { href: '/dashboard', label: '대시보드', icon: LayoutDashboard },
-    ],
-  },
-  {
-    id: 'order-related',
-    title: '주문관련',
-    collapsible: true,
-    defaultCollapsed: true,
-    groups: orderRelatedGroups,
-    items: orderRelatedGroups.flatMap((group) => group.items),
-  },
-  {
     id: 'product-preparation',
-    title: '상품 준비',
+    title: '소싱·상품 준비',
     items: [
       { href: '/new-products', label: '상품관리', icon: Sparkles },
       { href: '/operations/sourcing', label: '소싱', icon: Search },
-      { href: '/costs', label: '품목', icon: Package },
     ],
   },
   {
@@ -154,21 +144,36 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
       { href: '/purchasing/payment-flow', label: '발주금액', icon: WalletCards },
       { href: '/purchasing/raw-data', label: '발주 로우데이터', icon: FileSpreadsheet },
-      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
-      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
-      { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
-      { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
     ],
   },
   {
-    id: 'product-registration',
-    title: '상품등록·광고',
+    id: 'inventory-flow',
+    title: '중국재고·재고관리',
     items: [
+      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
+      { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
+      { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
+      { href: '/purchasing/import-documents', label: '인보이스·패킹리스트', icon: FileSpreadsheet },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
+    ],
+  },
+  {
+    id: 'pricing',
+    title: '원가·판매가',
+    items: [
+      { href: '/costs', label: '원가', icon: Package },
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
-      { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
+    ],
+  },
+  {
+    id: 'product-registration',
+    title: '상세페이지·상품등록',
+    items: [
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
+      { href: '/operations/marketplace-registration', label: '상품등록', icon: Package },
+      { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
     ],
   },
@@ -176,11 +181,20 @@ export const navSections: NavSection[] = [
     id: 'analytics',
     title: '매출분석',
     items: [
-      { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/overview', label: '대시보드', icon: BarChart3 },
+      { href: '/analytics/channels', label: '매출분석', icon: BarChart3 },
+      { href: '/settings/market-settings', label: '설정', icon: Store },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
-      { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],
+  },
+  {
+    id: 'order-related',
+    title: '주문관련',
+    collapsible: true,
+    defaultCollapsed: true,
+    groups: orderRelatedGroups,
+    items: orderRelatedGroups.flatMap((group) => group.items),
   },
   {
     id: 'operations',
@@ -205,21 +219,45 @@ interface SidebarProps {
   mobile?: boolean
 }
 
+type MenuPosition = { sectionId: string; groupId?: string; href?: string; crossSection?: boolean }
+
+function canDropMenu(source: MenuPosition, target: MenuPosition) {
+  if (!source.href) return !target.href && source.sectionId !== target.sectionId
+  if (source.sectionId === target.sectionId) {
+    return Boolean(target.href && source.groupId === target.groupId && source.href !== target.href)
+  }
+  return Boolean(source.crossSection && target.crossSection)
+}
+
+const menuPositionKey = ({ sectionId, href }: MenuPosition) => href ?? sectionId
+const sectionPosition = (section: NavSection): MenuPosition => ({
+  sectionId: section.id,
+  crossSection: canMoveSidebarItemAcrossSections(section),
+})
+
 export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps = {}) {
   const pathname = usePathname()
-  const router = useRouter()
+  const intent = useIntentPrefetch()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
   const access = useMenuAccess()
-  const prefetchedHrefs = useRef(new Set<string>())
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+  const [orderReady, setOrderReady] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const dragged = useRef<MenuPosition | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
 
   useEffect(() => {
+    let mounted = true
     const syncOrder = () => setOrderedSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
     syncOrder()
     void fetchSidebarMenuOrder()
       .then((order) => {
-        if (order) setOrderedSections(applySidebarMenuOrder(navSections, order))
+        if (mounted) {
+          setOrderedSections(applySidebarMenuOrder(navSections, order))
+          setOrderReady(true)
+        }
       })
       .catch(() => {
         // Keep the local menu order if account-level settings cannot be loaded.
@@ -227,20 +265,131 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
     window.addEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
     window.addEventListener('storage', syncOrder)
     return () => {
+      mounted = false
       window.removeEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
       window.removeEventListener('storage', syncOrder)
     }
   }, [])
 
-  const visibleSections = orderedSections.map((section) => ({
-    ...section,
-    items: section.items.filter((item) => canAccessPage(access, item.href)),
-    groups: section.groups?.map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(access, item.href)) })).filter((group) => group.items.length),
-  })).filter((section) => section.items.length)
+  const visibleSections = orderedSections.map((section) => {
+    const items = section.items.filter((item) => canAccessPage(access, item.href))
+    return {
+      ...section,
+      items,
+      groups: section.groups?.map((group) => {
+        const groupHrefs = new Set(group.items.map((item) => item.href))
+        return { ...group, items: items.filter((item) => groupHrefs.has(item.href)) }
+      }).filter((group) => group.items.length),
+    }
+  }).filter((section) => section.items.length || (
+    !mobile && canMoveSidebarItemAcrossSections(section)
+    && navSections.find(({ id }) => id === section.id)?.items.some((item) => canAccessPage(access, item.href))
+  ))
   const orderedNavItems = visibleSections.flatMap((section) => section.items)
   const favoriteItems = favorites
     .map((href) => orderedNavItems.find((item) => item.href === href))
     .filter((item): item is NavItem => Boolean(item))
+  const sortableSections = visibleSections.filter((section) => section.id !== 'dashboard')
+  const sectionPositions = sortableSections.map(sectionPosition)
+  const crossSectionCount = sectionPositions.filter((position) => position.crossSection).length
+
+  async function reorder(source: MenuPosition, target: MenuPosition) {
+    if (savingRef.current || mobile || !orderReady || !canDropMenu(source, target)) return
+    const previous = orderedSections
+    const from = previous.findIndex((section) => section.id === source.sectionId)
+    const to = previous.findIndex((section) => section.id === target.sectionId)
+    if (from < 0 || to < 0) return
+    let next = previous
+    if (source.href) {
+      const item = previous[from].items.find((entry) => entry.href === source.href)
+      if (!item) return
+      const targetItems = previous[to].items
+      const targetIndex = target.href ? targetItems.findIndex((entry) => entry.href === target.href) : targetItems.length
+      if (targetIndex < 0) return
+      if (from === to) {
+        const items = moveSidebarEntry(targetItems, targetItems.indexOf(item), targetIndex)
+        next = previous.map((section, index) => index === to ? { ...section, items } : section)
+      } else {
+        const items = [...targetItems]
+        items.splice(targetIndex, 0, item)
+        next = [...previous]
+        next[from] = { ...previous[from], items: previous[from].items.filter((entry) => entry !== item) }
+        next[to] = { ...previous[to], items }
+      }
+    } else next = moveSidebarEntry(previous, from, to)
+
+    savingRef.current = true
+    setSaving(true)
+    setOrderedSections(next)
+    try {
+      await saveSidebarMenuOrderRemote(createSidebarMenuOrder(next))
+    } catch (error) {
+      setOrderedSections(previous)
+      toast.error(error instanceof Error ? error.message : '메뉴 순서를 저장하지 못했습니다.')
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  function clearDrag() {
+    dragged.current = null
+    setDropTarget(null)
+  }
+
+  function dropHandlers(position: MenuPosition) {
+    return {
+      onDragOver(event: DragEvent<HTMLElement>) {
+        if (!dragged.current || !canDropMenu(dragged.current, position)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setDropTarget(menuPositionKey(position))
+      },
+      onDragLeave(event: DragEvent<HTMLElement>) {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+        setDropTarget((current) => current === menuPositionKey(position) ? null : current)
+      },
+      onDrop(event: DragEvent<HTMLElement>) {
+        const source = dragged.current
+        if (!source || !canDropMenu(source, position)) return
+        event.preventDefault()
+        clearDrag()
+        void reorder(source, position)
+      },
+    }
+  }
+
+  function renderDragHandle(label: string, position: MenuPosition, positions: MenuPosition[]) {
+    const canChangeCategory = position.href && position.crossSection && crossSectionCount > 1
+    if (mobile || !orderReady || (positions.length < 2 && !canChangeCategory)) return null
+    const description = `${label} 순서 변경`
+    return (
+      <button
+        type="button"
+        aria-label={description}
+        title={`${description} · 드래그 또는 위아래 방향키`}
+        aria-disabled={saving}
+        draggable={!saving}
+        onDragStart={(event) => {
+          dragged.current = position
+          intent.cancel()
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', menuPositionKey(position))
+        }}
+        onDragEnd={clearDrag}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+          event.preventDefault()
+          const index = positions.findIndex((entry) => menuPositionKey(entry) === menuPositionKey(position))
+          const target = positions[index + (event.key === 'ArrowUp' ? -1 : 1)]
+          if (target) void reorder(position, target)
+        }}
+        className="mr-0.5 flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-gray-500 opacity-0 hover:bg-gray-700 hover:text-white focus-visible:opacity-100 active:cursor-grabbing group-hover:opacity-100 aria-disabled:cursor-wait"
+      >
+        <GripVertical className="size-3.5" />
+      </button>
+    )
+  }
 
   function isItemActive(href: string) {
     const itemPath = href.split('?')[0]
@@ -254,15 +403,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
     return section.items.some((item) => isItemActive(item.href))
   }
 
-  function prefetchItem(href: string) {
-    if (prefetchedHrefs.current.has(href)) return
-    prefetchedHrefs.current.add(href)
-    router.prefetch(href, {
-      onInvalidate: () => prefetchedHrefs.current.delete(href),
-    })
-  }
-
-  function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
+  function renderNavItem(item: NavItem, opts: { showStar: boolean; position?: MenuPosition; siblings?: MenuPosition[] }) {
     const Icon = item.icon
     const active = isItemActive(item.href)
     const fav = isFavorite(item.href)
@@ -270,26 +411,32 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
     return (
       <div
         key={item.href}
+        {...(opts.position ? dropHandlers(opts.position) : {})}
         className={`group flex items-center rounded transition-colors ${
           active ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-        }`}
+        } ${opts.position && dropTarget === item.href ? 'ring-1 ring-inset ring-sky-400' : ''}`}
       >
         <Link
           href={item.href}
+          draggable={false}
           prefetch={false}
           onClick={() => onNavigate?.()}
-          onMouseEnter={() => prefetchItem(item.href)}
-          onFocus={() => prefetchItem(item.href)}
-          onTouchStart={() => prefetchItem(item.href)}
-          className={`flex flex-1 items-center font-medium ${
+          onMouseEnter={() => intent.prepare(item.href)}
+          onFocus={() => intent.prepare(item.href)}
+          onMouseLeave={intent.cancel}
+          onBlur={intent.cancel}
+          onTouchEnd={intent.cancel}
+          onTouchStart={() => intent.prepare(item.href)}
+          className={`flex min-w-0 flex-1 items-center font-medium ${
             mobile
               ? 'min-h-11 gap-3 px-3 py-2 text-sm'
               : 'gap-2 px-2 py-1 text-xs'
           }`}
         >
           <Icon className={mobile ? 'h-4 w-4 shrink-0' : 'h-3.5 w-3.5 shrink-0'} />
-          <span className="truncate">{item.label}</span>
+          <span className="min-w-0 whitespace-normal break-keep [overflow-wrap:anywhere]">{item.label}</span>
         </Link>
+        {opts.position && opts.siblings && renderDragHandle(item.label, opts.position, opts.siblings)}
         {opts.showStar && (
           <button
             type="button"
@@ -313,8 +460,12 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
   }
 
   function renderSectionItems(section: NavSection) {
+    function renderItems(items: NavItem[], groupId?: string) {
+      const positions = items.map((item) => ({ ...sectionPosition(section), groupId, href: item.href }))
+      return items.map((item, index) => renderNavItem(item, { showStar: true, position: positions[index], siblings: positions }))
+    }
     if (!section.groups?.length) {
-      return section.items.map((item) => renderNavItem(item, { showStar: true }))
+      return renderItems(section.items)
     }
 
     return section.groups.map((group) => (
@@ -323,7 +474,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           {group.title}
         </p>
         <div className="space-y-px">
-          {group.items.map((item) => renderNavItem(item, { showStar: true }))}
+          {renderItems(group.items, group.id)}
         </div>
       </div>
     ))
@@ -365,15 +516,18 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
           </div>
         )}
 
-        {visibleSections.filter((section) => section.id !== 'dashboard').map((section) => {
+        {sortableSections.map((section) => {
           const sectionIsActive = isSectionActive(section)
           const sectionIsOpen = section.collapsible
             ? openSections[section.id] ?? (sectionIsActive || !section.defaultCollapsed)
             : true
           return (
           <div key={section.id} className="mt-2">
-            {section.title && (
-              section.collapsible ? (
+            {section.title && <div
+              {...dropHandlers(sectionPosition(section))}
+              className={`group flex items-center rounded ${dropTarget === section.id ? 'ring-1 ring-inset ring-sky-400' : ''}`}
+            >
+              {section.collapsible ? (
                 <button
                   type="button"
                   onClick={() => setOpenSections((current) => ({
@@ -390,11 +544,12 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
                   {sectionIsOpen ? <ChevronDown className={mobile ? 'h-4 w-4' : 'h-3 w-3'} /> : <ChevronRight className={mobile ? 'h-4 w-4' : 'h-3 w-3'} />}
                 </button>
               ) : (
-                <p className={`mb-0.5 font-semibold uppercase tracking-wider text-gray-500 ${mobile ? 'px-3 pt-2 text-xs' : 'px-2 text-[9px]'}`}>
+                <p className={`mb-0.5 flex-1 font-semibold uppercase tracking-wider text-gray-500 ${mobile ? 'px-3 pt-2 text-xs' : 'px-2 text-[9px]'}`}>
                   {section.title}
                 </p>
-              )
-            )}
+              )}
+              {renderDragHandle(section.title, sectionPosition(section), sectionPositions)}
+            </div>}
             {sectionIsOpen && (
               <div className="space-y-px">
                 {renderSectionItems(section)}

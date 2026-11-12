@@ -8,7 +8,7 @@
  */
 
 import { assertMenuAccess } from '@/lib/auth/menu-access'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { analyticsChannelProductOverrides, inventory, products, purchaseRequestItems } from '@/lib/db/schema'
 import { and, eq, inArray, like, notLike, or, sql } from 'drizzle-orm'

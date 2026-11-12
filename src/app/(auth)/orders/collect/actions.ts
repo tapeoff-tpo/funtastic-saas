@@ -1,7 +1,7 @@
 'use server'
 
 import { assertMenuAccess } from '@/lib/auth/menu-access'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { revalidatePath, revalidateTag } from 'next/cache'

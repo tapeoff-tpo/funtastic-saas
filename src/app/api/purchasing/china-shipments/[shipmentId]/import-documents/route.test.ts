@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ user: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
+vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.access }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.workspace }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.detail }))
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemTradeDataBySku: mocks.metadata }))
@@ -13,6 +14,7 @@ describe('import document export route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.user.mockResolvedValue({ id: 'admin2' })
+    mocks.access.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/import-documents'] })
     mocks.workspace.mockResolvedValue('shared-owner')
     mocks.detail.mockResolvedValue({ items: [{ sku: 'SKU-A' }], boxItems: [] })
     mocks.metadata.mockResolvedValue(new Map())
@@ -43,6 +45,16 @@ describe('import document export route', () => {
   it('rejects malformed dates and does not silently treat missing information as zero', async () => {
     const response = await POST(request({ invoiceDate: '2026-02-31' }), context())
     expect(response.status).toBe(400)
+    expect(mocks.export).not.toHaveBeenCalled()
+  })
+  it('keeps document access independent of shipment editing and blocks unrelated menu access', async () => {
+    expect((await GET(new Request('http://localhost'), context())).status).toBe(200)
+    mocks.access.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] })
+    expect((await GET(new Request('http://localhost'), context())).status).toBe(200)
+    vi.clearAllMocks()
+    mocks.access.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/orders'] })
+    expect((await POST(request({}), context())).status).toBe(403)
+    expect(mocks.detail).not.toHaveBeenCalled()
     expect(mocks.export).not.toHaveBeenCalled()
   })
 })

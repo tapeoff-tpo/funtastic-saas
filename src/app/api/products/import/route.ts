@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { parseProductExcel, bulkImportProducts } from '@/lib/products/excel-import'
 
 export async function POST(request: NextRequest) {

@@ -5,7 +5,7 @@ import {
 } from 'nuqs/server'
 import { desc, sql } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { inventory, inventoryAdjustmentSlips } from '@/lib/db/schema'

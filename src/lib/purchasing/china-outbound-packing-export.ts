@@ -20,6 +20,7 @@ export type ChinaOutboundPackingExportDetail = {
     warehouseCode: string
     sku: string
     productName: string
+    chineseProductName?: string | null
     optionName: string | null
     reservedQuantity: number
     packedQuantity: number
@@ -27,6 +28,7 @@ export type ChinaOutboundPackingExportDetail = {
   pallets: Array<{
     id: string
     palletNo: string
+    grossWeightKg?: number | string | null
     lengthCm?: number | string | null
     widthCm?: number | string | null
     heightCm?: number | string | null
@@ -36,6 +38,7 @@ export type ChinaOutboundPackingExportDetail = {
     palletId: string | null
     boxNo: string
     status: string
+    grossWeightKg?: number | string | null
     lengthCm?: number | string | null
     widthCm?: number | string | null
     heightCm?: number | string | null
@@ -188,7 +191,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '박스 적재수량',
     '최종 파렛트 CBM',
     '파렛트 실측 규격 (cm)',
-  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26])
+    '파렛트 총중량(kg)',
+    '박스 총중량(kg)',
+    '상품명(중국어)',
+  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26, 20, 20, 34])
 
   let palletRowNo = 1
   for (const pallet of detail.pallets) {
@@ -219,6 +225,9 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
           packedItem?.quantity ?? 0,
           calculateChinaOutboundBoxCbm(pallet) ?? '',
           formatChinaOutboundBoxDimensions(pallet) ?? '',
+          dimensionNumber(pallet.grossWeightKg) ?? '',
+          dimensionNumber(box?.grossWeightKg) ?? '',
+          item?.chineseProductName ?? '',
         ])
       }
     }
@@ -327,6 +336,7 @@ function createListSheet(workbook: ExcelJS.Workbook, name: string, headers: stri
   headerRow.height = 28
   headers.forEach((header, index) => {
     if (header.includes('CBM')) sheet.getColumn(index + 1).numFmt = '#,##0.0000'
+    if (header.endsWith('(kg)')) sheet.getColumn(index + 1).numFmt = '#,##0.000'
     if (header.endsWith('(cm)')) sheet.getColumn(index + 1).numFmt = '#,##0.00'
   })
   sheet.views = [{ state: 'frozen', ySplit: 1 }]

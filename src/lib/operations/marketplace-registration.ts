@@ -44,6 +44,8 @@ export type RegistrationRow = {
   primaryImageUrl: string | null
   sourceImageUrl: string | null
   thumbnailUrls: string[]
+  linkedWorkflowId?: string | null
+  linkedDetailPageUrl?: string | null
   detailImageUrls: string[]
   imageUrls: string[]
   options: RegistrationOption[]
@@ -152,6 +154,8 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
       r.primary_image_url AS "primaryImageUrl",
       COALESCE(NULLIF(r.source_thumbnail_urls, '[]'::jsonb)->>0, r.primary_image_url) AS "sourceImageUrl",
       COALESCE(r.source_thumbnail_urls, '[]'::jsonb) AS "thumbnailUrls",
+      r.detail_notice->'linkedWorkflow'->>'itemId' AS "linkedWorkflowId",
+      r.detail_notice->'linkedWorkflow'->>'detailPageUrl' AS "linkedDetailPageUrl",
       COALESCE(r.source_detail_image_urls, '[]'::jsonb) AS "detailImageUrls",
       COALESCE(r.image_urls, '[]'::jsonb) AS "imageUrls",
       COALESCE(r.source_options, '[]'::jsonb) AS options,
@@ -260,7 +264,7 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
       ), 0)::int AS "matchedSalesCodes"
     FROM marketplace_registration_profiles r
     WHERE r.user_id = ${userId}
-      AND r.source_type = 'funtastic-b2b'
+      AND r.source_type IN ('funtastic-b2b', 'product-workflow')
       AND NOT EXISTS (
         SELECT 1
         FROM marketplace_registration_profiles canonical

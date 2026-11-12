@@ -54,9 +54,12 @@ import {
   saveNewProductStagesAction,
   updateNewProductAction,
 } from './actions'
-import { DaouWorksImportDialog } from './daou-works-import-dialog'
+import { ProductLinkPanel } from '@/components/product-linking/product-link-panel'
+import { WorksSyncDialog } from './works-sync-dialog'
+import { WorksAssetPanel } from './works-asset-panel'
 
 type Props = {
+  initialItemId?: string
   initialStages: NewProductStage[]
   initialLayout: NewProductEditorLayout
   canManageSettings: boolean
@@ -90,13 +93,13 @@ const toneClasses: Record<NewProductStageTone, string> = {
   red: 'bg-red-100 text-red-700',
 }
 
-export function NewProductBoard({ initialStages, initialLayout, canManageSettings, exchangeRate }: Props) {
+export function NewProductBoard({ initialItemId, initialStages, initialLayout, canManageSettings, exchangeRate }: Props) {
   const router = useRouter()
   const [selectedStageIds, setSelectedStageIds] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [summaries, setSummaries] = useState<NewProductSummary[]>([])
   const [total, setTotal] = useState(0)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialItemId ?? null)
   const [item, setItem] = useState<NewProductItem | null>(null)
   const [mode, setMode] = useState<'view' | 'create'>('view')
   const [editorRevision, setEditorRevision] = useState(0)
@@ -201,6 +204,12 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
       })
     return () => { active = false }
   }, [dataRevision, mode, selectedId, detailLoader])
+
+  useEffect(() => {
+    const refreshAttachments = () => { detailLoader.clear(); setDataRevision((value) => value + 1) }
+    window.addEventListener('new-product-attachments-imported', refreshAttachments)
+    return () => window.removeEventListener('new-product-attachments-imported', refreshAttachments)
+  }, [detailLoader])
 
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
   const hasSearchQuery = Boolean(query.trim())
@@ -327,7 +336,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
             {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
             {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
-            {canManageSettings && <DaouWorksImportDialog stages={initialStages} onImported={() => {
+            {canManageSettings && <WorksSyncDialog stages={initialStages} onImported={() => {
               detailLoader.clear()
               setSelectedStageIds([])
               setQuery('')
@@ -491,11 +500,7 @@ function ProductSummaryList({
         }
         onStageChanged(summary.id, stageId)
         clearPendingStage(summary.id)
-        if (result.itemMasterPendingCodes > 0) {
-          toast.warning(`${summary.productName} 상태를 ${stage.name}으로 변경했습니다. 사방넷코드를 입력하면 품목에 반영됩니다.`)
-        } else {
-          toast.success(`${summary.productName} 상태를 ${stage.name}으로 변경했습니다.`)
-        }
+        toast.success(`${summary.productName} 상태를 ${stage.name}으로 변경했습니다.`)
       } catch (error) {
         clearPendingStage(summary.id)
         toast.error(error instanceof Error ? error.message : '상태를 변경하지 못했습니다.')
@@ -948,6 +953,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
             />
           ))}
         </div>
+        {item?.daouWorks && <WorksAssetPanel key={item.id} itemId={item.id} />}
       </EditorSection>
     ),
     notice: (
@@ -1028,6 +1034,9 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           )}
         </div>
       </div>
+
+      {item && <a className="text-xs underline" href={`/operations/detail-pages?workflowItem=${encodeURIComponent(item.id)}`}>이 상품의 상세페이지 제작</a>}
+      {item && <ProductLinkPanel itemId={item.id} showPurchase initialPurchaseId={item.linkedPurchaseId} disabled={editing || pending} onApplied={() => onSaved(item.id)} />}
 
       {visibleSections.length > 1 && (
         <nav aria-label="상품 정보 항목 바로가기" className="rounded-xl border bg-card p-3 shadow-sm">
@@ -1841,7 +1850,7 @@ function showItemMasterSaveToast(
   created: boolean,
 ) {
   if (status === 'pending_code') {
-    toast.warning('신상품은 저장했습니다. 5단계 이상은 사방넷코드를 입력하면 품목에 자동 반영됩니다.')
+    toast.warning('신상품은 저장했습니다. 사방넷코드 입력 후 상품 업무 연계에서 동기화해주세요.')
     return
   }
   if (status === 'created') {

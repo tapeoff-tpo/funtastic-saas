@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Sidebar, navSections } from './sidebar'
 import { TabBar } from './tab-bar'
-import { MENU_PATHS } from '@/lib/auth/menu-permissions'
+import { MENU_PATHS, menuForPage } from '@/lib/auth/menu-permissions'
 
 const mocks = vi.hoisted(() => ({ access: { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] as string[] | null } }))
 vi.mock('./menu-access-provider', () => ({ useMenuAccess: () => mocks.access }))
@@ -13,7 +13,12 @@ vi.mock('./nav-state', async () => ({
   useNavState: () => ({ favorites: ['/costs', '/purchasing/china-shipments'], toggleFavorite: vi.fn(), isFavorite: () => false,
     tabs: [{ href: '/costs', label: '품목' }, { href: '/purchasing/china-shipments', label: '중국출고' }], closeTab: vi.fn() }),
 }))
-vi.mock('./sidebar-menu-order', () => ({ applySidebarMenuOrder: (sections: unknown) => sections, readSidebarMenuOrder: () => null, fetchSidebarMenuOrder: async () => null, SIDEBAR_MENU_ORDER_EVENT: 'test-menu-order' }))
+vi.mock('./sidebar-menu-order', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./sidebar-menu-order')>(),
+  readSidebarMenuOrder: () => null,
+  fetchSidebarMenuOrder: async () => null,
+  SIDEBAR_MENU_ORDER_EVENT: 'test-menu-order',
+}))
 
 describe('permission-aware navigation', () => {
   beforeEach(() => { mocks.access = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] } })
@@ -34,7 +39,7 @@ describe('permission-aware navigation', () => {
   it('never loses known sidebar menu entries from the permission catalogue', () => {
     for (const item of navSections.flatMap((section) => section.items)) {
       if (item.href.startsWith('/admin/')) continue
-      expect(MENU_PATHS).toContain(item.href)
+      expect(MENU_PATHS).toContain(menuForPage(item.href))
     }
   })
   it('keeps selected children visible when their parent menu is not granted', () => {

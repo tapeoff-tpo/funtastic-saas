@@ -18,14 +18,16 @@ export const MENU_PERMISSION_GROUPS = [
     ['/purchasing/raw-data', '발주 로우데이터'], ['/outbound-reflection', '출고반영'],
     ['/purchasing/china-inventory', '중국재고'], ['/purchasing/saas-china-inventory', '중국재고(SaaS)'],
     ['/purchasing/china-shipments', '중국출고'], ['/inventory', '재고관리'],
+    ['/purchasing/import-documents', '인보이스·패킹리스트'],
     ['/inventory/adjustments', '입출고관리'], ['/purchasing/overdue', '구매/입고지연'],
   ] },
   { title: '상품등록·광고', items: [
+    ['/operations/coupang-registration', '쿠팡상품등록'],
     ['/analytics/price-table', '판매가 테이블'], ['/operations/marketplace-registration', '상품 등록 관리'],
     ['/operations/detail-pages', '상세페이지 제작'], ['/operations/deal-calendar', '딜 캘린더'],
   ] },
-  { title: '분석', items: [
-    ['/analytics', '매출분석'], ['/analytics/settlements', '정산 캘린더'],
+  { title: '매출분석', items: [
+    ['/analytics', '매출분석'], ['/analytics/clearance', '재고정리 운영'], ['/analytics/settlements', '정산 캘린더'],
     ['/analytics/rocket-outbound', '로켓배송/대량 매출'], ['/analytics/short-meeting', '숏미팅'],
     ['/analytics/sabangnet-review', '사방넷 검수'],
   ] },
@@ -36,7 +38,7 @@ export const MENU_PERMISSION_GROUPS = [
 ] as const
 
 export const MENU_PATHS: readonly string[] = MENU_PERMISSION_GROUPS.flatMap((group) => group.items.map(([path]) => path))
-export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null }
+export type MenuAccess = { superAdmin: boolean; allowedMenus: string[] | null; canDeletePurchases?: boolean }
 export const UNRESTRICTED_MENU_ACCESS: MenuAccess = { superAdmin: true, allowedMenus: null }
 
 const matches = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`)
@@ -62,6 +64,12 @@ export function menuForPage(href: string): string | null {
 export function canUseMenu(access: MenuAccess, menu: string): boolean {
   if (matches(menu, '/admin/accounts')) return access.superAdmin
   return access.superAdmin || access.allowedMenus === null || access.allowedMenus.includes(menu)
+}
+
+export function canDeletePurchaseRequests(access: MenuAccess | null): boolean {
+  return Boolean(access && (access.superAdmin || (
+    access.canDeletePurchases && ['/purchasing/orders', '/purchasing/purchases', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
+  )))
 }
 
 export function canAccessPage(access: MenuAccess, href: string): boolean {
@@ -109,7 +117,10 @@ const API_MENU_RULES: Array<[string, string[]]> = [
 export function canAccessApi(access: MenuAccess, href: string, method = 'GET'): boolean {
   const path = normalizeMenuPath(href)
   if (path === '/api/menu-access' || path === '/api/settings/menu-order' || path === '/api/check-ip') return true
-  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection$/.test(path)) {
+  if (/^\/api\/purchasing\/china-shipments\/[^/]+\/import-documents$/.test(path)) {
+    return ['/purchasing/china-shipments', '/purchasing/import-documents'].some((menu) => canUseMenu(access, menu))
+  }
+  if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/inspection(?:\/(?:labels|correction|issues(?:\/[^/]+\/attachments\/[^/]+)?))?$/.test(path)) {
     return ['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))
   }
   if (/^\/api\/purchasing\/purchase-requests\/[^/]+\/bulk-payment-deposit$/.test(path)) {

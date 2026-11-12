@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { ProductLinkPanel } from '@/components/product-linking/product-link-panel'
 import { useMemo, useState, useTransition } from 'react'
 import {
   AlertCircle,
@@ -88,7 +89,7 @@ function registrationChecks(row: RegistrationRow) {
   return [
     { label: '카테고리', complete: Boolean(row.commonCategory) },
     { label: '대표·추가 이미지', complete: Boolean(primary) && additional.length > 0 },
-    { label: '상품 상세', complete: Boolean(row.sourceDescription) },
+    { label: '상품 상세', complete: Boolean(row.sourceDescription || row.linkedDetailPageUrl) },
     { label: '제조사·원산지', complete: Boolean(row.manufacturer && row.countryOfOrigin) },
     { label: '옵션·재고', complete: row.options.length > 0 },
     { label: '상품고시', complete: row.productNotice.length > 0 },
@@ -320,6 +321,15 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                 </div>
               </div>
 
+              {selected.linkedWorkflowId && (
+                <div className="mb-3 space-y-2">
+                  <Link href={`/new-products?item=${encodeURIComponent(selected.linkedWorkflowId)}`} className="text-xs underline">연결된 상품관리 열기</Link>
+                  {selected.linkedDetailPageUrl?.startsWith('https://') && (
+                    <a href={selected.linkedDetailPageUrl} target="_blank" rel="noreferrer" className="ml-3 text-xs underline">완성 상세페이지 열기</a>
+                  )}
+                  <ProductLinkPanel itemId={selected.linkedWorkflowId} targets={['registration']} />
+                </div>
+              )}
               <form key={selected.productCode} action={applyRegistrationAction}>
                 <input type="hidden" name="productCode" value={selected.productCode} />
                 <input type="hidden" name="sourceProductUrl" value={selected.sourceProductUrl ?? ''} />

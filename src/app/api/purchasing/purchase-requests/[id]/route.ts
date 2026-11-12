@@ -8,7 +8,14 @@ import {
 } from '@/lib/purchasing/purchase-requests'
 import { PURCHASE_DELAY_REASONS } from '@/lib/purchasing/purchase-delay'
 import { PURCHASE_PAYMENT_STATUSES } from '@/lib/purchasing/purchase-request-status'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { canDeletePurchaseRequests, canUseMenu } from '@/lib/auth/menu-permissions'
+import { PURCHASE_ARRIVAL_WAREHOUSES } from '@/lib/purchasing/purchase-arrival-warehouse'
+
+const price = z.number().min(0).max(999_999_999)
+  .refine((value) => Math.abs(value - Math.round(value * 100) / 100) < 0.0000001)
+  .nullable().optional()
 
 export const purchaseRequestPlanFieldsBodySchema = z.object({
   requestedQuantity: z.number().int().min(1).max(1_000_000).optional(),
@@ -20,6 +27,10 @@ export const purchaseRequestPlanFieldsBodySchema = z.object({
   requestDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   outboundExpectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   purchaseMethod: z.string().max(100).nullable().optional(),
+  purchasePriceComparison: z.object({
+    actualUnitPriceCny: price,
+    actualShippingCny: price,
+  }).strict().refine((values) => Object.keys(values).length > 0).optional(),
   purchaseConfirmed: z.boolean().optional(),
   paymentStatus: z.enum(PURCHASE_PAYMENT_STATUSES).optional(),
   bulkPaymentPending: z.boolean().optional(),
@@ -32,6 +43,7 @@ export const purchaseRequestPlanFieldsBodySchema = z.object({
   // An explicit opt-in marker only. The purchasing service merges this into
   // rawData so the existing Ecount/raw China-inventory path remains untouched.
   saasChinaMode: z.boolean().optional(),
+  arrivalWarehouseCode: z.enum(PURCHASE_ARRIVAL_WAREHOUSES).optional(),
 })
 
 export async function PATCH(
@@ -45,6 +57,12 @@ export async function PATCH(
   const body = purchaseRequestPlanFieldsBodySchema.safeParse(await request.json().catch(() => null))
   if (!body.success) {
     return NextResponse.json({ error: '저장할 발주 정보가 올바르지 않습니다.' }, { status: 400 })
+  }
+  if (body.data.purchasePriceComparison) {
+    const access = await getUserMenuAccess(user.id)
+    if (!access || !canUseMenu(access, '/purchasing/orders')) {
+      return NextResponse.json({ error: '구매가격을 수정할 권한이 없습니다.' }, { status: 403 })
+    }
   }
 
   const { id } = await params
@@ -93,6 +111,9 @@ export async function DELETE(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
+  if (!canDeletePurchaseRequests(await getUserMenuAccess(user.id))) {
+    return NextResponse.json({ error: '발주를 삭제할 권한이 없습니다.' }, { status: 403 })
+  }
 
   const { id } = await params
   let row: Awaited<ReturnType<typeof deletePurchaseRequestItem>>

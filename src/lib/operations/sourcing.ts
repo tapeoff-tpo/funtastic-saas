@@ -1152,10 +1152,10 @@ export async function passManualSourcingToNewProduct(input: {
       SELECT id
       FROM new_product_workflow_stages
       WHERE user_id = ${input.userId}::uuid
-      ORDER BY position
+      ORDER BY (name = '샘플 구매') DESC, position
       LIMIT 1
     `))
-    if (!stage) throw new Error('신상품 1단계를 찾을 수 없습니다.')
+    if (!stage) throw new Error('상품관리의 샘플 구매 단계를 찾을 수 없습니다.')
 
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
     const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
@@ -1184,7 +1184,7 @@ export async function passManualSourcingToNewProduct(input: {
         user_id, item_id, to_stage_id, note, changed_by_user_id
       ) VALUES (
         ${input.userId}::uuid, ${created!.id}::uuid, ${stage.id}::uuid,
-        '소싱 1차 통과 자동 등록', ${input.requestedByUserId}::uuid
+        '소싱 확정으로 샘플 구매에 추가', ${input.requestedByUserId}::uuid
       )
     `)
     await tx.execute(sql`

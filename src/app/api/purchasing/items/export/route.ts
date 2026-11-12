@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs'
 import { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import {
   ESA009M_HEADERS,
   CHINESE_PRODUCT_NAME_HEADER,

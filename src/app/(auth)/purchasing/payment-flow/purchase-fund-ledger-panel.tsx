@@ -48,13 +48,13 @@ export function PurchaseFundLedgerPanel({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const parsedKrw = parseFormattedNumber(amountKrw)
-    const parsedCny = amountCny.trim() ? parseFormattedNumber(amountCny) : null
-    if (!Number.isFinite(parsedKrw) || parsedKrw <= 0) {
-      setError('입금액(원화)을 입력해주세요.')
+    const parsedKrw = amountKrw.trim() ? parseFormattedNumber(amountKrw) : 0
+    const parsedCny = parseFormattedNumber(amountCny)
+    if (!Number.isFinite(parsedKrw) || parsedKrw < 0) {
+      setError('입금액(원화)을 올바르게 입력해주세요.')
       return
     }
-    if (parsedCny !== null && (!Number.isFinite(parsedCny) || parsedCny <= 0)) {
+    if (!Number.isFinite(parsedCny) || parsedCny <= 0) {
       setError('입금액(위안화)을 올바르게 입력해주세요.')
       return
     }
@@ -164,7 +164,7 @@ export function PurchaseFundLedgerPanel({
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="purchase-fund-krw">입금액 (원화) *</Label>
+                    <Label htmlFor="purchase-fund-krw">입금액 (원화, 선택)</Label>
                     <div className="relative">
                       <Input
                         id="purchase-fund-krw"
@@ -173,14 +173,13 @@ export function PurchaseFundLedgerPanel({
                         onChange={(event) => setAmountKrw(formatIntegerInput(event.target.value))}
                         className="pr-8 text-right tabular-nums"
                         placeholder="0"
-                        required
                         disabled={isPending}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">원</span>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="purchase-fund-cny">입금액 (위안화, 선택)</Label>
+                    <Label htmlFor="purchase-fund-cny">입금액 (위안화) *</Label>
                     <div className="relative">
                       <Input
                         id="purchase-fund-cny"
@@ -189,6 +188,7 @@ export function PurchaseFundLedgerPanel({
                         onChange={(event) => setAmountCny(formatDecimalInput(event.target.value))}
                         className="pr-8 text-right tabular-nums"
                         placeholder="0"
+                        required
                         disabled={isPending}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">元</span>
@@ -246,22 +246,36 @@ export function PurchaseFundLedgerPanel({
 
       <div className="grid gap-3 md:grid-cols-3">
         <FundSummaryCard
-          label="누적 입금"
+          label="누적 입금 (위안화 기준)"
           amountKrw={summary.totalDepositedKrw}
           amountCny={summary.totalDepositedCny}
+          unknownReason={summary.missingCnyDepositCount > 0
+            ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
+            : null}
           tone="credit"
         />
         <FundSummaryCard
-          label="발주 차감"
+          label="발주 차감 (위안화 기준)"
           amountKrw={summary.totalDebitedKrw}
           amountCny={summary.totalDebitedCny}
+          unknownReason={summary.missingCostOrderCount > 0
+            ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+            : null}
           tone="debit"
         />
         <FundSummaryCard
-          label="현재 잔액"
+          label="현재 잔액 (위안화 기준)"
           amountKrw={summary.balanceKrw}
           amountCny={summary.balanceCny}
-          tone={summary.balanceKrw < 0 ? 'debit' : 'balance'}
+          unknownReason={[
+            summary.missingCnyDepositCount > 0
+              ? `위안화 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
+              : null,
+            summary.missingCostOrderCount > 0
+              ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+              : null,
+          ].filter(Boolean).join(' · ') || null}
+          tone={summary.balanceCny !== null && summary.balanceCny < 0 ? 'debit' : 'balance'}
         />
       </div>
 
@@ -281,9 +295,9 @@ export function PurchaseFundLedgerPanel({
               <th className="px-3 py-2 text-left font-medium">날짜</th>
               <th className="px-3 py-2 text-left font-medium">구분</th>
               <th className="px-3 py-2 text-left font-medium">내역</th>
-              <th className="px-3 py-2 text-right font-medium">입금</th>
-              <th className="px-3 py-2 text-right font-medium">발주 차감</th>
-              <th className="px-3 py-2 text-right font-medium">잔액</th>
+              <th className="px-3 py-2 text-right font-medium">입금 (元)</th>
+              <th className="px-3 py-2 text-right font-medium">발주 차감 (元)</th>
+              <th className="px-3 py-2 text-right font-medium">잔액 (元)</th>
               <th className="w-12 px-2 py-2"><span className="sr-only">관리</span></th>
             </tr>
           </thead>
@@ -303,13 +317,21 @@ export function PurchaseFundLedgerPanel({
                 </td>
                 <td className="max-w-[360px] px-3 py-2.5 text-muted-foreground">{entry.detail}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-emerald-700">
-                  {entry.isManualCredit ? formatKrw(entry.amountKrw) : '-'}
+                  {entry.isManualCredit ? (
+                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
+                  ) : '-'}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-red-700">
-                  {entry.entryType === 'purchase_debit' ? formatKrw(entry.amountKrw) : '-'}
+                  {entry.entryType === 'purchase_debit' ? (
+                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
+                  ) : '-'}
                 </td>
-                <td className={`whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums ${entry.balanceKrw < 0 ? 'text-red-700' : ''}`}>
-                  {formatKrw(entry.balanceKrw)}
+                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
+                  <LedgerAmount
+                    amountCny={entry.balanceCny}
+                    amountKrw={entry.balanceKrw}
+                    className={entry.balanceCny !== null && entry.balanceCny < 0 ? 'text-red-700' : 'text-foreground'}
+                  />
                 </td>
                 <td className="px-2 py-2 text-right">
                   {entry.isManualCredit ? (
@@ -336,13 +358,13 @@ export function PurchaseFundLedgerPanel({
       </details>
 
       {(
-        (summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0)
+        (summary.totalDepositedCny === 0 && summary.totalDebitedCny !== null && summary.totalDebitedCny > 0)
         || summary.missingCnyDepositCount > 0
         || summary.missingCostOrderCount > 0
       ) ? (
         <aside aria-label="정산 참고" className="border-t pt-3">
           <div className="space-y-1.5 text-[11px] leading-4">
-            {summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0 ? (
+            {summary.totalDepositedCny === 0 && summary.totalDebitedCny !== null && summary.totalDebitedCny > 0 ? (
               <p className="rounded-sm border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-blue-800">
                 기존 발주 차감만 먼저 불러왔습니다. 실제 잔액부터 관리하려면 `입금내역 추가`에서 `기초잔액`을 한 번 등록해주세요.
               </p>
@@ -350,10 +372,10 @@ export function PurchaseFundLedgerPanel({
             {summary.missingCnyDepositCount > 0 || summary.missingCostOrderCount > 0 ? (
               <p className="rounded-sm border border-amber-100 bg-amber-50/50 px-2 py-1.5 text-amber-800">
                 {summary.missingCnyDepositCount > 0
-                  ? `위안화 금액을 입력하지 않은 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 위안화 잔액은 표시하지 않습니다. `
+                  ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 누적 입금액과 잔액을 확정할 수 없습니다. `
                   : null}
                 {summary.missingCostOrderCount > 0
-                  ? `원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건은 확인된 금액만 차감되어 있습니다.`
+                  ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건이 있어 발주 차감액과 잔액을 확정할 수 없습니다. 확인된 금액만 장부에 차감했습니다.`
                   : null}
               </p>
             ) : null}
@@ -368,11 +390,13 @@ function FundSummaryCard({
   label,
   amountKrw,
   amountCny,
+  unknownReason,
   tone,
 }: {
   label: string
   amountKrw: number
   amountCny: number | null
+  unknownReason: string | null
   tone: 'credit' | 'debit' | 'balance'
 }) {
   const color = tone === 'credit'
@@ -383,11 +407,33 @@ function FundSummaryCard({
   return (
     <div className="rounded-md border bg-muted/20 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>{formatKrw(amountKrw)}</p>
-      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>
         {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
       </p>
+      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatKrw(amountKrw)}</p>
+      {amountCny === null && unknownReason ? (
+        <p className="mt-1 text-[11px] leading-4 text-amber-700">{unknownReason}</p>
+      ) : null}
     </div>
+  )
+}
+
+function LedgerAmount({
+  amountCny,
+  amountKrw,
+  className = '',
+}: {
+  amountCny: number | null
+  amountKrw: number
+  className?: string
+}) {
+  return (
+    <span className={className}>
+      <span className="block font-medium">
+        {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
+      </span>
+      <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{formatKrw(amountKrw)}</span>
+    </span>
   )
 }
 

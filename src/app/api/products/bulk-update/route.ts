@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { products, productVariants, excelImportTemplates } from '@/lib/db/schema'
 import { inArray, sql, eq, and } from 'drizzle-orm'

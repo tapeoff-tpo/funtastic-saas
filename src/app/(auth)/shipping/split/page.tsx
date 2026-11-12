@@ -7,7 +7,7 @@
 
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { SplitShippingClient } from './client'
 
 export const metadata: Metadata = {

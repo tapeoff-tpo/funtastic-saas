@@ -19,7 +19,7 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
   })
   if (!attachment) return NextResponse.json({ error: '파일을 찾을 수 없습니다.' }, { status: 404 })
 
-  return new NextResponse(Buffer.from(attachment.fileDataBase64, 'base64'), {
+  return new NextResponse(Buffer.from(attachment.fileDataBase64 ?? '', 'base64'), {
     headers: {
       'Content-Type': attachment.contentType,
       'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,

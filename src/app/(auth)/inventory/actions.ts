@@ -3,7 +3,7 @@
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { revalidatePath } from 'next/cache'
 import { eq, and } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { inventory, inventoryAdjustmentSlips, products } from '@/lib/db/schema'
 import { setStock } from '@/lib/inventory/actions'

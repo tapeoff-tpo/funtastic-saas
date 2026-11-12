@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({ execute: vi.fn(), transaction: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
 import {
+  mergeChinaOutboundBoxes,
+  saveChinaOutboundPackageWeight,
+  saveChinaOutboundItemChineseName,
   assignChinaOutboundBoxesToPallets,
   dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
@@ -125,6 +128,67 @@ describe('China outbound box and pallet completion', () => {
       { id: 'allocation-1', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-1', quantity: 5 },
       { id: 'allocation-2', userId, shipmentId, boxId: 'box-2', shipmentItemId: 'item-1', quantity: 5 },
     ]
+  })
+
+  it('merges mixed contents into the real largest box without changing stock or per-item totals', async () => {
+    boxes[1] = { ...boxes[1]!, lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: '7' }
+    boxes[0]!.grossWeightKg = '3'
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 2, packedQuantity: 2 })
+    boxItems.push({ id: 'extra', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-2', quantity: 2 })
+    const balances = JSON.stringify(inventory)
+    const target = await mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })
+    expect(target.id).toBe('box-2')
+    expect(boxItems.map((row) => [row.boxId, row.shipmentItemId, row.quantity])).toEqual([['box-2', 'item-1', 10], ['box-2', 'item-2', 2]])
+    expect(boxes[1]).toMatchObject({ lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: null })
+    expect(boxes[0]).toMatchObject({ palletId: null, grossWeightKg: null })
+    expect(JSON.stringify(inventory)).toBe(balances); expect(items.map((item) => item.packedQuantity)).toEqual([10, 2])
+    await mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })
+    expect(boxItems).toHaveLength(2); expect(movements).toHaveLength(0)
+  })
+
+  it('rejects sealed, foreign, and closed box merges before moving any allocation', async () => {
+    const original = JSON.stringify(boxItems)
+    boxes[0]!.status = 'sealed'
+    await expect(mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })).rejects.toThrow('수정 가능한')
+    boxes[0]!.status = 'open'
+    await expect(mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'foreign'] })).rejects.toThrow('수정 가능한')
+    shipments[0]!.status = 'dispatched'
+    await expect(mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })).rejects.toThrow('초안 또는 포장중')
+    expect(JSON.stringify(boxItems)).toBe(original)
+  })
+
+  it('keeps the larger physical dimensions when another SKU enters a shared box', async () => {
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 2, packedQuantity: 0 })
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-2', allocations: [{ boxNo: '1', quantity: 2, lengthCm: 5, widthCm: 5, heightCm: 5 }] })
+    expect(boxes[0]).toMatchObject({ lengthCm: '10', widthCm: '20', heightCm: '30' })
+    expect(boxItems.filter((row) => row.boxId === 'box-1').map((row) => row.quantity)).toEqual([5, 2])
+  })
+
+  it.each(['box', 'pallet'] as const)('saves %s gross weight without touching quantities and guards other workspaces', async (kind) => {
+    const packageId = kind === 'box' ? 'box-1' : 'pallet-1'
+    const original = JSON.stringify(inventory)
+    await saveChinaOutboundPackageWeight({ userId, shipmentId, packageId, kind, grossWeightKg: 12.345 })
+    expect((kind === 'box' ? boxes : pallets)[0]!.grossWeightKg).toBe('12.345')
+    expect(JSON.stringify(inventory)).toBe(original)
+    await expect(saveChinaOutboundPackageWeight({ userId: 'foreign', shipmentId, packageId, kind, grossWeightKg: 3 })).rejects.toThrow('찾을 수 없습니다')
+    await expect(saveChinaOutboundPackageWeight({ userId, shipmentId, packageId, kind, grossWeightKg: -1 })).rejects.toThrow('0보다')
+  })
+
+  it('stores a Chinese name only on the requested outbound item', async () => {
+    await saveChinaOutboundItemChineseName({ userId, shipmentId, shipmentItemId: 'item-1', chineseProductName: '水杯' })
+    expect(items[0]!.chineseProductName).toBe('水杯')
+    await expect(saveChinaOutboundItemChineseName({ userId: 'foreign', shipmentId, shipmentItemId: 'item-1', chineseProductName: '别的' })).rejects.toThrow('찾을 수 없습니다')
+    expect(items[0]!.chineseProductName).toBe('水杯')
+  })
+
+  it.each([false, true])('dispatches loose boxes with mixed pallet loading = %s and deducts once', async (mixed) => {
+    boxes[0]!.palletId = null
+    if (!mixed) boxes[1]!.palletId = null
+    await dispatchChinaOutboundShipment({ userId, shipmentId, createdBy: 'admin' })
+    expect(inventory[0]).toMatchObject({ onHandQuantity: 10, reservedQuantity: 0 })
+    expect(movements).toHaveLength(1)
+    await expect(dispatchChinaOutboundShipment({ userId, shipmentId, createdBy: 'admin' })).rejects.toThrow('이미 출고완료')
+    expect(movements).toHaveLength(1)
   })
 
   it('changes only selected boxes and reopens their assigned pallets', async () => {

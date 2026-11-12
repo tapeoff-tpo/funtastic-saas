@@ -9,7 +9,7 @@ import {
 } from '@/lib/purchasing/discontinued-products'
 import { parseDiscontinuedProductFile } from '@/lib/purchasing/discontinued-product-file'
 import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const MAX_FILE_SIZE = 4 * 1024 * 1024
 

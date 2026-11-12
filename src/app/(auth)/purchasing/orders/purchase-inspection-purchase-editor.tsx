@@ -70,7 +70,6 @@ export function PurchaseInspectionPurchaseEditor({
         id={purchaseItemId} supplierOrderNumber={purchaseFields.supplierOrderNumber}
         trackingNumber={null} showTrackingNumber={false}
         dateValue={purchaseFields.outboundExpectedDate} dateField="outboundExpectedDate" dateLabel="구매날짜"
-        purchaseMethod={purchaseFields.purchaseMethod}
       />
     </div>
     {canCorrectQuantity ? <form onSubmit={(event) => void correct(event)} className="space-y-3 border-t pt-3">

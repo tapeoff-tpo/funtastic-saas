@@ -8,6 +8,7 @@ import {
   changeRole,
   resetAccountPassword,
   deactivateAccount,
+  deleteAccount,
   reactivateAccount,
 } from '@/lib/admin-accounts/actions'
 import type { UserProfile } from '@/lib/db/schema'
@@ -16,10 +17,13 @@ import { MenuPermissionsDialog } from './menu-permissions-dialog'
 interface Props {
   accounts: UserProfile[]
   currentUserId: string
+  workspaceOwnerId: string
+  canDeleteAccounts: boolean
   menuPermissions: Record<string, string[] | null>
+  purchaseDeletePermissions: Record<string, boolean>
 }
 
-export function AccountsTable({ accounts, currentUserId, menuPermissions }: Props) {
+export function AccountsTable({ accounts, currentUserId, workspaceOwnerId, canDeleteAccounts, menuPermissions, purchaseDeletePermissions }: Props) {
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState<UserProfile | null>(null)
 
@@ -34,10 +38,15 @@ export function AccountsTable({ accounts, currentUserId, menuPermissions }: Prop
   }
 
   function handleReset(targetId: string, email: string) {
-    if (!confirm(`${email} 의 비밀번호를 0000으로 초기화하시겠습니까?\n다음 로그인 시 새 비밀번호를 설정해야 합니다.`)) return
+    if (!confirm(`${email} 의 비밀번호를 초기화하시겠습니까?\n기존 세션이 종료되고 새 비밀번호 설정 링크가 발급됩니다.`)) return
     startTransition(async () => {
       const res = await resetAccountPassword({ targetId })
-      if (res.success) toast.success('비밀번호가 0000으로 초기화되었습니다. 다음 로그인 시 새 비밀번호를 설정해야 합니다.')
+      if (res.success) {
+        if (res.data?.resetPath) {
+          window.prompt('계정 소유자에게 전달할 비밀번호 설정 링크입니다. 1시간 내 1회 사용할 수 있습니다.', window.location.origin + res.data.resetPath)
+          toast.success('비밀번호 설정 링크가 발급되었습니다.')
+        } else toast.success('비밀번호가 초기화되었습니다.')
+      }
       else toast.error(res.error)
     })
   }
@@ -60,9 +69,23 @@ export function AccountsTable({ accounts, currentUserId, menuPermissions }: Prop
     })
   }
 
+  function canDelete(account: UserProfile) {
+    return canDeleteAccounts && account.id !== currentUserId && account.id !== workspaceOwnerId && account.role !== 'super_admin'
+      && ![account.email, account.displayName].some((name) => name?.trim().toLowerCase().startsWith('admin123'))
+  }
+
+  function handleDelete(account: UserProfile) {
+    if (!confirm(`${account.email}의 로그인 계정을 삭제하시겠습니까?\n로그인 세션과 비밀번호 설정 링크가 종료되고 업무 데이터와 이력은 보존됩니다. 삭제한 계정은 다시 활성화할 수 없습니다.`)) return
+    startTransition(async () => {
+      const result = await deleteAccount({ targetId: account.id })
+      if (result.success) toast.success('계정 삭제 완료')
+      else toast.error(result.error)
+    })
+  }
+
   return (
     <>
-      {editing && <MenuPermissionsDialog key={editing.id} account={{ id: editing.id, email: editing.email, allowedMenus: menuPermissions[editing.id] ?? null }} onClose={() => setEditing(null)} />}
+      {editing && <MenuPermissionsDialog key={editing.id} account={{ id: editing.id, email: editing.email, allowedMenus: menuPermissions[editing.id] ?? null, canDeletePurchases: purchaseDeletePermissions[editing.id] ?? false }} onClose={() => setEditing(null)} />}
       <div className="space-y-3 md:hidden">
         {accounts.map((a) => {
           const isSelf = a.id === currentUserId
@@ -90,6 +113,9 @@ export function AccountsTable({ accounts, currentUserId, menuPermissions }: Prop
                   <Button size="sm" variant="outline" className="col-span-2 h-10 text-red-600 hover:text-red-700" disabled={pending || isSelf} onClick={() => handleDeactivate(a.id, a.email)}>비활성화</Button>
                 ) : (
                   <Button size="sm" variant="outline" className="col-span-2 h-10" disabled={pending} onClick={() => handleReactivate(a.id, a.email)}>재활성화</Button>
+                )}
+                {canDelete(a) && (
+                  <Button size="sm" variant="destructive" className="col-span-2 h-10" disabled={pending} onClick={() => handleDelete(a)}>계정 삭제</Button>
                 )}
               </div>
             </article>
@@ -173,6 +199,9 @@ export function AccountsTable({ accounts, currentUserId, menuPermissions }: Prop
                       >
                         재활성화
                       </Button>
+                    )}
+                    {canDelete(a) && (
+                      <Button size="sm" variant="destructive" disabled={pending} onClick={() => handleDelete(a)}>계정 삭제</Button>
                     )}
                   </div>
                 </td>

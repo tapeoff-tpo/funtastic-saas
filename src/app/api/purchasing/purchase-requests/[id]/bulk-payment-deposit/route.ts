@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { updatePurchaseRequestBulkPaymentDeposit } from '@/lib/purchasing/purchase-requests'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 const calendarDateSchema = z.string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)

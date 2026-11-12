@@ -2,7 +2,7 @@ import { gunzipSync } from 'node:zlib'
 import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import {
   WorkspaceDataOperationInProgressError,
   withWorkspaceDataOperationLock,
@@ -46,7 +46,7 @@ const REPORT_KINDS: EcountReportKind[] = ['purchaseRequest', 'purchasePlan', 'pu
 type PurchasingRawDataRequest = Awaited<ReturnType<typeof readPurchasingRawDataRequest>>
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()

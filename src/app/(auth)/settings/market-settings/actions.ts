@@ -3,7 +3,7 @@
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { nanoid } from 'nanoid'
 import { revalidatePath, updateTag } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   listMarketplaceBusinessSettings,
@@ -28,8 +28,13 @@ export async function createCustomMarketplace(
   if (error || !user) return { error: '인증이 필요합니다.' }
 
   const marketplaceName = String(formData.get('marketplace_name') ?? '').trim()
+  const rawSalesFeePercent = String(formData.get('sales_fee_percent') ?? '').trim()
+  const salesFeePercent = rawSalesFeePercent === '' ? null : Number(rawSalesFeePercent)
   if (!marketplaceName) return { error: '추가할 마켓명을 입력해주세요.' }
   if (marketplaceName.length > 100) return { error: '마켓명은 100자 이내로 입력해주세요.' }
+  if (salesFeePercent !== null && (!Number.isFinite(salesFeePercent) || salesFeePercent < 0 || salesFeePercent > 100)) {
+    return { error: '수수료율은 0부터 100 사이 숫자로 입력해주세요.' }
+  }
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const normalizedName = normalizeName(marketplaceName)
@@ -48,14 +53,14 @@ export async function createCustomMarketplace(
     marketplaceId: `custom-${nanoid(10)}`,
     systemMarketplaceName: marketplaceName,
     salesExportMarketplaceId: '',
-    salesFeePercent: null,
+    salesFeePercent,
   })
 
   revalidatePath('/settings/market-settings')
   revalidatePath('/orders')
   revalidatePath('/analytics')
   updateTag('analytics')
-  return { success: true, message: `${marketplaceName} 마켓을 추가했습니다.` }
+  return { success: true, message: `${marketplaceName} 마켓과 기본 수수료율을 등록했습니다.` }
 }
 
 function normalizeName(value: string): string {

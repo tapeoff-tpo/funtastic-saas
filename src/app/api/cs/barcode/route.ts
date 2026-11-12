@@ -4,7 +4,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { marketplaceConnections, orderItems, orders, shipments } from '@/lib/db/schema'
 import { MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()

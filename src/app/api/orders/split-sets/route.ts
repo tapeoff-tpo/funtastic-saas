@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, inArray } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { orderItems, orders, shipmentGroupOrders, shipmentGroups } from '@/lib/db/schema'
 import { expandOrderItemsWithMapping, type ExpandedRow } from '@/lib/orders/mapping-expand'

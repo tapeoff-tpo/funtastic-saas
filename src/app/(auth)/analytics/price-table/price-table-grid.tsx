@@ -19,11 +19,13 @@ import {
 export type PriceTableGridRow = {
   id: string
   rowNumber: number
+  sourceNumber: string | null
   productCode: string | null
   productName: string | null
   optionName: string | null
   registeredProductName: string | null
   rawData: Record<string, string>
+  directEntryDate?: string
 }
 
 type CoreColumn = {

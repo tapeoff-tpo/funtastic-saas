@@ -1,5 +1,5 @@
 import { desc, eq, inArray } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, jobLogs, marketplaceConnections } from '@/lib/db/schema'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'

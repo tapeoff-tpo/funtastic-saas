@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { applyCarrierImport } from '@/lib/products/carrier-excel'
 import { revalidatePath } from 'next/cache'
 

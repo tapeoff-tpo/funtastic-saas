@@ -22,7 +22,7 @@ import {
   updateAiAccountLoginInfo,
   updateAiAccountOperationalState,
 } from '@/lib/operations/ai-accounts'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 import { parseWeeklyResetCode } from '@/lib/operations/ai-account-reset-code'
 
 export async function createAiAccountAction(

@@ -15,7 +15,7 @@ import {
   saveSourcingMeetingRows,
   updateSourcingMeeting,
 } from '@/lib/operations/sourcing'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/auth/server'
 
 type SourcingMeetingValues = {
   meetingDate: string
@@ -146,6 +146,9 @@ export async function saveSourcingMeetingRowsAction(input: {
   try {
     const auth = await actionUser()
     const rows = input.rows.slice(0, 100).map(rowValues)
+    if (rows.some(row => row.reviewStatus === 'passed' && !/^https?:\/\//i.test(row.chinaPurchaseUrl ?? ''))) {
+      return { success: false as const, error: '소싱 확정 전에 선택한 구매처 URL을 입력해주세요.' }
+    }
     const result = await saveSourcingMeetingRows({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,

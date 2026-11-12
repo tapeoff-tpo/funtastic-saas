@@ -23,6 +23,7 @@ export async function getLatestCnyKrwReferenceRate(): Promise<CnyKrwReferenceRat
   try {
     const response = await fetch('https://api.frankfurter.dev/v1/latest?base=CNY&symbols=KRW', {
       next: { revalidate: 60 * 60 },
+      signal: AbortSignal.timeout(2_500),
     })
     if (!response.ok) throw new Error(`환율 조회 실패 (${response.status})`)
 

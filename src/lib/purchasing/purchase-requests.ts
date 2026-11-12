@@ -7,6 +7,7 @@ import {
   inventory,
   products,
   purchaseRequestItems,
+  saasChinaInventory,
   saasChinaPurchaseLinks,
 } from '@/lib/db/schema'
 import {
@@ -22,6 +23,7 @@ import {
   type PurchaseDelayReason,
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
+import { purchaseMasterPriceKeys, readPurchasePriceComparison, type ActualPurchasePrices } from './purchase-price-comparison'
 import { purchasePipelineQuantity } from './purchase-recommendations'
 import {
   getProductGroupPurchaseUrgencyStatus,
@@ -47,6 +49,7 @@ import {
   purchasingOutboundComponentIdentity,
 } from './ignored-purchasing-items'
 import { isUniqueSupplierOrderIdentifier } from './supplier-order-reference'
+import { purchaseArrivalWarehouse, type PurchaseArrivalWarehouse } from './purchase-arrival-warehouse'
 import {
   adjustSaasChinaPurchaseArrivalQuantityInTransaction,
   ensureSaasChinaOutboundSchema,
@@ -1008,11 +1011,13 @@ export async function getPurchaseRequests(input: {
   /** Completed-outbound date groups selected in the list filter. */
   outboundDates?: readonly string[]
   exchangeRateKrw?: number
+  includeSaasArrival?: boolean
 }) {
   await Promise.all([
     ensurePurchasePaymentTrackingSchema(),
     ensurePurchaseInspectionIssueSchema(),
   ])
+  if (input.includeSaasArrival) await ensureSaasChinaOutboundSchema()
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
@@ -1108,7 +1113,26 @@ export async function getPurchaseRequests(input: {
         ...getTableColumns(purchaseRequestItems),
         specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
         newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-        purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
+        masterPurchasePriceCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.unitPrice}`,
+        masterPurchaseShippingCny: sql<string | null>`${products.metadata}->'esa009m'->>${purchaseMasterPriceKeys.shipping}`,
+        arrivalInventoryId: input.includeSaasArrival ? sql<string | null>`(
+          SELECT ${saasChinaPurchaseLinks.inventoryId}
+          FROM ${saasChinaPurchaseLinks}
+          WHERE ${saasChinaPurchaseLinks.userId} = ${purchaseRequestItems.userId}
+            AND ${saasChinaPurchaseLinks.purchaseRequestItemId} = ${purchaseRequestItems.id}
+        )` : sql<string | null>`NULL`,
+        arrivalInventoryWarehouse: input.includeSaasArrival ? sql<string | null>`(
+          SELECT ${saasChinaInventory.warehouseCode}
+          FROM ${saasChinaPurchaseLinks} JOIN ${saasChinaInventory}
+            ON ${saasChinaInventory.id} = ${saasChinaPurchaseLinks.inventoryId}
+            AND ${saasChinaInventory.userId} = ${saasChinaPurchaseLinks.userId}
+          WHERE ${saasChinaPurchaseLinks.userId} = ${purchaseRequestItems.userId}
+            AND ${saasChinaPurchaseLinks.purchaseRequestItemId} = ${purchaseRequestItems.id}
+        )` : sql<string | null>`NULL`,
+        purchaseUrl: sql<string | null>`COALESCE(
+          NULLIF(BTRIM(${purchaseRequestItems.rawData}->'productWorkflow'->>'purchaseUrl'), ''),
+          NULLIF(BTRIM(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}), '')
+        )`,
         purchasingStatus: products.purchasingStatus,
         purchasingStatusNote: products.purchasingStatusNote,
         chinaCurrentStock,
@@ -1981,14 +2005,17 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
     if (!current) return null
     if (!['purchase_completed', 'inspecting'].includes(current.status)) throw new Error('구매완료·검수 단계에서만 송장과 박스를 수정할 수 있습니다.')
     if ((current.purchaseInspection?.revision ?? 0) !== parsed.revision) throw new Error('다른 작업자가 검수 정보를 변경했습니다. 다시 열어 확인해주세요.')
+    const stickerStatus = parsed.stickerStatus === undefined ? current.purchaseInspection?.stickerStatus : parsed.stickerStatus
     const inspection: PurchaseInspection = {
       version: 1, revision: parsed.revision + 1,
       expectedQuantity: current.purchaseInspection?.expectedQuantity ?? current.actualPurchaseQuantity ?? current.requestedQuantity,
       parcels: parsed.parcels, resolutionNote: parsed.resolutionNote,
+      ...(stickerStatus === undefined ? {} : { stickerStatus }),
       checkedAt: parsed.complete ? new Date().toISOString() : null, checkedBy: parsed.complete ? input.actorId : null,
       hasReportedIssue: current.purchaseInspection?.hasReportedIssue === true,
     }
     const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : inspectionSummary(inspection)
+    if (parsed.complete && !stickerStatus) throw new Error('스티커 부착 상태를 선택해주세요.')
     await tx.update(purchaseRequestItems).set({
       status: 'inspecting', purchaseInspection: inspection,
       trackingNumber: inspection.parcels[0].trackingNumber,
@@ -2058,6 +2085,7 @@ export async function updatePurchaseRequestStatus(input: {
           productName: current.productName,
           optionName: current.optionName,
           quantity: purchaseQuantity(current),
+          warehouseCode: purchaseArrivalWarehouse(current.rawData),
         })
       } else {
         await addChinaWarehouseStock(tx, current)
@@ -2102,6 +2130,7 @@ export async function updatePurchaseRequestStatus(input: {
     if (input.status === 'china_arrived') {
       values.chinaReceivedAt = current.chinaReceivedAt ?? new Date()
       values.chinaReceivedQuantity = current.chinaReceivedQuantity ?? purchaseQuantity(current)
+      if (current.outboundExpectedDate) values.rawData = { ...current.rawData, purchaseDate: current.outboundExpectedDate }
     }
 
     const [row] = await tx
@@ -2126,6 +2155,7 @@ export async function updatePurchaseRequestPlanFields(input: {
   trackingNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
+  purchasePriceComparison?: ActualPurchasePrices
   purchaseConfirmed?: boolean
   paymentStatus?: PurchasePaymentStatus
   bulkPaymentPending?: boolean
@@ -2136,13 +2166,14 @@ export async function updatePurchaseRequestPlanFields(input: {
   delayNote?: string | null
   applyDelayReasonToItem?: boolean
   saasChinaMode?: boolean
+  arrivalWarehouseCode?: PurchaseArrivalWarehouse
   /** Internal optimistic-concurrency guard for browser-assisted 1688 lookups. */
   expectedSupplierOrderNumber?: string
   /** Never let an asynchronous lookup replace an existing manual inspection. */
   requireEmptyTrackingNumber?: boolean
 }) {
   await ensurePurchasePaymentTrackingSchema()
-  if (input.saasChinaMode !== undefined || input.chinaReceivedQuantity !== undefined || input.outboundRequestedQuantity !== undefined) {
+  if (input.saasChinaMode !== undefined || input.arrivalWarehouseCode !== undefined || input.chinaReceivedQuantity !== undefined || input.outboundRequestedQuantity !== undefined) {
     await ensureSaasChinaOutboundSchema()
   }
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
@@ -2272,6 +2303,11 @@ export async function updatePurchaseRequestPlanFields(input: {
     }
 
     const currentSaasChinaMode = usesSaasChinaInventory(current.rawData)
+    if (input.arrivalWarehouseCode && (
+      input.saasChinaMode === false || !['purchased', 'purchase_completed', 'inspecting'].includes(current.status)
+    )) {
+      throw new Error('입고 창고는 중국창고도착 전에만 변경할 수 있습니다.')
+    }
     if (input.saasChinaMode !== undefined) {
       const canChangeSaasMode = current.status === 'purchased' || current.status === 'purchase_completed' || current.status === 'inspecting'
       if (!canChangeSaasMode && input.saasChinaMode !== currentSaasChinaMode) {
@@ -2288,16 +2324,23 @@ export async function updatePurchaseRequestPlanFields(input: {
         }
       }
     }
-    const saasChinaMode = input.saasChinaMode ?? currentSaasChinaMode
-    const saasChinaModeChanged = input.saasChinaMode !== undefined && input.saasChinaMode !== currentSaasChinaMode
+    const saasChinaMode = input.arrivalWarehouseCode ? true : input.saasChinaMode ?? currentSaasChinaMode
+    const saasChinaModeChanged = saasChinaMode !== currentSaasChinaMode
     if (saasChinaMode && outboundRequestedQuantity !== undefined) {
       throw new Error('SaaS 중국재고 연동 발주의 출고요청수량은 중국출고 작업에서만 변경할 수 있습니다.')
     }
 
-    if (saasChinaModeChanged || outboundRequestedQuantity !== undefined) {
+    const pricePatch = input.purchasePriceComparison
+    if (pricePatch && current.status !== 'purchase_completed' && current.status !== 'inspecting') {
+      throw new Error('현재 발주 단계에서는 해당 구매가격을 수정할 수 없습니다.')
+    }
+
+    if (saasChinaModeChanged || input.arrivalWarehouseCode || outboundRequestedQuantity !== undefined || pricePatch) {
       values.rawData = {
         ...current.rawData,
-        ...(saasChinaModeChanged ? { saasChinaMode: input.saasChinaMode } : {}),
+        ...(pricePatch ? { purchasePriceComparison: { ...readPurchasePriceComparison(current.rawData), ...pricePatch } } : {}),
+        ...(saasChinaModeChanged ? { saasChinaMode } : {}),
+        ...(input.arrivalWarehouseCode ? { arrivalWarehouseCode: input.arrivalWarehouseCode } : {}),
         ...(outboundRequestedQuantity !== undefined ? { outboundRequestedQuantity } : {}),
       }
     }
@@ -2440,7 +2483,8 @@ export async function applyPurchaseRequest1688TrackingLookup(input: {
       }
 
       const replacementInspection: PurchaseInspection = {
-        ...createPurchaseInspection(previousInspection.expectedQuantity, trackingNumbers.join('\n')),
+        ...previousInspection,
+        parcels: createPurchaseInspection(previousInspection.expectedQuantity, trackingNumbers.join('\n')).parcels,
         revision: previousInspection.revision + 1,
       }
       const trackingNumber = replacementInspection.parcels[0]?.trackingNumber ?? null

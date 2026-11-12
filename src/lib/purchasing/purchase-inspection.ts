@@ -23,10 +23,21 @@ export const inspectionParcelsSchema = z.array(z.object({
   }
   if (count > 500) context.addIssue({ code: 'custom', message: '박스는 최대 500개까지 입력할 수 있습니다.' })
 })
+export const STICKER_STATUS_LABELS = {
+  none: '둘 다 미완료',
+  quality: '품질표시 사전완료',
+  barcode: '바코드 사전완료',
+  both: '둘 다 사전완료',
+} as const
+
+export const inspectionStickerStatusSchema = z.enum(['none', 'quality', 'barcode', 'both'])
+export type InspectionStickerStatus = z.infer<typeof inspectionStickerStatusSchema>
+
 export const purchaseInspectionInputSchema = z.object({
   revision: z.number().int().min(0), parcels: inspectionParcelsSchema,
   complete: z.boolean().default(false), acknowledgeMismatch: z.boolean().default(false),
   resolutionNote: z.string().trim().max(2_000).default(''),
+  stickerStatus: inspectionStickerStatusSchema.nullable().optional(),
 }).strict()
 export type InspectionParcel = z.infer<typeof inspectionParcelsSchema>[number]
 export type PurchaseInspection = {
@@ -34,6 +45,7 @@ export type PurchaseInspection = {
   checkedAt: string | null; checkedBy: string | null; resolutionNote: string
   /** Kept on the inspection record so raw logistics refreshes never replace a row with a reported issue. */
   hasReportedIssue?: boolean
+  stickerStatus?: InspectionStickerStatus | null
 }
 
 export function inspectionSummary(inspection: Pick<PurchaseInspection, 'expectedQuantity' | 'parcels'>) {

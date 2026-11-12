@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
       dynamic: 15,
     },
     serverActions: {
+      bodySizeLimit: '4352kb',
       allowedOrigins: allowedServerActionOrigins,
     },
   },

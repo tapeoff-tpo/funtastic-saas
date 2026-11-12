@@ -1,14 +1,9 @@
-import { sql } from 'drizzle-orm'
-import { db } from '@/lib/db'
+import postgres from 'postgres'
 
 const LOCK_NAMESPACE = 'funtastic-heavy-data-operation'
 
 type LockRow = {
   acquired: boolean
-}
-
-function resultRows<T>(result: T[] | { rows?: T[] }) {
-  return Array.isArray(result) ? result : result.rows ?? []
 }
 
 export class WorkspaceDataOperationInProgressError extends Error {
@@ -26,14 +21,32 @@ export async function withWorkspaceDataOperationLock<T>(
   userId: string,
   operation: () => Promise<T>,
 ) {
-  return db.transaction(async (tx) => {
-    const [lock] = resultRows<LockRow>(await tx.execute(sql`
-      SELECT pg_try_advisory_xact_lock(
-        hashtext(${`${LOCK_NAMESPACE}:${userId}`})
-      ) AS "acquired"
-    `))
-    if (!lock?.acquired) throw new WorkspaceDataOperationInProgressError()
-
-    return operation()
+  // The application pool has one connection. Holding that connection while
+  // operation() calls db would queue the operation behind its own lock.
+  // This short-lived connection holds only the advisory lock, leaving the
+  // application connection free for the import's queries and transactions.
+  const lockClient = postgres(process.env.DATABASE_URL!, {
+    prepare: false,
+    max: 1,
+    connect_timeout: 10,
+    fetch_types: false,
+    connection: {
+      application_name: 'funtastic-data-operation-lock',
+      // Release the lock if a five-minute serverless invocation is terminated.
+      idle_in_transaction_session_timeout: 330_000,
+    },
   })
+  try {
+    const completed = await lockClient.begin(async (lockSql) => {
+      const [lock] = await lockSql.unsafe<LockRow[]>(
+        'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS acquired',
+        [`${LOCK_NAMESPACE}:${userId}`],
+      )
+      if (!lock?.acquired) throw new WorkspaceDataOperationInProgressError()
+      return { value: await operation() }
+    })
+    return completed.value
+  } finally {
+    await lockClient.end({ timeout: 5 })
+  }
 }

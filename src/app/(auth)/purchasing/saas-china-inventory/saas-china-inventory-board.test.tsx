@@ -106,4 +106,27 @@ describe('SaasChinaInventoryBoard', () => {
       }))
     })
   })
+
+  it('refreshes a renamed warehouse in the filter and receipt without losing the entered item', async () => {
+    receive.mockResolvedValue({ ok: true })
+    const summary = { onHandQuantity: 20, reservedQuantity: 3, availableQuantity: 17 }
+    const { rerender } = render(<SaasChinaInventoryBoard items={items} summary={summary}
+      defaultWarehouseCode="중국창고" warehouseCodes={['중국창고']} />)
+    fireEvent.change(screen.getByLabelText('창고 필터'), { target: { value: '중국창고' } })
+    fireEvent.click(screen.getByRole('button', { name: '재고 추가' }))
+    fireEvent.change(screen.getByLabelText('품목코드'), { target: { value: 'SKU-NEW' } })
+    fireEvent.change(screen.getByLabelText('상품명'), { target: { value: '새 상품' } })
+    fireEvent.change(screen.getByLabelText('입고 수량'), { target: { value: '10' } })
+
+    rerender(<SaasChinaInventoryBoard items={items.map((item) => ({ ...item, warehouseCode: '중국 2창고' }))} summary={summary}
+      defaultWarehouseCode="중국 2창고" warehouseCodes={['중국 2창고']} />)
+    expect(screen.getByLabelText('창고')).toHaveValue('중국 2창고')
+    expect(screen.getByLabelText('창고 필터')).toHaveValue('')
+    expect(screen.getByLabelText('품목코드')).toHaveValue('SKU-NEW')
+    expect(screen.getAllByText('SKU-01')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: '입고 반영' }))
+    await waitFor(() => expect(receive).toHaveBeenCalledWith(expect.objectContaining({
+      warehouseCode: '중국 2창고', sku: 'SKU-NEW', quantity: 10,
+    })))
+  })
 })

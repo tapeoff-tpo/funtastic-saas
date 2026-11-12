@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useIntentPrefetch } from './layout/use-intent-prefetch'
 import { usePathname } from 'next/navigation'
 
 const RELATED_WORK = [
@@ -14,10 +15,12 @@ const RELATED_WORK = [
   { href: '/purchasing/china-shipments', label: '중국출고' },
   { href: '/analytics/price-table', label: '판매가' },
   { href: '/operations/marketplace-registration', label: '상품등록' },
+  { href: '/operations/coupang-registration', label: '쿠팡상품등록' },
 ]
 
 export function ProductFlowNav() {
   const pathname = usePathname()
+  const intent = useIntentPrefetch()
 
   return (
     <nav
@@ -30,6 +33,11 @@ export function ProductFlowNav() {
           <div key={stage.href}>
             <Link
               href={stage.href}
+              prefetch={false}
+              onMouseEnter={() => intent.prepare(stage.href)}
+              onFocus={() => intent.prepare(stage.href)}
+              onMouseLeave={intent.cancel}
+              onBlur={intent.cancel}
               className={`block shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-medium transition-colors ${
                 pathname === stage.href ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}

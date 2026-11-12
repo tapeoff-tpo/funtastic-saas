@@ -5,15 +5,25 @@ import { userMenuPermissions, userProfiles } from '@/lib/db/schema'
 import { getCurrentUser } from './current-user'
 import { canUseMenu, type MenuAccess } from './menu-permissions'
 
-export const getUserMenuAccess = cache(async (userId: string): Promise<MenuAccess | null> => {
+export const getUserAuthorization = cache(async (userId: string) => {
   const [row] = await db.select({
-    role: userProfiles.role, deactivatedAt: userProfiles.deactivatedAt,
+    role: userProfiles.role, deactivatedAt: userProfiles.deactivatedAt, email: userProfiles.email,
     allowedMenus: userMenuPermissions.allowedMenus,
+    canDeletePurchases: userMenuPermissions.canDeletePurchases,
   }).from(userProfiles)
     .leftJoin(userMenuPermissions, eq(userMenuPermissions.userId, userProfiles.id))
     .where(eq(userProfiles.id, userId)).limit(1)
-  if (!row || row.deactivatedAt) return null
-  return { superAdmin: row.role === 'super_admin', allowedMenus: row.allowedMenus ?? null }
+  if (!row) return null
+  const access: MenuAccess | null = row.deactivatedAt ? null : {
+    superAdmin: row.role === 'super_admin',
+    allowedMenus: row.allowedMenus ?? null,
+    canDeletePurchases: row.canDeletePurchases ?? false,
+  }
+  return { deactivatedAt: row.deactivatedAt, email: row.email, access }
+})
+
+export const getUserMenuAccess = cache(async (userId: string): Promise<MenuAccess | null> => {
+  return (await getUserAuthorization(userId))?.access ?? null
 })
 
 /** Check inside the action as well: Server Action IDs can be posted to other pages. */

@@ -1,16 +1,56 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react'
 import type { ShortMeetingRow } from '@/lib/analytics/short-meeting'
+
+type SortKey = 'sku' | 'productName' | 'todayOutbound' | 'currentStock' | 'stockAfterOutbound' | 'averageDailyOutbound' | 'monthOutbound' | 'outOfStock' | 'chinaStock' | 'chinaShipmentDate' | 'chinaOrderStatus' | 'chinaOrderDate' | 'location'
+type SortDirection = 'ascending' | 'descending'
+const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
+
+function sortValue(row: ShortMeetingRow, key: SortKey, sheetStatus: 'available' | 'unavailable'): string | number | null {
+  if (key === 'productName') return `${row.productName} ${row.optionName}`
+  if (key === 'outOfStock' && sheetStatus === 'unavailable') return null
+  const value = row[key]
+  if (typeof value === 'string' && (!value.trim() || value.trim() === '-')) return null
+  if ((key === 'chinaShipmentDate' || key === 'chinaOrderDate') && typeof value === 'string') {
+    const dates = value.match(/\d{4}-\d{2}-\d{2}/g)
+    if (dates?.length) return dates.reduce((latest, date) => date > latest ? date : latest)
+  }
+  return value
+}
 
 export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow[]; sheetStatus: 'available' | 'unavailable' }) {
   const [search, setSearch] = useState('')
   const [riskOnly, setRiskOnly] = useState(false)
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const filtered = useMemo(() => {
     const term = search.trim().toLocaleLowerCase()
-    return rows.filter((row) => (!riskOnly || row.stockStatus !== 'normal') && (!term || [row.sku, row.productName, row.optionName].some((value) => value.toLocaleLowerCase().includes(term))))
-  }, [rows, search, riskOnly])
+    const result = rows.filter((row) => (!riskOnly || row.stockStatus !== 'normal') && (!term || [row.sku, row.productName, row.optionName].some((value) => value.toLocaleLowerCase().includes(term))))
+    if (!sort) return result
+    return result.sort((a, b) => {
+      const left = sortValue(a, sort.key, sheetStatus)
+      const right = sortValue(b, sort.key, sheetStatus)
+      if (left == null) return right == null ? 0 : 1
+      if (right == null) return -1
+      const compared = typeof left === 'number' && typeof right === 'number' ? left - right : collator.compare(String(left), String(right))
+      return sort.direction === 'ascending' ? compared : -compared
+    })
+  }, [rows, search, riskOnly, sort, sheetStatus])
+
+  function changeSort(key: SortKey) {
+    setSort((previous) => ({ key, direction: previous?.key === key && previous.direction === 'ascending' ? 'descending' : 'ascending' }))
+  }
+
+  function sortable(key: SortKey, label: React.ReactNode, align: 'left' | 'right' = 'left') {
+    const direction = sort?.key === key ? sort.direction : undefined
+    const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowUpDown
+    return <th aria-sort={direction} className={`whitespace-nowrap px-3 py-2 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button type="button" onClick={() => changeSort(key)} title={key === 'chinaShipmentDate' || key === 'chinaOrderDate' ? '여러 날짜가 있으면 가장 최근 날짜로 정렬' : '클릭하여 정렬 방향 변경'} className={`inline-flex items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 ${align === 'right' ? 'justify-end' : ''}`}>
+        <span>{label}</span><Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      </button>
+    </th>
+  }
 
   return (
     <section className="rounded-lg border bg-card">
@@ -24,11 +64,11 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
           <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"><Search className="size-4 text-muted-foreground" /><span className="sr-only">상품 검색</span><input className="w-48 bg-transparent outline-none" placeholder="품목코드, 상품명, 옵션 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         </div>
       </div>
-      <div className="px-4 py-2 text-xs text-muted-foreground">{filtered.length.toLocaleString('ko-KR')}개 상품 표시 · 품절 여부는 <a className="underline underline-offset-2" href="https://docs.google.com/spreadsheets/d/1j5nkny_EUFZlZxRKGDd_myVsRL2DNyhNosQMgneESBs/edit?gid=30673467#gid=30673467" target="_blank" rel="noreferrer">품절리스트</a> 기준</div>
+      <div className="px-4 py-2 text-xs text-muted-foreground">{filtered.length.toLocaleString('ko-KR')}개 상품 표시 · 품절 여부는 <a className="underline underline-offset-2" href="https://docs.google.com/spreadsheets/d/1j5nkny_EUFZlZxRKGDd_myVsRL2DNyhNosQMgneESBs/edit?gid=30673467#gid=30673467" target="_blank" rel="noreferrer">품절리스트</a> 기준 · 열 제목을 눌러 정렬 · 여러 날짜는 가장 최근 날짜 기준</div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1800px] text-sm">
           <thead className="bg-muted/50 text-muted-foreground"><tr>
-            <Th>품목코드</Th><Th>상품명 / 옵션</Th><Th align="right">기준일 출고수량</Th><Th align="right">국내 현재고</Th><Th align="right">출고 후 재고</Th><Th align="right">평균 출고수량<br />(월평균)</Th><Th align="right">당월 출고수량</Th><Th>품절리스트</Th><Th align="right">중국재고</Th><Th>중국출고날짜</Th><Th>발주 상태</Th><Th>발주날짜</Th><Th>로케이션</Th>
+            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '기준일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}{sortable('location', '로케이션')}
           </tr></thead>
           <tbody>
             {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={13}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
@@ -46,10 +86,6 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
       </div>
     </section>
   )
-}
-
-function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
-  return <th className={`whitespace-nowrap px-3 py-2 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>{children}</th>
 }
 
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {

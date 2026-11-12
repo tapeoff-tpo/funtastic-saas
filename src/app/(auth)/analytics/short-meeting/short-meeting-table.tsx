@@ -16,8 +16,8 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
     <section className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b px-4 py-3">
         <div>
-          <h2 className="text-base font-semibold">오늘 상품별 출고 현황</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">주문일 기준 당일 주문을 품목별로 합산합니다. 평균 출고수량은 발주 화면과 같은 최근 3개월 월평균 기준입니다.</p>
+          <h2 className="text-base font-semibold">기준일 상품별 출고 현황</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">반영한 주문서 전체를 품목별로 합산합니다. 평균 출고수량은 발주 화면과 같은 최근 3개월 월평균 기준입니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={riskOnly} onChange={(event) => setRiskOnly(event.target.checked)} /> 재고 위험만 보기</label>
@@ -28,10 +28,10 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1800px] text-sm">
           <thead className="bg-muted/50 text-muted-foreground"><tr>
-            <Th>품목코드</Th><Th>상품명 / 옵션</Th><Th align="right">당일 출고수량</Th><Th align="right">국내 현재고</Th><Th align="right">출고 후 재고</Th><Th align="right">평균 출고수량<br />(월평균)</Th><Th align="right">당월 출고수량</Th><Th>품절리스트</Th><Th align="right">중국재고</Th><Th>중국출고날짜</Th><Th>발주 상태</Th><Th>발주날짜</Th><Th>로케이션</Th>
+            <Th>품목코드</Th><Th>상품명 / 옵션</Th><Th align="right">기준일 출고수량</Th><Th align="right">국내 현재고</Th><Th align="right">출고 후 재고</Th><Th align="right">평균 출고수량<br />(월평균)</Th><Th align="right">당월 출고수량</Th><Th>품절리스트</Th><Th align="right">중국재고</Th><Th>중국출고날짜</Th><Th>발주 상태</Th><Th>발주날짜</Th><Th>로케이션</Th>
           </tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={13}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '오늘 주문에서 품목코드가 확정된 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
+            {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={13}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
               <tr className="border-t" key={row.sku}>
                 <td data-no-translate className="whitespace-nowrap px-3 py-2 font-mono text-xs font-medium">{row.sku}</td>
                 <td className="min-w-[220px] max-w-[320px] px-3 py-2"><div data-no-translate className="font-medium">{row.productName}</div><div data-no-translate className="text-xs text-muted-foreground">{row.optionName}</div></td>

@@ -1,11 +1,11 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { purchaseRequestItems } from '@/lib/db/schema'
 import { getSkuOutgoingMetrics } from '@/lib/purchasing/items'
 import { getSaasChinaInventory } from '@/lib/purchasing/saas-china-outbound'
 import { PURCHASE_REQUEST_STATUS_LABELS, type PurchaseRequestStatus } from '@/lib/purchasing/purchase-request-status'
 import { getShortMeetingStockList } from './short-meeting-stock-list'
+import { getLatestShortMeetingUpload, todayInSeoul } from './short-meeting-uploads'
 
 export interface ShortMeetingRow {
   sku: string
@@ -28,6 +28,8 @@ export interface ShortMeetingRow {
 export interface ShortMeetingData {
   rows: ShortMeetingRow[]
   sheetStatus: 'available' | 'unavailable'
+  meetingDate: string
+  upload: { fileName: string; appliedAt: string; rowCount: number } | null
   summary: {
     productCount: number
     todayOutbound: number
@@ -46,37 +48,22 @@ type ShortMeetingQueryRow = {
   location: string | null
 }
 
-const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
-
-export async function getShortMeetingData(userId: string): Promise<ShortMeetingData> {
+export async function getShortMeetingData(userId: string, meetingDate = todayInSeoul()): Promise<ShortMeetingData> {
   const stockListPromise = getShortMeetingStockList().catch((error) => {
     console.error('short meeting stock list error:', error)
     return null
   })
+  const upload = await getLatestShortMeetingUpload(userId, meetingDate)
+  if (!upload) {
+    const stockList = await stockListPromise
+    return { ...emptyShortMeetingData(meetingDate), sheetStatus: stockList ? 'available' : 'unavailable' }
+  }
   const result = await db.execute<ShortMeetingQueryRow>(sql`
     WITH today_items AS (
-      SELECT
-        COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) AS sku,
-        MAX(COALESCE(NULLIF(oi.locked_product_name, ''), NULLIF(p.name, ''), oi.product_name)) AS product_name,
-        MAX(COALESCE(NULLIF(oi.locked_option_name, ''), NULLIF(i.option_name, ''), NULLIF(oi.option_text, ''), '단품')) AS option_name,
-        SUM(COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))) AS today_outbound
-      FROM orders o
-      JOIN order_items oi ON oi.order_id = o.id
-      LEFT JOIN products p
-        ON p.user_id = o.user_id
-       AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-      LEFT JOIN LATERAL (
-        SELECT MAX(inv.option_name) AS option_name
-        FROM inventory inv
-        WHERE inv.user_id = o.user_id
-          AND inv.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-      ) i ON true
-      WHERE o.user_id = ${userId}
-        AND (COALESCE(o.ordered_at, o.collected_at) AT TIME ZONE 'Asia/Seoul')::date
-          = (NOW() AT TIME ZONE 'Asia/Seoul')::date
-        AND o.status::text IN ${STATUS_FILTER}
-        AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IS NOT NULL
-      GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      SELECT item.sku, item."productName" AS product_name, item."optionName" AS option_name,
+             item.quantity AS today_outbound
+      FROM jsonb_to_recordset(${JSON.stringify(upload.items)}::jsonb)
+        AS item(sku text, "productName" text, "optionName" text, quantity numeric)
     ),
     inventory_summary AS (
       SELECT
@@ -114,11 +101,11 @@ export async function getShortMeetingData(userId: string): Promise<ShortMeetingD
   const skus = queryRows.map((row) => row.sku)
   if (skus.length === 0) {
     const stockList = await stockListPromise
-    return { ...emptyShortMeetingData(), sheetStatus: stockList ? 'available' : 'unavailable' }
+    return { ...emptyShortMeetingData(meetingDate), upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount }, sheetStatus: stockList ? 'available' : 'unavailable' }
   }
 
   const [outgoingBySku, chinaInventory, purchases, stockList] = await Promise.all([
-    getSkuOutgoingMetrics(userId, skus),
+    getSkuOutgoingMetrics(userId, skus, new Date(`${meetingDate}T12:00:00+09:00`)),
     getSaasChinaInventory(userId),
     db.select({
       sku: purchaseRequestItems.sku,
@@ -153,6 +140,8 @@ export async function getShortMeetingData(userId: string): Promise<ShortMeetingD
   return {
     rows,
     sheetStatus: stockList ? 'available' : 'unavailable',
+    meetingDate,
+    upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount },
     summary: {
       productCount: rows.length,
       todayOutbound: rows.reduce((sum, row) => sum + row.todayOutbound, 0),
@@ -164,27 +153,25 @@ export async function getShortMeetingData(userId: string): Promise<ShortMeetingD
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    }).format(new Date()),
+    }).format(new Date(`${meetingDate}T12:00:00+09:00`)),
   }
 }
 
-export const getCachedShortMeetingData = unstable_cache(
-  async (userId: string) => getShortMeetingData(userId),
-  ['short-meeting'],
-  { revalidate: 30 },
-)
+export const getCachedShortMeetingData = getShortMeetingData
 
-export function emptyShortMeetingData(): ShortMeetingData {
+export function emptyShortMeetingData(meetingDate = todayInSeoul()): ShortMeetingData {
   return {
     rows: [],
     sheetStatus: 'unavailable',
+    meetingDate,
+    upload: null,
     summary: { productCount: 0, todayOutbound: 0, outOfStockCount: 0, riskCount: 0 },
     dateLabel: new Intl.DateTimeFormat('ko-KR', {
       timeZone: 'Asia/Seoul',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    }).format(new Date()),
+    }).format(new Date(`${meetingDate}T12:00:00+09:00`)),
   }
 }
 

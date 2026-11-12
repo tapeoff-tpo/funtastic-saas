@@ -6,11 +6,13 @@ const mocks = vi.hoisted(() => ({
   outgoing: vi.fn(),
   chinaInventory: vi.fn(),
   stockList: vi.fn(),
+  latestUpload: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({ db: { execute: mocks.execute, select: () => ({ from: () => ({ where: mocks.purchaseWhere }) }) } }))
 vi.mock('@/lib/purchasing/items', () => ({ getSkuOutgoingMetrics: mocks.outgoing }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getSaasChinaInventory: mocks.chinaInventory }))
 vi.mock('./short-meeting-stock-list', () => ({ getShortMeetingStockList: mocks.stockList }))
+vi.mock('./short-meeting-uploads', () => ({ getLatestShortMeetingUpload: mocks.latestUpload, todayInSeoul: () => '2026-11-11' }))
 
 import { getShortMeetingData, summarizeMeetingPurchases } from './short-meeting'
 
@@ -19,6 +21,11 @@ describe('short meeting data assembly', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-11T03:00:00Z'))
+    mocks.latestUpload.mockResolvedValue({ fileName: 'orders.xlsx', meetingDate: '2026-11-11', appliedAt: '2026-11-11T03:00:00Z', rowCount: 3, items: [
+      { sku: 'A', productName: '상품 A', optionName: '빨강', quantity: 4 },
+      { sku: 'B', productName: '상품 B', optionName: '파랑', quantity: 3 },
+      { sku: 'C', productName: '상품 C', optionName: '단품', quantity: 1 },
+    ] })
     mocks.execute.mockResolvedValue({ rows: [
       { sku: 'A', productName: '상품 A', optionName: '빨강', todayOutbound: '4', currentStock: '10', location: 'A-1' },
       { sku: 'B', productName: '상품 B', optionName: '파랑', todayOutbound: '3', currentStock: '2', location: 'B-1' },
@@ -52,7 +59,7 @@ describe('short meeting data assembly', () => {
   it('joins per-SKU stock, outgoing metrics, purchases, and sheet results without mixing products', async () => {
     const data = await getShortMeetingData('workspace-owner')
 
-    expect(mocks.outgoing).toHaveBeenCalledWith('workspace-owner', ['A', 'B', 'C'])
+    expect(mocks.outgoing).toHaveBeenCalledWith('workspace-owner', ['A', 'B', 'C'], new Date('2026-11-11T03:00:00Z'))
     expect(mocks.chinaInventory).toHaveBeenCalledWith('workspace-owner')
     expect(data.sheetStatus).toBe('available')
     expect(data.summary).toEqual({ productCount: 3, todayOutbound: 8, outOfStockCount: 1, riskCount: 1 })
@@ -85,6 +92,15 @@ describe('short meeting data assembly', () => {
     expect(unavailable.sheetStatus).toBe('unavailable')
     expect(unavailable.rows.every((row) => row.outOfStock === null)).toBe(true)
     expect(unavailable.rows.find((row) => row.sku === 'A')).toMatchObject({ chinaStock: 13, monthOutbound: 17, chinaOrderStatus: '검수' })
+  })
+
+  it('does not fall back to unrelated SaaS orders when no file was applied for the selected date', async () => {
+    mocks.latestUpload.mockResolvedValueOnce(null)
+    const data = await getShortMeetingData('workspace-owner', '2026-11-12')
+    expect(mocks.latestUpload).toHaveBeenCalledWith('workspace-owner', '2026-11-12')
+    expect(data).toMatchObject({ meetingDate: '2026-11-12', upload: null, rows: [] })
+    expect(mocks.execute).not.toHaveBeenCalled()
+    expect(mocks.outgoing).not.toHaveBeenCalled()
   })
 })
 

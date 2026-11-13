@@ -36,5 +36,21 @@ describe('purchase fund overview', () => {
     const result = await getPurchaseFundLedgerData('workspace', 100, 200)
     expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null, missingCostOrderCount: 1 })
   })
+
+  it('keeps an existing debit but does not add an outbound-completed copy', async () => {
+    mockRows([
+      { id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') },
+      { id: 'debit', entryType: 'purchase_debit', occurredOn: '2026-11-03', amountKrw: '21000', amountCny: '100', memo: null, supplierOrderNumber: '3316362603001063953', missingCostCount: 0, details: { lines: [{ sourcePurchaseItemId: 'original', purchaseManagementCode: 'BUY-B', sku: 'B', productName: '상품 B', totalCostYuan: 100 }] }, voidedAt: null, createdAt: new Date('2026-11-03T00:00:00Z') },
+    ], [candidate({ id: 'outbound-copy', status: 'completed', purchaseManagementCode: 'BUY-B', supplierOrderNumber: null })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDepositedCny: 1000, totalDebitedCny: 100, balanceCny: 900 })
+  })
+
+  it('does not present an inflated balance when an outbound-completed row has no linkable original charge', async () => {
+    mockRows([{ id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') }], [candidate({ id: 'outbound-copy', status: 'completed', purchaseManagementCode: null, supplierOrderNumber: null })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null })
+    expect(result.requestReviewItems).toMatchObject([{ id: 'outbound-copy', reason: '출고완료 전 기존 차감 기록 확인' }])
+  })
 })
 

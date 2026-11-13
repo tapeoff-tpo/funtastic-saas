@@ -34,6 +34,7 @@ export type PurchaseFundDebitSourceRow = {
   optionName: string | null
   requestedQuantity: number
   actualPurchaseQuantity: number | null
+  chinaReceivedAt?: Date | string | null
   purchaseManagementCode: string | null
   supplierOrderNumber: string | null
   costExchangeRateKrw: string | null
@@ -617,7 +618,7 @@ export async function getPurchaseFundLedgerData(
     monthly: summarizeFundMonths(effectiveRows),
     requestReviewItems: charges.filter((charge) => charge.ambiguous || charge.boundary === 'uncertain').map((charge) => ({
       id: charge.id, occurredOn: charge.occurredOn, sku: charge.sku, productName: charge.productName,
-      reason: charge.boundary === 'uncertain' ? '기초잔액과 발주요청 시점 확인' : '기존 발주와 중복 여부 확인',
+      reason: charge.completedUnverified ? '출고완료 전 기존 차감 기록 확인' : charge.boundary === 'uncertain' ? '기초잔액과 발주요청 시점 확인' : '기존 발주와 중복 여부 확인',
     })),
     summary: {
       totalDepositedKrw: Math.round(totalDepositedKrw),
@@ -693,6 +694,7 @@ async function loadRequestedFundSourceRows(executor: DbExecutor, userId: string)
     optionName: purchaseRequestItems.optionName,
     requestedQuantity: purchaseRequestItems.requestedQuantity,
     actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+    chinaReceivedAt: purchaseRequestItems.chinaReceivedAt,
     purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
     supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
     costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,

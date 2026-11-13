@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, type FormEvent, type ReactNode } from 'react'
+import { useState, useTransition, type FormEvent } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -20,11 +20,9 @@ import { ChinaFundStatementPanel } from './china-fund-statement-panel'
 export function PurchaseFundLedgerPanel({
   data,
   exchangeRateReference,
-  children,
 }: {
   data: PurchaseFundLedgerData
   exchangeRateReference: CnyKrwReferenceRate
-  children: ReactNode
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -283,7 +281,7 @@ export function PurchaseFundLedgerPanel({
       <MonthlyFundDashboard monthly={data.monthly} />
 
       <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-semibold">중국 입금표 · 대량결제 관리</summary>
+        <summary className="cursor-pointer text-sm font-semibold">입금 기록 · 중국 입금표</summary>
         <div className="mt-4 space-y-4">
           <details>
             <summary className="cursor-pointer text-sm font-semibold">입금 기록 관리</summary>
@@ -296,7 +294,7 @@ export function PurchaseFundLedgerPanel({
               ))}
             </div>
           </details>
-          <ChinaFundStatementPanel />{children}
+          <ChinaFundStatementPanel />
         </div>
       </details>
 

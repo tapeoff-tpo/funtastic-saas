@@ -54,7 +54,7 @@ function parseDraftAmount(value: string) {
   return trimmed ? Number(trimmed) : null
 }
 
-export function ChinaFundStatementPanel() {
+export function ChinaFundStatementPanel({ purchaseDeductionCny }: { purchaseDeductionCny: number | null }) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [showEntries, setShowEntries] = useState(false)
   const [data, setData] = useState<ChinaFundStatementList | null>(null)
@@ -75,7 +75,7 @@ export function ChinaFundStatementPanel() {
   const [editSignedAmountCny, setEditSignedAmountCny] = useState('')
   const [editMemo, setEditMemo] = useState('')
   const [entrySaving, setEntrySaving] = useState(false)
-  const currentOpeningBalanceCny = draftOpeningBalanceCny ?? data?.currentBalanceCny ?? 0
+  const currentOpeningBalanceCny = draftOpeningBalanceCny ?? (data?.currentBalanceCny == null ? 0 : -data.currentBalanceCny)
   const draft = useMemo(() => buildChinaFundStatementDraft(
     currentOpeningBalanceCny,
     draftRows.map((row) => ({
@@ -125,7 +125,11 @@ export function ChinaFundStatementPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceLabel: sourceLabel.trim() || null,
-          entries: draft.entries,
+          entries: draft.entries.map((entry) => ({
+            ...entry,
+            signedAmountCny: -entry.signedAmountCny,
+            balanceAfterCny: -entry.balanceAfterCny,
+          })),
         }),
       })
       const body = await response.json().catch(() => ({}))
@@ -187,10 +191,10 @@ export function ChinaFundStatementPanel() {
         setDraftRows(ocrParsed.entries.map((entry) => ({
           id: createDraftRow().id,
           occurredOn: entry.occurredOn,
-          signedAmountCny: String(entry.signedAmountCny),
+          signedAmountCny: String(-entry.signedAmountCny),
           memo: '',
         })))
-        setDraftOpeningBalanceCny(ocrParsed.inferredOpeningBalanceCny)
+        setDraftOpeningBalanceCny(ocrParsed.inferredOpeningBalanceCny === null ? null : -ocrParsed.inferredOpeningBalanceCny)
         toast.success(
           extracted.recognizedCount.toLocaleString('ko-KR') + '건을 읽어 입력표에 채웠습니다. 날짜와 금액을 확인해주세요.',
         )
@@ -243,7 +247,7 @@ export function ChinaFundStatementPanel() {
   function openEdit(entry: ChinaFundStatementEntry) {
     setEditingEntry(entry)
     setEditOccurredOn(entry.occurredOn)
-    setEditSignedAmountCny(String(entry.signedAmountCny))
+    setEditSignedAmountCny(String(-entry.signedAmountCny))
     setEditMemo(entry.memo ?? '')
   }
 
@@ -262,7 +266,7 @@ export function ChinaFundStatementPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           occurredOn: editOccurredOn,
-          signedAmountCny,
+          signedAmountCny: -signedAmountCny,
           memo: editMemo.trim() || null,
         }),
       })
@@ -309,7 +313,7 @@ export function ChinaFundStatementPanel() {
         <div>
           <h3 className="text-sm font-semibold">중국 입금현황</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            중국 입금표의 부호를 그대로 저장합니다. +는 중국 선결제, -는 우리 입금이며 기존 자동 발주차감과 합산하지 않습니다.
+            우리 회사 기준으로 우리 입금은 +, 중국 선결제와 발주금액은 -로 표시합니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -380,7 +384,7 @@ export function ChinaFundStatementPanel() {
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
                       <div>
                         <p className="text-sm font-medium">입금 입력표</p>
-                        <p className="text-xs text-muted-foreground">+는 중국 선결제, -는 우리 입금입니다. 거래 후 총합은 직접 수정하지 않습니다.</p>
+                        <p className="text-xs text-muted-foreground">+는 우리 입금, -는 중국 선결제입니다. 거래 후 총합은 자동 계산됩니다.</p>
                       </div>
                       <div className="flex gap-2">
                         <Button type="button" size="sm" variant="ghost" onClick={resetDraftRows} disabled={saving || ocrLoading || loading}>빈 표</Button>
@@ -393,7 +397,7 @@ export function ChinaFundStatementPanel() {
                           <tr>
                             <th className="w-12 px-2 py-2 text-center font-medium">No.</th>
                             <th className="min-w-40 px-2 py-2 text-left font-medium">날짜</th>
-                            <th className="min-w-44 px-2 py-2 text-right font-medium">중국 기준 금액 (元)</th>
+                            <th className="min-w-44 px-2 py-2 text-right font-medium">우리 기준 금액 (元)</th>
                             <th className="min-w-40 px-2 py-2 text-right font-medium">거래 후 총합</th>
                             <th className="min-w-52 px-2 py-2 text-left font-medium">비고</th>
                             <th className="w-12 px-1 py-2"><span className="sr-only">행 삭제</span></th>
@@ -443,8 +447,8 @@ export function ChinaFundStatementPanel() {
                       <div className="grid gap-1 text-xs sm:grid-cols-2">
                         <p>입력 {draft.entries.length.toLocaleString('ko-KR')}건</p>
                         <p>시작잔액 {formatCny(draft.openingBalanceCny)} 元</p>
-                        <p>중국 선결제 +{formatCny(draftSummary.chinaAdvanceCny)} 元</p>
-                        <p>우리 입금 -{formatCny(draftSummary.companyRemittanceCny)} 元</p>
+                        <p>중국 선결제 -{formatCny(draftSummary.companyRemittanceCny)} 元</p>
+                        <p>우리 입금 +{formatCny(draftSummary.chinaAdvanceCny)} 元</p>
                         <p className="font-semibold sm:col-span-2">마지막 총합 {formatCny(draft.finalBalanceCny)} 元 · 자동 계산</p>
                       </div>
                     )}
@@ -499,10 +503,11 @@ export function ChinaFundStatementPanel() {
 
           {data ? (
             <>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <StatementSummary label="현재 중국 잔액" value={currentBalanceLabel(data.currentBalanceCny)} detail={data.currentBalanceAsOf ? data.currentBalanceAsOf + ' 기준' : '등록 내역 없음'} />
-                <StatementSummary label="조회기간 중국 선결제" value={'+' + formatCny(data.periodAdvanceCny) + ' 元'} detail="우리 미지급 증가" />
-                <StatementSummary label="조회기간 우리 입금" value={'-' + formatCny(data.periodRemittanceCny) + ' 元'} detail="우리 미지급 감소" />
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <StatementSummary label="현재 중국 잔액" value={currentBalanceLabel(data.currentBalanceCny === null ? null : -data.currentBalanceCny)} detail={data.currentBalanceAsOf ? data.currentBalanceAsOf + ' 기준' : '등록 내역 없음'} />
+                <StatementSummary label="조회기간 중국 선결제" value={'-' + formatCny(data.periodAdvanceCny) + ' 元'} detail="우리 미지급 증가" />
+                <StatementSummary label="조회기간 우리 입금" value={'+' + formatCny(data.periodRemittanceCny) + ' 元'} detail="우리 미지급 감소" />
+                <StatementSummary label="발주 차감 반영 잔액" value={data.currentBalanceCny === null || purchaseDeductionCny === null ? '금액 확인 필요' : currentBalanceLabel(-data.currentBalanceCny - purchaseDeductionCny)} detail={purchaseDeductionCny === null ? '발주 원가 또는 중복 확인 필요' : `발주 차감 -${formatCny(purchaseDeductionCny)} 元 · 2026년 11월 이후`} />
               </div>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full min-w-[880px] text-sm">
@@ -510,7 +515,7 @@ export function ChinaFundStatementPanel() {
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">날짜</th>
                       <th className="px-3 py-2 text-left font-medium">구분</th>
-                      <th className="px-3 py-2 text-right font-medium">중국 기준 금액</th>
+                      <th className="px-3 py-2 text-right font-medium">우리 기준 금액</th>
                       <th className="px-3 py-2 text-right font-medium">거래 후 총합</th>
                       <th className="px-3 py-2 text-left font-medium">출처 / 비고</th>
                       <th className="w-24 px-2 py-2"><span className="sr-only">관리</span></th>
@@ -526,9 +531,9 @@ export function ChinaFundStatementPanel() {
                         <td className={'whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums ' + (
                           entry.signedAmountCny > 0 ? 'text-red-700' : 'text-emerald-700'
                         )}>
-                          {entry.signedAmountCny > 0 ? '+' : ''}{formatCny(entry.signedAmountCny)} 元
+                          {entry.signedAmountCny < 0 ? '+' : ''}{formatCny(-entry.signedAmountCny)} 元
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCny(entry.balanceAfterCny)} 元</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCny(-entry.balanceAfterCny)} 元</td>
                         <td className="px-3 py-2.5 text-muted-foreground">
                           {entry.sourceLabel || entry.memo ? (
                             <div className="space-y-0.5">
@@ -604,7 +609,7 @@ export function ChinaFundStatementPanel() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="china-entry-amount">중국 기준 금액 (元)</Label>
+                  <Label htmlFor="china-entry-amount">우리 기준 금액 (元)</Label>
                   <Input
                     id="china-entry-amount"
                     type="number"
@@ -613,7 +618,7 @@ export function ChinaFundStatementPanel() {
                     onChange={(event) => setEditSignedAmountCny(event.target.value)}
                     disabled={entrySaving}
                   />
-                  <p className="text-xs text-muted-foreground">+는 중국 선결제, -는 우리 입금</p>
+                  <p className="text-xs text-muted-foreground">+는 우리 입금, -는 중국 선결제</p>
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -658,8 +663,8 @@ function StatementSummary({ label, value, detail }: { label: string; value: stri
 
 function currentBalanceLabel(value: number | null) {
   if (value === null) return '-'
-  if (value > 0) return '미지급 ' + formatCny(value) + ' 元'
-  if (value < 0) return '예치금 ' + formatCny(Math.abs(value)) + ' 元'
+  if (value > 0) return '예치금 ' + formatCny(value) + ' 元'
+  if (value < 0) return '미지급 ' + formatCny(Math.abs(value)) + ' 元'
   return '0 元 · 정산 완료'
 }
 
@@ -667,3 +672,4 @@ function formatCny(value: number | null) {
   if (value === null) return '-'
   return value.toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
+

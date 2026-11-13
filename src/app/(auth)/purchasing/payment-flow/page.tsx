@@ -26,7 +26,7 @@ export default async function PurchasePaymentFlowPage() {
     userId: workspaceUserId,
     fallbackExchangeRateKrw: exchangeRateReference.rate,
   })
-  const fundLedger = await getPurchaseFundLedgerData(workspaceUserId)
+  const fundLedger = await getPurchaseFundLedgerData(workspaceUserId, 100, exchangeRateReference.rate)
 
   return (
     <div className="space-y-5">
@@ -47,4 +47,6 @@ export default async function PurchasePaymentFlowPage() {
     </div>
   )
 }
+
+
 

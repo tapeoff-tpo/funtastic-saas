@@ -14,6 +14,8 @@ const DETAIL_IMAGES_STATE_KEY = 'funtastic1688DetailImagesRun'
 const DETAIL_IMAGES_TIMEOUT_ALARM = 'funtastic-1688-detail-images-timeout'
 const TRACKING_LOOKUP_STATE_KEY = 'funtastic1688TrackingLookupRun'
 const TRACKING_LOOKUP_TIMEOUT_ALARM = 'funtastic-1688-tracking-lookup-timeout'
+const TRACKING_LOOKUP_STATE_PREFIX = `${TRACKING_LOOKUP_STATE_KEY}:`
+const TRACKING_LOOKUP_MAX_CONCURRENCY = 3
 const VERIFICATION_ISSUE_LIMIT = 100
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
@@ -35,7 +37,15 @@ let resultInFlight = false
 let checkpointCache = null
 let verificationResultInFlight = false
 let verificationCheckpointCache = null
-let trackingCollectionRunId = null
+const trackingCollectionRunIds = new Set()
+const trackingTerminalRunIds = new Set()
+let workAdmission = Promise.resolve()
+
+function serialize1688WorkStart(start) {
+  const pending = workAdmission.then(start)
+  workAdmission = pending.catch(() => {})
+  return pending
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void handleMessage(message, sender)
@@ -52,7 +62,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === VERIFY_TIMEOUT_ALARM) void handleVerificationPageTimeout()
   if (alarm.name === VERIFY_SAVE_TIMEOUT_ALARM) void handleVerificationSaveTimeout()
   if (alarm.name === DETAIL_IMAGES_TIMEOUT_ALARM) void handleDetailImagesTimeout()
-  if (alarm.name === TRACKING_LOOKUP_TIMEOUT_ALARM) void handleTrackingLookupTimeout()
+  if (alarm.name === TRACKING_LOOKUP_TIMEOUT_ALARM || alarm.name.startsWith(`${TRACKING_LOOKUP_TIMEOUT_ALARM}:`)) {
+    void handleTrackingLookupTimeout(alarm.name)
+  }
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -67,27 +79,35 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void Promise.all([getRun(), getVerificationRun(), getDetailImagesRun(), getTrackingLookupRun()]).then(([run, verificationRun, detailImagesRun, trackingLookupRun]) => {
-    if (run?.collectorTabId === tabId && run.status === 'running') {
-      return failRun(run, '1688 주문조회 탭이 닫혀 수집을 중단했습니다.', false)
-    }
-    if (verificationRun?.collectorTabId === tabId && verificationRun.status === 'running') {
-      return failVerificationRun(verificationRun, '1688 URL 검증 탭이 닫혀 검증을 중단했습니다.', false)
-    }
-    if (detailImagesRun?.collectorTabId === tabId && detailImagesRun.status === 'running') {
-      return failDetailImagesRun(detailImagesRun, '1688 이미지 수집 탭이 닫혀 수집을 중단했습니다.')
-    }
-    if (trackingLookupRun?.collectorTabId === tabId && trackingLookupRun.status === 'running') {
-      return failTrackingLookupRun(trackingLookupRun, '1688 송장 조회 탭이 닫혀 조회를 중단했습니다.', false)
-    }
-  })
+  void handle1688TabRemoved(tabId)
 })
+
+async function handle1688TabRemoved(tabId) {
+  const [run, verificationRun, detailImagesRun, trackingLookupRuns] = await Promise.all([
+    getRun(), getVerificationRun(), getDetailImagesRun(), getTrackingLookupRuns(),
+  ])
+  await Promise.all(trackingLookupRuns.filter((tracking) => tracking.sourceTabId === tabId)
+    .map((tracking) => clearTrackingLookupRun(tracking, true)))
+  if (run?.collectorTabId === tabId && run.status === 'running') {
+    return failRun(run, '1688 주문조회 탭이 닫혀 수집을 중단했습니다.', false)
+  }
+  if (verificationRun?.collectorTabId === tabId && verificationRun.status === 'running') {
+    return failVerificationRun(verificationRun, '1688 URL 검증 탭이 닫혀 검증을 중단했습니다.', false)
+  }
+  if (detailImagesRun?.collectorTabId === tabId && detailImagesRun.status === 'running') {
+    return failDetailImagesRun(detailImagesRun, '1688 이미지 수집 탭이 닫혀 수집을 중단했습니다.')
+  }
+  const trackingLookupRun = trackingLookupRuns.find((tracking) => tracking.collectorTabId === tabId)
+  if (trackingLookupRun?.status === 'running') {
+    return failTrackingLookupRun(trackingLookupRun, '1688 송장 조회 탭이 닫혀 조회를 중단했습니다.', false)
+  }
+}
 
 async function handleMessage(message, sender) {
   if (!message || typeof message !== 'object') return { ok: false }
 
   if (message.type === 'FUNTASTIC_1688_TRACKING_READY') {
-    const run = await getTrackingLookupRun()
+    const run = (await getTrackingLookupRuns()).find((tracking) => tracking.collectorTabId === sender.tab?.id)
     if (!run || sender.frameId !== 0 || sender.tab?.id !== run.collectorTabId) return { active: false }
     void collectTrackingLookupFromTab(sender.tab.id)
     return { active: true }
@@ -97,57 +117,50 @@ async function handleMessage(message, sender) {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
     }
-    const [verificationRun, detailImagesRun, trackingLookupRun] = await Promise.all([
-      getVerificationRun(),
-      getDetailImagesRun(),
-      getTrackingLookupRun(),
-    ])
-    if (verificationRun || detailImagesRun || trackingLookupRun) {
-      return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
-    }
-    return startRun(message, sender.tab.id)
+    return serialize1688WorkStart(async () => {
+      const [verificationRun, detailImagesRun, trackingLookupRun] = await Promise.all([
+        getVerificationRun(), getDetailImagesRun(), getTrackingLookupRun(),
+      ])
+      if (verificationRun || detailImagesRun || trackingLookupRun) {
+        return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
+      }
+      return startRun(message, sender.tab.id)
+    })
   }
 
   if (message.type === 'FUNTASTIC_1688_VERIFY_START') {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
     }
-    const [run, detailImagesRun, trackingLookupRun] = await Promise.all([
-      getRun(),
-      getDetailImagesRun(),
-      getTrackingLookupRun(),
-    ])
-    if (run || detailImagesRun || trackingLookupRun) {
-      return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
-    }
-    return startVerificationRun(message, sender.tab.id)
+    return serialize1688WorkStart(async () => {
+      const [run, detailImagesRun, trackingLookupRun] = await Promise.all([
+        getRun(), getDetailImagesRun(), getTrackingLookupRun(),
+      ])
+      if (run || detailImagesRun || trackingLookupRun) {
+        return { ok: false, error: '진행 중인 1688 작업이 있습니다. 해당 작업을 먼저 마친 뒤 다시 시도해주세요.' }
+      }
+      return startVerificationRun(message, sender.tab.id)
+    })
   }
 
   if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_START') {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 상세페이지 제작 화면에서 시작해주세요.' }
     }
-    const [run, verificationRun, trackingLookupRun] = await Promise.all([getRun(), getVerificationRun(), getTrackingLookupRun()])
-    if (run || verificationRun || trackingLookupRun) {
-      return { ok: false, error: '진행 중인 1688 URL 작업이 있습니다. 해당 작업을 먼저 마친 뒤 이미지 수집을 시작해주세요.' }
-    }
-    return startDetailImagesRun(message, sender.tab.id)
+    return serialize1688WorkStart(async () => {
+      const [run, verificationRun, trackingLookupRun] = await Promise.all([getRun(), getVerificationRun(), getTrackingLookupRun()])
+      if (run || verificationRun || trackingLookupRun) {
+        return { ok: false, error: '진행 중인 1688 URL 작업이 있습니다. 해당 작업을 먼저 마친 뒤 이미지 수집을 시작해주세요.' }
+      }
+      return startDetailImagesRun(message, sender.tab.id)
+    })
   }
 
   if (message.type === 'FUNTASTIC_1688_TRACKING_START') {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 발주 화면에서 시작해주세요.' }
     }
-    const [run, verificationRun, detailImagesRun, trackingLookupRun] = await Promise.all([
-      getRun(),
-      getVerificationRun(),
-      getDetailImagesRun(),
-      getTrackingLookupRun(),
-    ])
-    if (run || verificationRun || detailImagesRun || trackingLookupRun) {
-      return { ok: false, error: '다른 1688 작업이 진행 중입니다. 완료된 뒤 다시 조회해주세요.' }
-    }
-    return startTrackingLookupRun(message, sender.tab.id)
+    return serialize1688WorkStart(() => startTrackingLookupRun(message, sender.tab.id))
   }
 
   if (message.type === 'FUNTASTIC_1688_CANCEL') {
@@ -874,9 +887,27 @@ async function sendDetailImagesToSaas(run, payload) {
 async function startTrackingLookupRun(message, sourceTabId) {
   const orderNumber = typeof message.orderNumber === 'string' ? message.orderNumber.trim() : ''
   const runId = typeof message.runId === 'string' ? message.runId.trim() : ''
+  const batchId = message.parallelVersion === 1 && typeof message.batchId === 'string' ? message.batchId.trim() : null
   const background = message.background === true
-  if (!runId || runId.length > 120 || !/^\d{10,40}$/.test(orderNumber)) {
+  if (!runId || runId.length > 120 || !/^\d{10,40}$/.test(orderNumber)
+    || (message.parallelVersion === 1 && (!batchId || batchId.length > 120))) {
     return { ok: false, error: '1688 주문번호 형식을 확인해주세요.' }
+  }
+  const [urlRun, verificationRun, detailImagesRun, trackingRuns] = await Promise.all([
+    getRun(), getVerificationRun(), getDetailImagesRun(), getTrackingLookupRuns(),
+  ])
+  const existing = trackingRuns.find((run) => run.runId === runId)
+  if (existing && existing.sourceTabId === sourceTabId && existing.orderNumber === orderNumber && existing.batchId === batchId) {
+    await acknowledgeTrackingLookupRun(existing)
+    return { ok: true }
+  }
+  if (urlRun || verificationRun || detailImagesRun || existing
+    || trackingRuns.length >= TRACKING_LOOKUP_MAX_CONCURRENCY
+    || trackingRuns.some((run) => !batchId || run.sourceTabId !== sourceTabId || run.batchId !== batchId)) {
+    return { ok: false, error: '다른 1688 작업이 진행 중입니다. 완료된 뒤 다시 조회해주세요.' }
+  }
+  if (trackingRuns.some((run) => run.orderNumber === orderNumber)) {
+    return { ok: false, error: '같은 1688 주문번호를 이미 조회 중입니다.' }
   }
 
   // Keep the actual 1688 order detail in an ordinary browser tab. Batch
@@ -893,36 +924,53 @@ async function startTrackingLookupRun(message, sourceTabId) {
     sourceTabId,
     collectorTabId: collectorTab.id,
     orderNumber,
+    batchId,
     background,
     status: 'running',
     collecting: false,
+    deadlineAt: Date.now() + TRACKING_LOOKUP_PAGE_TIMEOUT_MS,
   }
-  await setTrackingLookupRun(run)
-  await scheduleTrackingLookupTimeout()
-  await sendTrackingLookupToSaas(run, {
-    type: 'FUNTASTIC_1688_TRACKING_ACK',
-    orderNumber,
-  })
+  try {
+    // The progress popup can be closed while tabs.create is still pending.
+    // Check again after persistence so its onRemoved handler cannot miss a run.
+    if (!await chrome.tabs.get(sourceTabId).catch(() => null)) throw new Error('SaaS 송장 조회 작업 창이 닫혔습니다.')
+    await setTrackingLookupRun(run)
+    await scheduleTrackingLookupTimeout(run)
+    if (!await chrome.tabs.get(sourceTabId).catch(() => null)) throw new Error('SaaS 송장 조회 작업 창이 닫혔습니다.')
+    await acknowledgeTrackingLookupRun(run)
+  } catch (error) {
+    await clearTrackingLookupRun(run, true)
+    throw error
+  }
   const latestTab = await chrome.tabs.get(collectorTab.id).catch(() => null)
   if (latestTab?.status === 'complete') void collectTrackingLookupFromTab(collectorTab.id)
   return { ok: true }
 }
 
-async function collectTrackingLookupFromTab(tabId) {
-  const run = await getTrackingLookupRun()
-  if (!run || run.status !== 'running' || run.collecting || trackingCollectionRunId === run.runId || run.collectorTabId !== tabId) return
+async function acknowledgeTrackingLookupRun(run) {
+  await sendTrackingLookupToSaas(run, {
+    type: 'FUNTASTIC_1688_TRACKING_ACK',
+    orderNumber: run.orderNumber,
+    parallelVersion: 1,
+    maxConcurrency: TRACKING_LOOKUP_MAX_CONCURRENCY,
+  })
+}
 
-  trackingCollectionRunId = run.runId
-  run.collecting = true
-  await setTrackingLookupRun(run)
+async function collectTrackingLookupFromTab(tabId) {
+  const run = (await getTrackingLookupRuns()).find((tracking) => tracking.collectorTabId === tabId)
+  if (!run || run.status !== 'running' || trackingCollectionRunIds.has(run.runId) || trackingTerminalRunIds.has(run.runId)) return
+
+  // A persisted collecting flag can outlive an MV3 worker. The in-memory set
+  // guards reentry while allowing a newly awakened worker to resume its scans.
+  trackingCollectionRunIds.add(run.runId)
   try {
     const startedAt = Date.now()
     let lastError = '1688에서 송장번호를 찾지 못했습니다.'
     let stableOrderState = ''
     let sawLogisticsTab = false
     for (let attempt = 0; Date.now() - startedAt < TRACKING_LOOKUP_SCAN_TIMEOUT_MS; attempt += 1) {
-      const current = await getTrackingLookupRun()
-      if (!current || current.runId !== run.runId) return
+      const current = await getTrackingLookupRun(run.runId)
+      if (!isSameTrackingLookupRun(current, run) || trackingTerminalRunIds.has(run.runId)) return
       let results
       try {
         // Each frame returns a single snapshot immediately. Waiting inside an
@@ -941,8 +989,8 @@ async function collectTrackingLookupFromTab(tabId) {
         await new Promise((resolve) => setTimeout(resolve, 300))
         continue
       }
-      const latest = await getTrackingLookupRun()
-      if (!latest || latest.runId !== run.runId) return
+      const latest = await getTrackingLookupRun(run.runId)
+      if (!isSameTrackingLookupRun(latest, run) || trackingTerminalRunIds.has(run.runId)) return
       const topResult = results.find((result) => result.frameId === 0)?.result
       if (topResult?.fatal) {
         await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
@@ -972,78 +1020,122 @@ async function collectTrackingLookupFromTab(tabId) {
   } catch (error) {
     await failTrackingLookupRun(run, `1688 송장 조회를 실행하지 못했습니다: ${errorMessage(error)}`, false)
   } finally {
-    if (trackingCollectionRunId === run.runId) trackingCollectionRunId = null
+    trackingCollectionRunIds.delete(run.runId)
   }
 }
 
 async function completeTrackingLookupRun(run, trackingNumbers) {
-  const current = await getTrackingLookupRun()
-  if (!current || current.runId !== run.runId) return
-  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
+  if (!await claimTrackingLookupTerminal(run)) return
   try {
-    await sendTrackingLookupToSaas(run, {
-      type: 'FUNTASTIC_1688_TRACKING_RESULT',
-      orderNumber: run.orderNumber,
-      trackingNumbers,
-      // The SaaS only accepts results explicitly produced from the 1688
-      // `运单号码` field. This blocks an outdated extension from storing a
-      // nearby `物流编号` value by mistake.
-      trackingSource: 'waybill_number',
-      trackingEvidence: {
-        label: '运单号码',
-        extractionVersion: 2,
-      },
-    })
-  } catch (error) {
-    await failTrackingLookupRun(run, `SaaS 화면에 송장 조회 결과를 전달하지 못했습니다: ${errorMessage(error)}`, false)
-    return
+    await chrome.alarms.clear(trackingLookupAlarmName(run))
+    try {
+      await sendTrackingLookupToSaas(run, {
+        type: 'FUNTASTIC_1688_TRACKING_RESULT',
+        orderNumber: run.orderNumber,
+        trackingNumbers,
+        // Keep the exact waybill evidence even when several orders finish together.
+        trackingSource: 'waybill_number',
+        trackingEvidence: { label: '运单号码', extractionVersion: 2 },
+      })
+    } catch (error) {
+      await sendTrackingLookupToSaas(run, {
+        type: 'FUNTASTIC_1688_TRACKING_ERROR', orderNumber: run.orderNumber,
+        message: `SaaS 화면에 송장 조회 결과를 전달하지 못했습니다: ${errorMessage(error)}`,
+      }).catch(() => {})
+    }
+    await clearTrackingLookupRun(run, true)
+  } finally {
+    trackingTerminalRunIds.delete(run.runId)
   }
-  await clearTrackingLookupRun(run, true)
 }
 
 async function failTrackingLookupRun(run, message, keepCollectorTab) {
-  const current = await getTrackingLookupRun()
-  if (!current || current.runId !== run.runId) return
-  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
-  await sendTrackingLookupToSaas(run, {
-    type: 'FUNTASTIC_1688_TRACKING_ERROR',
-    orderNumber: run.orderNumber,
-    message,
-  }).catch(() => {})
-  await clearTrackingLookupRun(run, !keepCollectorTab)
-  if (keepCollectorTab && !run.background) {
-    await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
+  if (!await claimTrackingLookupTerminal(run)) return
+  try {
+    await chrome.alarms.clear(trackingLookupAlarmName(run))
+    await sendTrackingLookupToSaas(run, {
+      type: 'FUNTASTIC_1688_TRACKING_ERROR', orderNumber: run.orderNumber, message,
+    }).catch(() => {})
+    await clearTrackingLookupRun(run, !keepCollectorTab)
+    if (keepCollectorTab && !run.background) {
+      await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
+    }
+  } finally {
+    trackingTerminalRunIds.delete(run.runId)
   }
 }
 
-async function handleTrackingLookupTimeout() {
-  const run = await getTrackingLookupRun()
-  if (!run || run.status !== 'running') return
+async function claimTrackingLookupTerminal(run) {
+  if (trackingTerminalRunIds.has(run.runId)) return false
+  trackingTerminalRunIds.add(run.runId)
+  try {
+    const current = await getTrackingLookupRun(run.runId)
+    if (isSameTrackingLookupRun(current, run)) return true
+  } catch (error) {
+    trackingTerminalRunIds.delete(run.runId)
+    throw error
+  }
+  trackingTerminalRunIds.delete(run.runId)
+  return false
+}
+
+function isSameTrackingLookupRun(current, run) {
+  return current?.runId === run.runId && current.collectorTabId === run.collectorTabId && current.sourceTabId === run.sourceTabId
+}
+
+async function handleTrackingLookupTimeout(alarmName = TRACKING_LOOKUP_TIMEOUT_ALARM) {
+  const run = (await getTrackingLookupRuns()).find((tracking) => trackingLookupAlarmName(tracking) === alarmName)
+  if (!run) return
   await failTrackingLookupRun(run, '1688 송장 조회 시간이 초과되었습니다. 로그인 또는 보안 확인 상태를 확인해주세요.', false)
 }
 
 async function clearTrackingLookupRun(run, closeCollectorTab) {
-  await Promise.all([
-    chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM),
-    chrome.storage.session.remove(TRACKING_LOOKUP_STATE_KEY),
-  ])
+  const current = await getTrackingLookupRun(run.runId)
+  if (isSameTrackingLookupRun(current, run)) {
+    await Promise.all([
+      chrome.alarms.clear(trackingLookupAlarmName(run)),
+      chrome.storage.session.remove(trackingLookupStateKey(run)),
+    ])
+  }
   if (closeCollectorTab && run.collectorTabId) {
     await chrome.tabs.remove(run.collectorTabId).catch(() => {})
   }
 }
 
-async function getTrackingLookupRun() {
-  const stored = await chrome.storage.session.get(TRACKING_LOOKUP_STATE_KEY)
-  return stored[TRACKING_LOOKUP_STATE_KEY] || null
+function trackingLookupStateKey(run) {
+  return run.legacyState ? TRACKING_LOOKUP_STATE_KEY : `${TRACKING_LOOKUP_STATE_PREFIX}${encodeURIComponent(run.runId)}`
+}
+
+function trackingLookupAlarmName(run) {
+  return run.legacyState ? TRACKING_LOOKUP_TIMEOUT_ALARM : `${TRACKING_LOOKUP_TIMEOUT_ALARM}:${encodeURIComponent(run.runId)}`
+}
+
+async function getTrackingLookupRuns() {
+  const stored = await chrome.storage.session.get(null)
+  return Object.entries(stored).flatMap(([key, run]) => {
+    if (key !== TRACKING_LOOKUP_STATE_KEY && !key.startsWith(TRACKING_LOOKUP_STATE_PREFIX)) return []
+    if (!run || typeof run !== 'object' || run.status !== 'running' || typeof run.runId !== 'string') return []
+    return [{ ...run, legacyState: key === TRACKING_LOOKUP_STATE_KEY }]
+  })
+}
+
+async function getTrackingLookupRun(runId) {
+  if (!runId) return (await getTrackingLookupRuns())[0] || null
+  const key = `${TRACKING_LOOKUP_STATE_PREFIX}${encodeURIComponent(runId)}`
+  const stored = await chrome.storage.session.get([key, TRACKING_LOOKUP_STATE_KEY])
+  if (stored[key]) return { ...stored[key], legacyState: false }
+  const legacy = stored[TRACKING_LOOKUP_STATE_KEY]
+  return legacy?.runId === runId ? { ...legacy, legacyState: true } : null
 }
 
 async function setTrackingLookupRun(run) {
-  await chrome.storage.session.set({ [TRACKING_LOOKUP_STATE_KEY]: run })
+  await chrome.storage.session.set({ [trackingLookupStateKey(run)]: run })
 }
 
-async function scheduleTrackingLookupTimeout() {
-  await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
-  await chrome.alarms.create(TRACKING_LOOKUP_TIMEOUT_ALARM, { when: Date.now() + TRACKING_LOOKUP_PAGE_TIMEOUT_MS })
+async function scheduleTrackingLookupTimeout(run) {
+  const alarmName = trackingLookupAlarmName(run)
+  await chrome.alarms.clear(alarmName)
+  await chrome.alarms.create(alarmName, { when: run.deadlineAt ?? Date.now() + TRACKING_LOOKUP_PAGE_TIMEOUT_MS })
 }
 
 function trackingLookupUrl(orderNumber) {

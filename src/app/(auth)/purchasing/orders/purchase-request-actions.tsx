@@ -45,6 +45,7 @@ const TRACKING_LOOKUP_COMPLETE = 'FUNTASTIC_1688_TRACKING_COMPLETE'
 const EXACT_WAYBILL_EVIDENCE = { label: '运单号码', extractionVersion: 2 } as const
 const TRACKING_LOOKUP_RESULT_TIMEOUT_MS = 120_000
 const TRACKING_LOOKUP_SAVE_TIMEOUT_MS = 20_000
+const TRACKING_LOOKUP_MAX_CONCURRENCY = 3
 const TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS = 750
 const TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS = 4
 const TRACKING_POPUP_ROUTE = '/purchasing/orders/1688-tracking-run'
@@ -90,6 +91,9 @@ type Purchase1688TrackingProgress = {
   failedItems: number
   currentOrder: number
   currentOrderNumber: string | null
+  completedOrders: number
+  activeOrders: number
+  concurrency: number
   message: string
   stopping?: boolean
   complete?: boolean
@@ -373,83 +377,82 @@ function Purchase1688TrackingProgressRunner({
   useEffect(() => {
     if (!batch) return
 
+    type ActiveLookup = {
+      index: number
+      job: Purchase1688TrackingLookupJob
+      runId: string
+      attempt: number
+      phase: 'querying' | 'saving' | 'retrying'
+      acknowledged: boolean
+      timeout: number | null
+    }
     let disposed = false
-    let bridgeTimeout: number | null = null
-    let nextJobTimer: number | null = null
-    let index = 0
+    let finished = false
+    let pumping = false
+    let nextIndex = 0
+    let completedOrders = 0
     let succeededItems = 0
     let failedItems = 0
-    let currentStartAttempts = 0
-    let current: { runId: string; job: Purchase1688TrackingLookupJob; saving: boolean } | null = null
+    // Expand only after a capability-bearing ACK; older extensions stay serial.
+    let concurrency = 1
+    let haltReason: string | null = null
+    const active = new Map<number, ActiveLookup>()
+    const startedRuns = new Map<string, string>()
+    const timers = new Set<number>()
+    const saveControllers = new Set<AbortController>()
 
-    const updateLookupRows = (
-      ids: string[],
-      status: Purchase1688TrackingRowStatus,
-      message: string,
-      trackingNumbers: string[] = [],
-    ) => {
-      const idSet = new Set(ids)
-      setLookupRows((rows) => rows.map((row) => idSet.has(row.id)
-        ? { ...row, status, message, trackingNumbers }
-        : row))
+    const schedule = (callback: () => void, delayMs: number) => {
+      const timer = window.setTimeout(() => { timers.delete(timer); callback() }, delayMs)
+      timers.add(timer)
+      return timer
     }
-
+    const clearLookupTimeout = (lookup: ActiveLookup) => {
+      if (lookup.timeout === null) return
+      window.clearTimeout(lookup.timeout)
+      timers.delete(lookup.timeout)
+      lookup.timeout = null
+    }
     const clearTimers = () => {
-      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
-      if (nextJobTimer !== null) window.clearTimeout(nextJobTimer)
-      bridgeTimeout = null
-      nextJobTimer = null
+      for (const timer of timers) window.clearTimeout(timer)
+      timers.clear()
     }
-
+    const updateLookupRows = (ids: string[], status: Purchase1688TrackingRowStatus, message: string, trackingNumbers: string[] = []) => {
+      const idSet = new Set(ids)
+      setLookupRows((rows) => rows.map((row) => idSet.has(row.id) ? { ...row, status, message, trackingNumbers } : row))
+    }
     const updateProgress = (message: string, overrides: Partial<Purchase1688TrackingProgress> = {}) => {
+      if (disposed) return
+      const drainingMessage = haltReason
+        ? `${haltReason} · 진행 중인 ${active.size}개 주문의 조회·저장이 끝나면 중지합니다.`
+        : `진행 중인 ${active.size}개 주문의 조회·저장이 끝나면 중지합니다.`
       setProgress({
-        totalItems: batch.totalItems,
-        totalOrders: batch.jobs.length,
-        skippedItems: batch.skippedItems,
-        succeededItems,
-        failedItems,
-        currentOrder: Math.min(index + (current ? 1 : 0), batch.jobs.length),
-        currentOrderNumber: current?.job.orderNumber ?? null,
-        message,
+        totalItems: batch.totalItems, totalOrders: batch.jobs.length, skippedItems: batch.skippedItems,
+        succeededItems, failedItems, currentOrder: completedOrders,
+        currentOrderNumber: active.size === 1 ? active.values().next().value?.job.orderNumber ?? null : null,
+        completedOrders, activeOrders: active.size, concurrency,
+        stopping: stopRequestedRef.current || Boolean(haltReason),
+        message: !overrides.complete && (stopRequestedRef.current || haltReason) ? drainingMessage : message,
         ...overrides,
       })
     }
-
     const finish = (message: string) => {
-      if (disposed) return
+      if (disposed || finished) return
+      finished = true
       clearTimers()
-      const didSaveAny = succeededItems > 0
-      current = null
       batchActiveRef.current = false
       setBatch(null)
-      updateProgress(message, {
-        currentOrder: index,
-        currentOrderNumber: null,
-        complete: true,
-      })
-      if (didSaveAny) {
+      updateProgress(message, { currentOrderNumber: null, activeOrders: 0, complete: true })
+      if (succeededItems > 0) {
         try {
-          window.opener?.postMessage({
-            source: PAGE_SOURCE,
-            type: TRACKING_LOOKUP_COMPLETE,
-          }, window.location.origin)
-        } catch {
-          // The originating tab may have been closed or navigated away.
-        }
+          window.opener?.postMessage({ source: PAGE_SOURCE, type: TRACKING_LOOKUP_COMPLETE }, window.location.origin)
+        } catch { /* The originating tab may have been closed or navigated away. */ }
       }
-      try {
-        window.localStorage.removeItem(storageKey)
-      } catch {
-        // A completed popup can still show its summary if storage is unavailable.
+      try { window.localStorage.removeItem(storageKey) } catch { /* Keep the completed summary visible. */ }
+      if (stopRequestedRef.current || haltReason) {
+        setLookupRows((rows) => rows.map((row) => row.status === 'queued' || row.status === 'querying'
+          ? { ...row, status: 'skipped', message: '남은 항목은 조회하지 않았습니다.', trackingNumbers: [] } : row))
       }
-      if (stopRequestedRef.current || stops1688TrackingBatch(message)) {
-        setLookupRows((rows) => rows.map((row) => (
-          row.status === 'queued' || row.status === 'querying'
-            ? { ...row, status: 'skipped', message: '남은 항목은 조회하지 않았습니다.', trackingNumbers: [] }
-            : row
-        )))
-      }
-      if (succeededItems > 0 && failedItems === 0 && !stopRequestedRef.current) {
+      if (succeededItems > 0 && failedItems === 0 && !stopRequestedRef.current && !haltReason) {
         toast.success(isRecollectBatch
           ? `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 다시 수집했습니다.`
           : `1688 송장 ${succeededItems.toLocaleString('ko-KR')}건을 등록하고 검수로 이동했습니다.`)
@@ -461,200 +464,185 @@ function Purchase1688TrackingProgressRunner({
         toast.error(isRecollectBatch ? '1688 송장 다시 수집에서 저장된 항목이 없습니다.' : '1688 송장 일괄조회에서 저장된 항목이 없습니다.')
       }
     }
-
-    const scheduleNextJob = (delayMs = 150) => {
-      nextJobTimer = window.setTimeout(() => {
-        if (disposed) return
-        if (stopRequestedRef.current) {
-          finish(`현재 건까지 처리했습니다. 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
-          return
-        }
-        if (index >= batch.jobs.length) {
-          finish(`일괄조회 완료 · 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
-          return
-        }
-
-        const job = batch.jobs[index]
-        currentStartAttempts += 1
-        const runId = `${batch.id}-${index}-${currentStartAttempts}`
-        current = { runId, job, saving: false }
-        updateLookupRows(job.ids, 'querying', '1688 주문서번호 조회 중')
-        updateProgress(`1688 주문 ${index + 1}/${batch.jobs.length} 조회 중`)
-        bridgeTimeout = window.setTimeout(() => {
-          if (disposed || current?.runId !== runId) return
-          current = null
-          failedItems += job.ids.length
-          index += 1
-          const message = '1688 확장프로그램 연결을 확인해주세요.'
-          updateLookupRows(job.ids, 'failed', message)
-          finish(message)
-        }, 5_000)
-        window.postMessage({
-          source: PAGE_SOURCE,
-          type: TRACKING_LOOKUP_START,
-          runId,
-          orderNumber: job.orderNumber,
-          background: true,
-        }, window.location.origin)
-      }, delayMs)
+    const finishIfDrained = () => {
+      if (active.size > 0) return
+      if (haltReason) finish(`${haltReason} · 남은 항목은 확인 후 다시 일괄조회해주세요.`)
+      else if (stopRequestedRef.current) finish(`진행 중이던 주문까지 처리했습니다. 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
+      else if (nextIndex >= batch.jobs.length) finish(`일괄조회 완료 · 성공 ${succeededItems.toLocaleString('ko-KR')}건 · 미처리 ${failedItems.toLocaleString('ko-KR')}건`)
     }
-
-    const failCurrentJob = (message: string) => {
-      if (!current) return
-      const failedJob = current.job
-      current = null
-      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
-      bridgeTimeout = null
-      if (is1688TrackingLookupHandoffInProgress(message) && currentStartAttempts < TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS) {
-        updateLookupRows(failedJob.ids, 'querying', '이전 1688 조회를 정리한 뒤 재시도 중')
-        updateProgress('이전 1688 조회를 정리한 뒤 같은 주문을 다시 시도합니다.', {
-          currentOrder: index + 1,
-          currentOrderNumber: failedJob.orderNumber,
-        })
-        scheduleNextJob(TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS)
+    const release = (lookup: ActiveLookup, processed = true) => {
+      clearLookupTimeout(lookup)
+      active.delete(lookup.index)
+      if (processed) completedOrders += 1
+    }
+    const isActive = (lookup: ActiveLookup) => !disposed && !finished && active.get(lookup.index) === lookup
+    const pump = () => {
+      if (disposed || finished || pumping) return
+      pumping = true
+      while (!stopRequestedRef.current && !haltReason && active.size < concurrency && nextIndex < batch.jobs.length) {
+        const index = nextIndex++
+        const lookup: ActiveLookup = { index, job: batch.jobs[index], runId: '', attempt: 0, phase: 'querying', acknowledged: false, timeout: null }
+        active.set(index, lookup)
+        startAttempt(lookup)
+      }
+      pumping = false
+      finishIfDrained()
+    }
+    const failLookup = (lookup: ActiveLookup, message: string) => {
+      if (!isActive(lookup) || lookup.phase === 'saving') return
+      clearLookupTimeout(lookup)
+      if (is1688TrackingLookupHandoffInProgress(message) && lookup.attempt < TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS
+        && !stopRequestedRef.current && !haltReason) {
+        lookup.phase = 'retrying'
+        updateLookupRows(lookup.job.ids, 'querying', '이전 1688 조회를 정리한 뒤 재시도 중')
+        updateProgress('이전 1688 조회를 정리한 뒤 같은 주문을 다시 시도합니다.')
+        schedule(() => {
+          if (!isActive(lookup)) return
+          if (stopRequestedRef.current || haltReason) {
+            release(lookup, false)
+            updateLookupRows(lookup.job.ids, 'skipped', '남은 항목은 조회하지 않았습니다.')
+            updateProgress('재시도 대기 중인 주문을 건너뛰었습니다.')
+            pump()
+            return
+          }
+          startAttempt(lookup)
+        }, TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS)
         return
       }
-      failedItems += failedJob.ids.length
-      index += 1
-      currentStartAttempts = 0
-      updateLookupRows(failedJob.ids, 'failed', message)
+      failedItems += lookup.job.ids.length
+      release(lookup)
+      updateLookupRows(lookup.job.ids, 'failed', message)
+      if (stops1688TrackingBatch(message)) haltReason ??= message
       updateProgress(message)
-      if (stops1688TrackingBatch(message)) {
-        finish(`${message} · 남은 항목은 확인 후 다시 일괄조회해주세요.`)
-        return
-      }
-      scheduleNextJob()
+      pump()
     }
-
-    const saveCurrentJob = async (runId: string, trackingNumbers: string[]) => {
-      if (!current || current.runId !== runId) return
-      const job = current.job
-      let savedForJob = 0
-      let failedForJob = 0
+    function startAttempt(lookup: ActiveLookup) {
+      if (!isActive(lookup)) return
+      lookup.attempt += 1
+      lookup.runId = `${batch!.id}-${lookup.index}-${lookup.attempt}`
+      lookup.phase = 'querying'
+      lookup.acknowledged = false
+      const attemptRunId = lookup.runId
+      startedRuns.set(attemptRunId, lookup.job.orderNumber)
+      updateLookupRows(lookup.job.ids, 'querying', '1688 주문서번호 조회 중')
+      updateProgress(`1688 주문 ${lookup.index + 1}/${batch!.jobs.length} 조회 중`)
+      lookup.timeout = schedule(() => {
+        if (!isActive(lookup) || lookup.runId !== attemptRunId || lookup.phase !== 'querying') return
+        failLookup(lookup, '1688 확장프로그램 연결을 확인해주세요.')
+      }, 5_000)
+      window.postMessage({
+        source: PAGE_SOURCE, type: TRACKING_LOOKUP_START, runId: attemptRunId, batchId: batch!.id, parallelVersion: 1,
+        orderNumber: lookup.job.orderNumber, background: true,
+      }, window.location.origin)
+    }
+    const saveLookup = async (lookup: ActiveLookup, trackingNumbers: string[]) => {
+      const savedIds: string[] = [], failedIds: string[] = []
       let lastError = ''
-      const savedIds: string[] = []
-      const failedIds: string[] = []
-
-      for (const id of job.ids) {
-        if (disposed) return
+      for (const id of lookup.job.ids) {
+        if (!isActive(lookup)) return
         const controller = new AbortController()
+        saveControllers.add(controller)
         let saveTimer: number | null = null
         try {
           await Promise.race([
             (async () => {
               const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
-                method: 'POST', signal: controller.signal,
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  orderNumber: job.orderNumber,
-                  trackingNumbers,
-                  trackingSource: 'waybill_number',
-                  trackingEvidence: EXACT_WAYBILL_EVIDENCE,
-                  replaceUninspectedInspection: isRecollectBatch,
+                  orderNumber: lookup.job.orderNumber, trackingNumbers, trackingSource: 'waybill_number',
+                  trackingEvidence: EXACT_WAYBILL_EVIDENCE, replaceUninspectedInspection: isRecollectBatch,
                 }),
               })
               const body = await response.json().catch(() => ({}))
               if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
             })(),
             new Promise<never>((_, reject) => {
-              saveTimer = window.setTimeout(() => {
+              saveTimer = schedule(() => {
                 reject(new Error('송장 저장 응답이 지연되었습니다. 저장 여부를 확인한 뒤 다시 조회해주세요.'))
                 controller.abort()
               }, TRACKING_LOOKUP_SAVE_TIMEOUT_MS)
             }),
           ])
-          savedForJob += 1
+          if (!isActive(lookup)) return
+          succeededItems += 1
           savedIds.push(id)
-          if (!disposed) updateLookupRows([id], 'success', `송장 ${trackingNumbers.join(', ')} 저장 완료`, trackingNumbers)
+          updateLookupRows([id], 'success', `송장 ${trackingNumbers.join(', ')} 저장 완료`, trackingNumbers)
         } catch (error) {
-          failedForJob += 1
+          if (!isActive(lookup)) return
+          failedItems += 1
           failedIds.push(id)
           lastError = error instanceof Error ? error.message : '1688 송장번호를 저장하지 못했습니다.'
-          if (!disposed) updateLookupRows([id], 'failed', lastError)
+          updateLookupRows([id], 'failed', lastError)
         } finally {
-          if (saveTimer !== null) window.clearTimeout(saveTimer)
+          saveControllers.delete(controller)
+          if (saveTimer !== null) { window.clearTimeout(saveTimer); timers.delete(saveTimer) }
         }
-        if (!disposed) updateProgress(`주문 ${index + 1}/${batch.jobs.length} 송장 저장 중 · ${savedForJob}/${job.ids.length}개 상품 저장`, {
-          succeededItems: succeededItems + savedForJob,
-          failedItems: failedItems + failedForJob,
-        })
+        updateProgress(`주문 ${lookup.index + 1}/${batch.jobs.length} 송장 저장 중 · ${savedIds.length}/${lookup.job.ids.length}개 상품 저장`)
       }
-
-      if (disposed || current?.runId !== runId) return
-      succeededItems += savedForJob
-      failedItems += failedForJob
-      current = null
-      index += 1
-      currentStartAttempts = 0
+      if (!isActive(lookup)) return
+      release(lookup)
       if (savedIds.length > 0) updateLookupRows(savedIds, 'success', isRecollectBatch ? `송장 ${trackingNumbers.join(', ')} 다시 수집 완료` : `송장 ${trackingNumbers.join(', ')} 등록 완료`, trackingNumbers)
       if (failedIds.length > 0) updateLookupRows(failedIds, 'failed', lastError)
       updateProgress(lastError || (isRecollectBatch
-        ? `송장 ${savedForJob.toLocaleString('ko-KR')}건 실제 운송장으로 다시 수집됨`
-        : `송장 ${savedForJob.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`))
-      scheduleNextJob()
+        ? `송장 ${savedIds.length.toLocaleString('ko-KR')}건 실제 운송장으로 다시 수집됨`
+        : `송장 ${savedIds.length.toLocaleString('ko-KR')}건 등록됨 · 검수로 이동`))
+      pump()
     }
-
     const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== window || event.origin !== window.location.origin) return
+      if (disposed || finished || event.source !== window || event.origin !== window.location.origin) return
       const message = event.data
       if (!message || typeof message !== 'object') return
       const data = message as {
-        source?: unknown
-        type?: unknown
-        runId?: unknown
-        orderNumber?: unknown
-        trackingNumbers?: unknown
-        trackingSource?: unknown
-        trackingEvidence?: unknown
-        message?: unknown
+        source?: unknown; type?: unknown; runId?: unknown; orderNumber?: unknown; trackingNumbers?: unknown;
+        trackingSource?: unknown; trackingEvidence?: unknown; parallelVersion?: unknown; maxConcurrency?: unknown; message?: unknown
       }
-      if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string') return
-      if (!current || data.runId !== current.runId) return
-
+      if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string' || typeof data.runId !== 'string') return
+      const knownOrder = startedRuns.get(data.runId)
+      if (!knownOrder || (data.orderNumber !== undefined && data.orderNumber !== knownOrder)) return
+      const lookup = [...active.values()].find((entry) => entry.runId === data.runId)
       if (data.type === TRACKING_LOOKUP_ACK) {
-        if (current.saving) return
-        if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
-        const acknowledgedRunId = current.runId
-        bridgeTimeout = window.setTimeout(() => {
-          if (disposed || current?.runId !== acknowledgedRunId || current.saving) return
-          failCurrentJob('1688 송장 조회 시간이 초과되었습니다. 1688 화면을 확인한 뒤 다시 조회해주세요.')
-        }, TRACKING_LOOKUP_RESULT_TIMEOUT_MS)
+        // Late capabilities may unlock the pool, but cannot restart a finished watchdog.
+        if (data.parallelVersion === 1 && typeof data.maxConcurrency === 'number' && Number.isFinite(data.maxConcurrency)) {
+          concurrency = Math.max(concurrency, Math.min(TRACKING_LOOKUP_MAX_CONCURRENCY, Math.max(1, Math.floor(data.maxConcurrency))))
+        }
+        if (lookup?.phase === 'querying' && !lookup.acknowledged) {
+          lookup.acknowledged = true
+          clearLookupTimeout(lookup)
+          const acknowledgedRunId = lookup.runId
+          lookup.timeout = schedule(() => {
+            if (!isActive(lookup) || lookup.runId !== acknowledgedRunId || lookup.phase !== 'querying') return
+            failLookup(lookup, '1688 송장 조회 시간이 초과되었습니다. 1688 화면을 확인한 뒤 다시 조회해주세요.')
+          }, TRACKING_LOOKUP_RESULT_TIMEOUT_MS)
+        }
+        updateProgress('1688 주문 조회 중')
+        pump()
         return
       }
-
+      if (!lookup || lookup.phase !== 'querying') return
       if (data.type === TRACKING_LOOKUP_ERROR) {
-        if (current.saving) return
-        failCurrentJob(typeof data.message === 'string' ? data.message : '1688 송장 조회에 실패했습니다.')
+        failLookup(lookup, typeof data.message === 'string' ? data.message : '1688 송장 조회에 실패했습니다.')
         return
       }
-
-      if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== current.job.orderNumber || current.saving) return
+      if (data.type !== TRACKING_LOOKUP_RESULT || data.orderNumber !== lookup.job.orderNumber) return
       if (data.trackingSource !== 'waybill_number' || !hasExact1688WaybillEvidence(data.trackingEvidence)) {
-        failCurrentJob('운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
+        failLookup(lookup, '운송장번호 추출 확장프로그램을 1.10.1 이상으로 업데이트해주세요. 运单号码만 저장합니다.')
         return
       }
-
       const trackingNumbers = normalize1688TrackingNumbers(data.trackingNumbers)
-      if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
-      bridgeTimeout = null
-      if (trackingNumbers.length === 0) {
-        failCurrentJob('1688에서 유효한 송장번호를 찾지 못했습니다.')
-        return
-      }
-
-      current.saving = true
-      updateLookupRows(current.job.ids, 'saving', '송장번호 저장 중', trackingNumbers)
-      updateProgress(`주문 ${index + 1}/${batch.jobs.length} 송장 저장 중`)
-      void saveCurrentJob(current.runId, trackingNumbers)
+      if (trackingNumbers.length === 0) { failLookup(lookup, '1688에서 유효한 송장번호를 찾지 못했습니다.'); return }
+      clearLookupTimeout(lookup)
+      lookup.phase = 'saving'
+      updateLookupRows(lookup.job.ids, 'saving', '송장번호 저장 중', trackingNumbers)
+      updateProgress(`주문 ${lookup.index + 1}/${batch.jobs.length} 송장 저장 중`)
+      void saveLookup(lookup, trackingNumbers)
     }
-
     window.addEventListener('message', onMessage)
     updateProgress(`${isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'} 준비 · ${batch.jobs.length.toLocaleString('ko-KR')}개 주문`)
-    scheduleNextJob()
-
+    schedule(pump, 150)
     return () => {
       disposed = true
       clearTimers()
+      for (const controller of saveControllers) controller.abort()
       window.removeEventListener('message', onMessage)
     }
   }, [batch, isRecollectBatch, storageKey])
@@ -670,6 +658,9 @@ function Purchase1688TrackingProgressRunner({
           failedItems: 0,
           currentOrder: 0,
           currentOrderNumber: null,
+          completedOrders: 0,
+          activeOrders: 0,
+          concurrency: 1,
           message: isRecollectBatch
             ? '검수 전체에서 다시 수집할 LP로 시작하는 기존 물류번호를 찾지 못했습니다. 실제 운송장번호가 저장된 항목은 건너뜁니다.'
             : '이 작업 창에서 조회할 주문서번호가 있는 항목을 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
@@ -708,6 +699,9 @@ function Purchase1688TrackingProgressRunner({
       failedItems: 0,
       currentOrder: 0,
       currentOrderNumber: null,
+      completedOrders: 0,
+      activeOrders: 0,
+      concurrency: 1,
       message: isRecollectBatch ? '1688 송장 다시 수집 시작' : '1688 송장 일괄조회 시작',
     })
     setBatch({
@@ -732,7 +726,7 @@ function Purchase1688TrackingProgressRunner({
     setProgress((current) => current ? {
       ...current,
       stopping: true,
-      message: '현재 조회·저장이 끝나면 중지합니다.',
+      message: `진행 중인 ${current.activeOrders}개 주문의 조회·저장이 끝나면 중지합니다.`,
     } : current)
   }
 
@@ -744,11 +738,13 @@ function Purchase1688TrackingProgressRunner({
           ? `검수 전체 ${candidates.length.toLocaleString('ko-KR')}개 상품 중 기존 물류번호(LP)로 저장된 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}개 상품을 조회해 실제 운송장으로 교체합니다. 박스·수량 검수가 시작된 항목은 바꾸지 않습니다.`
           : `구매완료 전체 ${candidates.length.toLocaleString('ko-KR')}개 상품 중 주문서번호가 있고 송장이 비어 있는 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}개 상품을 조회합니다.${(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장·검수 기록이 있거나 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}`}
         {' '}같은 주문서번호의 상품은 묶어서 한 번만 조회합니다.
+        {' '}최대 3개 주문을 동시에 조회하며, 완료된 주문부터 저장합니다.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm" aria-live="polite">
         <span>{progress?.message ?? '조회 준비'}</span>
         {progress && <span className="text-muted-foreground">조회 대상 상품 {progress.totalItems.toLocaleString('ko-KR')}개 · 1688 주문 {progress.totalOrders.toLocaleString('ko-KR')}건</span>}
+        {progress && <span className="text-muted-foreground">완료 주문 {progress.completedOrders.toLocaleString('ko-KR')}/{progress.totalOrders.toLocaleString('ko-KR')}건 · 동시 조회·저장 {progress.activeOrders}/{progress.concurrency}건</span>}
         <span className="text-muted-foreground">성공 {(progress?.succeededItems ?? 0).toLocaleString('ko-KR')}건</span>
         <span className="text-muted-foreground">미처리 {(progress?.failedItems ?? 0).toLocaleString('ko-KR')}건</span>
         {progress?.skippedItems ? <span className="text-muted-foreground">건너뜀 {progress.skippedItems.toLocaleString('ko-KR')}건</span> : null}
@@ -802,7 +798,7 @@ function Purchase1688TrackingProgressRunner({
       <div className="mt-4 flex justify-end gap-2">
         {batch ? (
           <Button type="button" variant="outline" onClick={stopAfterCurrent} disabled={progress?.stopping}>
-            중지(현재 건 이후)
+            중지(진행 중인 주문 이후)
           </Button>
         ) : (
           <Button type="button" variant="outline" onClick={() => window.close()}>닫기</Button>

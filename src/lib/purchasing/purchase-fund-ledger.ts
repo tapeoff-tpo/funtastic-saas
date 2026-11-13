@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   products,
@@ -15,6 +15,7 @@ import {
 } from './supplier-order-reference'
 
 export const PURCHASE_FUND_MANUAL_ENTRY_TYPES = ['deposit', 'opening_balance'] as const
+export const PURCHASE_FUND_DEBIT_START_DATE = '2026-11-01'
 
 export type PurchaseFundManualEntryType = (typeof PURCHASE_FUND_MANUAL_ENTRY_TYPES)[number]
 export type PurchaseFundEntryType = PurchaseFundManualEntryType | 'purchase_debit'
@@ -250,7 +251,7 @@ export function buildPurchaseDebitSnapshots(
         : Math.round(knownAmountCny * 100) / 100,
       missingCostCount,
       details: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         lineCount: lines.length,
         productSummary: productNames.length <= 2
           ? productNames.join(', ')
@@ -258,7 +259,8 @@ export function buildPurchaseDebitSnapshots(
         lines,
       },
     }
-  }).sort((left, right) => (
+  }).filter((snapshot) => snapshot.occurredOn >= PURCHASE_FUND_DEBIT_START_DATE)
+    .sort((left, right) => (
     left.occurredOn.localeCompare(right.occurredOn)
       || left.supplierOrderNumber.localeCompare(right.supplierOrderNumber)
       || left.sourceKey.localeCompare(right.sourceKey)
@@ -330,10 +332,14 @@ export async function ensurePurchaseFundDebitBackfill(input: {
       eq(purchaseFundEntries.userId, input.userId),
       eq(purchaseFundEntries.entryType, 'purchase_debit'),
     ))
-  if (Number(existing?.count ?? 0) > 0) return { reconciledOrderCount: 0, backfilled: false }
 
-  const result = await reconcilePurchaseFundDebits(input)
-  return { ...result, backfilled: true }
+  // Reconcile on each balance-page load so status changes are reflected without
+  // modifying the purchase workflow or its status-update handler.
+  const result = await reconcilePurchaseFundDebits({
+    ...input,
+    existingEntryMode: 'recalculate',
+  })
+  return { ...result, backfilled: Number(existing?.count ?? 0) === 0 }
 }
 
 export async function reconcilePurchaseFundDebitsInTransaction(
@@ -357,7 +363,7 @@ export async function reconcilePurchaseFundDebitsInTransaction(
         occurredOn: snapshot.occurredOn,
         amountKrw: String(snapshot.amountKrw),
         amountCny: snapshot.amountCny === null ? null : String(snapshot.amountCny),
-        memo: '주문서번호 생성에 따른 자동 발주 차감',
+        memo: '구매완료 단계 도달에 따른 자동 발주 차감',
         sourceKey: snapshot.sourceKey,
         supplierOrderNumber: snapshot.supplierOrderNumber,
         sourcePurchaseItemId: snapshot.sourcePurchaseItemId,
@@ -367,8 +373,13 @@ export async function reconcilePurchaseFundDebitsInTransaction(
       })))
 
     if (input.existingEntryMode !== 'recalculate') {
-      await insertQuery.onConflictDoNothing({
+      await insertQuery.onConflictDoUpdate({
         target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey],
+        set: {
+          voidedAt: null,
+          voidedBy: null,
+          updatedAt: new Date(),
+        },
       })
       continue
     }
@@ -384,9 +395,30 @@ export async function reconcilePurchaseFundDebitsInTransaction(
           sourcePurchaseItemId: sql`excluded.source_purchase_item_id`,
           missingCostCount: sql`excluded.missing_cost_count`,
           details: sql`excluded.details`,
+          voidedAt: null,
+          voidedBy: null,
           updatedAt: new Date(),
         },
       })
+  }
+
+  if (!input.supplierOrderNumber) {
+    const activeSourceKeys = snapshots.map((snapshot) => snapshot.sourceKey)
+    await tx
+      .update(purchaseFundEntries)
+      .set({
+        voidedAt: new Date(),
+        details: sql`jsonb_set(COALESCE(${purchaseFundEntries.details}, '{}'::jsonb), '{schemaVersion}', '"2"'::jsonb, true)`,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(purchaseFundEntries.userId, input.userId),
+        eq(purchaseFundEntries.entryType, 'purchase_debit'),
+        isNull(purchaseFundEntries.voidedAt),
+        ...(activeSourceKeys.length
+          ? [notInArray(purchaseFundEntries.sourceKey, activeSourceKeys)]
+          : []),
+      ))
   }
 
   return { reconciledOrderCount: snapshots.length }
@@ -489,9 +521,12 @@ export async function getPurchaseFundLedgerData(
   const latestOpeningBalanceIndex = rows.reduce((latestIndex, row, index) => (
     row.entryType === 'opening_balance' ? index : latestIndex
   ), -1)
-  const effectiveRows = latestOpeningBalanceIndex >= 0
+  const effectiveRows = (latestOpeningBalanceIndex >= 0
     ? rows.slice(latestOpeningBalanceIndex)
-    : rows
+    : rows).filter((row) => (
+      row.entryType !== 'purchase_debit'
+      || String(row.occurredOn).slice(0, 10) >= PURCHASE_FUND_DEBIT_START_DATE
+    ))
 
   let balanceKrw = 0
   let balanceCny = 0
@@ -573,6 +608,13 @@ async function loadPurchaseDebitSourceRows(
   const supplierOrderReference = normalizeSupplierOrderReference(supplierOrderNumber)
   const conditions = [
     eq(purchaseRequestItems.userId, userId),
+    inArray(purchaseRequestItems.status, [
+      'purchase_completed',
+      'inspecting',
+      'china_arrived',
+      'outbound_requested',
+      'completed',
+    ]),
     sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL`,
   ]
   if (supplierOrderReference) {

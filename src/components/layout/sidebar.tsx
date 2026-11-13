@@ -186,6 +186,7 @@ export const navSections: NavSection[] = [
       { href: '/settings/market-settings', label: '설정', icon: Store },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
+      { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],
   },
   {

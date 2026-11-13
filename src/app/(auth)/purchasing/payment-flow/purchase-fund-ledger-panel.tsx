@@ -110,7 +110,7 @@ export function PurchaseFundLedgerPanel({
             발주금액 · 입금/잔액 현황
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            입금은 직접 추가하고, 주문서번호가 생성된 발주는 자동으로 차감됩니다.
+            입금은 직접 기록하며, 2026년 11월 1일 이후 발주요청일인 건 중 구매완료 단계에 도달한 발주부터 자동 차감됩니다.
           </p>
         </div>
         <Dialog.Root
@@ -287,7 +287,7 @@ export function PurchaseFundLedgerPanel({
         <summary className="cursor-pointer text-sm font-semibold marker:text-muted-foreground">
           입금·발주 거래내역 펼치기 ({data.entries.length.toLocaleString('ko-KR')}건 표시)
         </summary>
-        <p className="mt-1 text-xs text-muted-foreground">입금과 주문서번호가 생성된 발주의 실제 차감 기록입니다. 현재 진행 중인 발주 목록과 달리 이전 발주도 남아 있습니다.</p>
+        <p className="mt-1 text-xs text-muted-foreground">입금과 구매완료 이후 발주의 자동 차감 기록입니다. 발주요청 단계는 차감하지 않으며, 이후 단계에서는 같은 발주를 한 번만 반영합니다.</p>
         <div className="mt-3 overflow-x-auto rounded-md border">
           <table className="w-full min-w-[860px] text-sm">
           <thead className="bg-muted/60 text-xs text-muted-foreground">
@@ -353,7 +353,7 @@ export function PurchaseFundLedgerPanel({
           </table>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 선금과 잔금은 바로 위 대량결제대기 목록에서 별도로 관리하며, 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남습니다.
+          발주요청 단계에서는 차감하지 않고, 구매완료 이후 발주는 한 번만 차감합니다. 주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 선금과 잔금은 대량결제대기 목록에서 별도로 관리하며, 자동 차감 내역은 원본 발주가 정리되어도 장부에 남습니다.
         </p>
       </details>
 

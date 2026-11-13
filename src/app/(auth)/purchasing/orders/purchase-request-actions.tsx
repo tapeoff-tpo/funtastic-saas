@@ -43,8 +43,8 @@ const TRACKING_LOOKUP_RESULT = 'FUNTASTIC_1688_TRACKING_RESULT'
 const TRACKING_LOOKUP_ERROR = 'FUNTASTIC_1688_TRACKING_ERROR'
 const TRACKING_LOOKUP_COMPLETE = 'FUNTASTIC_1688_TRACKING_COMPLETE'
 const EXACT_WAYBILL_EVIDENCE = { label: '运单号码', extractionVersion: 2 } as const
-const MAX_1688_TRACKING_BATCH_ORDERS = 50
-const MAX_1688_TRACKING_BATCH_ITEMS = 100
+const TRACKING_LOOKUP_RESULT_TIMEOUT_MS = 120_000
+const TRACKING_LOOKUP_SAVE_TIMEOUT_MS = 20_000
 const TRACKING_LOOKUP_HANDOFF_RETRY_DELAY_MS = 750
 const TRACKING_LOOKUP_HANDOFF_MAX_ATTEMPTS = 4
 const TRACKING_POPUP_ROUTE = '/purchasing/orders/1688-tracking-run'
@@ -58,6 +58,7 @@ export type Purchase1688TrackingLookupCandidate = {
   optionName: string | null
   supplierOrderNumber: string | null
   trackingNumber: string | null
+  lookupBlocked?: boolean
 }
 
 type Purchase1688TrackingMode = 'initial' | 'recollect'
@@ -66,6 +67,7 @@ type Purchase1688TrackingPopupPayload = {
   createdAt: number
   mode: Purchase1688TrackingMode
   candidates: Purchase1688TrackingLookupCandidate[]
+  scope?: 'all'
 }
 
 type Purchase1688TrackingLookupJob = {
@@ -123,6 +125,7 @@ function isPurchase1688TrackingCandidate(value: unknown): value is Purchase1688T
     && (typeof candidate.optionName === 'string' || candidate.optionName === null)
     && (typeof candidate.supplierOrderNumber === 'string' || candidate.supplierOrderNumber === null)
     && (typeof candidate.trackingNumber === 'string' || candidate.trackingNumber === null)
+    && (candidate.lookupBlocked === undefined || typeof candidate.lookupBlocked === 'boolean')
 }
 
 function parsePurchase1688TrackingPopupPayload(value: string | null): Purchase1688TrackingPopupPayload | null {
@@ -132,10 +135,12 @@ function parsePurchase1688TrackingPopupPayload(value: string | null): Purchase16
     if (parsed.mode !== 'initial' && parsed.mode !== 'recollect') return null
     if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) return null
     if (!Array.isArray(parsed.candidates) || !parsed.candidates.every(isPurchase1688TrackingCandidate)) return null
+    if (parsed.scope !== undefined && parsed.scope !== 'all') return null
     return {
       createdAt: parsed.createdAt,
       mode: parsed.mode,
       candidates: parsed.candidates,
+      ...(parsed.scope === 'all' ? { scope: 'all' } : {}),
     }
   } catch {
     return null
@@ -360,7 +365,7 @@ function Purchase1688TrackingProgressRunner({
   }, [storageKey])
 
   const eligibleCandidates = candidates.filter((candidate) => (
-    valid1688OrderNumber(candidate.supplierOrderNumber)
+    !candidate.lookupBlocked && valid1688OrderNumber(candidate.supplierOrderNumber)
       && (isRecollectBatch ? /^LP/i.test(candidate.trackingNumber?.trim() ?? '') : !candidate.trackingNumber?.trim())
   ))
   const skippedCandidateCount = candidates.length - eligibleCandidates.length
@@ -531,27 +536,48 @@ function Purchase1688TrackingProgressRunner({
       const failedIds: string[] = []
 
       for (const id of job.ids) {
+        if (disposed) return
+        const controller = new AbortController()
+        let saveTimer: number | null = null
         try {
-          const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderNumber: job.orderNumber,
-              trackingNumbers,
-              trackingSource: 'waybill_number',
-              trackingEvidence: EXACT_WAYBILL_EVIDENCE,
-              replaceUninspectedInspection: isRecollectBatch,
+          await Promise.race([
+            (async () => {
+              const response = await fetch(`/api/purchasing/purchase-requests/${id}/1688-tracking`, {
+                method: 'POST', signal: controller.signal,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  orderNumber: job.orderNumber,
+                  trackingNumbers,
+                  trackingSource: 'waybill_number',
+                  trackingEvidence: EXACT_WAYBILL_EVIDENCE,
+                  replaceUninspectedInspection: isRecollectBatch,
+                }),
+              })
+              const body = await response.json().catch(() => ({}))
+              if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
+            })(),
+            new Promise<never>((_, reject) => {
+              saveTimer = window.setTimeout(() => {
+                reject(new Error('송장 저장 응답이 지연되었습니다. 저장 여부를 확인한 뒤 다시 조회해주세요.'))
+                controller.abort()
+              }, TRACKING_LOOKUP_SAVE_TIMEOUT_MS)
             }),
-          })
-          const body = await response.json().catch(() => ({}))
-          if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
+          ])
           savedForJob += 1
           savedIds.push(id)
+          if (!disposed) updateLookupRows([id], 'success', `송장 ${trackingNumbers.join(', ')} 저장 완료`, trackingNumbers)
         } catch (error) {
           failedForJob += 1
           failedIds.push(id)
           lastError = error instanceof Error ? error.message : '1688 송장번호를 저장하지 못했습니다.'
+          if (!disposed) updateLookupRows([id], 'failed', lastError)
+        } finally {
+          if (saveTimer !== null) window.clearTimeout(saveTimer)
         }
+        if (!disposed) updateProgress(`주문 ${index + 1}/${batch.jobs.length} 송장 저장 중 · ${savedForJob}/${job.ids.length}개 상품 저장`, {
+          succeededItems: succeededItems + savedForJob,
+          failedItems: failedItems + failedForJob,
+        })
       }
 
       if (disposed || current?.runId !== runId) return
@@ -586,12 +612,18 @@ function Purchase1688TrackingProgressRunner({
       if (!current || data.runId !== current.runId) return
 
       if (data.type === TRACKING_LOOKUP_ACK) {
+        if (current.saving) return
         if (bridgeTimeout !== null) window.clearTimeout(bridgeTimeout)
-        bridgeTimeout = null
+        const acknowledgedRunId = current.runId
+        bridgeTimeout = window.setTimeout(() => {
+          if (disposed || current?.runId !== acknowledgedRunId || current.saving) return
+          failCurrentJob('1688 송장 조회 시간이 초과되었습니다. 1688 화면을 확인한 뒤 다시 조회해주세요.')
+        }, TRACKING_LOOKUP_RESULT_TIMEOUT_MS)
         return
       }
 
       if (data.type === TRACKING_LOOKUP_ERROR) {
+        if (current.saving) return
         failCurrentJob(typeof data.message === 'string' ? data.message : '1688 송장 조회에 실패했습니다.')
         return
       }
@@ -639,7 +671,7 @@ function Purchase1688TrackingProgressRunner({
           currentOrder: 0,
           currentOrderNumber: null,
           message: isRecollectBatch
-            ? '현재 페이지에서 다시 수집할 LP로 시작하는 기존 물류번호를 찾지 못했습니다. 실제 운송장번호가 저장된 항목은 건너뜁니다.'
+            ? '검수 전체에서 다시 수집할 LP로 시작하는 기존 물류번호를 찾지 못했습니다. 실제 운송장번호가 저장된 항목은 건너뜁니다.'
             : '이 작업 창에서 조회할 주문서번호가 있는 항목을 찾지 못했습니다. 원래 발주 화면에서 다시 시작해주세요.',
           complete: true,
         })
@@ -666,26 +698,6 @@ function Purchase1688TrackingProgressRunner({
       message: '조회 대기',
       trackingNumbers: [],
     })))
-    if (eligibleCandidates.length > MAX_1688_TRACKING_BATCH_ITEMS || jobs.length > MAX_1688_TRACKING_BATCH_ORDERS) {
-      setProgress({
-        totalItems: eligibleCandidates.length,
-        totalOrders: jobs.length,
-        skippedItems,
-        succeededItems: 0,
-        failedItems: 0,
-        currentOrder: 0,
-        currentOrderNumber: null,
-        message: `한 번에 최대 ${MAX_1688_TRACKING_BATCH_ORDERS.toLocaleString('ko-KR')}개 1688 주문 또는 ${MAX_1688_TRACKING_BATCH_ITEMS.toLocaleString('ko-KR')}개 발주 항목만 조회할 수 있습니다. 현재 페이지 표시 수를 줄인 뒤 다시 조회해주세요.`,
-        complete: true,
-      })
-      setLookupRows((rows) => rows.map((row) => ({
-        ...row,
-        status: 'skipped',
-        message: '한 번에 처리할 수 있는 건수를 초과했습니다.',
-      })))
-      return
-    }
-
     stopRequestedRef.current = false
     batchActiveRef.current = true
     setProgress({
@@ -729,12 +741,14 @@ function Purchase1688TrackingProgressRunner({
       <h1 className="text-base font-semibold">{isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         {isRecollectBatch
-          ? `현재 페이지의 검수 항목 중 기존 물류번호(LP)로 저장된 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회해 실제 운송장으로 교체합니다. 박스·수량 검수가 시작된 항목은 바꾸지 않습니다.`
-          : `현재 페이지의 구매완료 항목 중 주문서번호가 있고 송장이 비어 있는 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}건을 순차 조회합니다.${(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장 또는 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}`}
+          ? `검수 전체 ${candidates.length.toLocaleString('ko-KR')}개 상품 중 기존 물류번호(LP)로 저장된 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}개 상품을 조회해 실제 운송장으로 교체합니다. 박스·수량 검수가 시작된 항목은 바꾸지 않습니다.`
+          : `구매완료 전체 ${candidates.length.toLocaleString('ko-KR')}개 상품 중 주문서번호가 있고 송장이 비어 있는 ${(progress?.totalItems ?? eligibleCandidates.length).toLocaleString('ko-KR')}개 상품을 조회합니다.${(progress?.skippedItems ?? skippedCandidateCount) > 0 ? ` 기존 송장·검수 기록이 있거나 주문서번호가 없는 ${(progress?.skippedItems ?? skippedCandidateCount).toLocaleString('ko-KR')}건은 자동으로 건너뜁니다.` : ''}`}
+        {' '}같은 주문서번호의 상품은 묶어서 한 번만 조회합니다.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm" aria-live="polite">
         <span>{progress?.message ?? '조회 준비'}</span>
+        {progress && <span className="text-muted-foreground">조회 대상 상품 {progress.totalItems.toLocaleString('ko-KR')}개 · 1688 주문 {progress.totalOrders.toLocaleString('ko-KR')}건</span>}
         <span className="text-muted-foreground">성공 {(progress?.succeededItems ?? 0).toLocaleString('ko-KR')}건</span>
         <span className="text-muted-foreground">미처리 {(progress?.failedItems ?? 0).toLocaleString('ko-KR')}건</span>
         {progress?.skippedItems ? <span className="text-muted-foreground">건너뜀 {progress.skippedItems.toLocaleString('ko-KR')}건</span> : null}
@@ -799,11 +813,13 @@ function Purchase1688TrackingProgressRunner({
 }
 
 export function PurchaseBulk1688TrackingLookup({
-  candidates,
+  candidates = [],
   mode = 'initial',
+  scope = 'provided',
 }: {
-  candidates: Purchase1688TrackingLookupCandidate[]
+  candidates?: Purchase1688TrackingLookupCandidate[]
   mode?: Purchase1688TrackingMode
+  scope?: 'all' | 'provided'
 }) {
   const router = useRouter()
   const progressPopupRef = useRef<Window | null>(null)
@@ -837,6 +853,7 @@ export function PurchaseBulk1688TrackingLookup({
       createdAt: Date.now(),
       mode,
       candidates,
+      ...(scope === 'all' ? { scope: 'all' } : {}),
     }
 
     try {
@@ -875,8 +892,8 @@ export function PurchaseBulk1688TrackingLookup({
       variant="outline"
       onClick={startBatch}
       title={isRecollectBatch
-        ? '현재 페이지에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
-        : '현재 페이지의 구매완료 항목을 순차 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}
+        ? '검수 전체에서 LP로 시작하는 기존 물류번호를 실제 运单号码로 다시 수집합니다. 검수 수량·박스 정보가 있는 항목은 건너뜁니다.'
+        : '페이지 수와 관계없이 구매완료 전체를 조회합니다. 주문번호가 없거나 송장이 이미 있는 항목은 자동으로 건너뜁니다.'}
     >
       <Search />
       {isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'}
@@ -893,7 +910,8 @@ export function Purchase1688TrackingProgressWindow({ runId }: { runId: string | 
   } | undefined>(undefined)
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => { void (async () => {
       if (!normalizedRunId) {
         setHandoff({
           payload: null,
@@ -931,9 +949,25 @@ export function Purchase1688TrackingProgressWindow({ runId }: { runId: string | 
         })
         return
       }
-      setHandoff({ payload, error: null })
-    }, 0)
-    return () => window.clearTimeout(timer)
+      if (payload.scope === 'all') {
+        try {
+          const response = await fetch(`/api/purchasing/purchase-requests/1688-tracking-candidates?mode=${payload.mode}`, {
+            cache: 'no-store', signal: controller.signal,
+          })
+          const body = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(body.error ?? '전체 송장 조회 대상을 불러오지 못했습니다.')
+          if (!Array.isArray(body.candidates) || !body.candidates.every(isPurchase1688TrackingCandidate)) {
+            throw new Error('전체 송장 조회 대상이 올바르지 않습니다. 다시 시작해주세요.')
+          }
+          payload = { ...payload, candidates: body.candidates }
+        } catch (failure) {
+          if (!controller.signal.aborted) setHandoff({ payload: null, error: failure instanceof Error ? failure.message : '전체 송장 조회 대상을 불러오지 못했습니다.' })
+          return
+        }
+      }
+      if (!controller.signal.aborted) setHandoff({ payload, error: null })
+    })() }, 0)
+    return () => { window.clearTimeout(timer); controller.abort() }
   }, [normalizedRunId, storageKey])
 
   if (handoff === undefined) {

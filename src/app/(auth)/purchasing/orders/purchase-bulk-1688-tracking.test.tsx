@@ -166,6 +166,31 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     })
   })
 
+  it('hands off whole-stage selection instead of embedding only the visible page', () => {
+    vi.spyOn(window, 'open').mockReturnValue(popupWindow())
+    render(<PurchaseBulk1688TrackingLookup scope="all" />)
+    fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
+    expect(JSON.parse(window.localStorage.getItem(purchase1688TrackingPopupStorageKey(runId)) ?? '{}')).toMatchObject({ scope: 'all', candidates: [] })
+  })
+
+  it('loads all 110 products in the popup and distinguishes product count from grouped order count', async () => {
+    const candidates = Array.from({ length: 110 }, (_, index) => ({
+      ...initialCandidates[0], id: `all-${index}`, sku: `SKU-${index}`,
+      supplierOrderNumber: (BigInt(firstOrder) + BigInt(index % 90)).toString(),
+      trackingNumber: index >= 104 ? 'ALREADY-SAVED' : null,
+    }))
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ candidates }) } as Response)
+    const postMessage = vi.spyOn(window, 'postMessage')
+    window.localStorage.setItem(purchase1688TrackingPopupStorageKey(runId), JSON.stringify({ createdAt: Date.now(), mode: 'initial', scope: 'all', candidates: [] }))
+    render(<Purchase1688TrackingProgressWindow runId={runId} />)
+    await waitForStart(postMessage)
+    expect(fetch).toHaveBeenCalledWith('/api/purchasing/purchase-requests/1688-tracking-candidates?mode=initial', expect.objectContaining({ cache: 'no-store' }))
+    expect(screen.getByText(/구매완료 전체 110개 상품 중/)).toHaveTextContent('104개 상품을 조회합니다.')
+    expect(screen.getByText('조회 대상 상품 104개 · 1688 주문 90건')).toBeInTheDocument()
+    expect(screen.getByText('SKU-103')).toBeInTheDocument()
+    expect(screen.queryByText('SKU-104')).not.toBeInTheDocument()
+  })
+
   it('keeps the re-collect launcher active when the visible list has no LP legacy tracking number', () => {
     const popup = popupWindow()
     vi.spyOn(window, 'open').mockReturnValue(popup)
@@ -198,7 +223,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     renderInitialRunner()
 
     expect(await screen.findByText(/CABOSS 자갈 지압매트 150cm/)).toBeTruthy()
-    expect(screen.getByText(/기존 송장 또는 주문서번호가 없는 2건은 자동으로 건너뜁니다/)).toBeTruthy()
+    expect(screen.getByText(/기존 송장·검수 기록이 있거나 주문서번호가 없는 2건은 자동으로 건너뜁니다/)).toBeTruthy()
     await waitForStart(postMessage)
 
     await act(async () => {

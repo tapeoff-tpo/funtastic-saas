@@ -29,11 +29,13 @@ const VERIFY_SAVE_TIMEOUT_MS = 30_000
 const MAX_VERIFY_LINKS = 2_000
 const DETAIL_IMAGES_PAGE_TIMEOUT_MS = 60_000
 const TRACKING_LOOKUP_PAGE_TIMEOUT_MS = 45_000
+const TRACKING_LOOKUP_SCAN_TIMEOUT_MS = 24_000
 
 let resultInFlight = false
 let checkpointCache = null
 let verificationResultInFlight = false
 let verificationCheckpointCache = null
+let trackingCollectionRunId = null
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void handleMessage(message, sender)
@@ -83,6 +85,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 async function handleMessage(message, sender) {
   if (!message || typeof message !== 'object') return { ok: false }
+
+  if (message.type === 'FUNTASTIC_1688_TRACKING_READY') {
+    const run = await getTrackingLookupRun()
+    if (!run || sender.frameId !== 0 || sender.tab?.id !== run.collectorTabId) return { active: false }
+    void collectTrackingLookupFromTab(sender.tab.id)
+    return { active: true }
+  }
 
   if (message.type === 'FUNTASTIC_1688_START') {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
@@ -884,6 +893,7 @@ async function startTrackingLookupRun(message, sourceTabId) {
     sourceTabId,
     collectorTabId: collectorTab.id,
     orderNumber,
+    background,
     status: 'running',
     collecting: false,
   }
@@ -900,41 +910,75 @@ async function startTrackingLookupRun(message, sourceTabId) {
 
 async function collectTrackingLookupFromTab(tabId) {
   const run = await getTrackingLookupRun()
-  if (!run || run.status !== 'running' || run.collecting || run.collectorTabId !== tabId) return
+  if (!run || run.status !== 'running' || run.collecting || trackingCollectionRunId === run.runId || run.collectorTabId !== tabId) return
 
+  trackingCollectionRunId = run.runId
   run.collecting = true
   await setTrackingLookupRun(run)
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: collect1688TrackingInPage,
-    })
-    const topResult = results.find((result) => result.frameId === 0)?.result
-    if (topResult?.fatal) {
-      await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
-      return
+    const startedAt = Date.now()
+    let lastError = '1688에서 송장번호를 찾지 못했습니다.'
+    let stableOrderState = ''
+    let sawLogisticsTab = false
+    for (let attempt = 0; Date.now() - startedAt < TRACKING_LOOKUP_SCAN_TIMEOUT_MS; attempt += 1) {
+      const current = await getTrackingLookupRun()
+      if (!current || current.runId !== run.runId) return
+      let results
+      try {
+        // Each frame returns a single snapshot immediately. Waiting inside an
+        // allFrames injection waits for the slowest/irrelevant frame too, and
+        // inactive-tab timers can be throttled to a minute by the browser.
+        results = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: collect1688TrackingInPage,
+          args: [{ singlePass: true, activateLogistics: [0, 2, 5, 9, 13, 20].includes(attempt) }],
+        })
+      } catch (error) {
+        const tab = await chrome.tabs.get(tabId).catch(() => null)
+        if (!tab || tab.status !== 'loading') throw error
+        // A redirect can replace the frame between DOM readiness and injection.
+        // Retry the new document instead of classifying that navigation as failure.
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        continue
+      }
+      const latest = await getTrackingLookupRun()
+      if (!latest || latest.runId !== run.runId) return
+      const topResult = results.find((result) => result.frameId === 0)?.result
+      if (topResult?.fatal) {
+        await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
+        return
+      }
+      const trackingNumbers = uniqueTrackingNumbers(results.flatMap((result) => result.result?.trackingNumbers || []))
+      if (trackingNumbers.length > 0) {
+        await completeTrackingLookupRun(run, trackingNumbers)
+        return
+      }
+      sawLogisticsTab ||= results.some((result) => result.result?.sawLogisticsTab)
+      // Only the main order document can declare this order unavailable or
+      // unshipped. Recommendations/ads in unrelated frames are not its status.
+      const terminal = topResult?.orderState ? topResult : null
+      if (terminal?.orderState !== stableOrderState) {
+        stableOrderState = terminal?.orderState || ''
+      }
+      if (terminal?.error) lastError = terminal.error
+      // The detail timeline also contains old stages such as 等待卖家发货.
+      // Allow logistics to finish rendering before trusting page-wide status
+      // text, even when that text has stayed visible across several snapshots.
+      await new Promise((resolve) => setTimeout(resolve, attempt < 3 ? 250 : 500))
     }
-
-    const trackingNumbers = uniqueTrackingNumbers(results.flatMap((result) => result.result?.trackingNumbers || []))
-    if (trackingNumbers.length === 0) {
-      const frameResult = results
-        .map((result) => result.result)
-        .find((result) => typeof result?.error === 'string' && /물류 탭은 열렸지만|발송 전|주문을 찾을 수 없/.test(result.error))
-      const error = typeof frameResult?.error === 'string'
-        ? frameResult.error
-        : typeof topResult?.error === 'string'
-          ? topResult.error
-        : '1688에서 송장번호를 찾지 못했습니다.'
-      await failTrackingLookupRun(run, error, false)
-      return
-    }
-    await completeTrackingLookupRun(run, trackingNumbers)
+    await failTrackingLookupRun(run, stableOrderState ? lastError : sawLogisticsTab
+      ? '1688 물류 탭은 열렸지만 송장번호 형식을 읽지 못했습니다. 물류정보가 실제로 표시되는지 확인해주세요.'
+      : '1688 물류 정보를 불러오지 못했습니다. 주문 상태 또는 1688 화면을 확인해주세요.', false)
   } catch (error) {
     await failTrackingLookupRun(run, `1688 송장 조회를 실행하지 못했습니다: ${errorMessage(error)}`, false)
+  } finally {
+    if (trackingCollectionRunId === run.runId) trackingCollectionRunId = null
   }
 }
 
 async function completeTrackingLookupRun(run, trackingNumbers) {
+  const current = await getTrackingLookupRun()
+  if (!current || current.runId !== run.runId) return
   await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
   try {
     await sendTrackingLookupToSaas(run, {
@@ -958,6 +1002,8 @@ async function completeTrackingLookupRun(run, trackingNumbers) {
 }
 
 async function failTrackingLookupRun(run, message, keepCollectorTab) {
+  const current = await getTrackingLookupRun()
+  if (!current || current.runId !== run.runId) return
   await chrome.alarms.clear(TRACKING_LOOKUP_TIMEOUT_ALARM)
   await sendTrackingLookupToSaas(run, {
     type: 'FUNTASTIC_1688_TRACKING_ERROR',
@@ -965,7 +1011,7 @@ async function failTrackingLookupRun(run, message, keepCollectorTab) {
     message,
   }).catch(() => {})
   await clearTrackingLookupRun(run, !keepCollectorTab)
-  if (keepCollectorTab) {
+  if (keepCollectorTab && !run.background) {
     await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
   }
 }
@@ -1019,7 +1065,7 @@ function uniqueTrackingNumbers(values) {
   return Array.from(numbers.values())
 }
 
-async function collect1688TrackingInPage() {
+async function collect1688TrackingInPage(options = {}) {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   // 1688 shows other logistics identifiers alongside the real waybill. Only
   // `运单号码` is the carrier tracking number for this purchasing flow.
@@ -1067,6 +1113,9 @@ async function collect1688TrackingInPage() {
 
   const collectStructuredTracking = () => {
     const sources = []
+    const labelledValues = []
+    const exactLabel = new RegExp(`^${trackingLabelPattern}\\s*[：:]?$`)
+    const exactValue = new RegExp(`^${trackingValue}$`)
     const addSource = (value) => {
       const normalized = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
       if (normalized) sources.push(normalized.slice(0, 20_000))
@@ -1092,10 +1141,21 @@ async function collect1688TrackingInPage() {
         scannedElements += 1
         if (scannedElements > 6_000) break
         if (element.shadowRoot) roots.push(element.shadowRoot)
+        // A few order-detail versions put the waybill in an input or in a
+        // separate inline value node, which is missing from body.innerText.
+        // Read only the next field value of an exact 运单号码 label, never a
+        // previous sibling or a broad ancestor containing 物流编号 as well.
+        if (exactLabel.test(textOf(element))) {
+          const valueElement = element.nextElementSibling
+          const value = valueElement?.matches?.('input, textarea')
+            ? valueElement.value
+            : textOf(valueElement)
+          if (exactValue.test(value || '')) labelledValues.push(value)
+        }
       }
     }
 
-    return mergeTrackingNumbers(...sources.map((source) => collect(source)))
+    return mergeTrackingNumbers(labelledValues, ...sources.map((source) => collect(source)))
   }
 
   const getOpenRoots = () => {
@@ -1173,12 +1233,13 @@ async function collect1688TrackingInPage() {
   let consecutiveNotShipped = 0
   let consecutiveUnavailableOrder = 0
   let sawLogisticsTab = false
-  const maxAttempts = 18
+  const maxAttempts = options.singlePass ? 1 : 18
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     // The order-detail URL normally selects this tab itself, but some 1688 page
     // variants ignore the URL fragment until the tab is clicked once.
-    if (attempt === 0 || attempt === 2 || attempt === 5 || attempt === 9 || attempt === 13) {
-      sawLogisticsTab ||= activateLogisticsTab()
+    if (options.activateLogistics !== false && (attempt === 0 || attempt === 2 || attempt === 5 || attempt === 9 || attempt === 13)) {
+      const activated = activateLogisticsTab()
+      sawLogisticsTab = sawLogisticsTab || activated
     }
     const text = pageText()
     if (isLoginPage() || looksLikeLogin(text)) {
@@ -1192,6 +1253,11 @@ async function collect1688TrackingInPage() {
       : []
     const trackingNumbers = mergeTrackingNumbers(collect(text), structuredTracking)
     if (trackingNumbers.length > 0) return { trackingNumbers }
+    if (options.singlePass) {
+      if (looksLikeNotShipped(text)) return { trackingNumbers: [], orderState: 'not_shipped', error: '1688에서 아직 발송 전으로 표시되어 송장번호가 없습니다.', sawLogisticsTab }
+      if (looksLikeUnavailableOrder(text)) return { trackingNumbers: [], orderState: 'unavailable', error: '1688에서 해당 주문을 찾을 수 없거나 현재 계정으로 볼 수 없습니다. 주문번호와 로그인 계정을 확인해주세요.', sawLogisticsTab }
+      return { trackingNumbers: [], sawLogisticsTab }
+    }
     consecutiveNotShipped = looksLikeNotShipped(text) ? consecutiveNotShipped + 1 : 0
     consecutiveUnavailableOrder = looksLikeUnavailableOrder(text) ? consecutiveUnavailableOrder + 1 : 0
     if (consecutiveNotShipped >= 2) {
@@ -1200,7 +1266,7 @@ async function collect1688TrackingInPage() {
     if (consecutiveUnavailableOrder >= 2) {
       return { trackingNumbers: [], error: '1688에서 해당 주문을 찾을 수 없거나 현재 계정으로 볼 수 없습니다. 주문번호와 로그인 계정을 확인해주세요.' }
     }
-    await delay(650)
+    if (attempt + 1 < maxAttempts) await delay(650)
   }
 
   return {

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
   "description": "1688 구매 URL·상세페이지 이미지와 발주 송장번호를 로그인된 브라우저에서 조회합니다.",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "permissions": [
     "alarms",
     "storage",
@@ -20,6 +20,11 @@
     "default_title": "1688 URL 수집"
   },
   "content_scripts": [
+    {
+      "matches": ["https://*.1688.com/*"],
+      "js": ["1688-tracking-ready.js"],
+      "run_at": "document_end"
+    },
     {
       "matches": [
         "https://funtastic-saas-vercel.vercel.app/*",

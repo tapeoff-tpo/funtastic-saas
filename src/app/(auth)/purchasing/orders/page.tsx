@@ -534,14 +534,7 @@ export async function PurchasingOrdersView({
               {showPaymentControls ? <PurchaseBulkPaymentDialog /> : null}
               {status === 'purchase_completed' || status === 'inspecting' ? (
                 <PurchaseBulk1688TrackingLookup
-                  candidates={items.flatMap((item) => item.id ? [{
-                    id: item.id,
-                    sku: item.sku,
-                    productName: item.productName,
-                    optionName: item.optionName,
-                    supplierOrderNumber: item.supplierOrderNumber,
-                    trackingNumber: item.trackingNumber,
-                  }] : [])}
+                  scope="all"
                   mode={status === 'inspecting' ? 'recollect' : 'initial'}
                 />
               ) : null}

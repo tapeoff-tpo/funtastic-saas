@@ -7,6 +7,7 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
+import { summarizeFundMonths, type FundMonth } from './purchase-fund-monthly'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 import {
@@ -52,6 +53,7 @@ export type PurchaseFundDebitSnapshot = {
 }
 
 export type PurchaseFundLedgerData = {
+  monthly: FundMonth[]
   summary: {
     totalDepositedKrw: number
     totalDebitedKrw: number
@@ -586,6 +588,7 @@ export async function getPurchaseFundLedgerData(
   const cnyDebitsKnown = missingCostOrderCount === 0
 
   return {
+    monthly: summarizeFundMonths(effectiveRows),
     summary: {
       totalDepositedKrw: Math.round(totalDepositedKrw),
       totalDebitedKrw: Math.round(totalDebitedKrw),

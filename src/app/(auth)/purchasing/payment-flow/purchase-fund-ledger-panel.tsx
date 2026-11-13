@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type FormEvent, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { ArrowDownRight, ArrowUpRight, Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
+import { Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import type {
   PurchaseFundLedgerData,
   PurchaseFundManualEntryType,
 } from '@/lib/purchasing/purchase-fund-ledger'
+import { MonthlyFundDashboard } from './monthly-fund-dashboard'
 import { ChinaFundStatementPanel } from './china-fund-statement-panel'
 
 export function PurchaseFundLedgerPanel({
@@ -279,82 +280,24 @@ export function PurchaseFundLedgerPanel({
         />
       </div>
 
-      <ChinaFundStatementPanel />
+      <MonthlyFundDashboard monthly={data.monthly} />
 
-      {children}
-
-      <details className="group border-t pt-4">
-        <summary className="cursor-pointer text-sm font-semibold marker:text-muted-foreground">
-          입금·발주 거래내역 펼치기 ({data.entries.length.toLocaleString('ko-KR')}건 표시)
-        </summary>
-        <p className="mt-1 text-xs text-muted-foreground">입금과 구매완료 이후 발주의 자동 차감 기록입니다. 발주요청 단계는 차감하지 않으며, 이후 단계에서는 같은 발주를 한 번만 반영합니다.</p>
-        <div className="mt-3 overflow-x-auto rounded-md border">
-          <table className="w-full min-w-[860px] text-sm">
-          <thead className="bg-muted/60 text-xs text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">날짜</th>
-              <th className="px-3 py-2 text-left font-medium">구분</th>
-              <th className="px-3 py-2 text-left font-medium">내역</th>
-              <th className="px-3 py-2 text-right font-medium">입금 (元)</th>
-              <th className="px-3 py-2 text-right font-medium">발주 차감 (元)</th>
-              <th className="px-3 py-2 text-right font-medium">잔액 (元)</th>
-              <th className="w-12 px-2 py-2"><span className="sr-only">관리</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.entries.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">입금 또는 발주 차감 내역이 없습니다.</td></tr>
-            ) : data.entries.map((entry) => (
-              <tr key={entry.id} className="border-t align-top">
-                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{entry.occurredOn}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">
-                  <span className="inline-flex items-center gap-1">
-                    {entry.entryType === 'purchase_debit'
-                      ? <ArrowDownRight className="size-3.5 text-red-600" />
-                      : <ArrowUpRight className="size-3.5 text-emerald-600" />}
-                    {entryTypeLabel(entry.entryType)}
-                  </span>
-                </td>
-                <td className="max-w-[360px] px-3 py-2.5 text-muted-foreground">{entry.detail}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-emerald-700">
-                  {entry.isManualCredit ? (
-                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
-                  ) : '-'}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-red-700">
-                  {entry.entryType === 'purchase_debit' ? (
-                    <LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} />
-                  ) : '-'}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
-                  <LedgerAmount
-                    amountCny={entry.balanceCny}
-                    amountKrw={entry.balanceKrw}
-                    className={entry.balanceCny !== null && entry.balanceCny < 0 ? 'text-red-700' : 'text-foreground'}
-                  />
-                </td>
-                <td className="px-2 py-2 text-right">
-                  {entry.isManualCredit ? (
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => voidEntry(entry.id)}
-                      disabled={isPending}
-                      aria-label="입금 내역 취소"
-                    >
-                      <Trash2 />
-                    </Button>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          </table>
+      <details className="rounded-lg border p-3">
+        <summary className="cursor-pointer text-sm font-semibold">중국 입금표 · 대량결제 관리</summary>
+        <div className="mt-4 space-y-4">
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold">입금 기록 관리</summary>
+            <div className="mt-2 divide-y rounded-md border">
+              {data.entries.filter((entry) => entry.isManualCredit).map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                  <div><span>{entry.occurredOn} · {entryTypeLabel(entry.entryType)}</span>{entry.memo ? <span className="ml-2 text-muted-foreground">{entry.memo}</span> : null}</div>
+                  <div className="flex items-center gap-2"><LedgerAmount amountCny={entry.amountCny} amountKrw={entry.amountKrw} /><Button type="button" size="icon-sm" variant="ghost" onClick={() => voidEntry(entry.id)} disabled={isPending} aria-label="입금 내역 취소"><Trash2 /></Button></div>
+                </div>
+              ))}
+            </div>
+          </details>
+          <ChinaFundStatementPanel />{children}
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          발주요청 단계에서는 차감하지 않고, 구매완료 이후 발주는 한 번만 차감합니다. 주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 선금과 잔금은 대량결제대기 목록에서 별도로 관리하며, 자동 차감 내역은 원본 발주가 정리되어도 장부에 남습니다.
-        </p>
       </details>
 
       {(

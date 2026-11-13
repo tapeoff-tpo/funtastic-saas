@@ -42,7 +42,8 @@ import { PurchaseInspectionIssueButton } from './purchase-inspection-issues'
 import { PurchasePriceComparisonFields } from './purchase-price-comparison-fields'
 import { readPurchasePriceComparison, resolvePurchasePriceComparison } from '@/lib/purchasing/purchase-price-comparison'
 import { inspectionSummary, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
-import { purchaseArrivalWarehouse } from '@/lib/purchasing/purchase-arrival-warehouse'
+import { purchaseArrivalWarehouseDisplay } from '@/lib/purchasing/purchase-arrival-warehouse'
+import { resolvePurchaseSourceWarehouses } from '@/lib/purchasing/purchase-source-warehouse'
 import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
 import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
 import {
@@ -211,6 +212,17 @@ export async function PurchasingOrdersView({
   const isSsj = authorization?.email?.trim().toLowerCase().split('@')[0] === 'ssj'
   const showPaymentControls = !isSsj && (status === 'purchased' || status === 'purchase_completed')
   const showArrivalWarehouse = isMainOrders
+  const sourceWarehouses = showArrivalWarehouse && ['purchased', 'purchase_completed', 'inspecting'].includes(status)
+    ? await resolvePurchaseSourceWarehouses(workspaceUserId, items.flatMap((item) => item.id ? [{
+      id: item.id,
+      status: item.status,
+      sku: item.sku,
+      purchaseManagementCode: item.purchaseManagementCode,
+      supplierOrderNumber: item.supplierOrderNumber,
+      inboundWarehouseCode: 'inboundWarehouseCode' in item ? item.inboundWarehouseCode : null,
+      rawData: item.rawData,
+    }] : [])).catch((error) => { console.error('purchase source warehouse preload failed', error); return new Map<string, string>() })
+    : new Map<string, string>()
   const showPurchaseDateColumn = isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status)
   const showCostColumns = isMainOrders || showCosts
   const newProductFirstSaleItems = isRequestedStatus
@@ -634,6 +646,11 @@ export async function PurchasingOrdersView({
                 ) : (
                   items.map((item, index) => {
                     const rowNumber = (page - 1) * pageSize + index + 1
+                    const arrivalWarehouse = purchaseArrivalWarehouseDisplay(
+                      item.rawData,
+                      'inboundWarehouseCode' in item ? item.inboundWarehouseCode : null,
+                      item.id ? sourceWarehouses.get(item.id) : undefined,
+                    )
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, item.status, outboundRequestedQuantity)
                     const isSaasChinaOutbound = item.rawData.saasChinaMode === true
@@ -785,8 +802,8 @@ export async function PurchasingOrdersView({
                       </td>
                       {showArrivalWarehouse && <td data-purchase-column="warehouse" className="whitespace-nowrap px-3 py-2 text-center align-middle">
                         {item.id && ['purchased', 'purchase_completed', 'inspecting'].includes(item.status)
-                          ? <PurchaseArrivalWarehouseField key={purchaseArrivalWarehouse(item.rawData)} id={item.id} warehouse={purchaseArrivalWarehouse(item.rawData)} />
-                          : <span data-no-translate>{('arrivalInventoryWarehouse' in item ? item.arrivalInventoryWarehouse : null) ?? purchaseArrivalWarehouse(item.rawData) ?? '–'}</span>}
+                          ? <PurchaseArrivalWarehouseField key={arrivalWarehouse} id={item.id} warehouse={arrivalWarehouse} />
+                          : <span data-no-translate>{('arrivalInventoryWarehouse' in item ? item.arrivalInventoryWarehouse : null) ?? arrivalWarehouse ?? '–'}</span>}
                       </td>}
                       {isRequestedStatus ? (
                         <td data-purchase-column="history" className="px-3 py-2 text-center align-middle">

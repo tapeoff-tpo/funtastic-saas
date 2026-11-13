@@ -114,6 +114,7 @@ export type EcountPendingRequest = {
   chinaArrivalRequestDate: string | null
   purchaseManagementCode: string
   buyerName: string | null
+  inboundWarehouseCode?: string | null
 }
 
 export type EcountPurchaseCompletedItem = {
@@ -135,6 +136,7 @@ export type EcountPurchaseCompletedItem = {
   purchaseMethod: string | null
   unitPriceCny: number | null
   shippingFeeCny: number | null
+  inboundWarehouseCode?: string | null
 }
 
 /** A purchase-history row that has reached the China warehouse. */
@@ -365,6 +367,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         chinaArrivalRequestDate: parseDate(valueAt(row, purchaseRequest, '중국창고 도착요청일')),
         purchaseManagementCode,
         buyerName: emptyToNull(valueAt(row, purchaseRequest, '사원(담당)명')),
+        inboundWarehouseCode: emptyToNull(valueAt(row, purchaseRequest, '창고명')),
       } satisfies EcountPendingRequest
     })
     .filter((row): row is EcountPendingRequest => row !== null)
@@ -507,6 +510,8 @@ export async function parseEcountPurchasingSnapshot(input: {
           valueAt(plan, purchasePlan, '주문서번호 (C)'),
         ),
         purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
+        inboundWarehouseCode: emptyToNull(valueAt(plan, purchasePlan, '입고창고명'))
+          ?? (request ? emptyToNull(valueAt(request, purchaseRequest, '창고명')) : null),
         unitPriceCny: null,
         shippingFeeCny: null,
       }
@@ -536,6 +541,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         purchaseOrderNumber: null,
         supplierOrderNumber: null,
         purchaseMethod: null,
+        inboundWarehouseCode: emptyToNull(valueAt(request, purchaseRequest, '창고명')),
         unitPriceCny: null,
         shippingFeeCny: null,
       }
@@ -581,6 +587,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         purchaseOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '발주서-no')),
         supplierOrderNumber,
         purchaseMethod: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
+        inboundWarehouseCode: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
         unitPriceCny: null,
         shippingFeeCny: null,
       }
@@ -1963,6 +1970,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       chinaArrivalRequestDate: item.chinaArrivalRequestDate,
       purchaseManagementCode: item.purchaseManagementCode,
       buyerName: item.buyerName,
+      inboundWarehouseCode: item.inboundWarehouseCode ?? null,
       rawData: {
         source: ECOUNT_PENDING_REQUEST_SOURCE,
         sourceFileName: item.sourceFileName,
@@ -1988,6 +1996,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       purchaseManagementCode: item.purchaseManagementCode,
       supplierOrderNumber: item.supplierOrderNumber,
       purchaseMethod: item.purchaseMethod,
+      inboundWarehouseCode: item.inboundWarehouseCode ?? null,
       purchaseConfirmed: true,
       unitPriceCny: item.unitPriceCny === null ? null : String(item.unitPriceCny),
       shippingFeeCny: item.shippingFeeCny === null ? null : String(item.shippingFeeCny),
@@ -2028,6 +2037,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       purchaseManagementCode: item.purchaseManagementCode,
       supplierOrderNumber: item.supplierOrderNumber,
       purchaseMethod: item.purchaseMethod,
+      inboundWarehouseCode: item.inboundWarehouseCode ?? null,
       purchaseConfirmed: true,
       sourceCurrentState: 'Ecount purchase history',
       rawData: {

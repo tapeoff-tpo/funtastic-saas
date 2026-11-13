@@ -2380,6 +2380,7 @@ export function PurchaseArrivalWarehouseField({ id, warehouse }: { id: string; w
       })
     }}>
     <option value="" disabled>창고 선택</option>
+    {warehouse && !PURCHASE_ARRIVAL_WAREHOUSES.some((option) => option === warehouse) ? <option value={warehouse} disabled data-no-translate>{warehouse}</option> : null}
     {PURCHASE_ARRIVAL_WAREHOUSES.map((option) => <option key={option} value={option}>{option}</option>)}
   </select>
 }

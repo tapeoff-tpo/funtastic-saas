@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   applyBulkPaymentOverride,
   applyPurchasePriceComparison,
@@ -14,6 +14,7 @@ import {
   getSaasChinaProtectedPurchaseKeys,
   parseEcountPurchasingSnapshot,
   resolveChinaInventorySnapshotAsOfDate,
+  syncEcountPurchasingSnapshot,
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
 
@@ -199,6 +200,80 @@ describe('getEcountPurchasingRefreshScope', () => {
 })
 
 describe('parseEcountPurchasingSnapshot', () => {
+  it('retains the selected source warehouse through request, completed request, plan, and arrival stages', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '일자-No.', '품목코드', '창고명', '품목명', '규격', '구매수량(EA)', '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사전포장여부코드',
+      ], [
+        ['20261110-1', '100001-0001', '  남부 임시창고  ', '요청 상품', '기본', 10, '', 'P-REQUEST', '발주요청', '진행중'],
+        ['20261110-2', '100002-0001', '중국창고', '완료 요청 상품', '기본', 10, '', 'P-COMPLETED', '발주요청', '완료'],
+        ['20261110-3', '100003-0001', '쿠팡창고', '원본 창고 상속', '기본', 10, '', 'P-FALLBACK', '발주요청', '진행중'],
+        ['20261110-4', '100004-0001', '중국창고', '계획 창고 우선', '기본', 10, '', 'P-OWN', '발주요청', '진행중'],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)', '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20261111-1', '', '100003-0001', '원본 창고 상속', '기본', 10, '3317159640039018761', '개인', 'P-FALLBACK', '발주계획'],
+        ['20261111-2', '  대량창고 ', '100004-0001', '계획 창고 우선', '기본', 10, '3317159640039018762', '개인', 'P-OWN', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '창고명', '품목명', '규격', '발주계획일자', '구매수량(EA)', '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20261112-1', '100005-0001', ' China WH 2 ', '도착 상품', '기본', '2026-11-11', 5, '', 'PO-1', 'P-HISTORY', '확인', '3317159640039018763'],
+      ]),
+    ])
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files, domesticInventoryReflectedThrough: '2026-11-01', asOfDate: '2026-11-13', allowMissingReports: true,
+    })
+    expect(snapshot.activeRequests).toEqual([expect.objectContaining({ purchaseManagementCode: 'P-REQUEST', inboundWarehouseCode: '남부 임시창고' })])
+    expect(snapshot.purchaseCompleted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ purchaseManagementCode: 'P-COMPLETED', inboundWarehouseCode: '중국창고' }),
+      expect.objectContaining({ purchaseManagementCode: 'P-FALLBACK', inboundWarehouseCode: '쿠팡창고', purchaseMethod: '개인' }),
+      expect.objectContaining({ purchaseManagementCode: 'P-OWN', inboundWarehouseCode: '대량창고', purchaseMethod: '개인' }),
+    ]))
+    expect(snapshot.chinaArrived).toEqual([expect.objectContaining({ purchaseManagementCode: 'P-HISTORY', inboundWarehouseCode: 'China WH 2' })])
+    const inserted = await syncWarehouseFixture(snapshot)
+    expect(inserted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'purchased', purchaseManagementCode: 'P-REQUEST', inboundWarehouseCode: '남부 임시창고' }),
+      expect.objectContaining({ status: 'purchase_completed', purchaseManagementCode: 'P-COMPLETED', inboundWarehouseCode: '중국창고' }),
+      expect.objectContaining({ status: 'purchase_completed', purchaseManagementCode: 'P-FALLBACK', inboundWarehouseCode: '쿠팡창고' }),
+      expect.objectContaining({ status: 'purchase_completed', purchaseManagementCode: 'P-OWN', inboundWarehouseCode: '대량창고' }),
+      expect.objectContaining({ status: 'china_arrived', purchaseManagementCode: 'P-HISTORY', inboundWarehouseCode: 'China WH 2' }),
+    ]))
+    for (const entry of inserted) {
+      expect(entry.rawData).not.toHaveProperty('arrivalWarehouseCode')
+      expect(entry.rawData).not.toHaveProperty('saasChinaMode')
+      expect(entry).not.toHaveProperty('purchaseInspection')
+      expect(entry).not.toHaveProperty('trackingNumber')
+    }
+    const protectedRefresh = await syncWarehouseFixture(snapshot, [{
+      sku: '100004-0001', purchaseManagementCode: 'P-OWN',
+      rawData: { arrivalWarehouseCode: '중국창고', saasChinaMode: true }, purchaseInspection: { version: 1 },
+    }])
+    expect(protectedRefresh).not.toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-OWN' }))
+    expect(protectedRefresh).toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-FALLBACK', inboundWarehouseCode: '쿠팡창고' }))
+  })
+
+  it('does not guess a plan warehouse from ambiguous requests for the same management code and SKU', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '일자-No.', '품목코드', '창고명', '품목명', '규격', '구매수량(EA)', '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사전포장여부코드',
+      ], [
+        ['20261110-1', '100001-0001', '중국창고', '상품', '기본', 5, '', 'P-AMBIGUOUS', '발주요청', '진행중'],
+        ['20261110-2', '100001-0001', '쿠팡창고', '상품', '기본', 5, '', 'P-AMBIGUOUS', '발주요청', '진행중'],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)', '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20261111-1', '', '100001-0001', '상품', '기본', 10, '3317159640039018761', '개인', 'P-AMBIGUOUS', '발주계획'],
+      ]),
+    ])
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files, domesticInventoryReflectedThrough: '2026-11-01', asOfDate: '2026-11-13', allowMissingReports: true,
+    })
+    expect(snapshot.purchaseCompleted).toEqual([expect.objectContaining({ purchaseManagementCode: 'P-AMBIGUOUS', inboundWarehouseCode: null })])
+  })
+
   it('keeps the printed China-inventory date ahead of a later upload timestamp', () => {
     expect(resolveChinaInventorySnapshotAsOfDate('2026-09-07', '2026-09-10')).toBe('2026-09-07')
     expect(resolveChinaInventorySnapshotAsOfDate(null, '2026-09-10')).toBe('2026-09-10')
@@ -1698,6 +1773,46 @@ describe('parseEcountPurchasingSnapshot', () => {
     ])
   })
 })
+
+async function syncWarehouseFixture(
+  snapshot: Parameters<typeof syncEcountPurchasingSnapshot>[0]['snapshot'],
+  protectedRows: Array<{ sku: string; purchaseManagementCode: string; rawData: Record<string, unknown>; purchaseInspection: unknown }> = [],
+) {
+  const [{ db }, reflected, retention, ignored, index, payment, ledger, currency] = await Promise.all([
+    import('@/lib/db'), import('./reflected-outbound-items'), import('./purchase-order-retention'),
+    import('./ignored-purchasing-items'), import('./purchase-request-item-index'), import('./purchase-payment-tracking'),
+    import('./purchase-fund-ledger'), import('@/lib/new-products/cny-cost'),
+  ])
+  const inserted: Array<Record<string, unknown>> = []
+  const tx = {
+    execute: vi.fn(async () => []),
+    select: vi.fn((fields: Record<string, unknown>) => ({ from: () => ({ where: () => Object.assign(
+      Promise.resolve('maxRowNumber' in fields ? [{ maxRowNumber: 0 }] : 'purchaseInspection' in fields ? protectedRows : []),
+      { orderBy: async () => [] },
+    ) }) })),
+    delete: vi.fn(() => ({ where: async () => [] })),
+    insert: vi.fn(() => ({ values: async (values: Array<Record<string, unknown>>) => { inserted.push(...values) } })),
+  }
+  try {
+    vi.spyOn(db, 'transaction').mockImplementation(async (callback) => callback(tx as never))
+    vi.spyOn(db, 'select').mockImplementation(() => ({ from: () => ({ where: async () => [] }) }) as never)
+    vi.spyOn(reflected, 'getReflectedOutboundMatchKeys').mockResolvedValue(new Set())
+    vi.spyOn(reflected, 'cleanupExpiredCompletedOutboundItems').mockResolvedValue(undefined as never)
+    vi.spyOn(retention, 'cleanupExpiredEcountPurchaseOrderRowsInTransaction').mockResolvedValue(undefined as never)
+    vi.spyOn(ignored, 'ensureIgnoredPurchasingItemsTable').mockResolvedValue(undefined as never)
+    vi.spyOn(ignored, 'getIgnoredPurchasingItemKeysInTransaction').mockResolvedValue(new Set())
+    vi.spyOn(index, 'ensurePurchaseRequestManagementCodeSkuLookupIndex').mockResolvedValue(undefined as never)
+    vi.spyOn(payment, 'ensurePurchasePaymentTrackingSchema').mockResolvedValue(undefined as never)
+    vi.spyOn(ledger, 'ensurePurchaseFundLedgerSchema').mockResolvedValue(undefined as never)
+    vi.spyOn(ledger, 'reconcilePurchaseFundDebitsInTransaction').mockResolvedValue(undefined as never)
+    vi.spyOn(currency, 'getLatestCnyKrwReferenceRate').mockResolvedValue({ rate: 200, date: null, source: 'fallback' })
+    await syncEcountPurchasingSnapshot({ userId: 'workspace-owner', requestedByUserId: 'staff', snapshot,
+      reportKinds: ['purchaseRequest', 'purchasePlan', 'purchaseHistory'] })
+    return inserted
+  } finally {
+    vi.restoreAllMocks()
+  }
+}
 
 async function makeUpload(
   fileName: string,

@@ -109,7 +109,7 @@ export function PurchaseFundLedgerPanel({
             발주금액 · 입금/잔액 현황
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            입금은 직접 기록하며, 2026년 11월 1일 이후 발주요청일인 건 중 구매완료 단계에 도달한 발주부터 자동 차감됩니다.
+            입금은 직접 기록하며, 2026년 11월 1일 이후 발주요청 단계에 등록된 발주부터 자동 차감됩니다.
           </p>
         </div>
         <Dialog.Root
@@ -258,7 +258,7 @@ export function PurchaseFundLedgerPanel({
           amountKrw={summary.totalDebitedKrw}
           amountCny={summary.totalDebitedCny}
           unknownReason={summary.missingCostOrderCount > 0
-            ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+            ? `원가 또는 중복·기초잔액 확인 필요 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
             : null}
           tone="debit"
         />
@@ -271,7 +271,7 @@ export function PurchaseFundLedgerPanel({
               ? `위안화 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
               : null,
             summary.missingCostOrderCount > 0
-              ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
+              ? `원가 또는 중복·기초잔액 확인 필요 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
               : null,
           ].filter(Boolean).join(' · ') || null}
           tone={summary.balanceCny !== null && summary.balanceCny < 0 ? 'debit' : 'balance'}
@@ -294,7 +294,7 @@ export function PurchaseFundLedgerPanel({
               ))}
             </div>
           </details>
-          <ChinaFundStatementPanel />
+          <ChinaFundStatementPanel purchaseDeductionCny={summary.totalDebitedCny} />
         </div>
       </details>
 
@@ -316,9 +316,16 @@ export function PurchaseFundLedgerPanel({
                   ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 누적 입금액과 잔액을 확정할 수 없습니다. `
                   : null}
                 {summary.missingCostOrderCount > 0
-                  ? `위안화 원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건이 있어 발주 차감액과 잔액을 확정할 수 없습니다. 확인된 금액만 장부에 차감했습니다.`
+                  ? `원가 또는 중복·기초잔액 확인이 필요한 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건이 있어 발주 차감액과 잔액을 확정할 수 없습니다.`
                   : null}
               </p>
+            ) : null}
+            {data.requestReviewItems?.length ? (
+              <details className="rounded-sm border px-2 py-1.5">
+                <summary className="cursor-pointer font-medium">중복·기초잔액 확인이 필요한 발주 {data.requestReviewItems.length.toLocaleString('ko-KR')}건</summary>
+                <ul className="mt-1 space-y-1">{data.requestReviewItems.slice(0, 10).map((item) => <li key={item.id}>{item.occurredOn} · {item.productName} ({item.sku}) · {item.reason}</li>)}</ul>
+                {data.requestReviewItems.length > 10 ? <p className="mt-1">상위 10건만 표시됩니다.</p> : null}
+              </details>
             ) : null}
           </div>
         </aside>
@@ -421,3 +428,5 @@ function todayKst() {
     day: '2-digit',
   }).format(new Date())
 }
+
+

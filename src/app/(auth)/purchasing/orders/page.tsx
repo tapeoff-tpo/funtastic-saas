@@ -615,7 +615,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th data-purchase-column="inspection-issues" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">검수 오류</th>}
-                  {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] px-3 py-2 font-medium">구매 정보</th>}
+                  {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] whitespace-nowrap px-3 py-2 font-medium">구매 정보</th>}
                   {showPurchaseDateColumn && <th data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center font-medium">구매날짜</th>}
                   {showPriceComparison && <th data-purchase-column="price" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
                   {showPaymentControls ? <th data-purchase-column="payment" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
@@ -815,7 +815,7 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       {isRequestedStatus ? null : (
-                        <td data-purchase-column="management" className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                        <td data-purchase-column="management" className="whitespace-nowrap px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
                       {isRequestedStatus ? null : (
                         <td data-purchase-column="inspection-issues" className="px-2 py-2 text-center align-middle">

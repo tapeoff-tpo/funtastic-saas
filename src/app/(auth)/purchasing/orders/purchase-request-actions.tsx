@@ -2562,7 +2562,7 @@ export function PurchaseQuantityField({
   }
 
   return (
-    <div className="mx-auto w-[112px]">
+    <div className="mx-auto w-max min-w-28">
       <div className="flex items-center justify-center gap-1">
         <Input
           type="number"
@@ -2574,10 +2574,10 @@ export function PurchaseQuantityField({
           onKeyDown={saveOnEnter}
           disabled={isPending}
           aria-label="수량"
-          className="h-7 w-16 px-2 text-center text-xs tabular-nums"
+          className="h-7 w-24 shrink-0 px-2 text-center text-xs tabular-nums"
         />
         {stockLimit !== undefined && stockLimit !== null ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
             /{stockLimit.toLocaleString('ko-KR')}
           </span>
         ) : null}
@@ -2759,61 +2759,63 @@ export function PurchasePlanFieldsV2({
   return (
     <form
       onSubmit={save}
-      className="flex min-w-0 flex-wrap items-end gap-1.5"
+      className="min-w-max"
     >
-      <label className="min-w-28 flex-1 space-y-1">
-        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
-        <Input
-          name="supplierOrderNumber"
-          defaultValue={supplierOrderNumber ?? ''}
-          placeholder="주문서번호"
-          className="h-7 text-xs"
-        />
-      </label>
-      {showTrackingNumber ? (
-        <div className="min-w-28 flex-1 space-y-1">
-          <div className="flex h-5 items-center gap-1 whitespace-nowrap">
-            <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
-            {savedTrackingNumber ? (
-              <a
-                href={`https://www.baidu.com/s?wd=${encodeURIComponent(savedTrackingNumber)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="바이두에서 송장번호 조회"
-                aria-label="바이두에서 송장번호 조회"
-                className="inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-              >
-                <ExternalLink className="size-3" />
-              </a>
-            ) : null}
-          </div>
+      <div className="flex flex-nowrap items-end gap-1.5">
+        <label className="w-48 shrink-0 space-y-1">
+          <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
           <Input
-            id={`purchase-tracking-${id}`}
-            name="trackingNumber"
-            defaultValue={trackingNumber ?? ''}
-            placeholder="운송장번호"
+            name="supplierOrderNumber"
+            defaultValue={supplierOrderNumber ?? ''}
+            placeholder="주문서번호"
             className="h-7 text-xs"
           />
+        </label>
+        {showTrackingNumber ? (
+          <div className="w-44 shrink-0 space-y-1">
+            <div className="flex h-5 items-center gap-1 whitespace-nowrap">
+              <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
+              {savedTrackingNumber ? (
+                <a
+                  href={`https://www.baidu.com/s?wd=${encodeURIComponent(savedTrackingNumber)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="바이두에서 송장번호 조회"
+                  aria-label="바이두에서 송장번호 조회"
+                  className="inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                >
+                  <ExternalLink className="size-3" />
+                </a>
+              ) : null}
+            </div>
+            <Input
+              id={`purchase-tracking-${id}`}
+              name="trackingNumber"
+              defaultValue={trackingNumber ?? ''}
+              placeholder="운송장번호"
+              className="h-7 text-xs"
+            />
+          </div>
+        ) : null}
+        <label data-purchase-column={dateColumn} className="w-32 shrink-0 space-y-1">
+          <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
+          <Input
+            name={dateField}
+            type="date"
+            defaultValue={formatDateInput(dateValue)}
+            className="h-7 text-xs"
+          />
+        </label>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
+            {isPending ? <Loader2 className="animate-spin" /> : <Save />}
+            저장
+          </Button>
         </div>
-      ) : null}
-      <label data-purchase-column={dateColumn} className="w-32 shrink-0 space-y-1">
-        <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
-        <Input
-          name={dateField}
-          type="date"
-          defaultValue={formatDateInput(dateValue)}
-          className="h-7 text-xs"
-        />
-      </label>
-      <div className="flex items-center gap-1">
-        <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
-          {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-          저장
-        </Button>
+        {afterFields}
       </div>
-      {afterFields}
       {message ? (
-        <div className="basis-full text-[11px] text-muted-foreground" aria-live="polite">
+        <div className="mt-1 max-w-lg whitespace-normal text-[11px] text-muted-foreground" aria-live="polite">
           {message}
         </div>
       ) : null}

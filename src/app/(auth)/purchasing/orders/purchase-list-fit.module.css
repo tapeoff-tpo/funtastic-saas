@@ -1,190 +1,58 @@
-.fitList {
-  container-type: inline-size;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.fitList > table,
-.fitList > table > thead,
-.fitList > table > tbody {
-  display: block;
-  width: 100%;
-  min-width: 0;
-}
-
-.fitList > table > thead > tr {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem;
-}
-
-.fitList > table > thead > tr > th {
-  position: static;
-  width: auto;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0.25rem 0.5rem;
-  white-space: normal;
-}
-
-.fitList > table > tbody > tr {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  align-items: start;
-  gap: 0.5rem 0.75rem;
-  padding: 0.75rem;
-}
-
+.fitList { container-type: inline-size; width: 100%; min-width: 0; max-width: 100%; }
+.fitList > table { width: 100%; table-layout: fixed; font-size: 0.75rem; }
+.fitList > table > thead > tr > th,
 .fitList > table > tbody > tr > td {
-  display: block;
-  position: static;
-  grid-column: span 2;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0.25rem 0;
-  text-align: left;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  position: static; min-width: 0; padding: 0.375rem 0.25rem;
+  vertical-align: middle; white-space: nowrap;
 }
-
-.fitList td[aria-label]::before {
-  content: attr(aria-label);
-  display: block;
-  margin-bottom: 0.25rem;
-  color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  line-height: 1rem;
+.fitList [data-purchase-column='select'] { width: 24px; }
+.fitList [data-purchase-column='number'] { width: 28px; }
+.fitList [data-purchase-column='status'] { width: 64px; }
+.fitList [data-purchase-column='url'] { width: 36px; }
+.fitList [data-purchase-column='quantity'] { width: 84px; }
+.fitList [data-purchase-column='warehouse'] { width: 100px; }
+.fitList [data-purchase-column='purchase-info'] { width: 480px; }
+.fitList th[data-purchase-column='purchase-date'],
+.fitList td[data-purchase-column='purchase-date'] { width: 92px; }
+.fitList [data-purchase-column='actions'] { width: 128px; }
+.fitList [data-purchase-column='details'] { width: 52px; }
+.fitList[data-purchase-stage='purchased'] [data-purchase-column='purchase-info'],
+.fitList[data-purchase-stage='outbound_requested'] [data-purchase-column='purchase-info'],
+.fitList[data-purchase-stage='completed'] [data-purchase-column='purchase-info'] { width: 328px; }
+.fitList[data-purchase-stage='china_arrived'] [data-purchase-column='purchase-info'] { width: 424px; }
+.fitList [data-purchase-column='unit-yuan'],
+.fitList [data-purchase-column='unit-krw'],
+.fitList [data-purchase-column='total-yuan'],
+.fitList [data-purchase-column='total-krw'],
+.fitList [data-purchase-column='basis'],
+.fitList [data-purchase-column='management'],
+.fitList [data-purchase-column='inspection-issues'],
+.fitList [data-purchase-column='price'],
+.fitList [data-purchase-column='payment'],
+.fitList [data-purchase-column='delete'] { display: none; }
+.fitList td[data-purchase-column='status'] > div,
+.fitList td[data-purchase-column='product'] > div:last-child,
+.fitList td[data-purchase-column='quantity'] > div:not(:first-child) { display: none; }
+.fitList td[data-purchase-column='product'] { overflow: hidden; text-overflow: ellipsis; }
+.fitList td[data-purchase-column='product'] > button,
+.fitList td[data-purchase-column='product'] > div:first-child {
+  display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-
-.fitList > table > tbody > tr > td[data-purchase-column='select'],
-.fitList > table > tbody > tr > td[data-purchase-column='number'] {
-  grid-column: span 1;
-  align-self: center;
-  text-align: center;
+.fitList td[data-purchase-column='quantity'] > div { width: auto; min-width: 0; }
+.fitList td[data-purchase-column='quantity'] > span > span { display: none; }
+.fitList td[data-purchase-column='quantity'] > div > div:first-child > span { display: none; }
+.fitList td[data-purchase-column='quantity'] > div > p { display: none; }
+.fitList td[data-purchase-column='quantity'] input {
+  width: 76px; padding-left: 4px; padding-right: 4px; font-size: 12px; appearance: textfield;
 }
-
-.fitList > table > tbody > tr > td[data-purchase-column='product'] {
-  grid-column: span 4;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='select']::before,
-.fitList > table > tbody > tr > td[data-purchase-column='number']::before,
-.fitList > table > tbody > tr > td[data-purchase-column='status']::before,
-.fitList > table > tbody > tr > td[data-purchase-column='product']::before {
-  display: none;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='management'] {
-  grid-column: span 3;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='url'],
-.fitList > table > tbody > tr > td[data-purchase-column='delete'] {
-  grid-column: span 1;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='url'],
-.fitList > table > tbody > tr > td[data-purchase-column='management'],
-.fitList > table > tbody > tr > td[data-purchase-column='inspection-issues'],
-.fitList > table > tbody > tr > td[data-purchase-column='price'],
-.fitList > table > tbody > tr > td[data-purchase-column='payment'],
-.fitList > table > tbody > tr > td[data-purchase-column='actions'],
-.fitList > table > tbody > tr > td[data-purchase-column='delete'] {
-  order: 1;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='payment'] {
-  grid-column: span 3;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='inspection-issues'],
-.fitList > table > tbody > tr > td[data-purchase-column='actions'] {
-  grid-column: span 1;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='purchase-info'],
-.fitList > table > tbody > tr > td[data-purchase-column='basis'],
-.fitList > table > tbody > tr > td[data-purchase-column='delay'],
-.fitList > table > tbody > tr > td:not([data-purchase-column]) {
-  grid-column: 1 / -1;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='purchase-info'] {
-  order: 2;
-  border-top: 1px solid var(--border);
-  padding-top: 0.5rem;
-}
-
-.fitList > table > tbody > tr > td[data-purchase-column='basis'],
-.fitList > table > tbody > tr > td[data-purchase-column='delay'] {
-  order: 3;
-}
-
-.fitList td[data-purchase-column='product'] :global(.truncate) {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.fitList td[data-purchase-column='quantity'] > div {
-  width: auto;
-  min-width: 0;
-  margin-left: 0;
-  margin-right: 0;
-}
-
-.fitList td[data-purchase-column='quantity'] > div > div:first-child {
-  flex-wrap: wrap;
-  justify-content: flex-start;
-}
-
+.fitList td[data-purchase-column='quantity'] input::-webkit-inner-spin-button,
+.fitList td[data-purchase-column='quantity'] input::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .fitList td[data-purchase-column='warehouse'] select {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
+  width: 100%; min-width: 0; max-width: 100%; padding-left: 4px; padding-right: 16px;
 }
-
-.fitList td[data-purchase-column='delay'] > div {
-  min-width: 0;
-}
-
-.fitList td[data-purchase-column='price'] button,
-.fitList td[data-purchase-column='inspection-issues'] button,
-.fitList td[data-purchase-column='delete'] button,
 .fitList td[data-purchase-column='actions'] button {
-  max-width: 100%;
-  height: auto;
-  min-height: 1.75rem;
-  flex-wrap: wrap;
-  white-space: normal;
+  max-width: 100%; padding-left: 6px; padding-right: 6px; font-size: 11px;
 }
-
-@container (max-width: 900px) {
-  .fitList > table > tbody > tr {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .fitList > table > tbody > tr > td[data-purchase-column='product'] {
-    grid-column: 1 / -1;
-  }
-
-  .fitList > table > tbody > tr > td[data-purchase-column='management'],
-  .fitList > table > tbody > tr > td[data-purchase-column='payment'],
-  .fitList > table > tbody > tr > td[data-purchase-column='actions'] {
-    grid-column: span 3;
-  }
-}
-
-@container (max-width: 440px) {
-  .fitList > table > tbody > tr > td[data-purchase-column='management'],
-  .fitList > table > tbody > tr > td[data-purchase-column='payment'],
-  .fitList > table > tbody > tr > td[data-purchase-column='actions'],
-  .fitList > table > tbody > tr > td[data-purchase-column='warehouse'],
-  .fitList > table > tbody > tr > td[data-purchase-column='quantity'],
-  .fitList > table > tbody > tr > td[data-purchase-column='price'] {
-    grid-column: span 3;
-  }
-}
+@container (max-width: 1200px) { .fitList > table { zoom: 0.9; } }
+@container (max-width: 1000px) { .fitList > table { zoom: 0.8; } }
+@container (max-width: 820px) { .fitList > table { zoom: 0.65; } }

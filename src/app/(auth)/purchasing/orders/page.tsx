@@ -47,6 +47,7 @@ import { resolvePurchaseSourceWarehouses } from '@/lib/purchasing/purchase-sourc
 import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
 import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
 import fitStyles from './purchase-list-fit.module.css'
+import { PurchaseRowDetails } from './purchase-row-details'
 import {
   PurchaseArrivalWarehouseField,
   PurchaseBulkDeleteButton,
@@ -258,8 +259,10 @@ export async function PurchasingOrdersView({
     ...(showPaymentControls ? [{ id: 'payment', label: '결제 상태 / 대량' }] : []),
     ...(overdueOnly ? [{ id: 'delay', label: '지연 사유' }] : []),
     { id: 'actions', label: '상태 변경' },
+    ...(isMainOrders ? [{ id: 'details', label: '상세' }] : []),
     ...(canDelete ? [{ id: 'delete', label: '삭제' }] : []),
   ]
+  const visibleColumns = isMainOrders ? columns.filter(({ id }) => !['unit-yuan', 'unit-krw', 'total-yuan', 'total-krw', 'basis', 'management', 'inspection-issues', 'price', 'payment', 'delete'].includes(id)) : columns
   const columnLabels = new Map(columns.map(({ id, label }) => [id, label]))
   const listLabel = isPurchaseReviewList
     ? '발주검토'
@@ -508,7 +511,7 @@ export async function PurchasingOrdersView({
       ) : null}
 
       <PurchaseBulkSelectionProvider ids={items.flatMap((item) => item.id ? [item.id] : [])} nextStatus={nextStatus}>
-        <PurchaseColumns scope={`${user.id}:${basePath}:${status}`} columns={columns}>
+        <PurchaseColumns scope={`${user.id}:${basePath}:${status}`} columns={visibleColumns}>
         <section className="min-w-0 rounded-md border bg-background">
           <div className="flex min-w-0 flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div className="shrink-0">
@@ -531,6 +534,16 @@ export async function PurchasingOrdersView({
               ) : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               <PurchaseColumnPicker />
+              {isMainOrders ? <details className="relative">
+                <summary className="flex h-7 cursor-pointer list-none items-center rounded-md border px-2.5 text-xs font-medium">추가 정렬</summary>
+                <div className="absolute right-0 z-30 mt-1 grid w-48 gap-2 rounded-md border bg-background p-3 text-xs shadow-lg">
+                  <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} />
+                  <SortHeader label="개당 원가(元)" column="unitCostYuan" {...sortHeaderProps} />
+                  <SortHeader label="개당 원가(₩)" column="unitCostKrw" {...sortHeaderProps} />
+                  <SortHeader label="총 원가(元)" column="totalCostYuan" {...sortHeaderProps} />
+                  <SortHeader label="총 원가(₩)" column="totalCostKrw" {...sortHeaderProps} />
+                </div>
+              </details> : null}
               {!isMainOrders && <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
@@ -577,7 +590,7 @@ export async function PurchasingOrdersView({
             />
           </div>
 
-          <div className={isMainOrders ? fitStyles.fitList : 'max-w-full overflow-x-auto overscroll-x-contain'}>
+          <div data-purchase-stage={isMainOrders ? status : undefined} className={isMainOrders ? fitStyles.fitList : 'max-w-full overflow-x-auto overscroll-x-contain'}>
             <table className="w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
@@ -629,12 +642,13 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th data-purchase-column="inspection-issues" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">검수 오류</th>}
-                  {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] whitespace-nowrap px-3 py-2 font-medium">구매 정보</th>}
+                  {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] whitespace-nowrap px-3 py-2 font-medium">{isMainOrders ? <><span>주문서번호</span>{status === 'purchase_completed' || status === 'inspecting' ? <> · <span>운송장번호</span></> : null} · <span>{status === 'purchased' ? '발주요청 날짜' : status === 'china_arrived' ? '중국도착일' : status === 'outbound_requested' || status === 'completed' ? '출고날짜' : '구매날짜'}</span></> : '구매 정보'}</th>}
                   {showPurchaseDateColumn && <th data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center font-medium">구매날짜</th>}
                   {showPriceComparison && <th data-purchase-column="price" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
                   {showPaymentControls ? <th data-purchase-column="payment" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th> : null}
                   {overdueOnly ? <th data-purchase-column="delay" className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th data-purchase-column="actions" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
+                  {isMainOrders && <th data-purchase-column="details" className="px-2 py-2 text-center font-medium">상세</th>}
                   {canDelete && <th data-purchase-column="delete" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>}
                 </tr>
               </thead>
@@ -740,7 +754,7 @@ export async function PurchasingOrdersView({
                           </div>
                         ) : null}
                       </td>
-                      <td data-purchase-column="product" aria-label={isMainOrders ? columnLabels.get('product') : undefined} className="px-3 py-2 align-middle">
+                      <td data-purchase-column="product" aria-label={isMainOrders ? columnLabels.get('product') : undefined} title={`${item.sku} · ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''}${isOverdueRow ? ' · 지연 확인 필요' : ''}${inspectionIssueCount > 0 ? ` · 검수 오류 ${inspectionIssueCount}건` : ''}`} className="px-3 py-2 align-middle">
                         {item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
                           ? <PurchaseInspectionButton id={item.id} productName={item.productName} imageData={productImages[item.id]} mode="image" />
                           : <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>}
@@ -849,7 +863,7 @@ export async function PurchasingOrdersView({
                             <>
                               <PurchasePlanFieldsV2
                                 id={item.id}
-                                fitWidth={isMainOrders}
+                                compact={isMainOrders}
                                 supplierOrderNumber={item.supplierOrderNumber}
                                 trackingNumber={item.trackingNumber}
                                 showTrackingNumber={item.status === 'purchase_completed' || item.status === 'inspecting'}
@@ -927,6 +941,22 @@ export async function PurchasingOrdersView({
                           />
                         ) : '-'}
                       </td>
+                      {isMainOrders && <td data-purchase-column="details" className="px-1 py-2 text-center align-middle">
+                        <PurchaseRowDetails productName={item.productName} sku={item.sku} attention={Boolean(inspectionIssueCount || isOverdueRow || receiptSummary?.hasError)}>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">구입관리코드</h3><span data-no-translate>{item.purchaseManagementCode ?? '-'}</span></div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">상태</h3><span>{displayStatusLabel}{isOverdueRow ? ' · 지연 확인 필요' : ''}</span>{receiptSummary?.hasError ? <p className="mt-1 text-sm text-red-700">입고오류 · {receiptSummary.difference < 0 ? '부족' : '초과'} {Math.abs(receiptSummary.difference)}개</p> : null}{purchaseUrgencyStatus ? <p className="mt-1 text-sm text-orange-700">{PURCHASE_URGENCY_STATUS_LABELS[purchaseUrgencyStatus]}</p> : null}</div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">검수 오류</h3>{item.id && inspectionIssueCount > 0 ? <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} /> : '-'}</div>
+                          {showPriceComparison && item.id && purchasePrices ? <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">구매가격</h3><PurchasePriceComparisonFields key={JSON.stringify(purchasePrices)} id={item.id} productName={item.productName} sku={item.sku} prices={purchasePrices} quantity={item.actualPurchaseQuantity ?? item.requestedQuantity} canEditActual={item.status === 'purchase_completed' || item.status === 'inspecting'} /></div> : null}
+                          {showPaymentControls && item.id ? <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">결제 상태 / 대량</h3><PurchasePaymentStatusField key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`} id={item.id} paymentStatus={item.paymentStatus} paidAt={item.paymentPaidAt} enabled={item.status !== 'purchased'} bulkPaymentPending={item.bulkPaymentPending} bulkPaymentDueDate={item.bulkPaymentDueDate} /></div> : null}
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">개당 원가(元)</h3>{formatCost(costs.unitCostYuan, 2)}</div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">개당 원가(₩)</h3>{formatCost(costs.unitCostKrw, 0)}</div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">총 원가(元)</h3>{formatCost(costs.totalCostYuan, 2)}</div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">총 원가(₩)</h3>{formatCost(costs.totalCostKrw, 0)}</div>
+                          <div><h3 className="mb-1 text-xs font-medium text-muted-foreground">중국재고</h3>{formatNumber(item.chinaCurrentStock)}</div>
+                          <div className="sm:col-span-2"><h3 className="mb-1 text-xs font-medium text-muted-foreground">추천근거</h3><RecommendationBasisGrid rawData={item.rawData} metrics={item.purchaseReviewMetrics} /></div>
+                          {canDelete && item.id ? <div className="border-t pt-3 sm:col-span-2"><PurchaseDeleteButton id={item.id} productName={item.productName} /></div> : null}
+                        </PurchaseRowDetails>
+                      </td>}
                       {canDelete && <td data-purchase-column="delete" aria-label={isMainOrders ? columnLabels.get('delete') : undefined} className="px-3 py-2 text-center align-middle">
                         {item.id ? <PurchaseDeleteButton id={item.id} productName={item.productName} /> : '-'}
                       </td>}

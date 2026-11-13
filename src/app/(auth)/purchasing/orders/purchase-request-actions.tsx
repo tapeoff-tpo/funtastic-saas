@@ -2641,8 +2641,6 @@ export function PurchasePlanFieldsV2({
   dateColumn,
   afterFields,
   trackingSaveMode = 'plan',
-  fitWidth = false,
-  compact = false,
 }: {
   id: string
   supplierOrderNumber: string | null
@@ -2655,10 +2653,6 @@ export function PurchasePlanFieldsV2({
   afterFields?: ReactNode
   /** Inspection rows update their primary parcel through the inspection API. */
   trackingSaveMode?: 'plan' | 'inspection'
-  /** Wrap the controls inside a viewport-fitting list without changing their values. */
-  fitWidth?: boolean
-  /** Keep editable values on one compact table row. */
-  compact?: boolean
 }) {
   const router = useRouter()
   const [message, setMessage] = useState<string | null>(null)
@@ -2762,25 +2756,22 @@ export function PurchasePlanFieldsV2({
   return (
     <form
       onSubmit={save}
-      onChange={compact ? () => setMessage(null) : undefined}
-      data-purchase-plan-fit={fitWidth || undefined}
-      data-purchase-plan-compact={compact || undefined}
-      className={compact ? 'relative min-w-0' : fitWidth ? 'w-full min-w-0' : 'min-w-max'}
+      className="min-w-max"
     >
-      <div className={compact ? 'flex min-w-0 flex-nowrap items-center gap-1' : fitWidth ? 'flex min-w-0 flex-wrap items-end gap-1.5' : 'flex flex-nowrap items-end gap-1.5'}>
-        <label className={compact ? 'w-[172px] shrink-0' : fitWidth ? 'w-48 min-w-0 max-w-full shrink-0 space-y-1' : 'w-48 shrink-0 space-y-1'}>
-          <span className={compact ? 'sr-only' : 'flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground'}>주문서번호</span>
+      <div className="flex flex-nowrap items-end gap-1.5">
+        <label className="w-48 shrink-0 space-y-1">
+          <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
           <Input
             name="supplierOrderNumber"
             defaultValue={supplierOrderNumber ?? ''}
             placeholder="주문서번호"
-            className={compact ? 'h-7 px-2 text-xs md:text-xs' : 'h-7 text-xs'}
+            className="h-7 text-xs"
           />
         </label>
         {showTrackingNumber ? (
-          <div className={compact ? 'relative w-[148px] shrink-0' : fitWidth ? 'w-44 min-w-0 max-w-full shrink-0 space-y-1' : 'w-44 shrink-0 space-y-1'}>
-            <div className={compact ? 'contents' : 'flex h-5 items-center gap-1 whitespace-nowrap'}>
-              <label htmlFor={`purchase-tracking-${id}`} className={compact ? 'sr-only' : 'text-[11px] font-medium text-muted-foreground'}>운송장번호</label>
+          <div className="w-44 shrink-0 space-y-1">
+            <div className="flex h-5 items-center gap-1 whitespace-nowrap">
+              <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
               {savedTrackingNumber ? (
                 <a
                   href={`https://www.baidu.com/s?wd=${encodeURIComponent(savedTrackingNumber)}`}
@@ -2788,7 +2779,7 @@ export function PurchasePlanFieldsV2({
                   rel="noopener noreferrer"
                   title="바이두에서 송장번호 조회"
                   aria-label="바이두에서 송장번호 조회"
-                  className={compact ? 'absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-blue-700 hover:bg-blue-50 hover:text-blue-800' : 'inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800'}
+                  className="inline-flex size-5 items-center justify-center rounded border border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                 >
                   <ExternalLink className="size-3" />
                 </a>
@@ -2799,29 +2790,29 @@ export function PurchasePlanFieldsV2({
               name="trackingNumber"
               defaultValue={trackingNumber ?? ''}
               placeholder="운송장번호"
-              className={compact ? `h-7 px-2 text-xs md:text-xs ${savedTrackingNumber ? 'pr-7' : ''}` : 'h-7 text-xs'}
+              className="h-7 text-xs"
             />
           </div>
         ) : null}
-        <label data-purchase-column={dateColumn} className={compact ? 'w-28 shrink-0' : fitWidth ? 'w-32 min-w-0 max-w-full shrink-0 space-y-1' : 'w-32 shrink-0 space-y-1'}>
-          <span className={compact ? 'sr-only' : 'flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground'}>{dateLabel}</span>
+        <label data-purchase-column={dateColumn} className="w-32 shrink-0 space-y-1">
+          <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
           <Input
             name={dateField}
             type="date"
             defaultValue={formatDateInput(dateValue)}
-            className={compact ? 'h-7 px-1 text-xs md:text-xs' : 'h-7 text-xs'}
+            className="h-7 text-xs"
           />
         </label>
         <div className="flex shrink-0 items-center gap-1">
-          <Button type="submit" size="sm" variant="outline" disabled={isPending} aria-label={compact ? '저장' : undefined} title={compact ? '저장' : undefined} className={compact ? 'size-7 shrink-0 p-0' : 'px-2'}>
+          <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
             {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-            {compact ? null : '저장'}
+            저장
           </Button>
         </div>
         {afterFields}
       </div>
       {message ? (
-        <div className={compact ? 'absolute right-0 top-full z-20 mt-1 w-max max-w-sm rounded-md border bg-background px-2 py-1 text-[11px] text-muted-foreground shadow-md' : 'mt-1 max-w-lg whitespace-normal text-[11px] text-muted-foreground'} aria-live="polite">
+        <div className="mt-1 max-w-lg whitespace-normal text-[11px] text-muted-foreground" aria-live="polite">
           {message}
         </div>
       ) : null}

@@ -25,7 +25,6 @@ function renderFields(
   trackingNumber: string | null = null,
   showTrackingNumber = false,
   trackingSaveMode: 'plan' | 'inspection' = 'plan',
-  compact = false,
 ) {
   render(
     <PurchasePlanFieldsV2
@@ -37,7 +36,6 @@ function renderFields(
       dateField="outboundExpectedDate"
       dateLabel="구매날짜"
       trackingSaveMode={trackingSaveMode}
-      compact={compact}
     />,
   )
 }
@@ -46,16 +44,6 @@ describe('PurchasePlanFieldsV2 manual tracking fields', () => {
   beforeEach(() => {
     refresh.mockReset()
     vi.restoreAllMocks()
-  })
-
-  it('saves a compact single-row form through its labelled icon button', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ id: itemId }) } as Response)
-    renderFields(null, true, 'plan', true)
-    fireEvent.change(screen.getByRole('textbox', { name: /^운송장번호/ }), { target: { value: '9823528519765' } })
-    const save = screen.getByRole('button', { name: '저장' })
-    expect(save).toHaveAttribute('title', '저장')
-    fireEvent.click(save)
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/purchasing/purchase-requests/${itemId}`, expect.objectContaining({ body: JSON.stringify({ trackingNumber: '9823528519765' }) })))
   })
 
   it('does not render row-level 1688 lookup or recollect controls', () => {

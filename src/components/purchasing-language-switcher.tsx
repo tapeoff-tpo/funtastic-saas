@@ -10,6 +10,13 @@ const LANGUAGE_EVENT = 'funtastic-purchasing-language-change'
 
 const EXACT_TRANSLATIONS: Record<string, string> = {
   ...APP_CHROME_KO_TO_ZH,
+  '기본정보': '基本信息',
+  '원가·구매': '成本·采购',
+  '상품규격·구성': '商品规格·组成',
+  '통관·인증': '清关·认证',
+  '창고·메모': '仓库·备注',
+  '세금·판매추가금': '税费·销售附加费',
+  '기타 정보': '其他信息',
   '동일 상품 박스': '同款商品箱',
   '중국출고 선택': '选择中国出库单',
   '중국출고요청 목록': '中国出库申请列表',

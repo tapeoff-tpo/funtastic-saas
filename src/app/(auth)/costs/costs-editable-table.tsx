@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useId, useMemo, useState, useTransition } from 'react'
 import { ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Pencil, Plus, Save, Tag, WandSparkles, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { purchaseMasterPriceKeys } from '@/lib/purchasing/purchase-price-comparison'
+import { groupCostItemFields } from './cost-item-field-groups'
 import {
   isDiscontinuedPurchasingStatus,
   PURCHASING_ITEM_STATUS_LABELS,
@@ -68,14 +69,14 @@ export function CostsEditableTable({
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [message, setMessage] = useState<string | null>(null)
   const [openGroups, setOpenGroups] = useState({ warehouse: false, extra: false })
+  const [expandedEditGroups, setExpandedEditGroups] = useState<Set<string>>(new Set())
+  const editGroupsId = useId()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [isPending, startTransition] = useTransition()
   const codeHeader = headers[0]
   const nameHeader = headers[1]
 
-  const editableHeaders = useMemo(() => (
-    isCreating ? headers : headers.filter((header) => header !== codeHeader)
-  ), [codeHeader, headers, isCreating])
+  const editFieldGroups = useMemo(() => groupCostItemFields(headers), [headers])
 
   const tableColumns = useMemo<TableColumn[]>(() => {
     const columns: TableColumn[] = []
@@ -136,6 +137,7 @@ export function CostsEditableTable({
     setEditingRow(row)
     setDraft(Object.fromEntries(headers.map((header) => [header, row.data[header] ?? ''])))
     setMessage(null)
+    setExpandedEditGroups(new Set(editFieldGroups.filter((group) => group.initiallyOpen).map((group) => group.id)))
   }
 
   function openCreate() {
@@ -143,6 +145,7 @@ export function CostsEditableTable({
     setEditingRow(null)
     setDraft(emptyDraft(headers))
     setMessage(null)
+    setExpandedEditGroups(new Set(editFieldGroups.filter((group) => group.initiallyOpen).map((group) => group.id)))
   }
 
   function openDetailPageWorkflow() {
@@ -394,7 +397,7 @@ export function CostsEditableTable({
       {modalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true">
           <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-md border bg-background shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
               <div className="min-w-0">
                 <h2 className="flex items-center gap-2 text-base font-semibold">
                   {isCreating ? <Plus className="size-4" /> : <Pencil className="size-4" />}
@@ -409,37 +412,58 @@ export function CostsEditableTable({
               </Button>
             </div>
 
-            <div className="grid gap-3 overflow-y-auto p-4 md:grid-cols-2 xl:grid-cols-3">
-              {!isCreating ? (
-                <label className="space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">{codeHeader}</span>
-                  <Input value={draft[codeHeader] ?? ''} disabled className="font-mono text-xs" />
-                </label>
-              ) : null}
-              {!isCreating && editingRow ? (
-                <div className="space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">발주 상태</span>
-                  <div>{renderPurchasingStatus(editingRow)}</div>
-                </div>
-              ) : null}
-              {editableHeaders.map((header) => (
-                <div key={header} className="space-y-1">
-                  <span className="flex items-center justify-between text-xs font-medium text-muted-foreground"><label htmlFor={`purchasing-field-${header.replaceAll(' ', '-')}`}>{itemFieldLabel(header)}</label>{header === '중국어 상품명' && draft[header] ? <button type="button" aria-label="중국어명 삭제" disabled={isPending} className="text-red-600 hover:underline" onClick={() => setDraft((current) => ({ ...current, [header]: '' }))}>중국어명 삭제</button> : null}</span>
-                  <Input
-                    id={`purchasing-field-${header.replaceAll(' ', '-')}`}
-                    aria-label={itemFieldLabel(header)}
-                    maxLength={header === '중국어 상품명' ? 1000 : undefined}
-                    type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
-                    value={draft[header] ?? ''}
-                    onChange={(event) => setDraft((current) => ({ ...current, [header]: event.target.value }))}
-                    className={header === codeHeader ? 'font-mono text-xs' : 'text-xs'}
-                    required={isCreating && (header === codeHeader || header === nameHeader)}
-                  />
-                </div>
-              ))}
+            <div className="min-h-0 space-y-3 overflow-y-auto p-4">
+              <div className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setExpandedEditGroups(new Set(editFieldGroups.map((group) => group.id)))}>전체 펼치기</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setExpandedEditGroups(new Set())}>전체 접기</Button>
+              </div>
+              {editFieldGroups.map((group) => {
+                const expanded = expandedEditGroups.has(group.id)
+                const panelId = `${editGroupsId}-${group.id}`
+                return <section key={group.id} className="overflow-hidden rounded-md border">
+                  <button type="button" aria-label={group.title} aria-expanded={expanded} aria-controls={panelId}
+                    className="flex w-full items-center gap-2 bg-muted/40 px-3 py-2.5 text-left text-sm font-semibold hover:bg-muted/70"
+                    onClick={() => setExpandedEditGroups((current) => {
+                      const next = new Set(current)
+                      if (next.has(group.id)) next.delete(group.id)
+                      else next.add(group.id)
+                      return next
+                    })}>
+                    <ChevronRight className={`size-4 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+                    <span>{group.title}</span>
+                    <span aria-hidden className="ml-auto rounded bg-background px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{group.headers.length}</span>
+                  </button>
+                  <div id={panelId} role="region" aria-label={group.title} hidden={!expanded}>
+                    <div className="grid gap-3 border-t p-3 md:grid-cols-2 xl:grid-cols-3">
+                      {group.headers.map((header) => (
+                        <div key={header} className="space-y-1">
+                          <span className="flex items-center justify-between text-xs font-medium text-muted-foreground"><label htmlFor={`purchasing-field-${header.replaceAll(' ', '-')}`}>{itemFieldLabel(header)}</label>{header === '중국어 상품명' && draft[header] ? <button type="button" aria-label="중국어명 삭제" disabled={isPending} className="text-red-600 hover:underline" onClick={() => setDraft((current) => ({ ...current, [header]: '' }))}>중국어명 삭제</button> : null}</span>
+                          <Input
+                            id={`purchasing-field-${header.replaceAll(' ', '-')}`}
+                            aria-label={itemFieldLabel(header)}
+                            maxLength={header === '중국어 상품명' ? 1000 : undefined}
+                            type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
+                            value={draft[header] ?? ''}
+                            disabled={!isCreating && header === codeHeader}
+                            onChange={(event) => setDraft((current) => ({ ...current, [header]: event.target.value }))}
+                            className={header === codeHeader ? 'font-mono text-xs' : 'text-xs'}
+                            required={isCreating && (header === codeHeader || header === nameHeader)}
+                          />
+                        </div>
+                      ))}
+                      {group.id === 'basic' && !isCreating && editingRow ? (
+                        <div className="space-y-1">
+                          <span className="text-xs font-medium text-muted-foreground">발주 상태</span>
+                          <div>{renderPurchasingStatus(editingRow)}</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              })}
             </div>
 
-            <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex shrink-0 flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
                 {!isCreating ? (
                   <>

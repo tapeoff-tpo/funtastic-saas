@@ -8,6 +8,7 @@ import {
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
 import { summarizeFundMonths, type FundMonth } from './purchase-fund-monthly'
+import { buildRequestedFundCharges, requestedChargeOpeningBoundary } from './purchase-fund-requested'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 import {
@@ -54,6 +55,7 @@ export type PurchaseFundDebitSnapshot = {
 
 export type PurchaseFundLedgerData = {
   monthly: FundMonth[]
+  requestReviewItems?: Array<{ id: string; occurredOn: string; sku: string; productName: string; reason: string }>
   summary: {
     totalDepositedKrw: number
     totalDebitedKrw: number
@@ -491,6 +493,7 @@ export async function voidPurchaseFundCredit(input: {
 export async function getPurchaseFundLedgerData(
   userId: string,
   limit = 100,
+  fallbackExchangeRateKrw = 0,
 ): Promise<PurchaseFundLedgerData> {
   await ensurePurchaseFundLedgerSchema()
   const rows = await db
@@ -523,12 +526,35 @@ export async function getPurchaseFundLedgerData(
   const latestOpeningBalanceIndex = rows.reduce((latestIndex, row, index) => (
     row.entryType === 'opening_balance' ? index : latestIndex
   ), -1)
-  const effectiveRows = (latestOpeningBalanceIndex >= 0
+  let effectiveRows = (latestOpeningBalanceIndex >= 0
     ? rows.slice(latestOpeningBalanceIndex)
     : rows).filter((row) => (
       row.entryType !== 'purchase_debit'
       || String(row.occurredOn).slice(0, 10) >= PURCHASE_FUND_DEBIT_START_DATE
     ))
+
+  // Include purchase requests as temporary, read-only charges until the existing
+  // durable debit represents them. Do not modify the purchase workflow or the
+  // saved ledger when calculating the overview.
+  const candidateRows = await loadRequestedFundSourceRows(db, userId)
+  const openingCreatedAt = latestOpeningBalanceIndex >= 0 ? rows[latestOpeningBalanceIndex].createdAt : null
+  const charges = buildRequestedFundCharges(candidateRows, effectiveRows.filter((row) => row.entryType === 'purchase_debit'), fallbackExchangeRateKrw)
+    .map((charge) => ({ ...charge, boundary: requestedChargeOpeningBoundary(charge, openingCreatedAt) }))
+    .filter((charge) => charge.boundary !== 'exclude')
+  const virtualRows = charges.map((charge) => ({
+    id: `request:${charge.id}`,
+    entryType: 'purchase_debit',
+    occurredOn: charge.occurredOn,
+    amountKrw: String(charge.boundary === 'uncertain' ? 0 : charge.amountKrw ?? 0),
+    amountCny: charge.boundary === 'uncertain' || charge.amountCny === null ? null : String(charge.amountCny),
+    memo: charge.boundary === 'uncertain' || charge.ambiguous ? '발주요청 중복 또는 기초잔액 기준 확인 필요' : '발주요청 자동 차감',
+    supplierOrderNumber: null,
+    missingCostCount: charge.boundary === 'uncertain' || charge.amountCny === null ? 1 : 0,
+    details: { productSummary: charge.productName, lines: [{ sourcePurchaseItemId: charge.id, sku: charge.sku, productName: charge.productName, purchaseManagementCode: charge.purchaseManagementCode, totalCostYuan: charge.boundary === 'uncertain' ? null : charge.amountCny }] },
+    voidedAt: null,
+    createdAt: new Date(Math.max(new Date(charge.createdAt).getTime(), openingCreatedAt ? openingCreatedAt.getTime() + 1 : 0)),
+  }))
+  effectiveRows = [...effectiveRows, ...virtualRows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
 
   let balanceKrw = 0
   let balanceCny = 0
@@ -589,6 +615,10 @@ export async function getPurchaseFundLedgerData(
 
   return {
     monthly: summarizeFundMonths(effectiveRows),
+    requestReviewItems: charges.filter((charge) => charge.ambiguous || charge.boundary === 'uncertain').map((charge) => ({
+      id: charge.id, occurredOn: charge.occurredOn, sku: charge.sku, productName: charge.productName,
+      reason: charge.boundary === 'uncertain' ? '기초잔액과 발주요청 시점 확인' : '기존 발주와 중복 여부 확인',
+    })),
     summary: {
       totalDepositedKrw: Math.round(totalDepositedKrw),
       totalDebitedKrw: Math.round(totalDebitedKrw),
@@ -649,6 +679,33 @@ async function loadPurchaseDebitSourceRows(
       eq(products.internalSku, purchaseRequestItems.sku),
     ))
     .where(and(...conditions)) as Promise<PurchaseFundDebitSourceRow[]>
+}
+
+async function loadRequestedFundSourceRows(executor: DbExecutor, userId: string) {
+  return executor.select({
+    id: purchaseRequestItems.id,
+    status: purchaseRequestItems.status,
+    requestDate: purchaseRequestItems.requestDate,
+    outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
+    createdAt: purchaseRequestItems.createdAt,
+    sku: purchaseRequestItems.sku,
+    productName: purchaseRequestItems.productName,
+    optionName: purchaseRequestItems.optionName,
+    requestedQuantity: purchaseRequestItems.requestedQuantity,
+    actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+    purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+    supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+    costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
+    specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+    newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+    rawData: purchaseRequestItems.rawData,
+  }).from(purchaseRequestItems).leftJoin(products, and(
+    eq(products.userId, purchaseRequestItems.userId),
+    eq(products.internalSku, purchaseRequestItems.sku),
+  )).where(and(
+    eq(purchaseRequestItems.userId, userId),
+    inArray(purchaseRequestItems.status, ['purchased', 'purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed']),
+  )) as Promise<PurchaseFundDebitSourceRow[]>
 }
 
 function purchaseDebitLineKey(row: PurchaseFundDebitSourceRow) {
@@ -764,3 +821,4 @@ function chunks<T>(values: T[], size: number) {
   }
   return result
 }
+

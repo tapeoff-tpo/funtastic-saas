@@ -29,9 +29,10 @@ export function MonthlyFundDashboard({ monthly }: { monthly: Month[] }) {
         </div>
         <div className="rounded-xl border bg-background p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{selected.replace('-', '년 ')}월 주문 금액 TOP 10</h3><p className="mt-1 text-xs text-muted-foreground">발주 차감 장부에 기록된 상품별 금액 기준</p></div><span className="rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">위안</span></div>
           {selectedData?.products.length ? <ol className="mt-3 divide-y">{selectedData.products.map((product, index) => <li key={product.sku || product.name} className="flex items-center gap-3 py-2.5"><span className="w-6 text-center text-xs font-semibold text-blue-600">{String(index + 1).padStart(2, '0')}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{product.name}</span><span className="block text-xs text-muted-foreground">{product.sku}</span></span><span className="whitespace-nowrap text-sm font-semibold tabular-nums">{money(product.amountCny)}</span></li>)}</ol> : <p className="py-10 text-center text-sm text-muted-foreground">선택한 월의 상품별 차감 자료가 없습니다.</p>}
-          {selectedData?.debitedCny === null ? <p className="mt-3 text-xs text-amber-700">원가 확인이 필요한 발주는 확인된 상품 금액만 순위에 표시됩니다.</p> : null}
+          {selectedData?.debitedCny === null ? <p className="mt-3 text-xs text-amber-700">원가 또는 중복 확인이 필요한 발주가 있습니다. 확인된 상품 금액만 순위에 표시됩니다.</p> : null}
         </div>
       </div>
     </section>
   )
 }
+

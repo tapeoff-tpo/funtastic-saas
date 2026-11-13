@@ -1,0 +1,190 @@
+.fitList {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fitList > table,
+.fitList > table > thead,
+.fitList > table > tbody {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.fitList > table > thead > tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+}
+
+.fitList > table > thead > tr > th {
+  position: static;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.25rem 0.5rem;
+  white-space: normal;
+}
+
+.fitList > table > tbody > tr {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem;
+}
+
+.fitList > table > tbody > tr > td {
+  display: block;
+  position: static;
+  grid-column: span 2;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.25rem 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.fitList td[aria-label]::before {
+  content: attr(aria-label);
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='select'],
+.fitList > table > tbody > tr > td[data-purchase-column='number'] {
+  grid-column: span 1;
+  align-self: center;
+  text-align: center;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='product'] {
+  grid-column: span 4;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='select']::before,
+.fitList > table > tbody > tr > td[data-purchase-column='number']::before,
+.fitList > table > tbody > tr > td[data-purchase-column='status']::before,
+.fitList > table > tbody > tr > td[data-purchase-column='product']::before {
+  display: none;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='management'] {
+  grid-column: span 3;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='url'],
+.fitList > table > tbody > tr > td[data-purchase-column='delete'] {
+  grid-column: span 1;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='url'],
+.fitList > table > tbody > tr > td[data-purchase-column='management'],
+.fitList > table > tbody > tr > td[data-purchase-column='inspection-issues'],
+.fitList > table > tbody > tr > td[data-purchase-column='price'],
+.fitList > table > tbody > tr > td[data-purchase-column='payment'],
+.fitList > table > tbody > tr > td[data-purchase-column='actions'],
+.fitList > table > tbody > tr > td[data-purchase-column='delete'] {
+  order: 1;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='payment'] {
+  grid-column: span 3;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='inspection-issues'],
+.fitList > table > tbody > tr > td[data-purchase-column='actions'] {
+  grid-column: span 1;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='purchase-info'],
+.fitList > table > tbody > tr > td[data-purchase-column='basis'],
+.fitList > table > tbody > tr > td[data-purchase-column='delay'],
+.fitList > table > tbody > tr > td:not([data-purchase-column]) {
+  grid-column: 1 / -1;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='purchase-info'] {
+  order: 2;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.fitList > table > tbody > tr > td[data-purchase-column='basis'],
+.fitList > table > tbody > tr > td[data-purchase-column='delay'] {
+  order: 3;
+}
+
+.fitList td[data-purchase-column='product'] :global(.truncate) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.fitList td[data-purchase-column='quantity'] > div {
+  width: auto;
+  min-width: 0;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.fitList td[data-purchase-column='quantity'] > div > div:first-child {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.fitList td[data-purchase-column='warehouse'] select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fitList td[data-purchase-column='delay'] > div {
+  min-width: 0;
+}
+
+.fitList td[data-purchase-column='price'] button,
+.fitList td[data-purchase-column='inspection-issues'] button,
+.fitList td[data-purchase-column='delete'] button,
+.fitList td[data-purchase-column='actions'] button {
+  max-width: 100%;
+  height: auto;
+  min-height: 1.75rem;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+@container (max-width: 900px) {
+  .fitList > table > tbody > tr {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .fitList > table > tbody > tr > td[data-purchase-column='product'] {
+    grid-column: 1 / -1;
+  }
+
+  .fitList > table > tbody > tr > td[data-purchase-column='management'],
+  .fitList > table > tbody > tr > td[data-purchase-column='payment'],
+  .fitList > table > tbody > tr > td[data-purchase-column='actions'] {
+    grid-column: span 3;
+  }
+}
+
+@container (max-width: 440px) {
+  .fitList > table > tbody > tr > td[data-purchase-column='management'],
+  .fitList > table > tbody > tr > td[data-purchase-column='payment'],
+  .fitList > table > tbody > tr > td[data-purchase-column='actions'],
+  .fitList > table > tbody > tr > td[data-purchase-column='warehouse'],
+  .fitList > table > tbody > tr > td[data-purchase-column='quantity'],
+  .fitList > table > tbody > tr > td[data-purchase-column='price'] {
+    grid-column: span 3;
+  }
+}

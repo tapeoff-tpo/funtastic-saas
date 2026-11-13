@@ -2641,6 +2641,7 @@ export function PurchasePlanFieldsV2({
   dateColumn,
   afterFields,
   trackingSaveMode = 'plan',
+  fitWidth = false,
 }: {
   id: string
   supplierOrderNumber: string | null
@@ -2653,6 +2654,8 @@ export function PurchasePlanFieldsV2({
   afterFields?: ReactNode
   /** Inspection rows update their primary parcel through the inspection API. */
   trackingSaveMode?: 'plan' | 'inspection'
+  /** Wrap the controls inside a viewport-fitting list without changing their values. */
+  fitWidth?: boolean
 }) {
   const router = useRouter()
   const [message, setMessage] = useState<string | null>(null)
@@ -2756,10 +2759,11 @@ export function PurchasePlanFieldsV2({
   return (
     <form
       onSubmit={save}
-      className="min-w-max"
+      data-purchase-plan-fit={fitWidth || undefined}
+      className={fitWidth ? 'w-full min-w-0' : 'min-w-max'}
     >
-      <div className="flex flex-nowrap items-end gap-1.5">
-        <label className="w-48 shrink-0 space-y-1">
+      <div className={fitWidth ? 'flex min-w-0 flex-wrap items-end gap-1.5' : 'flex flex-nowrap items-end gap-1.5'}>
+        <label className={fitWidth ? 'w-48 min-w-0 max-w-full shrink-0 space-y-1' : 'w-48 shrink-0 space-y-1'}>
           <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">주문서번호</span>
           <Input
             name="supplierOrderNumber"
@@ -2769,7 +2773,7 @@ export function PurchasePlanFieldsV2({
           />
         </label>
         {showTrackingNumber ? (
-          <div className="w-44 shrink-0 space-y-1">
+          <div className={fitWidth ? 'w-44 min-w-0 max-w-full shrink-0 space-y-1' : 'w-44 shrink-0 space-y-1'}>
             <div className="flex h-5 items-center gap-1 whitespace-nowrap">
               <label htmlFor={`purchase-tracking-${id}`} className="text-[11px] font-medium text-muted-foreground">운송장번호</label>
               {savedTrackingNumber ? (
@@ -2794,7 +2798,7 @@ export function PurchasePlanFieldsV2({
             />
           </div>
         ) : null}
-        <label data-purchase-column={dateColumn} className="w-32 shrink-0 space-y-1">
+        <label data-purchase-column={dateColumn} className={fitWidth ? 'w-32 min-w-0 max-w-full shrink-0 space-y-1' : 'w-32 shrink-0 space-y-1'}>
           <span className="flex h-5 items-center whitespace-nowrap text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
           <Input
             name={dateField}

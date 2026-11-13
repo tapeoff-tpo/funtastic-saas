@@ -46,6 +46,7 @@ import { purchaseArrivalWarehouseDisplay } from '@/lib/purchasing/purchase-arriv
 import { resolvePurchaseSourceWarehouses } from '@/lib/purchasing/purchase-source-warehouse'
 import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
 import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
+import fitStyles from './purchase-list-fit.module.css'
 import {
   PurchaseArrivalWarehouseField,
   PurchaseBulkDeleteButton,
@@ -259,6 +260,7 @@ export async function PurchasingOrdersView({
     { id: 'actions', label: '상태 변경' },
     ...(canDelete ? [{ id: 'delete', label: '삭제' }] : []),
   ]
+  const columnLabels = new Map(columns.map(({ id, label }) => [id, label]))
   const listLabel = isPurchaseReviewList
     ? '발주검토'
     : overdueOnly
@@ -575,7 +577,7 @@ export async function PurchasingOrdersView({
             />
           </div>
 
-          <div className="max-w-full overflow-x-auto overscroll-x-contain">
+          <div className={isMainOrders ? fitStyles.fitList : 'max-w-full overflow-x-auto overscroll-x-contain'}>
             <table className="w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
@@ -694,15 +696,15 @@ export async function PurchasingOrdersView({
                     return (
                       <tr
                         key={item.id ?? item.sku}
-                        className={`border-t align-middle ${!isRequestedStatus ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
+                        className={`border-t align-middle ${!isRequestedStatus && !isMainOrders ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
                       >
-                      <td data-purchase-column="select" className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
+                      <td data-purchase-column="select" aria-label={isMainOrders ? columnLabels.get('select') : undefined} className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         {item.id ? <PurchaseRowCheckbox id={item.id} /> : null}
                       </td>
-                      <td data-purchase-column="number" className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
+                      <td data-purchase-column="number" aria-label={isMainOrders ? columnLabels.get('number') : undefined} className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
-                      <td data-purchase-column="status" className="px-2 py-2 text-center align-middle">
+                      <td data-purchase-column="status" aria-label={isMainOrders ? columnLabels.get('status') : undefined} className="px-2 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
@@ -738,7 +740,7 @@ export async function PurchasingOrdersView({
                           </div>
                         ) : null}
                       </td>
-                      <td data-purchase-column="product" className="px-3 py-2 align-middle">
+                      <td data-purchase-column="product" aria-label={isMainOrders ? columnLabels.get('product') : undefined} className="px-3 py-2 align-middle">
                         {item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
                           ? <PurchaseInspectionButton id={item.id} productName={item.productName} imageData={productImages[item.id]} mode="image" />
                           : <div data-no-translate className="truncate font-medium" title={item.productName}>{item.productName}</div>}
@@ -747,7 +749,7 @@ export async function PurchasingOrdersView({
                         </div>
                       </td>
                       {showPurchaseUrlColumn ? (
-                        <td data-purchase-column="url" className="px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="url" aria-label={isMainOrders ? columnLabels.get('url') : undefined} className="px-2 py-2 text-center align-middle">
                           {purchaseUrlHref ? (
                             <a
                               href={purchaseUrlHref}
@@ -764,7 +766,7 @@ export async function PurchasingOrdersView({
                           )}
                         </td>
                       ) : null}
-                      <td data-purchase-column="quantity" className="px-2 py-2 text-center tabular-nums align-middle">
+                      <td data-purchase-column="quantity" aria-label={isMainOrders ? columnLabels.get('quantity') : undefined} className="px-2 py-2 text-center tabular-nums align-middle">
                         {isSaasChinaOutbound ? (
                           <div className="mx-auto w-[112px] py-1 text-sm font-medium tabular-nums">
                             {formatNumber(stageQuantity)}
@@ -800,31 +802,31 @@ export async function PurchasingOrdersView({
                             </div>
                           ) : null}
                       </td>
-                      {showArrivalWarehouse && <td data-purchase-column="warehouse" className="whitespace-nowrap px-3 py-2 text-center align-middle">
+                      {showArrivalWarehouse && <td data-purchase-column="warehouse" aria-label={isMainOrders ? columnLabels.get('warehouse') : undefined} className="whitespace-nowrap px-3 py-2 text-center align-middle">
                         {item.id && ['purchased', 'purchase_completed', 'inspecting'].includes(item.status)
                           ? <PurchaseArrivalWarehouseField key={arrivalWarehouse} id={item.id} warehouse={arrivalWarehouse} />
                           : <span data-no-translate>{('arrivalInventoryWarehouse' in item ? item.arrivalInventoryWarehouse : null) ?? arrivalWarehouse ?? '–'}</span>}
                       </td>}
                       {isRequestedStatus ? (
-                        <td data-purchase-column="history" className="px-3 py-2 text-center align-middle">
+                        <td data-purchase-column="history" aria-label={isMainOrders ? columnLabels.get('history') : undefined} className="px-3 py-2 text-center align-middle">
                           <PurchaseReviewHistorySummary history={item.purchaseReviewHistory} />
                         </td>
                       ) : null}
                       {isRequestedStatus ? (
-                        <td data-purchase-column="amount" className="px-3 py-2 text-right font-medium tabular-nums align-middle">
+                        <td data-purchase-column="amount" aria-label={isMainOrders ? columnLabels.get('amount') : undefined} className="px-3 py-2 text-right font-medium tabular-nums align-middle">
                           {formatCost(costs.totalCostKrw, 0)}
                         </td>
                       ) : null}
                       {showCostColumns ? (
                         <>
-                          <td data-purchase-column="unit-yuan" className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
-                          <td data-purchase-column="unit-krw" className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
-                          <td data-purchase-column="total-yuan" className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
-                          {isRequestedStatus ? null : <td data-purchase-column="total-krw" className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>}
+                          <td data-purchase-column="unit-yuan" aria-label={isMainOrders ? columnLabels.get('unit-yuan') : undefined} className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
+                          <td data-purchase-column="unit-krw" aria-label={isMainOrders ? columnLabels.get('unit-krw') : undefined} className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
+                          <td data-purchase-column="total-yuan" aria-label={isMainOrders ? columnLabels.get('total-yuan') : undefined} className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
+                          {isRequestedStatus ? null : <td data-purchase-column="total-krw" aria-label={isMainOrders ? columnLabels.get('total-krw') : undefined} className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>}
                         </>
                       ) : null}
                       {showBasisColumn ? (
-                        <td data-purchase-column="basis" className="px-3 py-2 text-xs text-muted-foreground align-middle">
+                        <td data-purchase-column="basis" aria-label={isMainOrders ? columnLabels.get('basis') : undefined} className="px-3 py-2 text-xs text-muted-foreground align-middle">
                           <RecommendationBasisGrid
                             rawData={item.rawData}
                             metrics={item.purchaseReviewMetrics}
@@ -832,21 +834,22 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       {isRequestedStatus ? null : (
-                        <td data-purchase-column="management" className="whitespace-nowrap px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                        <td data-purchase-column="management" aria-label={isMainOrders ? columnLabels.get('management') : undefined} className="whitespace-nowrap px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
                       {isRequestedStatus ? null : (
-                        <td data-purchase-column="inspection-issues" className="px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="inspection-issues" aria-label={isMainOrders ? columnLabels.get('inspection-issues') : undefined} className="px-2 py-2 text-center align-middle">
                           {item.id && inspectionIssueCount > 0 ? (
                             <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                           ) : <span className="text-xs text-muted-foreground">-</span>}
                         </td>
                       )}
                       {isRequestedStatus ? null : (
-                        <td data-purchase-column="purchase-info" data-purchase-plan className="px-3 py-2 align-middle">
+                        <td data-purchase-column="purchase-info" aria-label={isMainOrders ? columnLabels.get('purchase-info') : undefined} data-purchase-plan className="px-3 py-2 align-middle">
                           {item.id ? (
                             <>
                               <PurchasePlanFieldsV2
                                 id={item.id}
+                                fitWidth={isMainOrders}
                                 supplierOrderNumber={item.supplierOrderNumber}
                                 trackingNumber={item.trackingNumber}
                                 showTrackingNumber={item.status === 'purchase_completed' || item.status === 'inspecting'}
@@ -867,11 +870,11 @@ export async function PurchasingOrdersView({
                           ) : '-'}
                         </td>
                       )}
-                      {showPurchaseDateColumn && <td data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
+                      {showPurchaseDateColumn && <td data-purchase-column="purchase-date" aria-label={isMainOrders ? columnLabels.get('purchase-date') : undefined} className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
                         {readArrivedPurchaseDate(item) ?? '–'}
                       </td>}
                       {showPriceComparison && (
-                        <td data-purchase-column="price" className="whitespace-nowrap px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="price" aria-label={isMainOrders ? columnLabels.get('price') : undefined} className="whitespace-nowrap px-2 py-2 text-center align-middle">
                           {item.id && purchasePrices && (
                             <PurchasePriceComparisonFields
                               key={JSON.stringify(purchasePrices)}
@@ -886,7 +889,7 @@ export async function PurchasingOrdersView({
                         </td>
                       )}
                       {showPaymentControls ? (
-                        <td data-purchase-column="payment" className="px-2 py-2 text-center align-middle">
+                        <td data-purchase-column="payment" aria-label={isMainOrders ? columnLabels.get('payment') : undefined} className="px-2 py-2 text-center align-middle">
                           {item.id ? (
                             <PurchasePaymentStatusField
                               key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`}
@@ -901,7 +904,7 @@ export async function PurchasingOrdersView({
                         </td>
                       ) : null}
                       {overdueOnly ? (
-                        <td data-purchase-column="delay" className="px-3 py-2 align-middle">
+                        <td data-purchase-column="delay" aria-label={isMainOrders ? columnLabels.get('delay') : undefined} className="px-3 py-2 align-middle">
                           {item.id ? (
                             <PurchaseDelayReasonField
                               id={item.id}
@@ -913,7 +916,7 @@ export async function PurchasingOrdersView({
                           ) : '-'}
                         </td>
                       ) : null}
-                      <td data-purchase-column="actions" className="px-3 py-2 text-center align-middle">
+                      <td data-purchase-column="actions" aria-label={isMainOrders ? columnLabels.get('actions') : undefined} className="px-3 py-2 text-center align-middle">
                         {item.id && (item.status === 'purchase_completed' || item.status === 'inspecting') ? <PurchaseInspectionButton id={item.id} productName={item.productName} /> : item.id ? (
                           <PurchaseStatusButton
                             id={item.id}
@@ -924,7 +927,7 @@ export async function PurchasingOrdersView({
                           />
                         ) : '-'}
                       </td>
-                      {canDelete && <td data-purchase-column="delete" className="px-3 py-2 text-center align-middle">
+                      {canDelete && <td data-purchase-column="delete" aria-label={isMainOrders ? columnLabels.get('delete') : undefined} className="px-3 py-2 text-center align-middle">
                         {item.id ? <PurchaseDeleteButton id={item.id} productName={item.productName} /> : '-'}
                       </td>}
                       </tr>

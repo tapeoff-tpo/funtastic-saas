@@ -675,12 +675,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadShipmentLabels = boxesWithItems.length > 0
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
-  const sortedBoxSplitItems = [...items].sort((left, right) => {
-    const leftComplete = left.packedQuantity === left.reservedQuantity
-    const rightComplete = right.packedQuantity === right.reservedQuantity
-    if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
-    return compareShipmentItems(left, right)
-  })
+  const sortedBoxSplitItems = [...items].sort(compareShipmentItemWorkProgress)
   const incompleteBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity !== item.reservedQuantity)
   const completeBoxSplitItems = sortedBoxSplitItems.filter((item) => item.packedQuantity === item.reservedQuantity)
   const filteredBoxSplitItems = boxSplitItemFilter === 'incomplete'
@@ -879,15 +874,16 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
 }) {
   const { items, boxes } = detail
   const [editingId, setEditingId] = useState<string | null>(null)
-  const sortedItems = [...items].sort(compareShipmentItems)
+  const sortedItems = [...items].sort(compareShipmentItemWorkProgress)
   const editingItem = items.find((item) => item.id === editingId)
   return <section className="overflow-hidden rounded-lg border">
     <div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목 확인</h3></div>
     <div className="overflow-x-auto"><table className="min-w-[1100px] w-full text-sm">
       <thead className="bg-muted/30 text-xs text-muted-foreground"><tr>
-        {['품목코드', '품목구분', '상품명(한국어)', '상품명(중국어)', '옵션', '현재고', '실제 출고수량', '분할 수량', '박스 수·박스별 수량', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className="px-3 py-2 text-left font-medium">{label}</th>)}
+        {['품목코드', '품목구분', '상품명(한국어)', '상품명(중국어)', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수·박스별 수량', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className="px-3 py-2 text-left font-medium">{label}</th>)}
       </tr></thead>
       <tbody>{sortedItems.map((item) => {
+        const complete = item.packedQuantity === item.reservedQuantity
         const allocations = boxItemsByItem.get(item.id) ?? []
         const quantities = new Map<number, number>()
         for (const allocation of allocations) quantities.set(allocation.quantity, (quantities.get(allocation.quantity) ?? 0) + 1)
@@ -896,6 +892,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
           <td data-no-translate className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.itemCategory || '상품'}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-3 py-3"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
           <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong>{item.availableQuantity != null && <div className="mt-1 text-xs text-muted-foreground">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</div>}</td>
           <td className="px-3 py-3 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
+          <td className="px-3 py-3"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>
           <td className="px-3 py-3">{allocations.length ? <details><summary className="cursor-pointer text-xs">{allocations.length}박스 · {[...quantities].map(([quantity, count]) => `${quantity}개 × ${count}`).join(' / ')}</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">{allocations.map((allocation) => <p key={allocation.id}><span data-no-translate>{boxes.find((box) => box.id === allocation.boxId)?.boxNo}</span>번: {allocation.quantity}개</p>)}</div></details> : <span className="text-xs text-muted-foreground">미분할</span>}</td>
           <td className="px-3 py-3 text-xs">{receipts.length ? <details><summary className="cursor-pointer">입고 {receipts.length}박스 · 송장 {new Set(receipts.map((piece) => piece.trackingNumber)).size}개</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto">{receipts.map((piece) => <p key={piece.receiptBoxId}><span data-no-translate>{piece.trackingNumber}</span> · 입고 {piece.receivedQuantity}개/박스</p>)}</div></details> : <span className="text-muted-foreground">검수 포장정보 없음</span>}</td>
           <td className="px-3 py-3"><button type="button" disabled={isPending} aria-label={`${item.sku} 박스분할 수정`} onClick={() => setEditingId(item.id)} className="h-8 whitespace-nowrap rounded-md border px-3 text-xs font-medium hover:bg-muted">{editable ? '박스분할 수정' : '박스분할 보기'}</button></td>
@@ -1659,6 +1656,16 @@ function optionalNumber(value: string) {
 function positiveInteger(value: string) {
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function compareShipmentItemWorkProgress(
+  left: Pick<ChinaShipmentDetailView['items'][number], 'sku' | 'productName' | 'packedQuantity' | 'reservedQuantity'>,
+  right: Pick<ChinaShipmentDetailView['items'][number], 'sku' | 'productName' | 'packedQuantity' | 'reservedQuantity'>,
+) {
+  const leftComplete = left.packedQuantity === left.reservedQuantity
+  const rightComplete = right.packedQuantity === right.reservedQuantity
+  if (leftComplete !== rightComplete) return leftComplete ? 1 : -1
+  return compareShipmentItems(left, right)
 }
 
 function compareShipmentItems(

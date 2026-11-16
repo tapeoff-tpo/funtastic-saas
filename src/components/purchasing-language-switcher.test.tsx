@@ -90,6 +90,29 @@ describe('PurchasingLanguageSwitcher', () => {
     document.documentElement.lang = 'ko'
   })
 
+  it('translates outbound item work states while preserving item identities', async () => {
+    render(<div data-app-translate>
+      <PurchasingLanguageSwitcher />
+      <table><thead><tr><th>작업 상태</th></tr></thead><tbody>
+        <tr><td><span data-no-translate>SKU-Z · 진행 상품</span><span>미완료</span></td></tr>
+        <tr><td><span data-no-translate>SKU-A · 완료 상품</span><span>완료</span></td></tr>
+      </tbody></table>
+    </div>)
+
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+    await waitFor(() => {
+      expect(screen.getByRole('columnheader', { name: '作业状态' })).toBeInTheDocument()
+      expect(screen.getByText('未完成')).toBeInTheDocument()
+      expect(screen.getByText('完成')).toBeInTheDocument()
+    })
+    expect(screen.getByText('SKU-Z · 진행 상품')).toBeInTheDocument()
+    expect(screen.getByText('SKU-A · 완료 상품')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '한국어' }))
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: '작업 상태' })).toBeInTheDocument())
+    expect(screen.getByText('미완료')).toBeInTheDocument()
+    expect(screen.getByText('완료')).toBeInTheDocument()
+  })
+
   it('keeps Chinese mode active across authenticated screens while preserving product identity values', async () => {
     const { rerender } = render(<GlobalTranslationFixture route="dashboard" dynamicLabel="저장" />)
 

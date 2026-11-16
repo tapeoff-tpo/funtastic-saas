@@ -306,6 +306,52 @@ describe('ChinaShipmentsBoard', () => {
     refresh.mockReset()
   })
 
+  it('shows unfinished outbound items before completed quantities and derives work status from counts', () => {
+    const detail: ChinaShipmentDetailView = {
+      ...shipmentA,
+      items: [
+        { ...shipmentA.items[0]!, id: 'done', sku: 'A-DONE', reservedQuantity: 10, packedQuantity: 10, boxSplitStatus: 'in_progress' },
+        { ...shipmentA.items[0]!, id: 'short', sku: 'Z-SHORT', reservedQuantity: 10, packedQuantity: 5, boxSplitStatus: 'completed' },
+        { ...shipmentA.items[0]!, id: 'over', sku: 'B-OVER', reservedQuantity: 10, packedQuantity: 12, boxSplitStatus: 'completed' },
+      ],
+    }
+    const original = structuredClone(detail.items)
+    renderShipment(detail, 'items')
+    const table = within(screen.getByRole('columnheader', { name: '작업 상태' }).closest('table')!)
+    const rows = table.getAllByRole('row').slice(1)
+    expect(rows.map((row) => within(row).getAllByRole('cell')[0]!.textContent)).toEqual(['B-OVER', 'Z-SHORT', 'A-DONE'])
+    expect(within(rows[0]!).getByText('미완료', { exact: true })).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('미완료', { exact: true })).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('완료', { exact: true })).toBeInTheDocument()
+    expect(detail.items).toEqual(original)
+    expect(saveBoxSplits).not.toHaveBeenCalled()
+    expect(updateShipment).not.toHaveBeenCalled()
+  })
+
+  it('moves an item to the completed group after a saved quantity refresh and brings it back when quantities differ again', () => {
+    const detail: ChinaShipmentDetailView = {
+      ...shipmentA,
+      items: [
+        { ...shipmentA.items[0]!, id: 'done', sku: 'A-DONE', reservedQuantity: 10, packedQuantity: 10 },
+        { ...shipmentA.items[0]!, id: 'empty', sku: 'M-EMPTY', reservedQuantity: 10, packedQuantity: 0 },
+        { ...shipmentA.items[0]!, id: 'working', sku: 'Z-WORKING', reservedQuantity: 10, packedQuantity: 5 },
+      ],
+    }
+    const { rerender } = renderShipment(detail, 'items')
+    const rows = () => within(screen.getByRole('columnheader', { name: '작업 상태' }).closest('table')!).getAllByRole('row').slice(1)
+    const codes = () => rows().map((row) => within(row).getAllByRole('cell')[0]!.textContent)
+    expect(codes()).toEqual(['M-EMPTY', 'Z-WORKING', 'A-DONE'])
+
+    const showQuantity = (quantity: number) => rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...detail, items: detail.items.map((item) => item.id === 'working' ? { ...item, packedQuantity: quantity } : item) }} selectedStep="items" showCreate={false} />)
+    showQuantity(10)
+    expect(codes()).toEqual(['M-EMPTY', 'A-DONE', 'Z-WORKING'])
+    expect(within(rows()[2]!).getByText('완료', { exact: true })).toBeInTheDocument()
+    showQuantity(9)
+    expect(codes()).toEqual(['M-EMPTY', 'Z-WORKING', 'A-DONE'])
+    expect(within(rows()[1]!).getByText('미완료', { exact: true })).toBeInTheDocument()
+    expect(saveBoxSplits).not.toHaveBeenCalled()
+  })
+
   it('splits the actual outbound quantity from the items dialog and supports manual numbering', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail: ChinaShipmentDetailView = { ...shipmentA, items: [{ ...shipmentA.items[0], onHandQuantity: 1000, availableQuantity: 900, reservedQuantity: 100 }] }

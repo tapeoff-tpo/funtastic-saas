@@ -469,6 +469,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByText(/번역 제외 옵션명/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '添加品项' }))
+    fireEvent.click(within(await screen.findByRole('group', { name: '选择出库库存位置' })).getByRole('checkbox'))
     await waitFor(() => expect(screen.getByText(/出库仓库：/)).toBeInTheDocument())
     const stageOneRoot = document.querySelector('[data-purchasing-translate]')
     expect(stageOneRoot).not.toBeNull()
@@ -987,6 +988,7 @@ describe('ChinaShipmentsBoard', () => {
     ]
     render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
     fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ }))
     fireEvent.change(screen.getAllByLabelText('추가 출고')[1]!, { target: { value: '2' } })
     fireEvent.change(screen.getByLabelText('입고일 시작'), { target: { value: '2026-11-03' } })
     fireEvent.change(screen.getByLabelText('입고일 종료'), { target: { value: '2026-11-03' } })
@@ -1002,9 +1004,76 @@ describe('ChinaShipmentsBoard', () => {
       render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
       expect(fetchSpy).not.toHaveBeenCalled()
       fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+      const warehouse = await screen.findByRole('checkbox', { name: /중국창고/ })
+      expect(screen.queryByText('새 상품')).not.toBeInTheDocument()
+      fireEvent.click(warehouse)
       await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
       expect(fetchSpy).toHaveBeenCalledWith('/api/purchasing/china-shipments/available-stock', { cache: 'no-store' })
     } finally { fetchSpy.mockRestore() }
+  })
+
+  it('requires warehouse selection and preserves independent same-SKU additions across warehouse and search filters', async () => {
+    addShipmentItems.mockResolvedValue({ ok: true })
+    const stock = [
+      { ...inventoryItem, id: 'warehouse-a-stock', warehouseCode: 'A창고', sku: 'SAME-SKU', productName: 'A창고 재고' },
+      { ...inventoryItem, id: 'warehouse-b-stock', warehouseCode: 'B창고', sku: 'SAME-SKU', productName: 'B창고 재고' },
+      { ...inventoryItem, id: 'zero-stock', warehouseCode: '빈창고', sku: 'ZERO-SKU', productName: '추가 불가 재고', availableQuantity: 0 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    const warehouses = within(screen.getByRole('group', { name: '출고 재고 위치 선택' }))
+    expect(warehouses.getAllByRole('checkbox').every((checkbox) => !(checkbox as HTMLInputElement).checked)).toBe(true)
+    expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
+    expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '선택 품목 추가' })).toBeDisabled()
+
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
+    expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
+    fireEvent.change(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고'), { target: { value: '3' } })
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /B창고/ }))
+    fireEvent.change(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고'), { target: { value: '4' } })
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: 'B창고' } })
+    expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
+    expect(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(4)
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: '' } })
+    expect(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(3)
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /B창고/ }))
+    expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '전체 선택', exact: true }))
+    expect(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(4)
+    expect(screen.queryByText('추가 불가 재고')).not.toBeInTheDocument()
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
+    expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
+    expect(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(3)
+    fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
+    fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
+    await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [
+      { inventoryId: 'warehouse-a-stock', quantity: 3 },
+      { inventoryId: 'warehouse-b-stock', quantity: 4 },
+    ] }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '품목 추가' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
+    expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '선택 품목 추가' })).toBeDisabled()
+  })
+
+  it('retains an additional-item draft on cancel and clears its warehouse choice only after explicit discard', () => {
+    renderShipment(shipmentA, 'items')
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ }))
+    fireEvent.change(screen.getByLabelText('추가 출고'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: '추가 닫기' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+    expect(screen.getByLabelText('추가 출고')).toHaveValue(2)
+    expect(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '추가 닫기' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장하지 않고 이동' }))
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    expect(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ })).not.toBeChecked()
+    expect(screen.queryByText('새 상품')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '선택 품목 추가' })).toBeDisabled()
   })
 
   it('merges selected boxes using the largest physical box as the preview', async () => {
@@ -1570,6 +1639,7 @@ describe('ChinaShipmentsBoard', () => {
     updateShipment.mockResolvedValueOnce({ ok: false, error: '이름 저장 실패' }).mockResolvedValueOnce({ ok: true })
     renderShipment(shipmentA, 'items')
     fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ }))
     fireEvent.change(screen.getByLabelText('추가 출고'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: '이름·날짜 수정' }))
     fireEvent.change(screen.getByLabelText('출고작업명'), { target: { value: '수정된 이름' } })

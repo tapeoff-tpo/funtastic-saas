@@ -102,6 +102,7 @@ function asListItem(detail: ChinaShipmentDetailView): ChinaShipmentListItem {
 }
 
 const replaceHistoryState = window.history.replaceState.bind(window.history)
+const pushHistoryState = window.history.pushState.bind(window.history)
 
 const shipmentA = makeShipment('a', '출고 A', 'SKU-A')
 const shipmentB = makeShipment('b', '출고 B', 'SKU-B')
@@ -278,6 +279,10 @@ describe('ChinaShipmentsBoard', () => {
     // Next's history integration notifies useSearchParams without a server navigation.
     vi.spyOn(window.history, 'replaceState').mockImplementation((...args) => {
       replaceHistoryState(...args)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    vi.spyOn(window.history, 'pushState').mockImplementation((...args) => {
+      pushHistoryState(...args)
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     HTMLDialogElement.prototype.showModal = function () { this.open = true }
@@ -1307,6 +1312,40 @@ describe('ChinaShipmentsBoard', () => {
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     expect(screen.getByRole('button', { name: /2단계.*박스분할/ })).toHaveAttribute('aria-current', 'step')
+  })
+
+  it('returns through visited stages with browser Back and Forward while retaining the list period', async () => {
+    const period = 'period=custom&from=2026-09-01&to=2026-09-30'
+    replaceHistoryState(null, '', `/purchasing/china-shipments?shipment=a&step=items&${period}`)
+    renderShipment(makeShipmentWithBox(), 'items')
+    const stages = [
+      ['items', /1단계.*출고품목/],
+      ['boxes', /2단계.*박스분할/],
+      ['pallets', /3단계.*파렛트적재/],
+      ['summary', /4단계.*최종 적재리스트/],
+    ] as const
+
+    for (const [, title] of stages.slice(1)) fireEvent.click(screen.getByRole('button', { name: title }))
+    const historyLength = window.history.length
+    fireEvent.click(screen.getByRole('button', { name: stages[3][1] }))
+    expect(window.history.length).toBe(historyLength)
+
+    async function travel(direction: 'back' | 'forward', index: number) {
+      await act(async () => {
+        await new Promise<void>((resolve) => {
+          window.addEventListener('popstate', () => resolve(), { once: true })
+          window.history[direction]()
+        })
+      })
+      expect(screen.getByRole('button', { name: stages[index]![1] })).toHaveAttribute('aria-current', 'step')
+      expect(window.location.pathname).toBe('/purchasing/china-shipments')
+      expect(new URLSearchParams(window.location.search).get('step')).toBe(stages[index]![0])
+      expect(window.location.search).toContain(period)
+    }
+
+    for (const index of [2, 1, 0]) await travel('back', index)
+    for (const index of [1, 2, 3]) await travel('forward', index)
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it('guards changing the work stage while a box draft is unsaved', () => {

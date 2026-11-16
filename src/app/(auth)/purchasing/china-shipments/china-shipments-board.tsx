@@ -294,7 +294,7 @@ function ChinaShipmentsBoardContent({
   function createShipment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     startTransition(async () => {
-      if (await guard.runTask(saveNewShipment) && createdShipmentId.current) navigateChinaWork(shipmentHref(createdShipmentId.current, 'items'))
+      if (await guard.runTask(saveNewShipment) && createdShipmentId.current) navigateChinaWork(shipmentHref(createdShipmentId.current, 'items'), { replace: true })
     })
   }
 
@@ -395,7 +395,7 @@ function ChinaShipmentsBoardContent({
           startTransition={startTransition}
           onStageChange={(stage) => selectedShipment && stage !== activeStep && guard.requestNavigation(() => {
             // All four stages use this shipment snapshot; switching stages needs no server request.
-            window.history.replaceState(null, '', withChinaShipmentPeriod(shipmentHref(selectedShipment.shipment.id, stage), searchParams.toString()))
+            window.history.pushState(null, '', withChinaShipmentPeriod(shipmentHref(selectedShipment.shipment.id, stage), searchParams.toString()))
           })}
         /> : null}
       </div>
@@ -484,7 +484,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           toast.success('출고작업을 삭제하고 예약 재고를 되돌렸습니다.')
           return true
         })
-        if (deleted) navigateChinaWork('/purchasing/china-shipments')
+        if (deleted) navigateChinaWork('/purchasing/china-shipments', { replace: true })
         })
       })
     })

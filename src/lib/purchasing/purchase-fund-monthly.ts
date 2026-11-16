@@ -2,6 +2,8 @@ export type FundMonth = {
   month: string
   depositedCny: number | null
   debitedCny: number | null
+  knownDepositedCny: number
+  knownDebitedCny: number
   products: Array<{ sku: string; name: string; amountCny: number }>
 }
 
@@ -49,6 +51,8 @@ export function summarizeFundMonths(rows: FundRow[]): FundMonth[] {
     month,
     depositedCny: value.missingDeposit ? null : round(value.deposited),
     debitedCny: value.missingDebit ? null : round(value.debited),
+    knownDepositedCny: round(value.deposited),
+    knownDebitedCny: round(value.debited),
     products: [...value.products.values()].map((item) => ({ ...item, amountCny: round(item.amountCny) })).sort((a, b) => b.amountCny - a.amountCny).slice(0, 10),
   })).sort((a, b) => b.month.localeCompare(a.month))
 }

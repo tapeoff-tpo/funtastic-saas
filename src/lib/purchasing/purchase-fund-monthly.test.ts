@@ -16,10 +16,10 @@ describe('summarizeFundMonths', () => {
       ] } },
     ]
     expect(summarizeFundMonths(rows)).toEqual([
-      { month: '2026-11', depositedCny: 120.75, debitedCny: 75, products: [
+      { month: '2026-11', depositedCny: 120.75, debitedCny: 75, knownDepositedCny: 120.75, knownDebitedCny: 75, products: [
         { sku: '', name: '컵', amountCny: 40 }, { sku: 'B', name: '병', amountCny: 35 },
       ] },
-      { month: '2026-10', depositedCny: 30, debitedCny: 0, products: [] },
+      { month: '2026-10', depositedCny: 30, debitedCny: 0, knownDepositedCny: 30, knownDebitedCny: 0, products: [] },
     ])
   })
 
@@ -31,7 +31,7 @@ describe('summarizeFundMonths', () => {
         { sku: 'B', productName: '누락', totalCostYuan: null },
       ] } },
     ]
-    expect(summarizeFundMonths(rows)).toEqual([{ month: '2026-11', depositedCny: null, debitedCny: null, products: [{ sku: 'A', name: '상품', amountCny: 10 }] }])
+    expect(summarizeFundMonths(rows)).toEqual([{ month: '2026-11', depositedCny: null, debitedCny: null, knownDepositedCny: 0, knownDebitedCny: 0, products: [{ sku: 'A', name: '상품', amountCny: 10 }] }])
   })
 
   it('returns at most the ten highest-value products', () => {

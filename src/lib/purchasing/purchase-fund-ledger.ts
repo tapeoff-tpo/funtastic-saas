@@ -64,6 +64,9 @@ export type PurchaseFundLedgerData = {
     totalDepositedCny: number | null
     totalDebitedCny: number | null
     balanceCny: number | null
+    knownDepositedCny: number
+    knownDebitedCny: number
+    knownBalanceCny: number
     missingCnyDepositCount: number
     missingCostOrderCount: number
   }
@@ -627,6 +630,9 @@ export async function getPurchaseFundLedgerData(
       totalDepositedCny: cnyDepositsKnown ? Math.round(totalDepositedCny * 100) / 100 : null,
       totalDebitedCny: cnyDebitsKnown ? Math.round(totalDebitedCny * 100) / 100 : null,
       balanceCny: cnyBalanceKnown ? Math.round(balanceCny * 100) / 100 : null,
+      knownDepositedCny: Math.round(totalDepositedCny * 100) / 100,
+      knownDebitedCny: Math.round(totalDebitedCny * 100) / 100,
+      knownBalanceCny: Math.round(balanceCny * 100) / 100,
       missingCnyDepositCount,
       missingCostOrderCount,
     },

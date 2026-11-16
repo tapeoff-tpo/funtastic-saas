@@ -20,9 +20,11 @@ import { ChinaFundStatementPanel } from './china-fund-statement-panel'
 export function PurchaseFundLedgerPanel({
   data,
   exchangeRateReference,
+  previewOnly = false,
 }: {
   data: PurchaseFundLedgerData
   exchangeRateReference: CnyKrwReferenceRate
+  previewOnly?: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -121,7 +123,7 @@ export function PurchaseFundLedgerPanel({
         >
           <Dialog.Trigger
             render={(props) => (
-              <Button {...props} type="button" size="sm">
+              <Button {...props} type="button" size="sm" disabled={previewOnly}>
                 <Plus />
                 입금내역 추가
               </Button>
@@ -248,6 +250,7 @@ export function PurchaseFundLedgerPanel({
           label="누적 입금 (위안화 기준)"
           amountKrw={summary.totalDepositedKrw}
           amountCny={summary.totalDepositedCny}
+          partialCny={summary.knownDepositedCny}
           unknownReason={summary.missingCnyDepositCount > 0
             ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
             : null}
@@ -257,6 +260,7 @@ export function PurchaseFundLedgerPanel({
           label="발주 차감 (위안화 기준)"
           amountKrw={summary.totalDebitedKrw}
           amountCny={summary.totalDebitedCny}
+          partialCny={summary.knownDebitedCny}
           unknownReason={summary.missingCostOrderCount > 0
             ? `원가 또는 중복·기초잔액 확인 필요 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건`
             : null}
@@ -266,6 +270,8 @@ export function PurchaseFundLedgerPanel({
           label="현재 잔액 (위안화 기준)"
           amountKrw={summary.balanceKrw}
           amountCny={summary.balanceCny}
+          partialCny={summary.knownBalanceCny}
+          showKrw={summary.totalDepositedKrw !== 0 || summary.totalDepositedCny === 0}
           unknownReason={[
             summary.missingCnyDepositCount > 0
               ? `위안화 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건`
@@ -294,7 +300,7 @@ export function PurchaseFundLedgerPanel({
               ))}
             </div>
           </details>
-          <ChinaFundStatementPanel purchaseDeductionCny={summary.totalDebitedCny} />
+          {previewOnly ? <p className="text-sm text-muted-foreground">미리보기에서는 입금 내역을 변경할 수 없습니다.</p> : <ChinaFundStatementPanel purchaseDeductionCny={summary.totalDebitedCny} />}
         </div>
       </details>
 
@@ -316,15 +322,14 @@ export function PurchaseFundLedgerPanel({
                   ? `위안화 금액 누락 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 누적 입금액과 잔액을 확정할 수 없습니다. `
                   : null}
                 {summary.missingCostOrderCount > 0
-                  ? `원가 또는 중복·기초잔액 확인이 필요한 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건이 있어 발주 차감액과 잔액을 확정할 수 없습니다.`
+                  ? `확인 필요 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건은 표시된 차감액과 잔액에서 제외되어 있습니다. 확인된 금액만 반영한 잠정 금액이며 실제 잔액과 다를 수 있습니다.`
                   : null}
               </p>
             ) : null}
             {data.requestReviewItems?.length ? (
               <details className="rounded-sm border px-2 py-1.5">
                 <summary className="cursor-pointer font-medium">중복·기초잔액 확인이 필요한 발주 {data.requestReviewItems.length.toLocaleString('ko-KR')}건</summary>
-                <ul className="mt-1 space-y-1">{data.requestReviewItems.slice(0, 10).map((item) => <li key={item.id}>{item.occurredOn} · {item.productName} ({item.sku}) · {item.reason}</li>)}</ul>
-                {data.requestReviewItems.length > 10 ? <p className="mt-1">상위 10건만 표시됩니다.</p> : null}
+                <ul className="mt-1 max-h-64 space-y-1 overflow-y-auto">{data.requestReviewItems.map((item) => <li key={item.id}>{item.occurredOn} · {item.productName} ({item.sku}) · {item.reason}</li>)}</ul>
               </details>
             ) : null}
           </div>
@@ -338,12 +343,16 @@ function FundSummaryCard({
   label,
   amountKrw,
   amountCny,
+  partialCny,
+  showKrw = true,
   unknownReason,
   tone,
 }: {
   label: string
   amountKrw: number
   amountCny: number | null
+  partialCny: number
+  showKrw?: boolean
   unknownReason: string | null
   tone: 'credit' | 'debit' | 'balance'
 }) {
@@ -356,9 +365,10 @@ function FundSummaryCard({
     <div className="rounded-md border bg-muted/20 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={`mt-1 text-xl font-semibold tabular-nums ${color}`}>
-        {amountCny === null ? '위안화 금액 확인 필요' : `${formatCny(amountCny)} 元`}
+        {`${formatCny(amountCny ?? partialCny)} 元`}
       </p>
-      <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatKrw(amountKrw)}</p>
+      {amountCny === null ? <p className="mt-1 text-xs font-medium text-amber-700">확인된 내역만 반영한 잠정 금액</p> : null}
+      {showKrw ? <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{formatKrw(amountKrw)}</p> : <p className="mt-0.5 text-xs text-muted-foreground">원화 입금액 미입력</p>}
       {amountCny === null && unknownReason ? (
         <p className="mt-1 text-[11px] leading-4 text-amber-700">{unknownReason}</p>
       ) : null}

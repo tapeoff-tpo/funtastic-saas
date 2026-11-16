@@ -35,6 +35,7 @@ describe('purchase fund overview', () => {
     mockRows([{ id: 'opening', entryType: 'opening_balance', occurredOn: '2026-11-04', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-04T03:00:00Z') }], [candidate({ createdAt: new Date('2026-11-01T00:00:00Z'), requestDate: '2026-11-04' })])
     const result = await getPurchaseFundLedgerData('workspace', 100, 200)
     expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null, missingCostOrderCount: 1 })
+    expect(result.summary).toMatchObject({ knownDepositedCny: 1000, knownDebitedCny: 0, knownBalanceCny: 1000 })
   })
 
   it('keeps an existing debit but does not add an outbound-completed copy', async () => {
@@ -51,6 +52,16 @@ describe('purchase fund overview', () => {
     const result = await getPurchaseFundLedgerData('workspace', 100, 200)
     expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null })
     expect(result.requestReviewItems).toMatchObject([{ id: 'outbound-copy', reason: '출고완료 전 기존 차감 기록 확인' }])
+  })
+
+  it('keeps known totals separate from unresolved possible duplicates', async () => {
+    mockRows([
+      { id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') },
+      { id: 'debit', entryType: 'purchase_debit', occurredOn: '2026-11-03', amountKrw: '21000', amountCny: '100', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: { lines: [{ sku: 'A', productName: '상품 A', totalCostYuan: 100 }] }, voidedAt: null, createdAt: new Date('2026-11-03T00:00:00Z') },
+    ], [candidate({ id: 'possible-duplicate', sku: 'A', purchaseManagementCode: null }), candidate({ id: 'known', sku: 'B' })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null, missingCostOrderCount: 1, knownDepositedCny: 1000, knownDebitedCny: 300, knownBalanceCny: 700 })
+    expect(result.requestReviewItems).toMatchObject([{ id: 'possible-duplicate', reason: '기존 발주와 중복 여부 확인' }])
   })
 })
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Copy, Download, ExternalLink, FileSpreadsheet, LoaderCircle,
-  Plus, Printer, RefreshCw, Save, Search, Trash2,
+  Plus, Printer, Save, Search, Trash2,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
@@ -47,7 +47,7 @@ type Quote = {
 }
 type Catalog = { id: string; sku: string; name: string; spec: string; cost: number | null; location: string }
 type Workspace = { sales: Sale[]; quotes: Quote[]; catalog: Catalog[]; supplier: Supplier }
-type Tab = 'sales' | 'quote' | 'costs'
+type Tab = 'sales' | 'quote'
 type ExportScope = 'all' | 'selected' | 'date'
 type MonthlySummary = { month: string; count: number; activeCount: number; totalGross: number }
 
@@ -358,7 +358,6 @@ export default function QuoteWorkspace() {
   const [quoteMonth, setQuoteMonth] = useState(() => dateToday().slice(5, 7))
   const [allPeriods, setAllPeriods] = useState(false)
   const [monthlyOpen, setMonthlyOpen] = useState(false)
-  const [costSearch, setCostSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
@@ -431,10 +430,6 @@ export default function QuoteWorkspace() {
       }).totalGross ?? 0), 0),
     }
   }), [matchingSales, quoteYear])
-  const shownCatalog = useMemo(() => catalog.filter((entry) => {
-    const term = costSearch.trim().toLowerCase()
-    return !term || [entry.sku, entry.name, entry.spec, entry.location].join(' ').toLowerCase().includes(term)
-  }).slice(0, 300), [catalog, costSearch])
   const currentSaleTotals = useMemo(() => sale ? calculateSalesMarginTotals({
     items: sale.items.map((item) => ({ qty: item.qty, price: item.price, cost: item.cost, wholesalePrice: item.wholesalePrice, vatIncluded: item.vatIncluded })),
     includeShipping: sale.includeShipping, shippingFee: sale.shippingFee, shippingCost: sale.shippingCost, shippingVatIncluded: sale.shippingVatIncluded,
@@ -703,7 +698,6 @@ export default function QuoteWorkspace() {
       <nav className={styles.tabs} aria-label="견적서 탭">
         <button type="button" className={tab === 'sales' ? styles.tabActive : styles.tab} onClick={() => { setTab('sales'); setSale(null) }}>영업관리</button>
         <button type="button" className={tab === 'quote' ? styles.tabActive : styles.tab} onClick={() => setTab('quote')}>견적서</button>
-        <button type="button" className={tab === 'costs' ? styles.tabActive : styles.tab} onClick={() => setTab('costs')}>원가관리</button>
       </nav>
       <button type="button" className={styles.primary} onClick={() => { const next = newSale(); setSale(next); setTab('sales') }}><Plus size={15} /> 새 영업건</button>
     </header>
@@ -728,7 +722,6 @@ export default function QuoteWorkspace() {
     /> : null}
     {!loading && tab === 'sales' && sale ? <SalesEditor sale={sale} totals={currentSaleTotals} saving={saving} onBack={() => setSale(null)} onChange={setSale} onSave={saveSale} onDelete={() => void removeSale(sale.id)} onCopy={() => setSale(copySaleRecord(sale))} onQuote={() => openQuoteForSale(sale)} onSabangnet={downloadSabangnet} onAttach={uploadSaleAttachments} onDownloadAttachment={downloadSaleAttachment} onRemoveAttachment={removeSaleAttachment} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'sale')} /> : null}
     {!loading && tab === 'quote' ? <QuoteEditor quote={quote} totals={currentQuoteTotals} saved={quotes} selected={selectedQuote} saving={saving} onChange={setQuote} onSave={saveQuote} onDelete={removeQuote} onNew={() => { setQuote(newQuote(supplier)); setSelectedQuote('') }} onSelect={(quoteId) => { setSelectedQuote(quoteId); const selected = quotes.find((entry) => entry.id === quoteId); if (selected) setQuote(normalizeQuote(selected, supplier)) }} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'quote')} onPrint={async () => { try { if (quote.id) await api('PATCH', { action: 'mark-printed', quoteId: quote.id }) } catch { /* printing stays available */ } window.print() }} /> : null}
-    {!loading && tab === 'costs' ? <CostCatalog rows={shownCatalog} search={costSearch} onSearch={setCostSearch} onRefresh={() => void load()} /> : null}
     <datalist id="quote-catalog">{catalog.slice(0, 1000).flatMap((entry) => [
       <option key={`${entry.id}-sku`} value={entry.sku}>{entry.name}{entry.spec ? ' · ' + entry.spec : ''}</option>,
       <option key={`${entry.id}-name`} value={entry.name}>{entry.sku}{entry.spec ? ' · ' + entry.spec : ''}</option>,
@@ -754,7 +747,7 @@ function SalesList(props: {
   const visibleSelected = props.sales.filter((entry) => props.selected.includes(entry.id)).length
   const monthlyTotal = props.monthlySummary.reduce((sum, item) => sum + item.totalGross, 0)
   return <main className={styles.page}>
-    <section className={styles.listHead}><div><h1>영업관리</h1><p>거래처와 품목을 관리하고, 확정된 내용을 견적서로 바로 보냅니다.</p></div><div className={styles.actions}><button type="button" className={styles.light} onClick={props.onImport} disabled={props.saving}><FileSpreadsheet size={15} /> 엑셀 가져오기</button><button type="button" className={styles.primary} onClick={props.onNew}><Plus size={15} /> 새 영업건</button></div></section>
+    <section className={styles.listHead}><div><h1>영업관리</h1><p>거래처와 품목을 관리하고, 확정된 내용을 견적서로 바로 보냅니다.</p></div><div className={styles.actions}><a className={styles.light} href="/purchasing/items">품목 관리 <ExternalLink size={14} /></a><button type="button" className={styles.light} onClick={props.onImport} disabled={props.saving}><FileSpreadsheet size={15} /> 엑셀 가져오기</button><button type="button" className={styles.primary} onClick={props.onNew}><Plus size={15} /> 새 영업건</button></div></section>
     <div className={styles.cards}><Card label={props.allPeriods ? '전체 영업건' : `${props.quoteYear}년 ${Number(props.quoteMonth)}월 영업건`} value={props.sales.length} /><Card label="진행 중" value={counts('inProgress')} color="blue" /><Card label="전체 완료" value={counts('completed')} color="green" /><Card label="진행 불가" value={counts('blocked')} color="red" /></div>
     <section className={styles.listCard}>
       <div className={styles.filters}>
@@ -844,10 +837,6 @@ function QuoteEditor(props: {
       <div className={styles.notes}>{props.quote.notes.map((note, index) => <div key={index} className={styles.note}><span>※</span><textarea rows={1} value={note} onChange={(event) => update('notes', props.quote.notes.map((row, rowIndex) => rowIndex === index ? event.target.value : row))} /><button type="button" className={[styles.icon, styles.noPrint].join(' ')} onClick={() => update('notes', props.quote.notes.filter((_, rowIndex) => rowIndex !== index))}><Trash2 size={13} /></button></div>)}<button type="button" className={[styles.light, styles.noPrint].join(' ')} onClick={() => update('notes', [...props.quote.notes, ''])}><Plus size={14} /> 비고 추가</button></div>
     </section>
   </main>
-}
-
-function CostCatalog({ rows, search, onSearch, onRefresh }: { rows: Catalog[]; search: string; onSearch: (input: string) => void; onRefresh: () => void }) {
-  return <main className={styles.page}><section className={styles.listHead}><div><h1>원가관리</h1><p>SaaS 공용 품목 마스터의 품목코드, 품목명, 규격, 원가를 영업·견적서에서 바로 사용합니다.</p></div><div className={styles.actions}><button type="button" className={styles.light} onClick={onRefresh}><RefreshCw size={15} /> 새로고침</button><a className={styles.primary} href="/purchasing/items">품목 마스터 열기 <ExternalLink size={14} /></a></div></section><div className={styles.catalogNote}><FileSpreadsheet size={17} /> 원가 엑셀 업로드·수정은 기존 <strong>품목 마스터</strong>에서 품목코드 기준 미리보기 후 반영합니다. 이 화면은 공용 데이터 조회용입니다.</div><section className={styles.listCard}><div className={styles.filters}><label className={styles.search}><Search size={16} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="품목코드, 품목명, 규격, 위치 검색" /></label><span>{rows.length.toLocaleString('ko-KR')}개 표시</span></div><div className={styles.scroll}><table className={styles.table}><thead><tr><th>품목코드</th><th>품목명</th><th>규격정보</th><th>공용 원가</th><th>로케이션</th></tr></thead><tbody>{rows.length ? rows.map((entry) => <tr key={entry.id}><td className={styles.code}>{entry.sku}</td><td>{entry.name}</td><td>{entry.spec || '-'}</td><td>{entry.cost == null ? '-' : money(entry.cost)}</td><td>{entry.location || '-'}</td></tr>) : <tr><td colSpan={5} className={styles.empty}>일치하는 공용 품목이 없습니다.</td></tr>}</tbody></table></div></section></main>
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section className={styles.section}><h2>{title}</h2>{children}</section> }

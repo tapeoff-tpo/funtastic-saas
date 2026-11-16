@@ -46,6 +46,7 @@ import { purchaseArrivalWarehouseDisplay } from '@/lib/purchasing/purchase-arriv
 import { resolvePurchaseSourceWarehouses } from '@/lib/purchasing/purchase-source-warehouse'
 import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
 import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
+import tableSpacing from './purchase-table-spacing.module.css'
 import {
   PurchaseArrivalWarehouseField,
   PurchaseBulkDeleteButton,
@@ -576,7 +577,7 @@ export async function PurchasingOrdersView({
           </div>
 
           <div className="max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="w-full table-auto text-left text-sm">
+            <table className={`w-full table-auto text-sm ${isMainOrders ? tableSpacing.table : 'text-left'}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th data-purchase-column="select" className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
@@ -694,7 +695,7 @@ export async function PurchasingOrdersView({
                     return (
                       <tr
                         key={item.id ?? item.sku}
-                        className={`border-t align-middle ${!isRequestedStatus ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
+                        className={`border-t align-middle ${!isRequestedStatus && !isMainOrders ? '[&>td]:align-top [&>td:not([data-purchase-plan])]:pt-8' : ''} ${isOverdueRow ? 'bg-red-50/80' : ''}`}
                       >
                       <td data-purchase-column="select" className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         {item.id ? <PurchaseRowCheckbox id={item.id} /> : null}

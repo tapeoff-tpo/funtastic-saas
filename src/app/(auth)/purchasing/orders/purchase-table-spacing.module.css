@@ -1,0 +1,55 @@
+.table th,
+.table td {
+  padding: 4px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.table th > a,
+.table td[data-purchase-plan] form > div:first-child,
+.table td[data-purchase-plan] form [class~='h-5'] {
+  justify-content: center;
+}
+
+.table th[data-purchase-column='select'],
+.table td[data-purchase-column='select'] {
+  width: 48px;
+  min-width: 48px;
+}
+
+.table th[data-purchase-column='product'],
+.table td[data-purchase-column='product'] {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+}
+
+.table td[data-purchase-column='product'] > button {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table input,
+.table select {
+  text-align: center;
+}
+
+.table select {
+  text-align-last: center;
+}
+
+.table td[data-purchase-plan] form [class~='h-5'] {
+  height: 16px;
+}
+
+.table td[data-purchase-plan] form [class~='space-y-1'] > * {
+  margin-block: 0;
+}
+
+.table td[data-purchase-plan] form [class~='space-y-1'] > :not(:last-child) {
+  margin-bottom: 2px;
+}

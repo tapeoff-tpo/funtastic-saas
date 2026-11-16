@@ -24,7 +24,7 @@ const clientSchema = z.object({
 })
 
 async function workspace() {
-  await assertMenuAccess('/purchasing/quotes')
+  await assertMenuAccess('/operations/clients')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -51,6 +51,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!body.success) return NextResponse.json({ error: '거래처 정보를 확인해주세요.' }, { status: 400 })
     const client = await updateQuoteClient({ ...input.current, id: input.clientId, client: body.data.client })
     if (!client) return NextResponse.json({ error: '거래처를 찾을 수 없습니다.' }, { status: 404 })
+    revalidatePath('/operations/clients')
     revalidatePath('/purchasing/quotes')
     return NextResponse.json({ client })
   } catch (error) {
@@ -65,6 +66,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     if ('error' in input) return input.error
     const deleted = await deleteQuoteClient({ userId: input.current.userId, id: input.clientId })
     if (!deleted) return NextResponse.json({ error: '거래처를 찾을 수 없습니다.' }, { status: 404 })
+    revalidatePath('/operations/clients')
     revalidatePath('/purchasing/quotes')
     return NextResponse.json({ success: true })
   } catch (error) {

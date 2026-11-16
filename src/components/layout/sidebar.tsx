@@ -203,6 +203,7 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
+      { href: '/operations/clients', label: '거래처 정보', icon: Users },
     ],
   },
   {

@@ -32,7 +32,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/analytics/sabangnet-review', '사방넷 검수'],
   ] },
   { title: '운영·설정', items: [
-    ['/operations/ai-accounts', 'AI 계정공유'], ['/purchasing/quotes', '견적서'], ['/operations/flow', '운영 흐름'], ['/admin/dev-log', '개발 작업 일지'],
+    ['/operations/ai-accounts', 'AI 계정공유'], ['/purchasing/quotes', '견적서'], ['/operations/clients', '거래처 정보'], ['/operations/flow', '운영 흐름'], ['/admin/dev-log', '개발 작업 일지'],
     ['/settings/company', '회사 설정'], ['/settings/marketplaces', '마켓연동'], ['/settings/market-settings', '마켓설정'],
   ] },
 ] as const
@@ -117,6 +117,10 @@ const API_MENU_RULES: Array<[string, string[]]> = [
 export function canAccessApi(access: MenuAccess, href: string, method = 'GET'): boolean {
   const path = normalizeMenuPath(href)
   if (path === '/api/menu-access' || path === '/api/settings/menu-order' || path === '/api/check-ip') return true
+  if (matches(path, '/api/purchasing/quotes/clients')) {
+    return (method === 'GET' ? ['/operations/clients', '/purchasing/quotes'] : ['/operations/clients'])
+      .some((menu) => canUseMenu(access, menu))
+  }
   if (/^\/api\/purchasing\/china-shipments\/[^/]+\/import-documents$/.test(path)) {
     return ['/purchasing/china-shipments', '/purchasing/import-documents'].some((menu) => canUseMenu(access, menu))
   }

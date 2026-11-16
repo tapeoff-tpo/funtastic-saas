@@ -5,6 +5,21 @@ import { canAccessApi, canAccessPage, canUseMenu, MENU_PATHS, type MenuAccess } 
 
 const restricted: MenuAccess = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] }
 describe('menu authorization policy', () => {
+  it('keeps client management independent while allowing quotes to read client choices', () => {
+    const clients = { superAdmin: false, allowedMenus: ['/operations/clients'] }
+    const quotes = { superAdmin: false, allowedMenus: ['/purchasing/quotes'] }
+    expect(canAccessPage(clients, '/operations/clients')).toBe(true)
+    expect(canAccessPage(clients, '/purchasing/quotes')).toBe(false)
+    expect(canAccessPage(quotes, '/operations/clients')).toBe(false)
+    for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
+      expect(canAccessApi(clients, '/api/purchasing/quotes/clients', method)).toBe(true)
+      expect(canAccessApi(clients, '/api/purchasing/quotes/clients/client-id', method)).toBe(true)
+      expect(canAccessApi(quotes, '/api/purchasing/quotes/clients', method)).toBe(method === 'GET')
+      expect(canAccessApi(quotes, '/api/purchasing/quotes/clients/client-id', method)).toBe(method === 'GET')
+    }
+    expect(canAccessApi(clients, '/api/purchasing/quotes', 'GET')).toBe(false)
+    expect(canAccessApi(restricted, '/api/purchasing/quotes/clients', 'GET')).toBe(false)
+  })
   it('allows image reads for purchasing users while reserving catalogue copying for product management', () => {
     expect(canAccessApi(restricted, '/api/purchasing/product-images')).toBe(true)
     expect(canAccessApi(restricted, '/api/purchasing/product-images/files/1')).toBe(true)

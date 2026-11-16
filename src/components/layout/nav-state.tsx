@@ -72,6 +72,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/operations/marketplace-registration': '상품등록',
   '/operations/detail-pages': '상세페이지 제작',
   '/operations/ai-accounts': 'AI 계정공유',
+  '/operations/clients': '거래처 정보',
   '/settings': '설정',
   '/settings/account': '계정 설정',
   '/settings/company': '회사 설정',

@@ -23,8 +23,9 @@ const clientSchema = z.object({
   memo: z.string().max(8_000).default(''),
 })
 
-async function workspace() {
-  await assertMenuAccess('/purchasing/quotes')
+async function workspace(readOnly = false) {
+  if (readOnly) await assertMenuAccess('/operations/clients', '/purchasing/quotes')
+  else await assertMenuAccess('/operations/clients')
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -37,7 +38,7 @@ function errorMessage(error: unknown) {
 
 export async function GET() {
   try {
-    const current = await workspace()
+    const current = await workspace(true)
     if (!current) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
     return NextResponse.json({ clients: await listQuoteClients(current.userId) })
   } catch (error) {
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
     const body = z.object({ client: clientSchema }).safeParse(await request.json().catch(() => null))
     if (!body.success) return NextResponse.json({ error: '거래처 정보를 확인해주세요.' }, { status: 400 })
     const client = await createQuoteClient({ ...current, client: body.data.client })
+    revalidatePath('/operations/clients')
     revalidatePath('/purchasing/quotes')
     return NextResponse.json({ client }, { status: 201 })
   } catch (error) {

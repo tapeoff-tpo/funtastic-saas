@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, type PurchaseInspection } from './purchase-inspection'
+import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, validateInspectionSave, type PurchaseInspection } from './purchase-inspection'
 import { getNextPurchaseStatus } from './purchase-request-status'
 
 const id = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`
@@ -23,6 +23,25 @@ describe('purchase inspection rules', () => {
     const inspection = inspectedFixture(); inspection.parcels[1].boxes[0].quantity = null
     expect(inspectionSummary(inspection)).toMatchObject({ quantityPending: true, hasError: false })
     expect(() => validateInspectionCompletion(inspection)).toThrow('입고수량')
+  })
+  it.each([30, 50])('requires an explanation on every save when the second parcel quantity is %i', (quantity) => {
+    const inspection = inspectedFixture()
+    inspection.parcels[1].boxes[0].quantity = quantity
+    expect(() => validateInspectionSave(inspection)).toThrow('수량 차이 오류 설명')
+    inspection.resolutionNote = '   '
+    expect(() => validateInspectionSave(inspection)).toThrow('수량 차이 오류 설명')
+    inspection.resolutionNote = '공급처와 수량 차이 확인 중'
+    expect(validateInspectionSave(inspection).receivedQuantity).toBe(60 + quantity)
+  })
+  it('allows unfinished counting but requires an explanation once known quantities already exceed the purchase', () => {
+    const inspection = inspectedFixture()
+    inspection.parcels[1].boxes[0].quantity = null
+    expect(validateInspectionSave(inspection)).toMatchObject({ quantityPending: true, hasError: false })
+    inspection.parcels[0].boxes[0].quantity = 101
+    expect(inspectionSummary(inspection)).toMatchObject({ quantityPending: true, hasError: true })
+    expect(() => validateInspectionSave(inspection)).toThrow('수량 차이 오류 설명')
+    inspection.resolutionNote = '초과 배송 건 공급처 확인 중'
+    expect(validateInspectionSave(inspection).receivedQuantity).toBe(101)
   })
   it('requires both acknowledgement and an explanation for shortages and excesses', () => {
     const inspection = inspectedFixture()

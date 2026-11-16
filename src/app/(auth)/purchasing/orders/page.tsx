@@ -38,6 +38,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 import { PurchaseInspectionButton } from './purchase-inspection-dialog'
+import { PurchaseInspectionQuantityDisplay } from './purchase-inspection-quantity-display'
 import { PurchaseInspectionIssueButton } from './purchase-inspection-issues'
 import { PurchasePriceComparisonFields } from './purchase-price-comparison-fields'
 import { readPurchasePriceComparison, resolvePurchasePriceComparison } from '@/lib/purchasing/purchase-price-comparison'
@@ -771,10 +772,15 @@ export async function PurchasingOrdersView({
                             {formatNumber(stageQuantity)}
                             <p className="mt-0.5 text-[11px] font-normal leading-tight text-sky-700">중국출고 작업 기준</p>
                           </div>
-                        ) : item.status === 'inspecting' || (receipt && item.status === 'china_arrived') ? (
+                        ) : item.status === 'inspecting' ? (
+                          <PurchaseInspectionQuantityDisplay
+                            receivedQuantity={item.chinaReceivedQuantity}
+                            actualPurchaseQuantity={item.actualPurchaseQuantity}
+                            requestedQuantity={item.requestedQuantity}
+                          />
+                        ) : receipt && item.status === 'china_arrived' ? (
                           <span className="inline-block py-1 font-medium">
                             {formatNumber(stageQuantity)}
-                            {item.status === 'inspecting' && item.chinaReceivedQuantity === null ? <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">구매수량 기준</span> : null}
                           </span>
                         ) : item.id ? (
                           <PurchaseQuantityField

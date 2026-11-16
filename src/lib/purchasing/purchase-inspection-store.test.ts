@@ -60,13 +60,13 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.adjust).not.toHaveBeenCalled()
   })
   it('moves tracking entry into inspection and saves each parcel without receiving stock', async () => {
-    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel] } })
+    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel], resolutionNote: '부족 10개 공급처 확인 중' } })
     expect(fixture.writes[0]).toMatchObject({ status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { expectedQuantity: 100, revision: 1, checkedBy: null } })
     expect(fixture.receive).not.toHaveBeenCalled()
   })
   it('preserves the reported-issue protection marker on later inspection saves', async () => {
     fixture.current.purchaseInspection = { ...inspection, hasReportedIssue: true }
-    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel] } })
+    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel], resolutionNote: '부족 10개 공급처 확인 중' } })
     expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { hasReportedIssue: true, revision: 2 } })
   })
   it('rejects stale edits and cannot complete an unexplained shortage', async () => {
@@ -74,6 +74,63 @@ describe('inspection persistence and arrival safety', () => {
     await expect(savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel] } })).rejects.toThrow('다른 작업자')
     await expect(savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel], complete: true } })).rejects.toThrow('입고오류')
     expect(fixture.writes).toHaveLength(0)
+  })
+  it.each([
+    { quantity: 0, complete: false },
+    { quantity: 90, complete: false },
+    { quantity: 110, complete: false },
+    { quantity: 90, complete: true },
+    { quantity: 110, complete: true },
+  ])('blocks saving $quantity received units with complete=$complete when the discrepancy explanation is blank', async ({ quantity, complete }) => {
+    const original = structuredClone(fixture.current)
+    const parcels = [{ ...parcel, boxes: [{ ...parcel.boxes[0], quantity }] }]
+
+    await expect(savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id',
+      data: { revision: 0, parcels, complete, acknowledgeMismatch: true, stickerStatus: 'barcode', resolutionNote: '   ' },
+    })).rejects.toThrow('수량 차이 오류 설명')
+
+    expect(fixture.writes).toHaveLength(0)
+    expect(fixture.current).toEqual(original)
+    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.adjust).not.toHaveBeenCalled()
+  })
+  it('saves an explained discrepancy draft without completing measurements or acknowledging arrival', async () => {
+    const parcels = [{ ...parcel, boxes: [{ ...parcel.boxes[0], quantity: 110, lengthCm: null, weightKg: null }] }]
+    await savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id',
+      data: { revision: 0, parcels, resolutionNote: '초과 10개 공급처 확인 중' },
+    })
+    expect(fixture.writes[0]).toMatchObject({
+      status: 'inspecting', chinaReceivedQuantity: 110,
+      purchaseInspection: { expectedQuantity: 100, checkedAt: null, checkedBy: null, resolutionNote: '초과 10개 공급처 확인 중' },
+    })
+    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.adjust).not.toHaveBeenCalled()
+  })
+  it('saves equal counts or unknown counting drafts without inventing a discrepancy', async () => {
+    for (const quantity of [100, null]) {
+      fixture.writes = []
+      const parcels = [{ ...parcel, boxes: [{ ...parcel.boxes[0], quantity }] }]
+      await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels } })
+      expect(fixture.writes[0]).toMatchObject({ chinaReceivedQuantity: quantity, purchaseInspection: { resolutionNote: '', checkedAt: null } })
+    }
+    expect(fixture.receive).not.toHaveBeenCalled()
+  })
+  it('does not hide a known excess behind another uncounted box', async () => {
+    const parcels = [{ ...parcel, boxes: [
+      { ...parcel.boxes[0], quantity: 110 },
+      { ...parcel.boxes[0], id: '00000000-0000-4000-8000-000000000003', quantity: null },
+    ] }]
+    await expect(savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels },
+    })).rejects.toThrow('수량 차이 오류 설명')
+    expect(fixture.writes).toHaveLength(0)
+    await savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels, resolutionNote: '초과 입고 확인 중, 나머지 박스 미계수' },
+    })
+    expect(fixture.writes[0]).toMatchObject({ chinaReceivedQuantity: null, purchaseInspection: { checkedAt: null } })
+    expect(fixture.receive).not.toHaveBeenCalled()
   })
   it('records the real inspector only after shortage verification', async () => {
     const data = { revision: 0, parcels: [parcel], complete: true, acknowledgeMismatch: true, resolutionNote: '부족 10개 공급처 확인' }
@@ -85,7 +142,7 @@ describe('inspection persistence and arrival safety', () => {
   })
   it('preserves the recorded sticker status when another entry point only edits tracking', async () => {
     fixture.current.purchaseInspection = { ...inspection, stickerStatus: 'quality' }
-    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel] } })
+    await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 1, parcels: [parcel], resolutionNote: '부족 10개 공급처 확인 중' } })
     expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { stickerStatus: 'quality' } })
   })
   it('blocks generic arrival and downstream status jumps before inspection', async () => {

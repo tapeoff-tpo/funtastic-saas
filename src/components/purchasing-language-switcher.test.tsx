@@ -42,8 +42,10 @@ function InspectionTranslationFixture() {
         <a href="https://www.baidu.com" title="바이두에서 송장번호 조회" aria-label="바이두에서 송장번호 조회">조회</a>
         <p>구매완료 수량을 임시 기본값으로 넣었습니다. 실제 입고수량을 확인한 뒤 저장하세요.</p>
         <p>실제 입고수량이 구매수량과 다르면 아래 비고를 입력해주세요.</p>
-        <label htmlFor="inspection-note">수량 차이 비고</label>
+        <label htmlFor="inspection-note">수량 차이 오류 설명</label>
         <textarea id="inspection-note" placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" />
+        <p>구매수량과 실제 입고수량이 다르면 임시저장할 때도 오류 설명을 입력해주세요.</p>
+        <p role="alert">입고오류: 구매수량과 실제 입고수량이 다릅니다. 수량 차이 오류 설명을 입력해주세요.</p>
         <p>수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p>
         <button type="button">박스 복사</button>
         <button type="button" aria-label="2번 송장 박스 복사">박스 복사</button>
@@ -251,7 +253,9 @@ describe('PurchasingLanguageSwitcher', () => {
       expect(screen.getByText('运单号')).toBeInTheDocument()
       expect(screen.getByText('已将采购完成数量填为临时默认值。请确认实际收货数量后再保存。')).toBeInTheDocument()
       expect(screen.getByText('实际收货数量与采购数量不一致时，请在下方填写备注。')).toBeInTheDocument()
-      expect(screen.getByText('数量差异备注')).toBeInTheDocument()
+      expect(screen.getByLabelText('数量差异异常说明')).toBeInTheDocument()
+      expect(screen.getByText('采购数量与实际收货数量不一致时，暂存也必须填写异常说明。')).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('收货异常：采购数量与实际收货数量不一致。请填写数量差异异常说明。')
       expect(screen.getByText('数量不一致时，只有勾选确认并填写备注后才能完成验货。')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '复制箱子' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '运单 2 复制箱子' })).toHaveTextContent('复制箱子')

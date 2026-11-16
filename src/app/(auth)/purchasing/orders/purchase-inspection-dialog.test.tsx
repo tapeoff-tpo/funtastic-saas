@@ -51,6 +51,38 @@ describe('purchase tracking and inspection editor', () => {
       parcels: [{ boxes: [{ quantity: 100 }] }],
     })
   })
+  it.each([90, 110])('requires a nonblank discrepancy explanation before saving %i received units against a purchase of 100', async (quantity) => {
+    const currentInspection = {
+      ...inspection,
+      parcels: [{ ...inspection.parcels[0], boxes: [{ ...box, quantity, lengthCm: null, widthCm: null, heightCm: null, weightKg: null }] }],
+    }
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ ...detail, inspection: currentInspection }))
+      .mockResolvedValueOnce(json({ inspection: { ...currentInspection, revision: 1 } }))
+    stubInspectionFetch(fetcher)
+    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
+    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
+    const note = await screen.findByLabelText('수량 차이 오류 설명')
+    fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(mocks.toast).toHaveBeenCalledWith('입고오류: 구매수량과 실제 입고수량이 다릅니다. 수량 차이 오류 설명을 입력해주세요.')
+    expect(note).toHaveFocus()
+
+    fireEvent.change(note, { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+
+    const reason = quantity < 100 ? '공급처가 10개를 누락했습니다.' : '공급처가 여분 10개를 동봉했습니다.'
+    fireEvent.change(note, { target: { value: reason } })
+    fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({
+      complete: false, acknowledgeMismatch: false, resolutionNote: reason,
+      parcels: [{ boxes: [{ quantity, lengthCm: null, widthCm: null, heightCm: null, weightKg: null }] }],
+    })
+    expect(fetcher.mock.calls[1][0]).toBe(`/api/purchasing/purchase-requests/${id}/inspection`)
+    expect(fetcher.mock.calls[1][1].method).toBe('POST')
+  })
   it('copies a completed box under the same tracking number with sequential box numbers and editable values', async () => {
     stubInspectionFetch(vi.fn(async () => json(detail)))
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
@@ -110,6 +142,7 @@ describe('purchase tracking and inspection editor', () => {
     expect(screen.getByLabelText('2번 송장 2번 박스 quantity')).toHaveValue(12)
     expect(screen.getByLabelText('2번 송장 2번 박스 lengthCm')).toHaveValue(60)
     expect(screen.getByLabelText('2번 송장 4번 박스 lengthCm')).toHaveValue(60)
+    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '추가 포장 수량을 공급처에 확인했습니다.' } })
     fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
@@ -162,6 +195,7 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '오류 등록' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
 
+    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '공급처 부족수량 10개를 확인했습니다.' } })
     fireEvent.click(screen.getByRole('button', { name: '임시저장 · 검수로 이동' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
     const savedBody = JSON.parse(fetcher.mock.calls[2][1].body)
@@ -175,7 +209,7 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     expect(await screen.findByRole('status')).toHaveTextContent('입고오류 · 부족 10개')
     fireEvent.click(screen.getByRole('checkbox', { name: '구매수량과 실제 입고수량의 차이를 확인했습니다.' }))
-    fireEvent.change(screen.getByLabelText('수량 차이 비고'), { target: { value: '공급처와 부족수량 확인' } })
+    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '공급처와 부족수량 확인' } })
     fireEvent.change(screen.getByLabelText('스티커 부착 상태'), { target: { value: 'quality' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료 · 중국창고도착' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
@@ -189,6 +223,7 @@ describe('purchase tracking and inspection editor', () => {
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
     await screen.findByRole('status')
+    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '공급처 부족수량을 확인했습니다.' } })
     fireEvent.change(screen.getByLabelText('스티커 부착 상태'), { target: { value: 'none' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료 · 중국창고도착' }))
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('입고오류를 확인해주세요.'))

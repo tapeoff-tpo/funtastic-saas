@@ -55,13 +55,21 @@ export function inspectionSummary(inspection: Pick<PurchaseInspection, 'expected
   return {
     receivedQuantity, boxCount: boxes.length, quantityPending,
     difference: receivedQuantity - inspection.expectedQuantity,
-    hasError: !quantityPending && receivedQuantity !== inspection.expectedQuantity,
+    hasError: receivedQuantity > inspection.expectedQuantity || (!quantityPending && receivedQuantity !== inspection.expectedQuantity),
     measurementsPending: boxes.some((box) => [box.lengthCm, box.widthCm, box.heightCm, box.weightKg].some((value) => value === null)),
   }
 }
 
-export function validateInspectionCompletion(inspection: PurchaseInspection, acknowledgeMismatch = Boolean(inspection.checkedAt)) {
+export function validateInspectionSave(inspection: PurchaseInspection) {
   const summary = inspectionSummary(inspection)
+  if (summary.hasError && !inspection.resolutionNote.trim()) {
+    throw new Error('입고오류: 구매수량과 실제 입고수량이 다릅니다. 수량 차이 오류 설명을 입력해주세요.')
+  }
+  return summary
+}
+
+export function validateInspectionCompletion(inspection: PurchaseInspection, acknowledgeMismatch = Boolean(inspection.checkedAt)) {
+  const summary = validateInspectionSave(inspection)
   if (!inspection.parcels.length || inspection.parcels.some((parcel) => !parcel.trackingNumber.trim())) throw new Error('송장번호를 입력해주세요.')
   if (summary.quantityPending) throw new Error('모든 박스의 입고수량을 입력해주세요.')
   if (summary.measurementsPending) throw new Error('모든 박스의 크기와 무게를 입력해주세요.')

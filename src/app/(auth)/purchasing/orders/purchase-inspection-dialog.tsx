@@ -7,7 +7,7 @@ import { Copy, ExternalLink } from 'lucide-react'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
-import { blankInspectionBox, inspectionSummary, STICKER_STATUS_LABELS, type InspectionParcel, type InspectionStickerStatus, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import { blankInspectionBox, inspectionSummary, validateInspectionSave, STICKER_STATUS_LABELS, type InspectionParcel, type InspectionStickerStatus, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import type { PurchaseInspectionIssue } from '@/lib/purchasing/purchase-inspection-issues'
 import { PurchaseInspectionIssueList, PurchaseInspectionIssueRegister } from './purchase-inspection-issues'
 import { PurchaseInspectionLabelPanel } from './purchase-inspection-label-panel'
@@ -56,6 +56,7 @@ export function PurchaseInspectionButton({ id, productName, imageData, mode = 'i
 
 function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
+  const quantityReasonRef = useRef<HTMLTextAreaElement>(null)
   const router = useRouter()
   const [data, setData] = useState<Detail | null>(null)
   const [error, setError] = useState('')
@@ -138,6 +139,13 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   }
   async function save(complete: boolean) {
     if (!data || !inspection) return
+    try {
+      validateInspectionSave(inspection)
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : '검수 저장에 실패했습니다.')
+      quantityReasonRef.current?.focus()
+      return
+    }
     if (complete && !inspection.stickerStatus) {
       toast.error('스티커 부착 상태를 선택해주세요.')
       return
@@ -263,7 +271,8 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
           </div>
           {((inspection.parcels.length > 0 && summary.hasError) || inspection.resolutionNote) && <div className={`space-y-2 rounded-lg border p-3 ${summary.hasError ? 'border-red-200 bg-red-50/50' : 'bg-muted/20'}`}>
             {editable && summary.hasError && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledgeMismatch} onChange={(event) => setAcknowledgeMismatch(event.target.checked)} />구매수량과 실제 입고수량의 차이를 확인했습니다.</label>}
-            <label className="block text-sm">수량 차이 비고<textarea value={inspection.resolutionNote} maxLength={2_000} className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
+            <p className="text-xs text-muted-foreground">구매수량과 실제 입고수량이 다르면 임시저장할 때도 오류 설명을 입력해주세요.</p>
+            <label className="block text-sm">수량 차이 오류 설명<textarea ref={quantityReasonRef} aria-label="수량 차이 오류 설명" aria-required={summary.hasError} value={inspection.resolutionNote} maxLength={2_000} placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
           </div>}
         </fieldset>
         <section className="space-y-3 rounded-lg border p-3">

@@ -35,7 +35,7 @@ import {
   type PurchaseRequestStatus,
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
-import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, type PurchaseInspection } from './purchase-inspection'
+import { createPurchaseInspection, inspectionSummary, purchaseInspectionInputSchema, validateInspectionCompletion, validateInspectionSave, type PurchaseInspection } from './purchase-inspection'
 import { ensurePurchaseInspectionIssueSchema, getPurchaseInspectionIssues } from './purchase-inspection-issues'
 import {
   ensurePurchaseFundLedgerSchema,
@@ -2014,7 +2014,7 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
       checkedAt: parsed.complete ? new Date().toISOString() : null, checkedBy: parsed.complete ? input.actorId : null,
       hasReportedIssue: current.purchaseInspection?.hasReportedIssue === true,
     }
-    const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : inspectionSummary(inspection)
+    const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : validateInspectionSave(inspection)
     if (parsed.complete && !stickerStatus) throw new Error('스티커 부착 상태를 선택해주세요.')
     await tx.update(purchaseRequestItems).set({
       status: 'inspecting', purchaseInspection: inspection,

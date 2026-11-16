@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions, createShipment, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
   mergeBoxes: vi.fn(),
   saveWeight: vi.fn(),
   saveChineseName: vi.fn(),
   addSample: vi.fn(),
   savePalletDimensions: vi.fn(),
   createShipment: vi.fn(),
+  deleteShipmentAction: vi.fn(),
   updateShipment: vi.fn(),
   saveBoxSplits: vi.fn(),
   savePalletAssignments: vi.fn(),
@@ -19,11 +20,12 @@ const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions
   addShipmentItems: vi.fn(),
   toastError: vi.fn(),
   navigate: vi.fn(),
+  refresh: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/purchasing/china-shipments',
-  useRouter: () => ({ refresh: vi.fn(), replace: navigate }),
+  useRouter: () => ({ refresh, replace: navigate }),
   useSearchParams: () => new URLSearchParams(useSyncExternalStore(
     (notify) => { window.addEventListener('popstate', notify); return () => window.removeEventListener('popstate', notify) },
     () => window.location.search,
@@ -41,7 +43,7 @@ vi.mock('../saas-china-actions', () => ({
   assignChinaOutboundBoxesToPalletsAction: savePalletAssignments,
   cancelChinaOutboundShipmentAction: vi.fn(),
   createChinaOutboundShipmentAction: createShipment,
-  deleteChinaOutboundShipmentAction: vi.fn(),
+  deleteChinaOutboundShipmentAction: deleteShipmentAction,
   dispatchChinaOutboundShipmentAction: vi.fn(),
   markChinaOutboundShipmentReadyAction: vi.fn(),
   saveChinaOutboundItemBoxSplitsAction: saveBoxSplits,
@@ -289,6 +291,7 @@ describe('ChinaShipmentsBoard', () => {
     HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new Event('close')) }
     window.localStorage.clear()
     createShipment.mockReset()
+    deleteShipmentAction.mockReset()
     updateShipment.mockReset()
     saveBoxSplits.mockReset()
     savePalletAssignments.mockReset()
@@ -300,6 +303,7 @@ describe('ChinaShipmentsBoard', () => {
     savePalletDimensions.mockReset()
     toastError.mockReset()
     navigate.mockReset()
+    refresh.mockReset()
   })
 
   it('splits the actual outbound quantity from the items dialog and supports manual numbering', async () => {
@@ -533,7 +537,7 @@ describe('ChinaShipmentsBoard', () => {
     const createRoot = document.querySelector('[data-purchasing-translate]')
     expect(createRoot).not.toBeNull()
     expect(visibleKoreanUi(createRoot!)).toEqual([])
-    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(within(screen.getByRole('group', { name: '选择出库库存位置' })).getByRole('checkbox'))
     await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
     expect(visibleKoreanUi(createRoot!)).toEqual([])
     expect(screen.getByText('새 상품')).toBeInTheDocument()
@@ -594,6 +598,82 @@ describe('ChinaShipmentsBoard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '출고 B' }))
     expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items')
+  })
+
+  it('selects only deletable list rows and cancels bulk deletion without deleting anything', () => {
+    const list = [...shipments, { ...asListItem(makeShipment('done', '완료된 출고', 'SKU-DONE')), status: 'dispatched' }]
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={list} selectedShipment={null} selectedStep="items" showCreate={false} />)
+
+    expect(screen.getByRole('button', { name: '선택 삭제 0' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'OUT-done 삭제 선택' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '삭제 가능한 중국출고 전체 선택' }))
+    expect(screen.getByRole('checkbox', { name: 'OUT-a 삭제 선택' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'OUT-b 삭제 선택' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'OUT-done 삭제 선택' })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '선택 삭제 2' }))
+
+    const dialog = screen.getByRole('dialog', { name: '선택한 출고작업 삭제' })
+    expect(within(dialog).getByText('출고 A · OUT-a')).toHaveAttribute('data-no-translate')
+    expect(within(dialog).getByText('출고 B · OUT-b')).toHaveAttribute('data-no-translate')
+    expect(within(dialog).queryByText(/완료된 출고/)).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '취소' }))
+    expect(deleteShipmentAction).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '선택 삭제 2' })).toBeEnabled()
+  })
+
+  it('deletes only checked shipments after confirmation and removes their rows without leaving the list', async () => {
+    deleteShipmentAction.mockResolvedValue({ ok: true })
+    const list = [...shipments, asListItem(makeShipment('c', '출고 C', 'SKU-C'))]
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={list} selectedShipment={null} selectedStep="items" showCreate={false} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'OUT-a 삭제 선택' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'OUT-c 삭제 선택' }))
+    fireEvent.click(screen.getByRole('button', { name: '선택 삭제 2' }))
+    expect(deleteShipmentAction).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByRole('dialog', { name: '선택한 출고작업 삭제' })).getByRole('button', { name: '삭제' }))
+
+    await waitFor(() => expect(deleteShipmentAction).toHaveBeenCalledTimes(2))
+    expect(deleteShipmentAction.mock.calls.map(([input]) => input)).toEqual([{ shipmentId: 'a' }, { shipmentId: 'c' }])
+    await waitFor(() => expect(screen.queryByRole('button', { name: '출고 A' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '출고 C' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '선택 삭제 0' })).toBeDisabled()
+    expect(refresh).toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('keeps failed deletion rows selected while removing successful rows', async () => {
+    deleteShipmentAction.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, error: '다른 사용자가 출고완료 처리했습니다.' })
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '삭제 가능한 중국출고 전체 선택' }))
+    fireEvent.click(screen.getByRole('button', { name: '선택 삭제 2' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '선택한 출고작업 삭제' })).getByRole('button', { name: '삭제' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: '출고 A' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'OUT-b 삭제 선택' })).toBeChecked()
+    await waitFor(() => expect(screen.getByRole('button', { name: '선택 삭제 1' })).toBeEnabled())
+    expect(screen.getByText(/다른 사용자가 출고완료 처리했습니다\./)).toBeInTheDocument()
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it('disables list selection and deletion until an in-progress deletion finishes', async () => {
+    let finishDelete!: (result: { ok: true }) => void
+    deleteShipmentAction.mockReturnValue(new Promise((resolve) => { finishDelete = resolve }))
+    render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'OUT-a 삭제 선택' }))
+    fireEvent.click(screen.getByRole('button', { name: '선택 삭제 1' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: '선택한 출고작업 삭제' })).getByRole('button', { name: '삭제' }))
+
+    await waitFor(() => expect(deleteShipmentAction).toHaveBeenCalledOnce())
+    expect(screen.getByRole('checkbox', { name: 'OUT-b 삭제 선택' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '선택 삭제 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '출고 B' })).toBeDisabled()
+    await act(async () => finishDelete({ ok: true }))
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'OUT-b 삭제 선택' })).toBeEnabled())
   })
 
   it('shows the creation form without opening an existing shipment editor', () => {

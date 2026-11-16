@@ -60,6 +60,24 @@ function InspectionTranslationFixture() {
   )
 }
 
+function ShipmentBulkDeleteTranslationFixture() {
+  return <div data-app-translate>
+    <PurchasingLanguageSwitcher />
+    <input type="checkbox" aria-label="삭제 가능한 중국출고 전체 선택" />
+    <input type="checkbox" aria-label="OUT-20261116 삭제 선택" />
+    <button type="button">선택 삭제 <span>2</span></button>
+    <p>출고완료 작업은 삭제할 수 없습니다.</p>
+    <div role="dialog" aria-label="선택한 출고작업 삭제">
+      <h2>선택한 출고작업 삭제</h2>
+      <p>선택한 출고작업의 예약 재고를 해제하고 박스·파렛트·적재 기록을 삭제합니다. 삭제 후에는 되돌릴 수 없습니다.</p>
+      <p data-no-translate>11월 중국출고 · OUT-20261116</p>
+    </div>
+    <p role="status">2건 삭제 완료</p>
+    <h3>삭제하지 못한 출고작업</h3>
+    <p role="alert">삭제 결과를 확인하지 못했습니다. 목록을 새로고침한 뒤 다시 확인해주세요.</p>
+  </div>
+}
+
 describe('PurchasingLanguageSwitcher', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -179,6 +197,25 @@ describe('PurchasingLanguageSwitcher', () => {
     await waitFor(() => {
       expect(screen.getByTestId('dynamic-label')).toHaveTextContent('空白或 0 数量的 2 格会按无库存处理。')
     })
+  })
+
+  it('translates shipment bulk deletion controls and results while preserving selected shipment identities', async () => {
+    render(<ShipmentBulkDeleteTranslationFixture />)
+    fireEvent.click(await screen.findByRole('button', { name: '中文' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: '全选可删除的中国出库作业' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '删除所选 2' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: '删除所选出库作业' })).toHaveTextContent('将释放所选出库作业的预留库存，并删除箱子、托盘和装载记录。删除后无法恢复。')
+      expect(screen.getByText('无法删除已完成出库的作业。')).toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent('已删除 2 项')
+      expect(screen.getByText('未能删除的出库作业')).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('无法确认删除结果。请刷新列表后再次确认。')
+    })
+    expect(screen.getByRole('checkbox', { name: '选择删除 OUT-20261116' })).toBeInTheDocument()
+    expect(screen.getByText('11월 중국출고 · OUT-20261116')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '한국어' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('2건 삭제 완료'))
   })
 
   it('translates all inspection labels, guidance, and placeholders added after the Chinese switch is active', async () => {

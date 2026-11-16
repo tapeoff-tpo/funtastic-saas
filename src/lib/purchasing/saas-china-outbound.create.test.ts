@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
-import { addChinaOutboundSample, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment } from './saas-china-outbound'
+import { addChinaOutboundSample, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment, deleteChinaOutboundShipment } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
 
@@ -111,6 +111,23 @@ function makeTransaction() {
           return { returning: async () => matchingRows.map((match) => ({ ...rows.find((row) => row.id === match.id)! })) }
         },
       }),
+    })),
+    delete: vi.fn().mockImplementation((table: unknown) => ({
+      where: (condition: SQL) => {
+        const rows = table === chinaOutboundShipments ? shipments
+          : table === chinaOutboundShipmentItems ? shipmentItems
+            : table === saasChinaShipmentPurchaseAllocations ? allocations
+              : table === chinaOutboundBoxes ? boxes
+                : table === chinaOutboundBoxItems ? boxItems : table === chinaOutboundPallets ? pallets : null
+        if (!rows) throw new Error('Unexpected delete table')
+        const matchingRows = queryRows(rows, condition)
+        const matchingIds = new Set(matchingRows.map((row) => row.id))
+        for (let index = rows.length - 1; index >= 0; index -= 1) {
+          if (matchingIds.has(rows[index]!.id)) rows.splice(index, 1)
+        }
+        const result = Promise.resolve(matchingRows)
+        return Object.assign(result, { returning: async () => matchingRows })
+      },
     })),
   }
   return tx
@@ -335,5 +352,73 @@ describe('createChinaOutboundShipment', () => {
       rawData: { saasChinaReservedQuantity: 3, outboundRequestedQuantity: 3 },
     })
     expect(movements.map((movement) => movement.reservedDelta)).toEqual([4, 3, -4])
+  })
+
+  it('deletes only the selected shipment and packing records while releasing its inventory and purchase-lot reservations', async () => {
+    inventories[0]!.reservedQuantity = 0
+    inventories[0]!.availableQuantity = 10
+    shipments = []
+    purchaseLinks = [{ id: 'lot-a', userId: workspaceUserId, inventoryId: 'inventory-a', purchaseRequestItemId: 'purchase-a', receivedQuantity: 10, reservedQuantity: 0, dispatchedQuantity: 0 }]
+    purchaseItems = [{ id: 'purchase-a', userId: workspaceUserId, rawData: {} }]
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    const first = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentNo: 'A', lines: [{ inventoryId: 'inventory-a', quantity: 4 }] })
+    const second = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentNo: 'B', lines: [{ inventoryId: 'inventory-a', quantity: 3 }] })
+    for (const [index, shipment] of [first, second].entries()) {
+      pallets.push({ id: `delete-pallet-${index}`, userId: workspaceUserId, shipmentId: shipment.id })
+      boxes.push({ id: `delete-box-${index}`, userId: workspaceUserId, shipmentId: shipment.id, palletId: `delete-pallet-${index}` })
+      boxItems.push({ id: `delete-box-item-${index}`, userId: workspaceUserId, shipmentId: shipment.id, boxId: `delete-box-${index}` })
+    }
+
+    await expect(deleteChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentId: first.id })).resolves.toMatchObject({ id: first.id })
+
+    expect(shipments.map((shipment) => shipment.id)).toEqual([second.id])
+    expect(inventories[0]).toMatchObject({ onHandQuantity: 10, reservedQuantity: 3, availableQuantity: 7 })
+    expect(purchaseLinks[0]).toMatchObject({ reservedQuantity: 3, dispatchedQuantity: 0 })
+    expect(purchaseItems[0]).toMatchObject({ status: 'outbound_requested', rawData: { saasChinaReservedQuantity: 3, outboundRequestedQuantity: 3 } })
+    for (const rows of [allocations, shipmentItems, boxes, boxItems]) {
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ shipmentId: second.id })
+    }
+    expect(pallets.some((pallet) => pallet.shipmentId === first.id)).toBe(false)
+    expect(pallets.find((pallet) => pallet.id === 'delete-pallet-1')).toMatchObject({ shipmentId: second.id })
+    expect(movements.map((movement) => [movement.movementType, movement.onHandDelta, movement.reservedDelta])).toEqual([
+      ['shipment_reservation', 0, 4], ['shipment_reservation', 0, 3], ['shipment_release', 0, -4],
+    ])
+    expect(tx.delete.mock.calls.map(([table]) => table)).toEqual([
+      saasChinaShipmentPurchaseAllocations, chinaOutboundBoxItems, chinaOutboundBoxes,
+      chinaOutboundPallets, chinaOutboundShipmentItems, chinaOutboundShipments,
+    ])
+  })
+
+  it('does not delete dispatched work or release its inventory', async () => {
+    shipments[0]!.status = 'dispatched'
+    const before = JSON.stringify({ shipments, inventories, pallets })
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await expect(deleteChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentId: 'existing-shipment' })).rejects.toThrow('출고완료')
+
+    expect(JSON.stringify({ shipments, inventories, pallets })).toBe(before)
+    expect(tx.delete).not.toHaveBeenCalled()
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(movements).toEqual([])
+  })
+
+  it('deletes cancelled work without releasing reservations a second time', async () => {
+    shipments[0]!.status = 'cancelled'
+    const inventoryBefore = structuredClone(inventories)
+    shipmentItems = [{ id: 'released-item', userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: 'inventory-a', reservedQuantity: 4 }]
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+
+    await deleteChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', shipmentId: 'existing-shipment' })
+
+    expect(shipments).toEqual([])
+    expect(shipmentItems).toEqual([])
+    expect(pallets).toEqual([])
+    expect(inventories).toEqual(inventoryBefore)
+    expect(movements).toEqual([])
+    expect(tx.update).not.toHaveBeenCalled()
   })
 })

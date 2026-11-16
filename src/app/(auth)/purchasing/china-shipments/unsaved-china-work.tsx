@@ -220,7 +220,7 @@ export function ChinaWorkGuardProvider({ children }: { children: ReactNode }) {
     {pendingConfirmation ? <div className="fixed inset-0 z-[101] flex items-center justify-center bg-black/50 p-4">
       <div ref={confirmationDialogRef} data-purchasing-translate role="dialog" aria-modal="true" aria-labelledby="china-confirmation-title" aria-describedby="china-confirmation-description" className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-xl">
         <h2 id="china-confirmation-title" className="text-lg font-semibold">{pendingConfirmation.title}</h2>
-        <p id="china-confirmation-description" className="mt-2 text-sm text-muted-foreground">{pendingConfirmation.description}</p>
+        <div id="china-confirmation-description" className="mt-2 text-sm text-muted-foreground">{pendingConfirmation.description}</div>
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <button type="button" onClick={() => setPendingConfirmation(null)} className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-muted">취소</button>
           <button type="button" onClick={confirmPendingAction} className={`h-9 rounded-md px-3 text-sm font-medium text-primary-foreground ${pendingConfirmation.destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'}`}>{pendingConfirmation.confirmLabel}</button>

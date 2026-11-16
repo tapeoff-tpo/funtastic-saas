@@ -424,7 +424,59 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   const [periodPreset, setPeriodPreset] = useState(listPeriod.preset)
   const [periodFrom, setPeriodFrom] = useState(listPeriod.from)
   const [periodTo, setPeriodTo] = useState(listPeriod.to)
-  const visibleShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState<string[]>([])
+  const [deletedIds, setDeletedIds] = useState<string[]>([])
+  const [deleteSummary, setDeleteSummary] = useState('')
+  const [deleteFailures, setDeleteFailures] = useState<Array<{ id: string; name: string; error: string }>>([])
+  const listedShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const visibleShipments = listedShipments.filter((shipment) => !deletedIds.includes(shipment.id))
+  const deletableShipments = visibleShipments.filter((shipment) => ['draft', 'packing', 'ready'].includes(shipment.status))
+  const selectedDeleteShipments = deletableShipments.filter((shipment) => selectedDeleteIds.includes(shipment.id))
+  const allDeleteSelected = deletableShipments.length > 0 && selectedDeleteShipments.length === deletableShipments.length
+
+  function deleteSelectedShipments() {
+    const targets = [...selectedDeleteShipments]
+    if (!targets.length || isPending || guard.busy) return
+    guard.requestConfirmation({
+      title: '선택한 출고작업 삭제',
+      description: <>
+        <span className="block">선택한 출고작업의 예약 재고를 해제하고 박스·파렛트·적재 기록을 삭제합니다. 삭제 후에는 되돌릴 수 없습니다.</span>
+        <ul className="mt-3 max-h-40 list-disc space-y-1 overflow-y-auto pl-5">
+          {targets.map((shipment) => <li key={shipment.id} data-no-translate>{shipmentDisplayName(shipment)} · {shipment.shipmentNo}</li>)}
+        </ul>
+      </>,
+      confirmLabel: '삭제',
+      destructive: true,
+      onConfirm: () => guard.requestNavigation(() => startTransition(async () => {
+        await guard.runTask(async () => {
+          setDeleteSummary('')
+          setDeleteFailures([])
+          const deleted: string[] = []
+          const failures: Array<{ id: string; name: string; error: string }> = []
+          for (const shipment of targets) {
+            try {
+              const result = await deleteChinaOutboundShipmentAction({ shipmentId: shipment.id })
+              if (result.ok) deleted.push(shipment.id)
+              else failures.push({ id: shipment.id, name: shipmentDisplayName(shipment), error: result.error })
+            } catch {
+              failures.push({ id: shipment.id, name: shipmentDisplayName(shipment), error: '삭제 결과를 확인하지 못했습니다. 목록을 새로고침한 뒤 다시 확인해주세요.' })
+            }
+          }
+          setDeletedIds((current) => [...new Set([...current, ...deleted])])
+          setSelectedDeleteIds(failures.map((failure) => failure.id))
+          setDeleteFailures(failures)
+          if (deleted.length) {
+            const message = `${deleted.length.toLocaleString('ko-KR')}건 삭제 완료`
+            setDeleteSummary(message)
+            toast.success(message)
+          }
+          if (failures.length) toast.error('삭제하지 못한 출고작업')
+          router.refresh()
+          return failures.length === 0
+        })
+      })),
+    })
+  }
 
   function searchPeriod(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -525,13 +577,34 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
         <button type="submit" disabled={isPending} className="h-9 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted disabled:opacity-50">조회</button>
       </form>
       {listPeriod.error && <p role="alert" className="mt-2 text-sm text-red-700">{listPeriod.error}</p>}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">출고완료 작업은 삭제할 수 없습니다.</p>
+        <button type="button" disabled={isPending || guard.busy || selectedDeleteShipments.length === 0} onClick={deleteSelectedShipments}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 px-3 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
+          {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}선택 삭제 {selectedDeleteShipments.length.toLocaleString('ko-KR')}
+        </button>
+      </div>
+      {deleteSummary && <p role="status" className="mt-2 text-sm text-emerald-700">{deleteSummary}</p>}
+      {deleteFailures.length > 0 && <div role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        <p className="font-medium">삭제하지 못한 출고작업</p>
+        <ul className="mt-1 space-y-1">{deleteFailures.map((failure) => <li key={failure.id}><span data-no-translate>{failure.name}</span> · {failure.error}</li>)}</ul>
+      </div>}
       <div className="mt-3 max-h-[360px] overflow-auto rounded-md border">
         <table className="w-full min-w-[760px] text-left text-sm" aria-label="중국출고요청 목록">
           <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground"><tr>
+            <th className="w-10 px-3 py-2 text-center"><input type="checkbox" aria-label="삭제 가능한 중국출고 전체 선택" checked={allDeleteSelected}
+              ref={(element) => { if (element) element.indeterminate = selectedDeleteShipments.length > 0 && !allDeleteSelected }}
+              disabled={isPending || guard.busy || deletableShipments.length === 0}
+              onChange={(event) => setSelectedDeleteIds(event.target.checked ? deletableShipments.map((shipment) => shipment.id) : [])} /></th>
             {['출고작업명', '요청일', '출고예정일', '도착지', '상태', '상품 수', '출고수량', '포장수량'].map((label) => <th key={label} className="whitespace-nowrap px-3 py-2 font-medium">{label}</th>)}
           </tr></thead>
-          <tbody>{visibleShipments.length === 0 ? <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">선택한 기간에 중국출고요청이 없습니다.</td></tr> : visibleShipments.map((shipment) => {
-            return <tr key={shipment.id} className="border-t hover:bg-muted/30">
+          <tbody>{visibleShipments.length === 0 ? <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">선택한 기간에 중국출고요청이 없습니다.</td></tr> : visibleShipments.map((shipment) => {
+            const canDelete = deletableShipments.some((entry) => entry.id === shipment.id)
+            return <tr key={shipment.id} className={`border-t hover:bg-muted/30 ${canDelete && selectedDeleteIds.includes(shipment.id) ? 'bg-red-50/50' : ''}`}>
+              <td className="px-3 py-2 text-center"><input type="checkbox" aria-label={`${shipment.shipmentNo} 삭제 선택`}
+                title={canDelete ? undefined : '출고완료 작업은 삭제할 수 없습니다.'}
+                checked={canDelete && selectedDeleteIds.includes(shipment.id)} disabled={isPending || guard.busy || !canDelete}
+                onChange={(event) => setSelectedDeleteIds((current) => event.target.checked ? [...current, shipment.id] : current.filter((id) => id !== shipment.id))} /></td>
               <td className="px-3 py-2">
                 <button type="button" disabled={isPending} onClick={() => onSelect(shipment.id)}
                   data-no-translate className="text-left font-medium text-blue-700 underline-offset-2 hover:underline disabled:opacity-50">{shipmentDisplayName(shipment)}</button>
@@ -548,7 +621,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           })}</tbody>
         </table>
       </div>
-      {shipments.length !== visibleShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - visibleShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
+      {shipments.length !== listedShipments.length ? <p className="mt-2 text-xs text-muted-foreground">취소된 출고작업 {(shipments.length - listedShipments.length).toLocaleString('ko-KR')}건은 목록에서 숨겼습니다.</p> : null}
       </>}
       {isEditing && selectedShipment ? <form onSubmit={saveShipmentDetails} className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
         <Field label="출고작업명"><input value={draftDisplayName} onChange={(event) => setDraftDisplayName(event.target.value)} className={inputClass} placeholder="예: 2026-10-01 중국출고" /></Field>

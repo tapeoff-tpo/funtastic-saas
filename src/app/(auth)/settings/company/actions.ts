@@ -33,6 +33,11 @@ export async function saveCompanySettings(
   const phone = (formData.get('phone') as string) ?? ''
   const address = (formData.get('address') as string) ?? ''
   const zipCode = (formData.get('zipCode') as string) ?? ''
+  const businessRegistrationNumber = (formData.get('businessRegistrationNumber') as string) ?? ''
+  const representativeName = (formData.get('representativeName') as string) ?? ''
+  const businessType = (formData.get('businessType') as string) ?? ''
+  const businessItem = (formData.get('businessItem') as string) ?? ''
+  const bankAccount = (formData.get('bankAccount') as string) ?? ''
 
   try {
     await db
@@ -43,6 +48,11 @@ export async function saveCompanySettings(
         phone,
         address,
         zipCode,
+        businessRegistrationNumber,
+        representativeName,
+        businessType,
+        businessItem,
+        bankAccount,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -52,6 +62,11 @@ export async function saveCompanySettings(
           phone,
           address,
           zipCode,
+          businessRegistrationNumber,
+          representativeName,
+          businessType,
+          businessItem,
+          bankAccount,
           updatedAt: new Date(),
         },
       })

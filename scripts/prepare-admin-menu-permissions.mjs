@@ -4,6 +4,7 @@ if (process.env.VERCEL === '1') {
   await import('./migrate-admin-menu-permissions.mjs')
   await import('./migrate-purchase-inspection.mjs')
   await import('./migrate-inspection-outbound-packing.mjs')
+  await import('./migrate-quote-sales.mjs')
   await import('./prepare-inventory-search.mjs')
   await import('./prepare-inventory-month-end.mjs')
 }

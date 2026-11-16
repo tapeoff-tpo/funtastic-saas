@@ -28,6 +28,11 @@ export default async function CompanySettingsPage() {
           phone: settings?.phone ?? '',
           address: settings?.address ?? '',
           zipCode: settings?.zipCode ?? '',
+          businessRegistrationNumber: settings?.businessRegistrationNumber ?? '',
+          representativeName: settings?.representativeName ?? '',
+          businessType: settings?.businessType ?? '',
+          businessItem: settings?.businessItem ?? '',
+          bankAccount: settings?.bankAccount ?? '',
         }}
       />
     </div>

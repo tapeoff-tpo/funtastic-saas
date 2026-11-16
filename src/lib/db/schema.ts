@@ -1628,6 +1628,11 @@ export const companySettings = pgTable(
     phone: varchar('phone', { length: 50 }).notNull().default(''),
     address: text('address').notNull().default(''),
     zipCode: varchar('zip_code', { length: 10 }).notNull().default(''),
+    businessRegistrationNumber: varchar('business_registration_number', { length: 30 }).notNull().default(''),
+    representativeName: varchar('representative_name', { length: 100 }).notNull().default(''),
+    businessType: varchar('business_type', { length: 200 }).notNull().default(''),
+    businessItem: varchar('business_item', { length: 200 }).notNull().default(''),
+    bankAccount: text('bank_account').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1651,6 +1656,171 @@ export const sidebarMenuSettings = pgTable(
   },
   (table) => [
     uniqueIndex('sidebar_menu_settings_user_id').on(table.userId),
+  ],
+)
+
+// ─── Operations: Shared Sales & Quotes ───────────────────────────
+// Sales and quotes use immutable product/cost snapshots. `products` remains
+// the authoritative current catalog; changing a current item must never
+// change the margin of an already-created sales or quote record.
+
+export const quoteSales = pgTable(
+  'quote_sales',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    clientId: varchar('client_id', { length: 160 }).notNull(),
+    saleNumber: varchar('sale_number', { length: 80 }),
+    saleDate: date('sale_date').notNull().defaultNow(),
+    customerName: text('customer_name').notNull().default(''),
+    contactName: text('contact_name').notNull().default(''),
+    status: varchar('status', { length: 30 }).notNull().default('pending'),
+    shippingStatus: varchar('shipping_status', { length: 30 }).notNull().default('pending'),
+    shippingDate: date('shipping_date'),
+    paymentStatus: varchar('payment_status', { length: 30 }).notNull().default('unpaid'),
+    paymentDate: date('payment_date'),
+    memo: text('memo'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    subtotalAmount: numeric('subtotal_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    vatAmount: numeric('vat_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull().default('0'),
+    grossProfit: numeric('gross_profit', { precision: 14, scale: 2 }).notNull().default('0'),
+    createdByUserId: uuid('created_by_user_id'),
+    updatedByUserId: uuid('updated_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('quote_sales_user_client_id_unique').on(table.userId, table.clientId),
+    uniqueIndex('quote_sales_user_sale_number_unique')
+      .on(table.userId, table.saleNumber)
+      .where(sql`${table.saleNumber} IS NOT NULL AND btrim(${table.saleNumber}) <> ''`),
+    index('quote_sales_user_date_updated_idx').on(table.userId, table.saleDate, table.updatedAt),
+    index('quote_sales_user_status_idx').on(table.userId, table.status, table.updatedAt),
+  ],
+)
+
+export const quoteSaleItems = pgTable(
+  'quote_sale_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    saleId: uuid('sale_id')
+      .notNull()
+      .references(() => quoteSales.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    sku: varchar('sku', { length: 100 }),
+    productName: text('product_name').notNull().default(''),
+    optionName: text('option_name').notNull().default(''),
+    quantity: integer('quantity').notNull().default(1),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 2 }).notNull().default('0'),
+    unitCostSnapshot: numeric('unit_cost_snapshot', { precision: 14, scale: 2 }).notNull().default('0'),
+    vatIncluded: boolean('vat_included').notNull().default(false),
+    note: text('note').notNull().default(''),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('quote_sale_items_sale_sort_idx').on(table.saleId, table.sortOrder, table.createdAt),
+    index('quote_sale_items_product_idx').on(table.productId),
+    index('quote_sale_items_user_sku_idx').on(table.userId, table.sku),
+  ],
+)
+
+// Operational sales files are shared with the workspace just like their
+// parent sales record.  Binary data stays out of the JSON details snapshot so
+// it can be accessed/downloaded through an authenticated route only.
+export const quoteSaleAttachments = pgTable(
+  'quote_sale_attachments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    saleId: uuid('sale_id')
+      .notNull()
+      .references(() => quoteSales.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    contentType: varchar('content_type', { length: 160 }).notNull().default('application/octet-stream'),
+    fileSize: integer('file_size').notNull(),
+    fileData: customType<{ data: Buffer }>({
+      dataType() {
+        return 'bytea'
+      },
+    })('file_data').notNull(),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('quote_sale_attachments_sale_created_idx').on(table.saleId, table.createdAt),
+    index('quote_sale_attachments_user_sale_idx').on(table.userId, table.saleId),
+    check('quote_sale_attachments_file_size_check', sql`${table.fileSize} > 0`),
+  ],
+)
+
+export const quotes = pgTable(
+  'quotes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    clientId: varchar('client_id', { length: 160 }).notNull(),
+    quoteNumber: varchar('quote_number', { length: 80 }),
+    saleId: uuid('sale_id').references(() => quoteSales.id, { onDelete: 'set null' }),
+    issueDate: date('issue_date').notNull().defaultNow(),
+    recipient: text('recipient').notNull().default(''),
+    recipientTitle: text('recipient_title').notNull().default(''),
+    intro: text('intro').notNull().default(''),
+    supplierSnapshot: jsonb('supplier_snapshot').$type<Record<string, string>>().notNull().default({}),
+    notes: jsonb('notes').$type<string[]>().notNull().default([]),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    subtotalAmount: numeric('subtotal_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    vatAmount: numeric('vat_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    printCount: integer('print_count').notNull().default(0),
+    lastPrintedAt: timestamp('last_printed_at', { withTimezone: true }),
+    createdByUserId: uuid('created_by_user_id'),
+    updatedByUserId: uuid('updated_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('quotes_user_client_id_unique').on(table.userId, table.clientId),
+    uniqueIndex('quotes_user_quote_number_unique')
+      .on(table.userId, table.quoteNumber)
+      .where(sql`${table.quoteNumber} IS NOT NULL AND btrim(${table.quoteNumber}) <> ''`),
+    index('quotes_user_issue_updated_idx').on(table.userId, table.issueDate, table.updatedAt),
+    index('quotes_user_sale_idx').on(table.userId, table.saleId, table.updatedAt),
+    index('quotes_sale_idx').on(table.saleId),
+  ],
+)
+
+export const quoteItems = pgTable(
+  'quote_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    quoteId: uuid('quote_id')
+      .notNull()
+      .references(() => quotes.id, { onDelete: 'cascade' }),
+    saleItemId: uuid('sale_item_id').references(() => quoteSaleItems.id, { onDelete: 'set null' }),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    sku: varchar('sku', { length: 100 }),
+    productName: text('product_name').notNull().default(''),
+    optionName: text('option_name').notNull().default(''),
+    quantity: integer('quantity').notNull().default(1),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 2 }).notNull().default('0'),
+    unitCostSnapshot: numeric('unit_cost_snapshot', { precision: 14, scale: 2 }).notNull().default('0'),
+    vatIncluded: boolean('vat_included').notNull().default(false),
+    note: text('note').notNull().default(''),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('quote_items_quote_sort_idx').on(table.quoteId, table.sortOrder, table.createdAt),
+    index('quote_items_sale_item_idx').on(table.saleItemId),
+    index('quote_items_product_idx').on(table.productId),
+    index('quote_items_user_sku_idx').on(table.userId, table.sku),
   ],
 )
 

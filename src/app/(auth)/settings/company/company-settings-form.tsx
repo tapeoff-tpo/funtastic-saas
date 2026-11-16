@@ -10,6 +10,11 @@ interface CompanySettingsFormProps {
     phone: string
     address: string
     zipCode: string
+    businessRegistrationNumber: string
+    representativeName: string
+    businessType: string
+    businessItem: string
+    bankAccount: string
   }
 }
 
@@ -37,6 +42,59 @@ export function CompanySettingsForm({ defaultValues }: CompanySettingsFormProps)
           defaultValue={defaultValues.companyName}
           className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           placeholder="예: 판타스틱"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="businessRegistrationNumber" className="block text-sm font-medium">
+          사업자등록번호
+        </label>
+        <input
+          id="businessRegistrationNumber"
+          name="businessRegistrationNumber"
+          type="text"
+          defaultValue={defaultValues.businessRegistrationNumber}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          placeholder="예: 123-45-67890"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="representativeName" className="block text-sm font-medium">
+          대표자명
+        </label>
+        <input
+          id="representativeName"
+          name="representativeName"
+          type="text"
+          defaultValue={defaultValues.representativeName}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          placeholder="예: 홍길동"
+        />
+      </div>
+
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div className="space-y-2">
+          <label htmlFor="businessType" className="block text-sm font-medium">업태</label>
+          <input id="businessType" name="businessType" type="text" defaultValue={defaultValues.businessType} className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="businessItem" className="block text-sm font-medium">종목</label>
+          <input id="businessItem" name="businessItem" type="text" defaultValue={defaultValues.businessItem} className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="bankAccount" className="block text-sm font-medium">
+          견적서 입금계좌
+        </label>
+        <input
+          id="bankAccount"
+          name="bankAccount"
+          type="text"
+          defaultValue={defaultValues.bankAccount}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          placeholder="예: 기업은행 000-000000-00-000"
         />
       </div>
 

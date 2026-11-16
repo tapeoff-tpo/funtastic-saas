@@ -676,13 +676,42 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'OUT-b 삭제 선택' })).toBeEnabled())
   })
 
-  it('shows the creation form without opening an existing shipment editor', () => {
+  it('shows only the creation form while hiding list rows, filters, deletion, and list tools', () => {
     render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate />)
 
     expect(screen.getByRole('button', { name: '중국출고요청 만들기' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '요청 닫기' })).toBeEnabled()
+    expect(screen.getByRole('heading', { name: '새 중국출고요청' })).toBeInTheDocument()
+    expect(screen.getByLabelText('출고작업명')).toBeInTheDocument()
+    expect(screen.getByLabelText('도착지')).toBeInTheDocument()
+    expect(screen.queryByRole('table', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('조회 기간')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /선택 삭제/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '출고 A' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '출고 B' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀로 출고 등록' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '창고 수정' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '출고 A' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '중국출고 작업 단계' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a new request on cancel and returns to the list only after explicitly discarding its edits', () => {
+    const { rerender } = render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
+    fireEvent.change(screen.getByLabelText('메모'), { target: { value: '작성 중인 요청' } })
+    fireEvent.click(screen.getByRole('button', { name: '요청 닫기' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
+    expect(screen.getByLabelText('메모')).toHaveValue('작성 중인 요청')
+    expect(screen.queryByRole('table', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '요청 닫기' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장하지 않고 이동' }))
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
+    rerender(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate={false} />)
+    expect(screen.getByRole('table', { name: '중국출고요청 목록' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출고 A' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '중국출고요청 만들기' })).not.toBeInTheDocument()
   })
 
   it('lists requests as selectable rows and submits custom calendar filters', () => {
@@ -1608,24 +1637,24 @@ describe('ChinaShipmentsBoard', () => {
     render(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
     fireEvent.change(screen.getByLabelText('출고작업명'), { target: { value: '작성 중' } })
 
-    selectOtherShipment()
+    fireEvent.click(screen.getByRole('button', { name: '요청 닫기' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(screen.getByLabelText('출고작업명')).toHaveValue('작성 중')
     expect(screen.getByRole('button', { name: '중국출고요청 만들기' })).toBeInTheDocument()
   })
 
-  it('creates a completed new-shipment draft before switching to the requested shipment', async () => {
+  it('creates a completed new-shipment draft before closing to the list', async () => {
     createShipment.mockResolvedValue({ ok: true, shipmentId: 'created' })
     render(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
     fireEvent.change(screen.getByLabelText('출고작업명'), { target: { value: '새 출고' } })
     fireEvent.change(screen.getByLabelText('도착지'), { target: { value: '인천' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /중국창고/ }))
     fireEvent.change(screen.getByLabelText('이번 출고'), { target: { value: '3' } })
-    selectOtherShipment()
+    fireEvent.click(screen.getByRole('button', { name: '요청 닫기' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments?shipment=b&step=items'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments'))
     expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ displayName: '새 출고', destinationName: '인천', lines: [{ inventoryId: 'inventory-new', quantity: 3 }] }))
     expect(createShipment).toHaveBeenCalledTimes(1)
   })

@@ -548,12 +548,12 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
         {selectedShipment ? (
           <button type="button" disabled={isPending} onClick={onBack} className="mr-auto inline-flex h-9 items-center justify-center gap-1 rounded-md border bg-muted/50 px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><ChevronLeft className="size-4" />목록으로</button>
         ) : <>
-        <h2 className="min-w-0 flex-1 text-sm font-semibold">중국출고요청 목록</h2>
+        <h2 className="min-w-0 flex-1 text-sm font-semibold">{showCreate ? '새 중국출고요청' : '중국출고요청 목록'}</h2>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <ChinaShipmentExcelDialog onApplied={(shipmentId) => {
+          {!showCreate && <><ChinaShipmentExcelDialog onApplied={(shipmentId) => {
             if (shipmentId) guard.requestNavigation(() => navigateChinaWork(shipmentHref(shipmentId, 'items')))
           }} />
-          <ChinaShipmentWarehouseDialog warehouses={outboundWarehouses} />
+          <ChinaShipmentWarehouseDialog warehouses={outboundWarehouses} /></>}
           <button type="button" disabled={isPending} onClick={onToggleCreate} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60"><PackagePlus className="size-4" /> {showCreate ? '요청 닫기' : '새 중국출고요청'}</button>
         </div>
         </>}
@@ -562,7 +562,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
           <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
         </div> : null}
       </div>
-      {!selectedShipment && <>
+      {!selectedShipment && !showCreate && <>
       <form onSubmit={searchPeriod} className="mt-3 flex flex-wrap items-end gap-2 border-t pt-3">
         <label className="space-y-1 text-xs">
           <span>조회 기간</span>

@@ -20,6 +20,7 @@ import {
   saveChinaOutboundPackageWeight,
   saveChinaOutboundItemChineseName,
   assignChinaOutboundBoxesToPallets,
+  applyChinaOutboundWorkbook,
   dispatchChinaOutboundShipment,
   markChinaOutboundShipmentReady,
   saveChinaOutboundBoxCompletionStatuses,
@@ -40,6 +41,7 @@ let pallets: Row[]
 let inventory: Row[]
 let movements: Row[]
 let insertedSequence: number
+let reverseInsertResults: boolean
 
 function matchingRows(rows: Row[], condition: SQL) {
   const query = dialect.sqlToQuery(condition)
@@ -96,10 +98,10 @@ function makeTransaction() {
       },
     })),
     insert: vi.fn().mockImplementation((table: unknown) => ({
-      values: (values: Omit<Row, 'id'>) => {
-        const row = { ...values, id: `new-${++insertedSequence}` } as Row
-        rowsFor(table).push(row)
-        return { returning: async () => [row] }
+      values: (values: Omit<Row, 'id'> | Array<Omit<Row, 'id'>>) => {
+        const rows = (Array.isArray(values) ? values : [values]).map((value) => ({ ...value, id: `new-${++insertedSequence}` } as Row))
+        rowsFor(table).push(...rows)
+        return { returning: async () => reverseInsertResults ? [...rows].reverse() : rows }
       },
     })),
   }
@@ -110,6 +112,7 @@ describe('China outbound box and pallet completion', () => {
     vi.clearAllMocks()
     mocks.execute.mockResolvedValue(undefined)
     insertedSequence = 0
+    reverseInsertResults = false
     mocks.transaction.mockImplementation((callback) => callback(makeTransaction()))
     shipments = [{ id: shipmentId, userId, status: 'packing' }]
     items = [{ id: 'item-1', userId, shipmentId, inventoryId: 'inventory-1', sku: 'SKU-1', reservedQuantity: 10, packedQuantity: 10, boxSplitStatus: 'completed' }]
@@ -288,6 +291,83 @@ describe('China outbound box and pallet completion', () => {
     expect(pallets[0]).toMatchObject({ completionStatus: 'in_progress' })
     expect(boxes[1]).toMatchObject({ completionStatus: 'completed' })
     expect(pallets[1]).toMatchObject({ completionStatus: 'completed' })
+  })
+
+  it.each([50, 1201])('saves %i new boxes in bounded database batches without changing inventory', async (count) => {
+    boxes = []
+    boxItems = []
+    pallets = []
+    const allocations = Array.from({ length: count }, (_, index) => ({
+      boxNo: `BOX-${index + 1}`, quantity: index + 1, lengthCm: 10, widthCm: 20, heightCm: 30,
+    }))
+    items[0]!.reservedQuantity = allocations.reduce((total, allocation) => total + allocation.quantity, 0)
+    const balances = JSON.stringify(inventory)
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+    // SQL RETURNING order must not decide which quantity belongs to a box.
+    reverseInsertResults = true
+
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations, boxSplitStatus: 'completed' })
+
+    expect(boxes).toHaveLength(count)
+    expect(boxItems).toHaveLength(count)
+    const boxById = new Map(boxes.map((box) => [box.id, box]))
+    for (const allocation of boxItems) {
+      expect(boxById.get(allocation.boxId as string)).toMatchObject({
+        boxNo: `BOX-${allocation.quantity}`, sortOrder: Number(allocation.quantity) - 1,
+        lengthCm: '10', widthCm: '20', heightCm: '30',
+      })
+    }
+    expect(tx.insert.mock.calls.filter(([table]) => table === chinaOutboundBoxes)).toHaveLength(Math.ceil(count / 500))
+    expect(tx.insert.mock.calls.filter(([table]) => table === chinaOutboundBoxItems)).toHaveLength(Math.ceil(count / 500))
+    expect(items[0]).toMatchObject({ packedQuantity: items[0]!.reservedQuantity, boxSplitStatus: 'completed' })
+    expect(JSON.stringify(inventory)).toBe(balances)
+    expect(movements).toHaveLength(0)
+  })
+
+  it('skips identical dimension writes and preserves completion and other products in a shared box', async () => {
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 2, packedQuantity: 2 })
+    boxItems.push({ id: 'other-allocation', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-2', quantity: 2 })
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ boxNo: '1', quantity: 5, lengthCm: 10, widthCm: 20, heightCm: 30 }, { boxNo: '2', quantity: 5 }],
+    })
+
+    expect(tx.update).not.toHaveBeenCalledWith(chinaOutboundBoxes)
+    expect(boxItems.find((row) => row.id === 'other-allocation')).toMatchObject({ boxId: 'box-1', shipmentItemId: 'item-2', quantity: 2 })
+    expect(boxes.slice(0, 2).map((box) => box.completionStatus)).toEqual(['completed', 'completed'])
+    expect(pallets.map((pallet) => pallet.completionStatus)).toEqual(['completed', 'completed'])
+  })
+
+  it('reuses newly batched boxes across workbook products before assigning their pallet', async () => {
+    boxes = []
+    boxItems = []
+    pallets = []
+    items[0]!.reservedQuantity = 5
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 7, packedQuantity: 0 })
+    reverseInsertResults = true
+    const balances = JSON.stringify(inventory)
+
+    await applyChinaOutboundWorkbook({
+      userId, shipmentId,
+      boxSplits: [
+        { shipmentItemId: 'item-1', allocations: [{ boxNo: 'MIXED', quantity: 5, lengthCm: 10, widthCm: 20, heightCm: 30 }] },
+        { shipmentItemId: 'item-2', allocations: [{ boxNo: 'MIXED', quantity: 7, lengthCm: 5, widthCm: 5, heightCm: 5 }] },
+      ],
+      palletAssignments: [{ boxNo: 'MIXED', palletNo: 'P1' }],
+    })
+
+    expect(boxes).toHaveLength(1)
+    expect(boxItems.map((row) => [row.boxId, row.shipmentItemId, row.quantity])).toEqual([
+      [boxes[0]!.id, 'item-1', 5], [boxes[0]!.id, 'item-2', 7],
+    ])
+    expect(boxes[0]).toMatchObject({ boxNo: 'MIXED', lengthCm: '10', widthCm: '20', heightCm: '30', palletId: pallets[0]!.id })
+    expect(items.map((item) => item.packedQuantity)).toEqual([5, 7])
+    expect(JSON.stringify(inventory)).toBe(balances)
+    expect(movements).toHaveLength(0)
   })
 
   it('preserves completed boxes and pallets when only the product status changes', async () => {

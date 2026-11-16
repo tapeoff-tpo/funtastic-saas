@@ -4588,37 +4588,48 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         eq(chinaOutboundBoxItems.shipmentItemId, input.shipmentItem.id),
       ))
   }
-  let nextBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId !== input.shipmentItem.id)
+  const nextBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId !== input.shipmentItem.id)
+  // Each statement crosses the database connection. Create boxes and their
+  // allocations in bounded batches instead of two round trips per box.
+  const newAllocations = input.allocations.filter((allocation) => !boxesByNo.has(allocation.boxNo))
+  const firstSortOrder = input.boxes.length
+  const batchSize = 500
+  for (let offset = 0; offset < newAllocations.length; offset += batchSize) {
+    const batch = newAllocations.slice(offset, offset + batchSize)
+    const created = await input.tx.insert(chinaOutboundBoxes).values(batch.map((allocation, index) => {
+      const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+      return {
+        shipmentId: input.shipment.id,
+        userId: input.userId,
+        palletId: null,
+        boxNo: allocation.boxNo,
+        sortOrder: firstSortOrder + offset + index,
+        lengthCm: dimensions ? String(dimensions.lengthCm) : null,
+        widthCm: dimensions ? String(dimensions.widthCm) : null,
+        heightCm: dimensions ? String(dimensions.heightCm) : null,
+      }
+    })).returning()
+    if (created.length !== batch.length) throw new Error('박스를 저장하지 못했습니다.')
+    const createdByNo = new Map(created.map((box) => [box.boxNo, box]))
+    for (const allocation of batch) {
+      const box = createdByNo.get(allocation.boxNo)
+      if (!box) throw new Error('박스를 저장하지 못했습니다.')
+      input.boxes.push(box)
+      boxesByNo.set(box.boxNo, box)
+      changedBoxIds.add(box.id)
+    }
+  }
+  const boxItemValues: Array<typeof chinaOutboundBoxItems.$inferInsert> = []
 
   for (const allocation of input.allocations) {
     let box = boxesByNo.get(allocation.boxNo)
+    if (!box) throw new Error('박스를 저장하지 못했습니다.')
     let dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
     if (box && dimensions && input.boxItems.some((row) => row.boxId === box!.id && row.shipmentItemId !== input.shipmentItem.id)) {
       dimensions = largestChinaOutboundBox([normalizeOptionalChinaOutboundBoxDimensions({ lengthCm: box.lengthCm == null ? null : Number(box.lengthCm), widthCm: box.widthCm == null ? null : Number(box.widthCm), heightCm: box.heightCm == null ? null : Number(box.heightCm) }), dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? dimensions
     }
-    if (!box) {
-      const [created] = await input.tx
-        .insert(chinaOutboundBoxes)
-        .values({
-          shipmentId: input.shipment.id,
-          userId: input.userId,
-          palletId: null,
-          boxNo: allocation.boxNo,
-          sortOrder: input.boxes.length,
-          lengthCm: dimensions?.lengthCm == null ? null : String(dimensions.lengthCm),
-          widthCm: dimensions?.widthCm == null ? null : String(dimensions.widthCm),
-          heightCm: dimensions?.heightCm == null ? null : String(dimensions.heightCm),
-        })
-        .returning()
-      if (!created) throw new Error('박스를 저장하지 못했습니다.')
-      box = created
-      input.boxes.push(created)
-      boxesByNo.set(created.boxNo, created)
-      changedBoxIds.add(created.id)
-    } else if (dimensions) {
-      if (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm) {
-        changedBoxIds.add(box.id)
-      }
+    if (dimensions && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)) {
+      changedBoxIds.add(box.id)
       const [updated] = await input.tx
         .update(chinaOutboundBoxes)
         .set({
@@ -4638,18 +4649,19 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
 
     if (previousQuantitiesByBox.get(box.id) !== allocation.quantity) changedBoxIds.add(box.id)
 
-    const [boxItem] = await input.tx
-      .insert(chinaOutboundBoxItems)
-      .values({
-        boxId: box.id,
-        shipmentId: input.shipment.id,
-        shipmentItemId: input.shipmentItem.id,
-        userId: input.userId,
-        quantity: allocation.quantity,
-      })
-      .returning()
-    if (!boxItem) throw new Error('박스 분할 수량을 저장하지 못했습니다.')
-    nextBoxItems = [...nextBoxItems, boxItem]
+    boxItemValues.push({
+      boxId: box.id,
+      shipmentId: input.shipment.id,
+      shipmentItemId: input.shipmentItem.id,
+      userId: input.userId,
+      quantity: allocation.quantity,
+    })
+  }
+  for (let offset = 0; offset < boxItemValues.length; offset += batchSize) {
+    const batch = boxItemValues.slice(offset, offset + batchSize)
+    const saved = await input.tx.insert(chinaOutboundBoxItems).values(batch).returning()
+    if (saved.length !== batch.length) throw new Error('박스 분할 수량을 저장하지 못했습니다.')
+    nextBoxItems.push(...saved)
   }
 
   await markChinaOutboundBoxesChanged(input.tx, input.userId, input.shipment.id, [...changedBoxIds])

@@ -331,7 +331,8 @@ export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Prom
     const value = saveItemBoxSplitsSchema.parse(input)
     const actor = await getActor()
     await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
-    revalidateSaasChinaPaths()
+    // Packing edits do not change inventory reservations or purchasing status.
+    revalidatePath('/purchasing/china-shipments')
   })
 }
 

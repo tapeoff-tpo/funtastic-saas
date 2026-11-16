@@ -1057,7 +1057,6 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   onSaved?: () => void
   showSelection?: boolean
 }) {
-  const router = useRouter()
   const guard = useChinaWorkGuard()
   const draftId = `box:${item.id}`
   const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
@@ -1097,7 +1096,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch, ...(patch.boxNo !== undefined ? { autoNumber: false } : {}) } : draft))
   }
 
-  async function saveDraft(options: { quiet?: boolean; refresh?: boolean } = {}) {
+  async function saveDraft(options: { quiet?: boolean } = {}) {
     const nextAllocations = drafts
       .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm].some((value) => value.trim()))
       .map((draft) => {
@@ -1132,7 +1131,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     setInitialBoxSplitStatus(currentBoxSplitStatus)
     guard.setDraft(draftId, null)
     if (!options.quiet) toast.success(`${item.productName}의 박스분할을 저장했습니다.`)
-    if (options.refresh !== false) router.refresh()
+    // The Server Action revalidates this page; avoid fetching it again here.
     if (!options.quiet) onSaved?.()
     return true
   }
@@ -1145,7 +1144,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
       baseline: cloneBoxSplitDrafts(initialDrafts),
       status: currentBoxSplitStatus,
       baselineStatus: initialBoxSplitStatus,
-    }, save: saveDraft, saveQuietly: () => saveDraft({ quiet: true, refresh: false }),
+    }, save: saveDraft, saveQuietly: () => saveDraft({ quiet: true }),
     boxDimensions: drafts.flatMap((draft) => {
       const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
       const dimensions = [draft.lengthCm, draft.widthCm, draft.heightCm]

@@ -332,7 +332,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('keeps stage-two edit controls out of the list until the edit button opens a popup', async () => {
+  it('opens stage-two edits in a popup and clears a saved draft without a duplicate client refresh', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -346,6 +346,10 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({ shipmentItemId: 'shared-item-id', allocations: [expect.objectContaining({ boxNo: '7', quantity: 10 })] }))
     expect(screen.queryByPlaceholderText('1')).not.toBeInTheDocument()
+    expect(refresh).not.toHaveBeenCalled()
+    selectOtherShipment()
+    expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('applies the first box dimensions to every automatic split and saves them together', async () => {
@@ -1243,12 +1247,14 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(screen.getByText('선택 1개')).toBeInTheDocument()
     expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-1')).toHaveLength(1)
+    expect(refresh).toHaveBeenCalledOnce()
 
     await waitFor(() => expect(screen.getByRole('button', { name: '선택 저장' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '선택 저장' }))
 
     await waitFor(() => expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-2')).toHaveLength(2))
     expect(saveBoxSplits.mock.calls.filter(([input]) => input.shipmentItemId === 'item-1')).toHaveLength(1)
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
   })
 
   it('switches immediately with a clean blank box number', () => {

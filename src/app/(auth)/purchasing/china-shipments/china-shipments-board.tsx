@@ -357,7 +357,7 @@ function ChinaShipmentsBoardContent({
               {selectedWarehouseInventory.length > 0 ? (
                 <>
                   <input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
-                  <div className="mt-3 max-h-[440px] space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-3 max-h-[1440px] space-y-2 overflow-y-auto pr-1">
                     {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => (
                       <article key={item.id} className="rounded-md border bg-background p-3">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

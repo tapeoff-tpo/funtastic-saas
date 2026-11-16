@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   Purchase1688TrackingProgressWindow,
   PurchaseBulk1688TrackingLookup,
@@ -136,6 +136,11 @@ async function waitForStart(postMessage: ReturnType<typeof vi.spyOn>, orderNumbe
 }
 
 describe('PurchaseBulk1688TrackingLookup', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     window.localStorage.clear()
     refresh.mockReset()
@@ -171,6 +176,26 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     render(<PurchaseBulk1688TrackingLookup scope="all" />)
     fireEvent.click(screen.getByRole('button', { name: '1688 송장 일괄조회' }))
     expect(JSON.parse(window.localStorage.getItem(purchase1688TrackingPopupStorageKey(runId)) ?? '{}')).toMatchObject({ scope: 'all', candidates: [] })
+  })
+
+  it('coalesces nearby saved-result notifications into one list refresh without moving focus', async () => {
+    vi.useFakeTimers()
+    const focus = vi.spyOn(window, 'focus').mockImplementation(() => {})
+    render(<PurchaseBulk1688TrackingLookup scope="all" />)
+    const notifySaved = () => extensionMessage({ source: 'funtastic-saas', type: 'FUNTASTIC_1688_TRACKING_COMPLETE' })
+
+    act(() => notifySaved())
+    await act(async () => vi.advanceTimersByTimeAsync(200))
+    act(() => notifySaved())
+    await act(async () => vi.advanceTimersByTimeAsync(299))
+    expect(refresh).not.toHaveBeenCalled()
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(refresh).toHaveBeenCalledOnce()
+
+    act(() => notifySaved())
+    await act(async () => vi.advanceTimersByTimeAsync(300))
+    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(focus).not.toHaveBeenCalled()
   })
 
   it('loads all 110 products in the popup and distinguishes product count from grouped order count', async () => {
@@ -212,6 +237,8 @@ describe('PurchaseBulk1688TrackingLookup', () => {
   })
 
   it('runs the independent popup queue, saves exact waybills, and skips existing/manual rows', async () => {
+    const opener = { postMessage: vi.fn(), focus: vi.fn() }
+    vi.stubGlobal('opener', opener)
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input)
       if (url === `/api/purchasing/purchase-requests/${firstId}/1688-tracking` || url === `/api/purchasing/purchase-requests/${secondId}/1688-tracking`) {
@@ -254,6 +281,12 @@ describe('PurchaseBulk1688TrackingLookup', () => {
       expect.objectContaining({ runId: `${runId}-1-1`, orderNumber: secondOrder }),
       window.location.origin,
     ))
+    expect(opener.postMessage).toHaveBeenCalledOnce()
+    expect(opener.postMessage).toHaveBeenCalledWith({ source: 'funtastic-saas', type: 'FUNTASTIC_1688_TRACKING_COMPLETE' }, window.location.origin)
+    expect(screen.getByText('검수로 이동 완료')).toBeInTheDocument()
+    expect(screen.getByText('S71268668516')).toBeInTheDocument()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(opener.focus).not.toHaveBeenCalled()
 
     await act(async () => {
       extensionMessage({
@@ -278,6 +311,7 @@ describe('PurchaseBulk1688TrackingLookup', () => {
     expect(fetch).not.toHaveBeenCalledWith(`/api/purchasing/purchase-requests/${existingTrackingId}/1688-tracking`, expect.anything())
     expect(fetch).not.toHaveBeenCalledWith(`/api/purchasing/purchase-requests/${invalidOrderId}/1688-tracking`, expect.anything())
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('1688 송장 2건을 등록하고 검수로 이동했습니다.'))
+    expect(opener.focus).not.toHaveBeenCalled()
   })
 
   it('re-queries LP legacy records in the popup and asks the API to replace only untouched inspections', async () => {

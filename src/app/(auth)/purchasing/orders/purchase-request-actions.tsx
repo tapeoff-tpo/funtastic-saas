@@ -435,6 +435,11 @@ function Purchase1688TrackingProgressRunner({
         ...overrides,
       })
     }
+    const notifyOriginatingList = () => {
+      try {
+        window.opener?.postMessage({ source: PAGE_SOURCE, type: TRACKING_LOOKUP_COMPLETE }, window.location.origin)
+      } catch { /* The originating tab may have been closed or navigated away. */ }
+    }
     const finish = (message: string) => {
       if (disposed || finished) return
       finished = true
@@ -442,11 +447,7 @@ function Purchase1688TrackingProgressRunner({
       batchActiveRef.current = false
       setBatch(null)
       updateProgress(message, { currentOrderNumber: null, activeOrders: 0, complete: true })
-      if (succeededItems > 0) {
-        try {
-          window.opener?.postMessage({ source: PAGE_SOURCE, type: TRACKING_LOOKUP_COMPLETE }, window.location.origin)
-        } catch { /* The originating tab may have been closed or navigated away. */ }
-      }
+      if (succeededItems > 0) notifyOriginatingList()
       try { window.localStorage.removeItem(storageKey) } catch { /* Keep the completed summary visible. */ }
       if (stopRequestedRef.current || haltReason) {
         setLookupRows((rows) => rows.map((row) => row.status === 'queued' || row.status === 'querying'
@@ -566,7 +567,7 @@ function Purchase1688TrackingProgressRunner({
           if (!isActive(lookup)) return
           succeededItems += 1
           savedIds.push(id)
-          updateLookupRows([id], 'success', `송장 ${trackingNumbers.join(', ')} 저장 완료`, trackingNumbers)
+          updateLookupRows([id], 'success', isRecollectBatch ? `송장 ${trackingNumbers.join(', ')} 저장 완료` : '검수로 이동 완료', trackingNumbers)
         } catch (error) {
           if (!isActive(lookup)) return
           failedItems += 1
@@ -581,7 +582,10 @@ function Purchase1688TrackingProgressRunner({
       }
       if (!isActive(lookup)) return
       release(lookup)
-      if (savedIds.length > 0) updateLookupRows(savedIds, 'success', isRecollectBatch ? `송장 ${trackingNumbers.join(', ')} 다시 수집 완료` : `송장 ${trackingNumbers.join(', ')} 등록 완료`, trackingNumbers)
+      if (savedIds.length > 0) {
+        updateLookupRows(savedIds, 'success', isRecollectBatch ? `송장 ${trackingNumbers.join(', ')} 다시 수집 완료` : '검수로 이동 완료', trackingNumbers)
+        notifyOriginatingList()
+      }
       if (failedIds.length > 0) updateLookupRows(failedIds, 'failed', lastError)
       updateProgress(lastError || (isRecollectBatch
         ? `송장 ${savedIds.length.toLocaleString('ko-KR')}건 실제 운송장으로 다시 수집됨`
@@ -822,17 +826,23 @@ export function PurchaseBulk1688TrackingLookup({
   const isRecollectBatch = mode === 'recollect'
 
   useEffect(() => {
+    let refreshTimer: number | undefined
     const refreshOriginatingList = (event: MessageEvent<unknown>) => {
       if (event.origin !== window.location.origin) return
       const message = event.data
       if (!message || typeof message !== 'object') return
       const data = message as { source?: unknown; type?: unknown }
       if (data.source === PAGE_SOURCE && data.type === TRACKING_LOOKUP_COMPLETE) {
-        router.refresh()
+        // Concurrent lookups can save together; combine their list refreshes.
+        window.clearTimeout(refreshTimer)
+        refreshTimer = window.setTimeout(() => router.refresh(), 300)
       }
     }
     window.addEventListener('message', refreshOriginatingList)
-    return () => window.removeEventListener('message', refreshOriginatingList)
+    return () => {
+      window.removeEventListener('message', refreshOriginatingList)
+      window.clearTimeout(refreshTimer)
+    }
   }, [router])
 
   function startBatch() {

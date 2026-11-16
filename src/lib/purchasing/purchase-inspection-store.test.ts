@@ -24,6 +24,41 @@ describe('inspection persistence and arrival safety', () => {
     vi.clearAllMocks(); fixture.writes = []
     fixture.current = { id: 'purchase-id', userId: 'workspace-id', status: 'purchase_completed', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: null, supplierOrderNumber: '3317159640039018761', trackingNumber: null, rawData: { saasChinaMode: true }, purchaseInspection: null, costExchangeRateKrw: '200', sku: 'SKU-A', productName: '상품A' }
   })
+  it('moves a successful initial waybill lookup into inspection without assuming box quantities or receiving inventory', async () => {
+    await applyPurchaseRequest1688TrackingLookup({
+      userId: 'workspace-id', id: 'purchase-id', supplierOrderNumber: '3317159640039018761',
+      trackingNumbers: [' S71268668516 ', '9823528519765'],
+    })
+
+    expect(fixture.writes).toHaveLength(1)
+    expect(fixture.writes[0]).toMatchObject({
+      status: 'inspecting', trackingNumber: 'S71268668516', chinaReceivedQuantity: null,
+      purchaseInspection: { expectedQuantity: 100, revision: 0, checkedAt: null, checkedBy: null },
+    })
+    const savedInspection = fixture.writes[0]!.purchaseInspection as PurchaseInspection
+    expect(savedInspection.parcels.map((entry) => entry.trackingNumber)).toEqual(['S71268668516', '9823528519765'])
+    for (const entry of savedInspection.parcels) {
+      expect(entry.boxes).toEqual([{
+        id: expect.any(String), quantity: null, lengthCm: null, widthCm: null, heightCm: null, weightKg: null,
+      }])
+    }
+    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.adjust).not.toHaveBeenCalled()
+  })
+  it('preserves a manually entered waybill and the purchase-completed status when a later lookup returns', async () => {
+    fixture.current.trackingNumber = 'MANUAL-SF001'
+    const original = structuredClone(fixture.current)
+
+    await expect(applyPurchaseRequest1688TrackingLookup({
+      userId: 'workspace-id', id: 'purchase-id', supplierOrderNumber: '3317159640039018761',
+      trackingNumbers: ['S71268668516'],
+    })).rejects.toThrow('이미 등록된 송장 또는 검수 정보')
+
+    expect(fixture.writes).toHaveLength(0)
+    expect(fixture.current).toEqual(original)
+    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.adjust).not.toHaveBeenCalled()
+  })
   it('moves tracking entry into inspection and saves each parcel without receiving stock', async () => {
     await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel] } })
     expect(fixture.writes[0]).toMatchObject({ status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { expectedQuantity: 100, revision: 1, checkedBy: null } })

@@ -4,6 +4,7 @@ import {
   companySettings,
   products,
   quoteItems,
+  quoteClients,
   quoteSaleAttachments,
   quoteSaleItems,
   quoteSales,
@@ -43,6 +44,7 @@ export type QuoteWorkspaceAttachment = {
 
 export type QuoteWorkspaceSale = {
   id?: string
+  customerId?: string | null
   saleNumber?: string
   saleDate?: string
   quoteDate?: string
@@ -84,6 +86,7 @@ export type QuoteSupplier = {
 export type QuoteWorkspaceQuote = {
   id?: string
   salesId?: string | null
+  customerId?: string | null
   date?: string
   recipient?: string
   recipientTitle?: string
@@ -104,9 +107,26 @@ export type QuoteCatalogItem = {
   location: string
 }
 
+export type QuoteWorkspaceClient = {
+  id: string
+  clientName: string
+  representativeName: string
+  contactName: string
+  contactPhone: string
+  businessRegistrationNumber: string
+  taxInvoiceEmail: string
+  address: string
+  recipientName: string
+  recipientTitle: string
+  recipientPhone: string
+  deliveryMessage: string
+  memo: string
+}
+
 export type QuoteWorkspaceData = {
   sales: QuoteWorkspaceSale[]
   quotes: QuoteWorkspaceQuote[]
+  clients: QuoteWorkspaceClient[]
   catalog: QuoteCatalogItem[]
   supplier: QuoteSupplier
 }
@@ -196,6 +216,7 @@ function normalizedSale(input: QuoteWorkspaceSale): Required<Omit<QuoteWorkspace
 } {
   return {
     id: clientId(input.id, 'sale'),
+    customerId: cleanText(input.customerId, 100) || null,
     saleNumber: cleanText(input.saleNumber, 80),
     saleDate: cleanDate(input.saleDate) ?? new Date().toISOString().slice(0, 10),
     quoteDate: cleanDate(input.quoteDate) ?? cleanDate(input.saleDate) ?? new Date().toISOString().slice(0, 10),
@@ -237,6 +258,7 @@ function normalizedQuote(input: QuoteWorkspaceQuote) {
   return {
     id: clientId(input.id, 'quote'),
     salesId: cleanText(input.salesId, 160) || null,
+    customerId: cleanText(input.customerId, 100) || null,
     date: cleanDate(input.date) ?? new Date().toISOString().slice(0, 10),
     recipient: cleanText(input.recipient, 1_000),
     recipientTitle: cleanText(input.recipientTitle, 300),
@@ -296,9 +318,133 @@ export async function getQuoteSupplier(userId: string): Promise<QuoteSupplier> {
   }
 }
 
+function normalizedQuoteClient(input: Partial<QuoteWorkspaceClient>) {
+  return {
+    clientName: cleanText(input.clientName, 1_000),
+    representativeName: cleanText(input.representativeName, 300),
+    contactName: cleanText(input.contactName, 300),
+    contactPhone: cleanText(input.contactPhone, 200),
+    businessRegistrationNumber: cleanText(input.businessRegistrationNumber, 100),
+    taxInvoiceEmail: cleanText(input.taxInvoiceEmail, 320),
+    address: cleanText(input.address, 2_000),
+    recipientName: cleanText(input.recipientName, 300),
+    recipientTitle: cleanText(input.recipientTitle, 300),
+    recipientPhone: cleanText(input.recipientPhone, 200),
+    deliveryMessage: cleanText(input.deliveryMessage, 2_000),
+    memo: cleanText(input.memo, 8_000),
+  }
+}
+
+function quoteClientMetadata(row: {
+  id: string
+  clientName: string
+  representativeName: string
+  contactName: string
+  contactPhone: string
+  businessRegistrationNumber: string
+  taxInvoiceEmail: string
+  address: string
+  recipientName: string
+  recipientTitle: string
+  recipientPhone: string
+  deliveryMessage: string
+  memo: string
+}): QuoteWorkspaceClient {
+  return {
+    id: row.id,
+    clientName: row.clientName,
+    representativeName: row.representativeName,
+    contactName: row.contactName,
+    contactPhone: row.contactPhone,
+    businessRegistrationNumber: row.businessRegistrationNumber,
+    taxInvoiceEmail: row.taxInvoiceEmail,
+    address: row.address,
+    recipientName: row.recipientName,
+    recipientTitle: row.recipientTitle,
+    recipientPhone: row.recipientPhone,
+    deliveryMessage: row.deliveryMessage,
+    memo: row.memo,
+  }
+}
+
+const quoteClientColumns = {
+  id: quoteClients.id,
+  clientName: quoteClients.clientName,
+  representativeName: quoteClients.representativeName,
+  contactName: quoteClients.contactName,
+  contactPhone: quoteClients.contactPhone,
+  businessRegistrationNumber: quoteClients.businessRegistrationNumber,
+  taxInvoiceEmail: quoteClients.taxInvoiceEmail,
+  address: quoteClients.address,
+  recipientName: quoteClients.recipientName,
+  recipientTitle: quoteClients.recipientTitle,
+  recipientPhone: quoteClients.recipientPhone,
+  deliveryMessage: quoteClients.deliveryMessage,
+  memo: quoteClients.memo,
+}
+
+export async function listQuoteClients(userId: string): Promise<QuoteWorkspaceClient[]> {
+  const rows = await db.select(quoteClientColumns).from(quoteClients)
+    .where(eq(quoteClients.userId, userId))
+    .orderBy(asc(quoteClients.clientName), desc(quoteClients.updatedAt))
+  return rows.map(quoteClientMetadata)
+}
+
+export async function createQuoteClient(input: {
+  userId: string
+  actorUserId: string
+  client: Partial<QuoteWorkspaceClient>
+}): Promise<QuoteWorkspaceClient> {
+  const client = normalizedQuoteClient(input.client)
+  if (!client.clientName) throw new Error('거래처명을 입력해주세요.')
+  const [created] = await db.insert(quoteClients).values({
+    ...client,
+    userId: input.userId,
+    createdByUserId: input.actorUserId,
+    updatedByUserId: input.actorUserId,
+  }).returning(quoteClientColumns)
+  if (!created) throw new Error('거래처 정보를 저장하지 못했습니다.')
+  return quoteClientMetadata(created)
+}
+
+export async function updateQuoteClient(input: {
+  userId: string
+  actorUserId: string
+  id: string
+  client: Partial<QuoteWorkspaceClient>
+}): Promise<QuoteWorkspaceClient | null> {
+  const client = normalizedQuoteClient(input.client)
+  if (!client.clientName) throw new Error('거래처명을 입력해주세요.')
+  const [updated] = await db.update(quoteClients).set({
+    ...client,
+    updatedByUserId: input.actorUserId,
+    updatedAt: new Date(),
+  }).where(and(eq(quoteClients.userId, input.userId), eq(quoteClients.id, input.id)))
+    .returning(quoteClientColumns)
+  return updated ? quoteClientMetadata(updated) : null
+}
+
+export async function deleteQuoteClient(input: { userId: string; id: string }) {
+  const [deleted] = await db.delete(quoteClients)
+    .where(and(eq(quoteClients.userId, input.userId), eq(quoteClients.id, input.id)))
+    .returning({ id: quoteClients.id })
+  return Boolean(deleted)
+}
+
+async function ownedQuoteClientId(userId: string, candidate: string | null | undefined) {
+  const id = cleanText(candidate, 100)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null
+  const [client] = await db.select({ id: quoteClients.id }).from(quoteClients)
+    .where(and(eq(quoteClients.userId, userId), eq(quoteClients.id, id))).limit(1)
+  return client?.id ?? null
+}
+
 export async function saveQuoteSale(input: { userId: string; actorUserId: string; sale: QuoteWorkspaceSale }): Promise<QuoteWorkspaceSale> {
   const sale = normalizedSale(input.sale)
-  const catalog = await productLookup(input.userId, sale.items)
+  const [catalog, customerId] = await Promise.all([
+    productLookup(input.userId, sale.items),
+    ownedQuoteClientId(input.userId, sale.customerId),
+  ])
   const resolvedItems = sale.items.map((item) => {
     const catalogItem = catalog.get(item.productCode ?? '')
     return {
@@ -333,7 +479,7 @@ export async function saveQuoteSale(input: { userId: string; actorUserId: string
     const [existing] = await tx.select({ id: quoteSales.id }).from(quoteSales)
       .where(and(eq(quoteSales.userId, input.userId), eq(quoteSales.clientId, sale.id))).limit(1)
     const values = {
-      saleNumber: sale.saleNumber || null, saleDate: sale.saleDate, customerName: sale.clientName,
+      saleNumber: sale.saleNumber || null, saleDate: sale.saleDate, customerId, customerName: sale.clientName,
       contactName: sale.contactName, status: sale.status, shippingStatus: shipping.status,
       shippingDate: shipping.date, paymentStatus: payment.status, paymentDate: payment.date,
       memo: sale.internalMemo || null, details,
@@ -355,7 +501,7 @@ export async function saveQuoteSale(input: { userId: string; actorUserId: string
     }
     return parent
   })
-  return { ...sale, items: resolvedItems, id: sale.id, dbId: result.id } as QuoteWorkspaceSale
+  return { ...sale, customerId, items: resolvedItems, id: sale.id, dbId: result.id } as QuoteWorkspaceSale
 }
 
 export async function deleteQuoteSale(input: { userId: string; clientId: string }) {
@@ -474,7 +620,10 @@ export async function deleteQuoteSaleAttachment(input: { userId: string; saleCli
 
 export async function saveQuoteRecord(input: { userId: string; actorUserId: string; quote: QuoteWorkspaceQuote }): Promise<QuoteWorkspaceQuote> {
   const quote = normalizedQuote(input.quote)
-  const catalog = await productLookup(input.userId, quote.items)
+  const [catalog, requestedCustomerId] = await Promise.all([
+    productLookup(input.userId, quote.items),
+    ownedQuoteClientId(input.userId, quote.customerId),
+  ])
   const resolvedItems = quote.items.map((item) => {
     const catalogItem = catalog.get(item.productCode ?? '')
     // Keep the quoted line's cost snapshot stable on later edits.  The client
@@ -483,13 +632,14 @@ export async function saveQuoteRecord(input: { userId: string; actorUserId: stri
   })
   const totals = calculateQuoteTotals(resolvedItems.map((item) => ({ qty: item.qty, price: item.price, vatIncluded: item.vatIncluded })))
   const [sale] = quote.salesId
-    ? await db.select({ id: quoteSales.id }).from(quoteSales).where(and(eq(quoteSales.userId, input.userId), eq(quoteSales.clientId, quote.salesId))).limit(1)
+    ? await db.select({ id: quoteSales.id, customerId: quoteSales.customerId }).from(quoteSales).where(and(eq(quoteSales.userId, input.userId), eq(quoteSales.clientId, quote.salesId))).limit(1)
     : []
+  const customerId = sale?.customerId ?? requestedCustomerId
   const result = await db.transaction(async (tx) => {
     const [existing] = await tx.select({ id: quotes.id, printCount: quotes.printCount, lastPrintedAt: quotes.lastPrintedAt }).from(quotes)
       .where(and(eq(quotes.userId, input.userId), eq(quotes.clientId, quote.id))).limit(1)
     const values = {
-      saleId: sale?.id ?? null, issueDate: quote.date, recipient: quote.recipient, recipientTitle: quote.recipientTitle,
+      saleId: sale?.id ?? null, customerId, issueDate: quote.date, recipient: quote.recipient, recipientTitle: quote.recipientTitle,
       intro: quote.intro, supplierSnapshot: quote.supplier, notes: quote.notes, details: { salesId: quote.salesId },
       subtotalAmount: asNumeric(totals.supply), vatAmount: asNumeric(totals.vat), totalAmount: asNumeric(totals.total),
       updatedByUserId: input.actorUserId, updatedAt: new Date(),
@@ -508,7 +658,7 @@ export async function saveQuoteRecord(input: { userId: string; actorUserId: stri
     }
     return parent
   })
-  return { ...quote, items: resolvedItems, id: quote.id, printCount: result.printCount, lastPrintedAt: result.lastPrintedAt?.toISOString() ?? null } as QuoteWorkspaceQuote
+  return { ...quote, customerId, items: resolvedItems, id: quote.id, printCount: result.printCount, lastPrintedAt: result.lastPrintedAt?.toISOString() ?? null } as QuoteWorkspaceQuote
 }
 
 export async function deleteQuoteRecord(input: { userId: string; clientId: string }) {
@@ -525,9 +675,10 @@ export async function markQuotePrinted(input: { userId: string; clientId: string
 }
 
 export async function getQuoteWorkspace(userId: string): Promise<QuoteWorkspaceData> {
-  const [saleRows, quoteRows, catalog, supplier] = await Promise.all([
+  const [saleRows, quoteRows, clients, catalog, supplier] = await Promise.all([
     db.select().from(quoteSales).where(eq(quoteSales.userId, userId)).orderBy(desc(quoteSales.saleDate), desc(quoteSales.updatedAt)),
     db.select().from(quotes).where(eq(quotes.userId, userId)).orderBy(desc(quotes.issueDate), desc(quotes.updatedAt)),
+    listQuoteClients(userId),
     listQuoteCatalog(userId),
     getQuoteSupplier(userId),
   ])
@@ -563,7 +714,7 @@ export async function getQuoteWorkspace(userId: string): Promise<QuoteWorkspaceD
     const details = detailsRecord(row.details)
     return {
       ...details,
-      id: row.clientId, saleNumber: row.saleNumber ?? '', saleDate: row.saleDate, clientName: row.customerName,
+      id: row.clientId, customerId: row.customerId, saleNumber: row.saleNumber ?? '', saleDate: row.saleDate, clientName: row.customerName,
       contactName: row.contactName, status: row.status as SalesStatus,
       internalMemo: row.memo ?? String(details.internalMemo ?? ''),
       attachments: attachmentsBySaleId.get(row.id) ?? [],
@@ -579,7 +730,7 @@ export async function getQuoteWorkspace(userId: string): Promise<QuoteWorkspaceD
     return {
       // Once its source sale is deleted, the foreign key is intentionally
       // cleared. Do not resurrect the stale browser-era link from JSON.
-      id: row.clientId, salesId: row.saleId
+      id: row.clientId, customerId: row.customerId, salesId: row.saleId
         ? (saleClientIdByDbId.get(row.saleId) ?? (cleanText(details.salesId, 160) || null))
         : null,
       date: row.issueDate, recipient: row.recipient, recipientTitle: row.recipientTitle, intro: row.intro,
@@ -592,5 +743,5 @@ export async function getQuoteWorkspace(userId: string): Promise<QuoteWorkspaceD
       })),
     } as QuoteWorkspaceQuote
   })
-  return { sales, quotes: savedQuotes, catalog, supplier }
+  return { sales, quotes: savedQuotes, clients, catalog, supplier }
 }

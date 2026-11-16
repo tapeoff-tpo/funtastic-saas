@@ -289,8 +289,10 @@
 .quoteToolbar select,
 .trackRow select,
 .field input,
+.field select,
 .field textarea,
 .fieldWide input,
+.fieldWide select,
 .fieldWide textarea,
 .memo,
 .itemTable input,
@@ -417,8 +419,10 @@
 .hiddenInput { display: none; }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus,
 .fieldWide input:focus,
+.fieldWide select:focus,
 .fieldWide textarea:focus,
 .memo:focus,
 .itemTable input:focus,
@@ -552,6 +556,18 @@
 .fieldWide { grid-column: 1 / -1; }
 .field textarea,
 .fieldWide textarea { resize: vertical; }
+.clientSelect { cursor: pointer; }
+
+.clientFormHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.clientFormHead h2 { margin-bottom: 0.25rem; }
+.clientFormHead p { margin: 0; color: #697386; font-size: 0.8rem; line-height: 1.45; }
 
 .trackGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
 .track > div:first-child { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.55rem; }
@@ -718,6 +734,7 @@
   .monthlySummary > div:first-child span { text-align: left; }
   .monthlyGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cards, .fields { grid-template-columns: 1fr; }
+  .clientFormHead { align-items: flex-start; flex-direction: column; }
   .fieldWide { grid-column: auto; }
   .trackRow, .trackRow:has(input[type="number"]) { grid-template-columns: 1fr 1fr 30px; }
   .trackRow input:last-of-type { grid-column: 1 / 3; }

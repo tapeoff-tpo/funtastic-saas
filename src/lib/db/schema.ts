@@ -1664,12 +1664,44 @@ export const sidebarMenuSettings = pgTable(
 // the authoritative current catalog; changing a current item must never
 // change the margin of an already-created sales or quote record.
 
+// Customer master data is shared by the canonical workspace owner.  Sales and
+// quotes only point at it for convenience; their displayed customer details
+// stay as independent historical snapshots.
+export const quoteClients = pgTable(
+  'quote_clients',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    clientName: text('client_name').notNull().default(''),
+    representativeName: text('representative_name').notNull().default(''),
+    contactName: text('contact_name').notNull().default(''),
+    contactPhone: varchar('contact_phone', { length: 200 }).notNull().default(''),
+    businessRegistrationNumber: varchar('business_registration_number', { length: 100 }).notNull().default(''),
+    taxInvoiceEmail: varchar('tax_invoice_email', { length: 320 }).notNull().default(''),
+    address: text('address').notNull().default(''),
+    recipientName: text('recipient_name').notNull().default(''),
+    recipientTitle: text('recipient_title').notNull().default(''),
+    recipientPhone: varchar('recipient_phone', { length: 200 }).notNull().default(''),
+    deliveryMessage: text('delivery_message').notNull().default(''),
+    memo: text('memo').notNull().default(''),
+    createdByUserId: uuid('created_by_user_id'),
+    updatedByUserId: uuid('updated_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('quote_clients_user_name_idx').on(table.userId, table.clientName),
+    index('quote_clients_user_business_registration_idx').on(table.userId, table.businessRegistrationNumber),
+  ],
+)
+
 export const quoteSales = pgTable(
   'quote_sales',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
     clientId: varchar('client_id', { length: 160 }).notNull(),
+    customerId: uuid('customer_id').references(() => quoteClients.id, { onDelete: 'set null' }),
     saleNumber: varchar('sale_number', { length: 80 }),
     saleDate: date('sale_date').notNull().defaultNow(),
     customerName: text('customer_name').notNull().default(''),
@@ -1698,6 +1730,7 @@ export const quoteSales = pgTable(
       .where(sql`${table.saleNumber} IS NOT NULL AND btrim(${table.saleNumber}) <> ''`),
     index('quote_sales_user_date_updated_idx').on(table.userId, table.saleDate, table.updatedAt),
     index('quote_sales_user_status_idx').on(table.userId, table.status, table.updatedAt),
+    index('quote_sales_user_customer_idx').on(table.userId, table.customerId),
   ],
 )
 
@@ -1764,6 +1797,7 @@ export const quotes = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
     clientId: varchar('client_id', { length: 160 }).notNull(),
+    customerId: uuid('customer_id').references(() => quoteClients.id, { onDelete: 'set null' }),
     quoteNumber: varchar('quote_number', { length: 80 }),
     saleId: uuid('sale_id').references(() => quoteSales.id, { onDelete: 'set null' }),
     issueDate: date('issue_date').notNull().defaultNow(),
@@ -1790,6 +1824,7 @@ export const quotes = pgTable(
       .where(sql`${table.quoteNumber} IS NOT NULL AND btrim(${table.quoteNumber}) <> ''`),
     index('quotes_user_issue_updated_idx').on(table.userId, table.issueDate, table.updatedAt),
     index('quotes_user_sale_idx').on(table.userId, table.saleId, table.updatedAt),
+    index('quotes_user_customer_idx').on(table.userId, table.customerId),
     index('quotes_sale_idx').on(table.saleId),
   ],
 )

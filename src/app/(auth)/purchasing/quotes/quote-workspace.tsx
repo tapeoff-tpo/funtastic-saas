@@ -33,7 +33,7 @@ type Track = { id: string; status: 'before' | 'completed'; date: string; memo: s
 type Supplier = { reg: string; name: string; rep: string; addr: string; biz: string; type: string; tel: string; bankAccount?: string }
 type SaleAttachment = { id: string; fileName: string; contentType: string; fileSize: number; createdAt: string }
 type Sale = {
-  id: string; saleNumber: string; saleDate: string; quoteDate: string; clientName: string
+  id: string; customerId: string | null; saleNumber: string; saleDate: string; quoteDate: string; clientName: string
   representativeName: string; contactName: string; contactPhone: string; businessRegistrationNumber: string
   taxInvoiceEmail: string; address: string; recipientName: string; recipientPhone: string
   deliveryMessage: string; recipientTitle: string; requestedDueDate: string; status: SalesStatus
@@ -42,12 +42,17 @@ type Sale = {
   items: Item[]; shipments: Track[]; payments: Track[]
 }
 type Quote = {
-  id: string; salesId: string | null; date: string; recipient: string; recipientTitle: string
+  id: string; customerId: string | null; salesId: string | null; date: string; recipient: string; recipientTitle: string
   intro: string; supplier: Supplier; notes: string[]; items: Item[]; printCount?: number; lastPrintedAt?: string | null
 }
 type Catalog = { id: string; sku: string; name: string; spec: string; cost: number | null; location: string }
-type Workspace = { sales: Sale[]; quotes: Quote[]; catalog: Catalog[]; supplier: Supplier }
-type Tab = 'sales' | 'quote'
+type Client = {
+  id: string; clientName: string; representativeName: string; contactName: string; contactPhone: string
+  businessRegistrationNumber: string; taxInvoiceEmail: string; address: string; recipientName: string
+  recipientPhone: string; recipientTitle: string; deliveryMessage: string; memo: string
+}
+type Workspace = { sales: Sale[]; quotes: Quote[]; catalog: Catalog[]; supplier: Supplier; clients?: Client[] }
+type Tab = 'sales' | 'quote' | 'clients'
 type ExportScope = 'all' | 'selected' | 'date'
 type MonthlySummary = { month: string; count: number; activeCount: number; totalGross: number }
 
@@ -195,12 +200,19 @@ function newTrack(partial: Partial<Track> = {}): Track {
 }
 function newSale(): Sale {
   return {
-    id: id('sale'), saleNumber: '', saleDate: dateToday(), quoteDate: dateToday(), clientName: '',
+    id: id('sale'), customerId: null, saleNumber: '', saleDate: dateToday(), quoteDate: dateToday(), clientName: '',
     representativeName: '', contactName: '', contactPhone: '', businessRegistrationNumber: '',
     taxInvoiceEmail: '', address: '', recipientName: '', recipientPhone: '', deliveryMessage: '',
     recipientTitle: '대표이사 귀하', requestedDueDate: '', status: 'pending', includeShipping: false,
     shippingFee: 0, shippingCost: 0, shippingVatIncluded: true, internalMemo: '', attachments: [],
     items: [newItem()], shipments: [newTrack()], payments: [newTrack()],
+  }
+}
+function newClient(): Client {
+  return {
+    id: '', clientName: '', representativeName: '', contactName: '', contactPhone: '',
+    businessRegistrationNumber: '', taxInvoiceEmail: '', address: '', recipientName: '', recipientPhone: '', recipientTitle: '',
+    deliveryMessage: '', memo: '',
   }
 }
 function quoteNotes(date = dateToday(), supplier: Supplier = emptySupplier()) {
@@ -218,7 +230,7 @@ function quoteNotes(date = dateToday(), supplier: Supplier = emptySupplier()) {
 function newQuote(supplier: Supplier, sale?: Sale): Quote {
   const date = sale?.quoteDate || dateToday()
   return {
-    id: id('quote'), salesId: sale?.id || null, date, recipient: sale?.clientName || '',
+    id: id('quote'), customerId: sale?.customerId || null, salesId: sale?.id || null, date, recipient: sale?.clientName || '',
     recipientTitle: sale?.recipientTitle || '대표이사 귀하', intro: '아래와 같이 납품 및 청구합니다.',
     supplier: { ...supplier }, notes: quoteNotes(date, supplier),
     items: sale ? quoteItemsForSale(sale) : [newItem()],
@@ -247,7 +259,7 @@ function normalizeAttachment(input: unknown): SaleAttachment | null {
 function normalizeSale(input: Partial<Sale> | undefined): Sale {
   const base = newSale()
   return {
-    ...base, ...input, id: String(input?.id || id('sale')), saleNumber: String(input?.saleNumber || ''),
+    ...base, ...input, id: String(input?.id || id('sale')), customerId: input?.customerId ? String(input.customerId) : null, saleNumber: String(input?.saleNumber || ''),
     saleDate: String(input?.saleDate || dateToday()), quoteDate: String(input?.quoteDate || input?.saleDate || dateToday()),
     clientName: String(input?.clientName || ''), representativeName: String(input?.representativeName || ''),
     contactName: String(input?.contactName || ''), contactPhone: String(input?.contactPhone || ''),
@@ -261,10 +273,55 @@ function normalizeSale(input: Partial<Sale> | undefined): Sale {
     payments: (input?.payments?.length ? input.payments : base.payments).map(normalizeTrack),
   }
 }
+function normalizeClient(input: Partial<Client> | undefined): Client {
+  const base = newClient()
+  return {
+    ...base,
+    ...input,
+    id: String(input?.id || ''),
+    clientName: String(input?.clientName || ''),
+    representativeName: String(input?.representativeName || ''),
+    contactName: String(input?.contactName || ''),
+    contactPhone: String(input?.contactPhone || ''),
+    businessRegistrationNumber: String(input?.businessRegistrationNumber || ''),
+    taxInvoiceEmail: String(input?.taxInvoiceEmail || ''),
+    address: String(input?.address || ''),
+    recipientName: String(input?.recipientName || ''),
+    recipientPhone: String(input?.recipientPhone || ''),
+    recipientTitle: String(input?.recipientTitle || ''),
+    deliveryMessage: String(input?.deliveryMessage || ''),
+    memo: String(input?.memo || ''),
+  }
+}
+function saleFromClient(sale: Sale, client: Client): Sale {
+  return {
+    ...sale,
+    customerId: client.id || null,
+    clientName: client.clientName,
+    representativeName: client.representativeName,
+    contactName: client.contactName,
+    contactPhone: client.contactPhone,
+    businessRegistrationNumber: client.businessRegistrationNumber,
+    taxInvoiceEmail: client.taxInvoiceEmail,
+    address: client.address,
+    recipientName: client.recipientName || client.contactName,
+    recipientPhone: client.recipientPhone || client.contactPhone,
+    recipientTitle: client.recipientTitle || sale.recipientTitle,
+    deliveryMessage: client.deliveryMessage,
+  }
+}
+function quoteFromClient(quote: Quote, client: Client): Quote {
+  return {
+    ...quote,
+    customerId: client.id || null,
+    recipient: client.clientName,
+    recipientTitle: client.recipientTitle || quote.recipientTitle,
+  }
+}
 function normalizeQuote(input: Partial<Quote> | undefined, supplier: Supplier): Quote {
   const base = newQuote(supplier)
   return {
-    ...base, ...input, id: String(input?.id || id('quote')), salesId: input?.salesId ? String(input.salesId) : null,
+    ...base, ...input, id: String(input?.id || id('quote')), customerId: input?.customerId ? String(input.customerId) : null, salesId: input?.salesId ? String(input.salesId) : null,
     date: String(input?.date || dateToday()), recipient: String(input?.recipient || ''),
     recipientTitle: String(input?.recipientTitle || '대표이사 귀하'), intro: String(input?.intro || base.intro),
     supplier: { ...supplier, ...(input?.supplier || {}) },
@@ -286,6 +343,12 @@ async function attachmentApi<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, init)
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.error || '첨부파일을 처리하지 못했습니다.')
+  return data as T
+}
+async function clientApi<T>(url: string, init: RequestInit): Promise<T> {
+  const response = await fetch(url, init)
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || '거래처 정보를 처리하지 못했습니다.')
   return data as T
 }
 function catalogItem(item: Item, catalog: Catalog[], code: string): Item {
@@ -347,6 +410,7 @@ export default function QuoteWorkspace() {
   const [sales, setSales] = useState<Sale[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [catalog, setCatalog] = useState<Catalog[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [supplier, setSupplier] = useState<Supplier>(emptySupplier)
   const [sale, setSale] = useState<Sale | null>(null)
   const [quote, setQuote] = useState<Quote>(() => newQuote(emptySupplier()))
@@ -375,6 +439,7 @@ export default function QuoteWorkspace() {
       setSales((result.sales || []).map(normalizeSale))
       setQuotes((result.quotes || []).map((item) => normalizeQuote(item, currentSupplier)))
       setCatalog(result.catalog || [])
+      setClients((result.clients || []).map(normalizeClient))
       // The initial blank document is created before the shared company
       // settings arrive. Replace it once so its supplier/account-note
       // snapshot uses the common company data, but never wipe an already
@@ -447,6 +512,46 @@ export default function QuoteWorkspace() {
       setNotice({ text: '영업건을 공용 데이터에 저장했습니다.' })
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : '영업건 저장에 실패했습니다.', error: true }) } finally { setSaving(false) }
   }
+  const saveClient = async (input: Client): Promise<Client | null> => {
+    if (!input.clientName.trim()) {
+      setNotice({ text: '거래처명을 입력해주세요.', error: true })
+      return null
+    }
+    const existing = clients.some((entry) => entry.id === input.id)
+    setSaving(true)
+    try {
+      const url = existing
+        ? `/api/purchasing/quotes/clients/${encodeURIComponent(input.id)}`
+        : '/api/purchasing/quotes/clients'
+      const result = await clientApi<{ client: Client }>(url, {
+        method: existing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client: input }),
+      })
+      const saved = normalizeClient(result.client)
+      setClients((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)].sort((left, right) => left.clientName.localeCompare(right.clientName, 'ko-KR')))
+      setNotice({ text: existing ? '거래처 정보를 수정했습니다.' : '거래처 정보를 등록했습니다.' })
+      return saved
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : '거래처 정보를 저장하지 못했습니다.', error: true })
+      return null
+    } finally { setSaving(false) }
+  }
+  const removeClient = async (target: Client): Promise<boolean> => {
+    if (!target.id) return false
+    setSaving(true)
+    try {
+      await clientApi(`/api/purchasing/quotes/clients/${encodeURIComponent(target.id)}`, { method: 'DELETE' })
+      setClients((current) => current.filter((entry) => entry.id !== target.id))
+      setSale((current) => current?.customerId === target.id ? { ...current, customerId: null } : current)
+      setQuote((current) => current.customerId === target.id ? { ...current, customerId: null } : current)
+      setNotice({ text: '거래처 정보를 삭제했습니다. 기존 영업건과 견적서의 저장된 정보는 유지됩니다.' })
+      return true
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : '거래처 정보를 삭제하지 못했습니다.', error: true })
+      return false
+    } finally { setSaving(false) }
+  }
   const updateSaleFromList = (saleId: string, updater: (current: Sale) => Sale) => {
     const current = sales.find((entry) => entry.id === saleId)
     if (!current) return
@@ -501,6 +606,7 @@ export default function QuoteWorkspace() {
       setSales((result.sales || []).map(normalizeSale))
       setQuotes((result.quotes || []).map((entry) => normalizeQuote(entry, currentSupplier)))
       setCatalog(result.catalog || [])
+      setClients((result.clients || []).map(normalizeClient))
       window.localStorage.setItem(migrationKey, 'true'); setLegacy(null)
       setNotice({ text: '이 브라우저의 기존 기록을 공용 데이터로 가져왔습니다.' })
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : '기존 기록을 가져오지 못했습니다.', error: true }) } finally { setSaving(false) }
@@ -570,6 +676,7 @@ export default function QuoteWorkspace() {
         setSales((result.sales || []).map(normalizeSale))
         setQuotes((result.quotes || []).map((entry) => normalizeQuote(entry, currentSupplier)))
         setCatalog(result.catalog || [])
+        setClients((result.clients || []).map(normalizeClient))
       }
       setSelectedSales([])
       setNotice({ text: `${additions.length.toLocaleString('ko-KR')}건의 영업 기록을 공용 데이터에 추가했습니다.` })
@@ -599,6 +706,7 @@ export default function QuoteWorkspace() {
       setQuote(shouldRefresh ? {
         ...loaded,
         salesId: source.id,
+        customerId: source.customerId,
         date: source.quoteDate || dateToday(),
         recipient: source.clientName,
         recipientTitle: source.recipientTitle || '대표이사 귀하',
@@ -697,6 +805,7 @@ export default function QuoteWorkspace() {
       <strong>펀타 영업·견적</strong>
       <nav className={styles.tabs} aria-label="견적서 탭">
         <button type="button" className={tab === 'sales' ? styles.tabActive : styles.tab} onClick={() => { setTab('sales'); setSale(null) }}>영업관리</button>
+        <button type="button" className={tab === 'clients' ? styles.tabActive : styles.tab} onClick={() => { setTab('clients'); setSale(null) }}>거래처정보</button>
         <button type="button" className={tab === 'quote' ? styles.tabActive : styles.tab} onClick={() => setTab('quote')}>견적서</button>
       </nav>
       <button type="button" className={styles.primary} onClick={() => { const next = newSale(); setSale(next); setTab('sales') }}><Plus size={15} /> 새 영업건</button>
@@ -720,8 +829,9 @@ export default function QuoteWorkspace() {
       onAll={() => setSelectedSales((current) => shownSales.length && shownSales.every((entry) => current.includes(entry.id)) ? current.filter((entry) => !shownSales.some((saleEntry) => saleEntry.id === entry)) : [...new Set([...current, ...shownSales.map((entry) => entry.id)])])}
       onExport={exportSales} onImport={() => salesImportRef.current?.click()}
     /> : null}
-    {!loading && tab === 'sales' && sale ? <SalesEditor sale={sale} totals={currentSaleTotals} saving={saving} onBack={() => setSale(null)} onChange={setSale} onSave={saveSale} onDelete={() => void removeSale(sale.id)} onCopy={() => setSale(copySaleRecord(sale))} onQuote={() => openQuoteForSale(sale)} onSabangnet={downloadSabangnet} onAttach={uploadSaleAttachments} onDownloadAttachment={downloadSaleAttachment} onRemoveAttachment={removeSaleAttachment} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'sale')} /> : null}
-    {!loading && tab === 'quote' ? <QuoteEditor quote={quote} totals={currentQuoteTotals} saved={quotes} selected={selectedQuote} saving={saving} onChange={setQuote} onSave={saveQuote} onDelete={removeQuote} onNew={() => { setQuote(newQuote(supplier)); setSelectedQuote('') }} onSelect={(quoteId) => { setSelectedQuote(quoteId); const selected = quotes.find((entry) => entry.id === quoteId); if (selected) setQuote(normalizeQuote(selected, supplier)) }} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'quote')} onPrint={async () => { try { if (quote.id) await api('PATCH', { action: 'mark-printed', quoteId: quote.id }) } catch { /* printing stays available */ } window.print() }} /> : null}
+    {!loading && tab === 'sales' && sale ? <SalesEditor sale={sale} clients={clients} totals={currentSaleTotals} saving={saving} onBack={() => setSale(null)} onChange={setSale} onUseClient={(client) => setSale((current) => current ? saleFromClient(current, client) : current)} onSave={saveSale} onDelete={() => void removeSale(sale.id)} onCopy={() => setSale(copySaleRecord(sale))} onQuote={() => openQuoteForSale(sale)} onSabangnet={downloadSabangnet} onAttach={uploadSaleAttachments} onDownloadAttachment={downloadSaleAttachment} onRemoveAttachment={removeSaleAttachment} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'sale')} /> : null}
+    {!loading && tab === 'clients' ? <ClientDirectory clients={clients} saving={saving} onSave={saveClient} onDelete={removeClient} /> : null}
+    {!loading && tab === 'quote' ? <QuoteEditor quote={quote} clients={clients} totals={currentQuoteTotals} saved={quotes} selected={selectedQuote} saving={saving} onChange={setQuote} onUseClient={(client) => setQuote((current) => quoteFromClient(current, client))} onSave={saveQuote} onDelete={removeQuote} onNew={() => { setQuote(newQuote(supplier)); setSelectedQuote('') }} onSelect={(quoteId) => { setSelectedQuote(quoteId); const selected = quotes.find((entry) => entry.id === quoteId); if (selected) setQuote(normalizeQuote(selected, supplier)) }} onCatalog={(itemId, code) => applyCatalogItem(itemId, code, 'quote')} onPrint={async () => { try { if (quote.id) await api('PATCH', { action: 'mark-printed', quoteId: quote.id }) } catch { /* printing stays available */ } window.print() }} /> : null}
     <datalist id="quote-catalog">{catalog.slice(0, 1000).flatMap((entry) => [
       <option key={`${entry.id}-sku`} value={entry.sku}>{entry.name}{entry.spec ? ' · ' + entry.spec : ''}</option>,
       <option key={`${entry.id}-name`} value={entry.name}>{entry.sku}{entry.spec ? ' · ' + entry.spec : ''}</option>,
@@ -789,12 +899,51 @@ function SalesList(props: {
     </section>
   </main>
 }
+
+function ClientDirectory(props: {
+  clients: Client[]; saving: boolean
+  onSave: (client: Client) => Promise<Client | null>; onDelete: (client: Client) => Promise<boolean>
+}) {
+  const [search, setSearch] = useState('')
+  const [draft, setDraft] = useState<Client | null>(null)
+  const shownClients = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return props.clients
+      .filter((client) => !term || [
+        client.clientName, client.representativeName, client.contactName, client.contactPhone,
+        client.businessRegistrationNumber, client.taxInvoiceEmail, client.address, client.memo,
+      ].join(' ').toLowerCase().includes(term))
+      .slice()
+      .sort((left, right) => left.clientName.localeCompare(right.clientName, 'ko-KR'))
+  }, [props.clients, search])
+  const update = <K extends keyof Client>(field: K, input: Client[K]) => {
+    setDraft((current) => current ? { ...current, [field]: input } : current)
+  }
+  const save = async () => {
+    if (!draft) return
+    const saved = await props.onSave(draft)
+    if (saved) setDraft(saved)
+  }
+  const remove = async () => {
+    if (!draft || !draft.id || !window.confirm(`${draft.clientName || '이 거래처'} 정보를 삭제할까요?\n\n기존 영업건과 견적서에 저장된 정보는 유지됩니다.`)) return
+    if (await props.onDelete(draft)) setDraft(null)
+  }
+  return <main className={styles.page}>
+    <section className={styles.listHead}><div><h1>거래처정보</h1><p>우리와 거래하는 업체의 기본 정보를 등록하고, 영업건·견적서에서 바로 불러옵니다.</p></div><div className={styles.actions}><button type="button" className={styles.primary} onClick={() => setDraft(newClient())}><Plus size={15} /> 새 거래처</button></div></section>
+    <section className={styles.listCard}>
+      <div className={styles.filters}><label className={styles.search}><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="거래처명, 담당자, 연락처, 사업자번호 검색" /></label><span>{shownClients.length.toLocaleString('ko-KR')}개 거래처</span></div>
+      <div className={styles.scroll}><table className={styles.table}><thead><tr><th>거래처명</th><th>대표자 · 담당자</th><th>연락처</th><th>사업자번호</th><th>세금계산서 이메일</th><th>주소</th><th className={styles.noPrint}>관리</th></tr></thead><tbody>{shownClients.length ? shownClients.map((client) => <tr key={client.id}><td><strong>{client.clientName}</strong></td><td>{[client.representativeName, client.contactName].filter(Boolean).join(' · ') || '-'}</td><td>{client.contactPhone || '-'}</td><td>{client.businessRegistrationNumber || '-'}</td><td>{client.taxInvoiceEmail || '-'}</td><td>{client.address || '-'}</td><td className={styles.noPrint}><div className={styles.rowActions}><button type="button" className={styles.light} onClick={() => setDraft(normalizeClient(client))}>수정</button></div></td></tr>) : <tr><td colSpan={7} className={styles.empty}>{search ? '일치하는 거래처가 없습니다.' : '등록된 거래처가 없습니다. 새 거래처를 등록해 주세요.'}</td></tr>}</tbody></table></div>
+    </section>
+    {draft ? <section className={styles.section}><div className={styles.clientFormHead}><div><h2>{draft.id ? '거래처 정보 수정' : '새 거래처 등록'}</h2><p>여기에서 저장한 정보는 선택할 때만 영업건과 견적서에 복사됩니다.</p></div><div className={styles.actions}><button type="button" className={styles.light} disabled={props.saving} onClick={() => setDraft(null)}>닫기</button>{draft.id ? <button type="button" className={styles.danger} disabled={props.saving} onClick={() => void remove()}><Trash2 size={14} /> 삭제</button> : null}<button type="button" className={styles.primary} disabled={props.saving} onClick={() => void save()}><Save size={15} /> {props.saving ? '저장 중' : '저장'}</button></div></div><div className={styles.fields}><Field label="거래처명"><input value={draft.clientName} onChange={(event) => update('clientName', event.target.value)} placeholder="예: 주식회사 펀타" /></Field><Field label="대표자"><input value={draft.representativeName} onChange={(event) => update('representativeName', event.target.value)} /></Field><Field label="담당자"><input value={draft.contactName} onChange={(event) => update('contactName', event.target.value)} /></Field><Field label="담당자 연락처"><input value={draft.contactPhone} onChange={(event) => update('contactPhone', event.target.value)} /></Field><Field label="사업자등록번호"><input value={draft.businessRegistrationNumber} onChange={(event) => update('businessRegistrationNumber', event.target.value)} /></Field><Field label="세금계산서 이메일"><input type="email" value={draft.taxInvoiceEmail} onChange={(event) => update('taxInvoiceEmail', event.target.value)} /></Field><Field label="주소" wide><input value={draft.address} onChange={(event) => update('address', event.target.value)} /></Field><Field label="기본 수령인"><input value={draft.recipientName} onChange={(event) => update('recipientName', event.target.value)} /></Field><Field label="기본 수령인 연락처"><input value={draft.recipientPhone} onChange={(event) => update('recipientPhone', event.target.value)} /></Field><Field label="견적서 수신 표기" wide><input value={draft.recipientTitle} onChange={(event) => update('recipientTitle', event.target.value)} placeholder="예: 대표이사 귀하" /></Field><Field label="기본 배송 메모" wide><textarea rows={2} value={draft.deliveryMessage} onChange={(event) => update('deliveryMessage', event.target.value)} /></Field><Field label="관리 메모" wide><textarea rows={3} value={draft.memo} onChange={(event) => update('memo', event.target.value)} placeholder="거래 조건 등 내부에서만 볼 메모" /></Field></div></section> : null}
+  </main>
+}
+
 function Card({ label, value, color = '' }: { label: string; value: number; color?: string }) { return <div className={[styles.card, color ? styles[color] : ''].join(' ')}><span>{label}</span><strong>{value.toLocaleString('ko-KR')}</strong></div> }
 
 function SalesEditor(props: {
-  sale: Sale; totals: ReturnType<typeof calculateSalesMarginTotals> | null; saving: boolean
+  sale: Sale; clients: Client[]; totals: ReturnType<typeof calculateSalesMarginTotals> | null; saving: boolean
   onBack: () => void; onChange: (sale: Sale) => void; onSave: () => void; onDelete: () => void; onCopy: () => void; onQuote: () => void; onSabangnet: () => void
-  onAttach: (files: FileList | null) => void; onDownloadAttachment: (attachment: SaleAttachment) => void; onRemoveAttachment: (attachment: SaleAttachment) => void; onCatalog: (id: string, code: string) => void
+  onUseClient: (client: Client) => void; onAttach: (files: FileList | null) => void; onDownloadAttachment: (attachment: SaleAttachment) => void; onRemoveAttachment: (attachment: SaleAttachment) => void; onCatalog: (id: string, code: string) => void
 }) {
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const update = <K extends keyof Sale>(field: K, input: Sale[K]) => props.onChange({ ...props.sale, [field]: input })
@@ -810,10 +959,18 @@ function SalesEditor(props: {
     if (field === 'shipments') updateTracking(rows, props.sale.payments)
     else updateTracking(props.sale.shipments, rows)
   }
+  const selectClient = (clientId: string) => {
+    if (!clientId) {
+      update('customerId', null)
+      return
+    }
+    const client = props.clients.find((entry) => entry.id === clientId)
+    if (client) props.onUseClient(client)
+  }
   return <main className={styles.page}>
     <div className={[styles.editorActions, styles.noPrint].join(' ')}><button type="button" className={styles.back} onClick={props.onBack}><ArrowLeft size={16} /> 영업관리</button><div className={styles.actions}><button type="button" className={styles.light} onClick={props.onCopy}><Copy size={15} /> 복사</button><button type="button" className={styles.light} onClick={props.onDelete}><Trash2 size={15} /> 삭제</button><button type="button" className={styles.light} onClick={props.onSabangnet}><Download size={15} /> 사방넷 등록 엑셀</button><button type="button" className={styles.light} onClick={props.onQuote}>견적서 작업</button><button type="button" className={styles.primary} disabled={props.saving} onClick={props.onSave}><Save size={15} /> {props.saving ? '저장 중' : '저장'}</button></div></div>
     <section className={styles.editorTitle}><div><h1>{props.sale.clientName || '새 영업건'}</h1><p>영업 조건, 출고·입금 현황, 수익을 한 화면에서 관리합니다.</p></div><select value={props.sale.status} onChange={(event) => update('status', event.target.value as SalesStatus)}>{Object.entries(statusNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></section>
-    <div className={styles.editorGrid}><Section title="거래처 정보"><div className={styles.fields}><Field label="견적일"><input type="date" value={props.sale.quoteDate} onChange={(event) => update('quoteDate', event.target.value)} /></Field><Field label="영업일"><input type="date" value={props.sale.saleDate} onChange={(event) => update('saleDate', event.target.value)} /></Field><Field label="거래처명"><input value={props.sale.clientName} onChange={(event) => update('clientName', event.target.value)} /></Field><Field label="대표자"><input value={props.sale.representativeName} onChange={(event) => update('representativeName', event.target.value)} /></Field><Field label="담당자"><input value={props.sale.contactName} onChange={(event) => update('contactName', event.target.value)} /></Field><Field label="연락처"><input value={props.sale.contactPhone} onChange={(event) => update('contactPhone', event.target.value)} /></Field><Field label="사업자번호"><input value={props.sale.businessRegistrationNumber} onChange={(event) => update('businessRegistrationNumber', event.target.value)} /></Field><Field label="세금계산서 이메일"><input value={props.sale.taxInvoiceEmail} onChange={(event) => update('taxInvoiceEmail', event.target.value)} /></Field><Field label="주소" wide><input value={props.sale.address} onChange={(event) => update('address', event.target.value)} /></Field></div></Section>
+    <div className={styles.editorGrid}><Section title="거래처 정보"><div className={styles.fields}><Field label="등록 거래처" wide><select className={styles.clientSelect} value={props.sale.customerId || ''} onChange={(event) => selectClient(event.target.value)}><option value="">직접 입력 또는 등록 거래처 선택</option>{props.clients.map((client) => <option key={client.id} value={client.id}>{client.clientName}{client.contactName ? ` · ${client.contactName}` : ''}</option>)}</select></Field><Field label="견적일"><input type="date" value={props.sale.quoteDate} onChange={(event) => update('quoteDate', event.target.value)} /></Field><Field label="영업일"><input type="date" value={props.sale.saleDate} onChange={(event) => update('saleDate', event.target.value)} /></Field><Field label="거래처명"><input value={props.sale.clientName} onChange={(event) => update('clientName', event.target.value)} /></Field><Field label="대표자"><input value={props.sale.representativeName} onChange={(event) => update('representativeName', event.target.value)} /></Field><Field label="담당자"><input value={props.sale.contactName} onChange={(event) => update('contactName', event.target.value)} /></Field><Field label="연락처"><input value={props.sale.contactPhone} onChange={(event) => update('contactPhone', event.target.value)} /></Field><Field label="사업자번호"><input value={props.sale.businessRegistrationNumber} onChange={(event) => update('businessRegistrationNumber', event.target.value)} /></Field><Field label="세금계산서 이메일"><input value={props.sale.taxInvoiceEmail} onChange={(event) => update('taxInvoiceEmail', event.target.value)} /></Field><Field label="주소" wide><input value={props.sale.address} onChange={(event) => update('address', event.target.value)} /></Field></div></Section>
       <Section title="수령·배송 정보"><div className={styles.fields}><Field label="수령인"><input value={props.sale.recipientName} onChange={(event) => update('recipientName', event.target.value)} /></Field><Field label="수령인 연락처"><input value={props.sale.recipientPhone} onChange={(event) => update('recipientPhone', event.target.value)} /></Field><Field label="희망 납기일"><input type="date" value={props.sale.requestedDueDate} onChange={(event) => update('requestedDueDate', event.target.value)} /></Field><Field label="수신 표기"><input value={props.sale.recipientTitle} onChange={(event) => update('recipientTitle', event.target.value)} /></Field><Field label="배송 메모" wide><textarea value={props.sale.deliveryMessage} onChange={(event) => update('deliveryMessage', event.target.value)} rows={2} /></Field></div></Section></div>
     <Section title="출고 · 입금 현황"><div className={styles.trackGrid}><Tracks title="출고 현황" rows={props.sale.shipments} onAdd={() => updateTracking([...props.sale.shipments, newTrack()], props.sale.payments)} onChange={(trackId, changes) => updateTrack('shipments', trackId, changes)} onRemove={(trackId) => updateTracking(props.sale.shipments.length > 1 ? props.sale.shipments.filter((track) => track.id !== trackId) : props.sale.shipments, props.sale.payments)} /><Tracks title="입금 현황" payment rows={props.sale.payments} onAdd={() => updateTracking(props.sale.shipments, [...props.sale.payments, newTrack()])} onChange={(trackId, changes) => updateTrack('payments', trackId, changes)} onRemove={(trackId) => updateTracking(props.sale.shipments, props.sale.payments.length > 1 ? props.sale.payments.filter((track) => track.id !== trackId) : props.sale.payments)} /></div></Section>
     <Section title="품목 및 수익"><div className={styles.scroll}><table className={styles.itemTable}><thead><tr><th>품목코드</th><th>품목명</th><th>옵션</th><th>수량</th><th>개당 원가</th><th>도매가</th><th>판매 단가</th><th>VAT</th><th>매출</th><th>순이익</th><th className={styles.noPrint} /></tr></thead><tbody>{props.sale.items.map((item) => { const margin = calculateSalesItemMargin({ qty: item.qty, price: item.price, cost: item.cost, wholesalePrice: item.wholesalePrice, vatIncluded: item.vatIncluded }); return <tr key={item.id}><td><input list="quote-catalog" value={item.productCode} onChange={(event) => props.onCatalog(item.id, event.target.value)} placeholder="코드·품명 검색" /></td><td><input value={item.name} onChange={(event) => updateItem(item.id, 'name', event.target.value)} /></td><td><input value={item.spec} onChange={(event) => updateItem(item.id, 'spec', event.target.value)} /></td><td><input type="number" min="0" value={item.qty} onChange={(event) => updateItem(item.id, 'qty', event.target.value)} /></td><td><input type="number" min="0" value={item.cost} onChange={(event) => updateItem(item.id, 'cost', event.target.value)} /></td><td><input type="number" min="0" value={item.wholesalePrice} onChange={(event) => updateItem(item.id, 'wholesalePrice', event.target.value)} /></td><td><input type="number" min="0" value={item.price} onChange={(event) => updateItem(item.id, 'price', event.target.value)} /></td><td><label className={styles.check}><input type="checkbox" checked={item.vatIncluded} onChange={(event) => updateItem(item.id, 'vatIncluded', event.target.checked)} />포함</label></td><td>{money(margin.totalGross)}</td><td>{money(margin.totalProfit)}<small>{percent(margin.totalProfitRate)}</small></td><td className={styles.noPrint}><button type="button" className={styles.icon} disabled={props.sale.items.length === 1} onClick={() => props.onChange({ ...props.sale, items: props.sale.items.filter((row) => row.id !== item.id) })}><Trash2 size={14} /></button></td></tr> })}</tbody></table></div><div className={[styles.actions, styles.noPrint].join(' ')}><button type="button" className={styles.light} onClick={() => props.onChange({ ...props.sale, items: [...props.sale.items, newItem()] })}><Plus size={14} /> 빈 품목 추가</button><button type="button" className={styles.light} disabled={!props.sale.items.length} onClick={() => { const previous = props.sale.items.at(-1); if (previous) props.onChange({ ...props.sale, items: [...props.sale.items, newItem({ ...previous, id: id('item') })] }) }}><Copy size={14} /> 이전 품목 복사</button></div><div className={styles.totals}><span>매출 {money(props.totals?.totalGross)}</span><span>원가 {money(props.totals?.totalCost)}</span><strong>순이익 {money(props.totals?.totalProfit)} <small>{percent(props.totals?.totalProfitRate)}</small></strong></div></Section>
@@ -822,14 +979,22 @@ function SalesEditor(props: {
 }
 
 function QuoteEditor(props: {
-  quote: Quote; totals: ReturnType<typeof calculateQuoteTotals>; saved: Quote[]; selected: string; saving: boolean
-  onChange: (quote: Quote) => void; onSave: () => void; onDelete: () => void; onNew: () => void; onSelect: (id: string) => void; onCatalog: (itemId: string, code: string) => void; onPrint: () => void
+  quote: Quote; clients: Client[]; totals: ReturnType<typeof calculateQuoteTotals>; saved: Quote[]; selected: string; saving: boolean
+  onChange: (quote: Quote) => void; onUseClient: (client: Client) => void; onSave: () => void; onDelete: () => void; onNew: () => void; onSelect: (id: string) => void; onCatalog: (itemId: string, code: string) => void; onPrint: () => void
 }) {
   const update = <K extends keyof Quote>(field: K, input: Quote[K]) => props.onChange({ ...props.quote, [field]: input })
   const updateItem = <K extends keyof Item>(itemId: string, field: K, input: Item[K]) => props.onChange({ ...props.quote, items: props.quote.items.map((item) => item.id === itemId ? { ...item, [field]: input } : item) })
   const updateSupplier = <K extends keyof Supplier>(field: K, input: Supplier[K]) => update('supplier', { ...props.quote.supplier, [field]: input })
+  const selectClient = (clientId: string) => {
+    if (!clientId) {
+      update('customerId', null)
+      return
+    }
+    const client = props.clients.find((entry) => entry.id === clientId)
+    if (client) props.onUseClient(client)
+  }
   return <main className={styles.quotePage}>
-    <div className={[styles.quoteToolbar, styles.noPrint].join(' ')}><div className={styles.actions}><button type="button" className={styles.primary} disabled={props.saving} onClick={props.onSave}><Save size={15} /> {props.saving ? '저장 중' : '저장'}</button><select value={props.selected} onChange={(event) => props.onSelect(event.target.value)}><option value="">저장된 견적서</option>{props.saved.map((entry) => <option key={entry.id} value={entry.id}>{titleOf(entry)}</option>)}</select><button type="button" className={styles.light} disabled={!props.selected} onClick={props.onDelete}><Trash2 size={15} /> 삭제</button><button type="button" className={styles.light} onClick={props.onNew}>새 견적서</button></div><button type="button" className={styles.print} onClick={props.onPrint}><Printer size={15} /> 인쇄 / PDF</button></div>
+    <div className={[styles.quoteToolbar, styles.noPrint].join(' ')}><div className={styles.actions}><button type="button" className={styles.primary} disabled={props.saving} onClick={props.onSave}><Save size={15} /> {props.saving ? '저장 중' : '저장'}</button><select aria-label="등록 거래처" value={props.quote.customerId || ''} onChange={(event) => selectClient(event.target.value)}><option value="">등록 거래처 불러오기</option>{props.clients.map((client) => <option key={client.id} value={client.id}>{client.clientName}{client.contactName ? ` · ${client.contactName}` : ''}</option>)}</select><select value={props.selected} onChange={(event) => props.onSelect(event.target.value)}><option value="">저장된 견적서</option>{props.saved.map((entry) => <option key={entry.id} value={entry.id}>{titleOf(entry)}</option>)}</select><button type="button" className={styles.light} disabled={!props.selected} onClick={props.onDelete}><Trash2 size={15} /> 삭제</button><button type="button" className={styles.light} onClick={props.onNew}>새 견적서</button></div><button type="button" className={styles.print} onClick={props.onPrint}><Printer size={15} /> 인쇄 / PDF</button></div>
     <section className={styles.paper}><h1>견 적 서</h1><div className={styles.quoteInfo}><div className={styles.quoteLeft}><QField label="날 짜"><input type="date" value={props.quote.date} onChange={(event) => update('date', event.target.value)} /></QField><QField label="수 신"><input value={props.quote.recipient} onChange={(event) => update('recipient', event.target.value)} placeholder="거래처명" /></QField><QField label="참 조"><input value={props.quote.recipientTitle} onChange={(event) => update('recipientTitle', event.target.value)} /></QField><div className={styles.intro}><input value={props.quote.intro} onChange={(event) => update('intro', event.target.value)} /></div></div><div className={styles.supplier}><strong>공급자</strong><div><QField label="등록번호"><input value={props.quote.supplier.reg} onChange={(event) => updateSupplier('reg', event.target.value)} /></QField><div className={styles.two}><QField label="상 호"><input value={props.quote.supplier.name} onChange={(event) => updateSupplier('name', event.target.value)} /></QField><QField label="성 명"><input value={props.quote.supplier.rep} onChange={(event) => updateSupplier('rep', event.target.value)} /></QField></div><QField label="사업장 주소"><input value={props.quote.supplier.addr} onChange={(event) => updateSupplier('addr', event.target.value)} /></QField><div className={styles.two}><QField label="업 태"><input value={props.quote.supplier.biz} onChange={(event) => updateSupplier('biz', event.target.value)} /></QField><QField label="종 목"><input value={props.quote.supplier.type} onChange={(event) => updateSupplier('type', event.target.value)} /></QField></div><QField label="전화번호"><input value={props.quote.supplier.tel} onChange={(event) => updateSupplier('tel', event.target.value)} /></QField></div></div></div>
       <div className={styles.quoteTotal}><span>합계금액<small>(공급가액+세액)</small></span><div><strong>{money(props.totals.total)}</strong><em>{formatKoreanWon(props.totals.total)}</em></div></div>
       <div className={[styles.quoteAdd, styles.noPrint].join(' ')}><button type="button" className={styles.light} onClick={() => update('items', [...props.quote.items, newItem()])}><Plus size={14} /> 품목 추가</button></div>

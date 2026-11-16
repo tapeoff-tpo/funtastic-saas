@@ -46,6 +46,7 @@ function InspectionTranslationFixture() {
         <textarea id="inspection-note" placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" />
         <p>수량이 다르면 확인 체크와 비고 입력 후에만 검수완료할 수 있습니다.</p>
         <button type="button">박스 복사</button>
+        <button type="button" aria-label="2번 송장 박스 복사">박스 복사</button>
         <p>1번 박스 복사</p>
         <label htmlFor="copy-count">추가할 박스 개수</label><input id="copy-count" type="number" />
         <h3>검수 오류 등록</h3>
@@ -193,6 +194,7 @@ describe('PurchasingLanguageSwitcher', () => {
       expect(screen.getByText('数量差异备注')).toBeInTheDocument()
       expect(screen.getByText('数量不一致时，只有勾选确认并填写备注后才能完成验货。')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '复制箱子' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '运单 2 复制箱子' })).toHaveTextContent('复制箱子')
       expect(screen.getByText('复制第 1 箱')).toBeInTheDocument()
       expect(screen.getByText('登记验货异常')).toBeInTheDocument()
       expect(screen.getByText('仅填写异常说明即可登记，照片为选填。')).toBeInTheDocument()

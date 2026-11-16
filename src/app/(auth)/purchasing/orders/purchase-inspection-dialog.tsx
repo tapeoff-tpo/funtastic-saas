@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ExternalLink } from 'lucide-react'
+import { Copy, ExternalLink } from 'lucide-react'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
@@ -190,7 +190,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       {error ? <div role="alert" className="text-sm text-red-700">{error}<Button type="button" variant="outline" className="ml-3" onClick={() => setAttempt((value) => value + 1)}>다시 불러오기</Button></div> : !data ? <p>불러오는 중…</p> : null}
       {data && inspection && summary && <>
         <PurchaseInspectionLabelPanel id={id} canUpload={editable || data.status === 'china_arrived'} />
-        <fieldset disabled={pending || !editable} className="space-y-4">
+        <fieldset disabled={pending || !editable} className="min-w-0 space-y-4">
           {inspection.parcels.map((parcel, parcelIndex) => <section key={parcel.id} className="space-y-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-48 flex-1 text-sm">
@@ -213,8 +213,34 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
                 onChange={(event) => changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, trackingNumber: event.target.value } : row))} />
               </div>
               <span className="pb-2 text-sm">송장별 입고수량: <strong>{parcel.boxes.reduce((sum, box) => sum + (box.quantity ?? 0), 0)}</strong>개</span>
-              <Button type="button" variant="outline" size="sm" onClick={() => changeParcels(inspection.parcels.filter((row) => row.id !== parcel.id))}>송장 삭제</Button>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" aria-label={`${parcelIndex + 1}번 송장 박스 복사`}
+                  disabled={remainingBoxCapacity < 1 || !copyableBoxes.some((entry) => entry.parcelId === parcel.id)}
+                  title={remainingBoxCapacity < 1 ? '검수 한 건에는 박스를 최대 500개까지 입력할 수 있습니다.' : copyableBoxes.some((entry) => entry.parcelId === parcel.id) ? undefined : '수량과 가로·세로·높이를 입력한 박스만 복사할 수 있습니다.'}
+                  onClick={() => {
+                    const source = copyableBoxes.find((entry) => entry.parcelId === parcel.id)
+                    if (source) beginBoxCopy(source.parcelId, source.boxId)
+                  }}><Copy className="size-3.5" />박스 복사</Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => changeParcels(inspection.parcels.filter((row) => row.id !== parcel.id))}>송장 삭제</Button>
+              </div>
             </div>
+            {boxCopySource?.parcelId === parcel.id ? (() => {
+              const sourceIndex = parcel.boxes.findIndex((box) => box.id === boxCopySource.boxId)
+              if (sourceIndex < 0) return null
+              return <div className="flex flex-wrap items-end gap-2 rounded-md border bg-muted/30 p-2 text-sm">
+                <label className="grid gap-1 text-xs">복사할 박스
+                  <select value={boxCopySource.boxId} className="rounded border bg-background p-1.5 text-sm" onChange={(event) => {
+                    const source = copyableBoxes.find((entry) => entry.parcelId === parcel.id && entry.boxId === event.target.value)
+                    if (source) setBoxCopySource({ parcelId: source.parcelId, boxId: source.boxId })
+                  }}>{copyableBoxes.filter((entry) => entry.parcelId === parcel.id).map((entry) => <option key={entry.boxId} value={entry.boxId}>{`${entry.parcelIndex + 1}번 송장 ${entry.boxIndex + 1}번 박스 복사`}</option>)}</select>
+                </label>
+                <label className="grid gap-1 text-xs">추가할 박스 개수
+                  <input aria-label={`${parcelIndex + 1}번 송장 ${sourceIndex + 1}번 박스 복사 개수`} type="number" min="1" max={Math.max(1, remainingBoxCapacity)} step="1" value={boxCopyCount} className="w-28 rounded border bg-background p-1.5 text-sm" onChange={(event) => setBoxCopyCount(event.target.value)} />
+                </label>
+                <Button type="button" size="sm" disabled={remainingBoxCapacity < 1} onClick={copyBoxes}>복사 추가</Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setBoxCopySource(null)}>취소</Button>
+              </div>
+            })() : null}
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-sm">
               <thead><tr>{['박스', '입고수량', '가로(cm)', '세로(cm)', '높이(cm)', '무게(kg)', 'CBM', ''].map((text, index) => <th key={index} className="p-1 text-left font-medium">{text}</th>)}</tr></thead>
               <tbody>{parcel.boxes.map((box, boxIndex) => <tr key={box.id}>
@@ -227,23 +253,6 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
                 <td className="p-1"><div className="flex items-center gap-1"><Button type="button" variant="ghost" size="sm" aria-label={`${parcelIndex + 1}번 송장 ${boxIndex + 1}번 박스 복사`} title={remainingBoxCapacity < 1 ? '검수 한 건에는 박스를 최대 500개까지 입력할 수 있습니다.' : canCopyInspectionBox(box) ? undefined : '수량과 가로·세로·높이를 입력한 박스만 복사할 수 있습니다.'} disabled={remainingBoxCapacity < 1 || !canCopyInspectionBox(box)} onClick={() => beginBoxCopy(parcel.id, box.id)}>박스 복사</Button><Button type="button" variant="ghost" size="sm" disabled={parcel.boxes.length === 1} onClick={() => { if (boxCopySource?.boxId === box.id) setBoxCopySource(null); changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: row.boxes.filter((entry) => entry.id !== box.id) } : row)) }}>삭제</Button></div></td>
               </tr>)}</tbody>
             </table></div>
-            {boxCopySource?.parcelId === parcel.id ? (() => {
-              const sourceIndex = parcel.boxes.findIndex((box) => box.id === boxCopySource.boxId)
-              if (sourceIndex < 0) return null
-              return <div className="flex flex-wrap items-end gap-2 rounded-md border bg-muted/30 p-2 text-sm">
-                <label className="grid gap-1 text-xs">복사할 박스
-                  <select value={boxCopySource.boxId} className="rounded border bg-background p-1.5 text-sm" onChange={(event) => {
-                    const source = copyableBoxes.find((entry) => entry.boxId === event.target.value)
-                    if (source) setBoxCopySource({ parcelId: source.parcelId, boxId: source.boxId })
-                  }}>{copyableBoxes.map((entry) => <option key={entry.boxId} value={entry.boxId}>{`${entry.parcelIndex + 1}번 송장 ${entry.boxIndex + 1}번 박스 복사`}</option>)}</select>
-                </label>
-                <label className="grid gap-1 text-xs">추가할 박스 개수
-                  <input aria-label={`${parcelIndex + 1}번 송장 ${sourceIndex + 1}번 박스 복사 개수`} type="number" min="1" max={Math.max(1, remainingBoxCapacity)} step="1" value={boxCopyCount} className="w-28 rounded border bg-background p-1.5 text-sm" onChange={(event) => setBoxCopyCount(event.target.value)} />
-                </label>
-                <Button type="button" size="sm" disabled={remainingBoxCapacity < 1} onClick={copyBoxes}>복사 추가</Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setBoxCopySource(null)}>취소</Button>
-              </div>
-            })() : null}
           </section>)}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" disabled={remainingBoxCapacity < 1 || inspection.parcels.length >= 100} title={remainingBoxCapacity < 1 ? '검수 한 건에는 박스를 최대 500개까지 입력할 수 있습니다.' : undefined} onClick={() => changeParcels([...inspection.parcels, { id: crypto.randomUUID(), trackingNumber: '', boxes: [blankInspectionBox(crypto.randomUUID())] }])}>송장 추가</Button>

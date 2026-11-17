@@ -806,6 +806,55 @@ describe('ChinaShipmentsBoard', () => {
     })))
   })
 
+  it('views saved goods and subsidiary materials separately and fills only the visible category', async () => {
+    createShipment.mockResolvedValue({ ok: false, error: '테스트 종료' })
+    const stock = [
+      { ...inventoryItem, itemCategory: '[상품]' },
+      { ...inventoryItem, id: 'material', sku: 'PACK-1', productName: '포장 부자재', itemCategory: '[부재료]', availableQuantity: 8 },
+      { ...inventoryItem, id: 'empty-material', sku: 'PACK-EMPTY', productName: '예약된 부자재', itemCategory: '부자재', availableQuantity: 0 },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /중국창고/ }))
+    const categories = within(screen.getByRole('group', { name: '출고 품목구분 선택' }))
+    expect(categories.getByRole('button', { name: /^전체/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(categories.getByRole('button', { name: /^부자재/ })).toHaveTextContent('1종')
+    fireEvent.click(categories.getByRole('button', { name: /^상품/ }))
+    expect(screen.getByText('새 상품')).toBeInTheDocument()
+    expect(screen.queryByText('포장 부자재')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /중국창고/ })).toHaveAccessibleName(/15개/)
+    fireEvent.click(screen.getByRole('button', { name: '보이는 상품 전체수량' }))
+    expect(screen.getByLabelText('이번 출고')).toHaveValue(15)
+    fireEvent.click(categories.getByRole('button', { name: /^부자재/ }))
+    expect(screen.queryByText('새 상품')).not.toBeInTheDocument()
+    expect(screen.getByText('포장 부자재')).toBeInTheDocument()
+    expect(screen.getByLabelText('이번 출고')).toHaveDisplayValue('')
+    expect(screen.getByRole('checkbox', { name: /중국창고/ })).toHaveAccessibleName(/8개/)
+    fireEvent.change(screen.getByLabelText('이번 출고'), { target: { value: '3' } })
+    fireEvent.click(categories.getByRole('button', { name: /^상품/ }))
+    expect(screen.getByLabelText('이번 출고')).toHaveValue(15)
+    fireEvent.change(screen.getByLabelText('도착지'), { target: { value: '인천' } })
+    fireEvent.click(screen.getByRole('button', { name: '중국출고요청 만들기' }))
+    await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [
+      { inventoryId: 'inventory-new', quantity: 15 },
+      { inventoryId: 'material', quantity: 3 },
+    ] })))
+  })
+
+  it('keeps uncategorized legacy goods and custom saved categories accessible', () => {
+    render(<ChinaShipmentsBoard inventoryItems={[
+      { ...inventoryItem, itemCategory: null },
+      { ...inventoryItem, id: 'sample', sku: 'SAMPLE', productName: '출고용 샘플', itemCategory: '[샘플]' },
+    ]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /중국창고/ }))
+    const categories = within(screen.getByRole('group', { name: '출고 품목구분 선택' }))
+    fireEvent.click(categories.getByRole('button', { name: /^상품/ }))
+    expect(screen.getByText('새 상품')).toBeInTheDocument()
+    expect(screen.queryByText('출고용 샘플')).not.toBeInTheDocument()
+    fireEvent.click(categories.getByRole('button', { name: /^샘플/ }))
+    expect(screen.getByText('출고용 샘플')).toBeInTheDocument()
+    expect(screen.queryByText('새 상품')).not.toBeInTheDocument()
+  })
+
   it('shows configured stock locations before they have available inventory', () => {
     render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate
       outboundWarehouses={[
@@ -1059,6 +1108,34 @@ describe('ChinaShipmentsBoard', () => {
       fireEvent.click(warehouse)
       await waitFor(() => expect(screen.getByText('새 상품')).toBeInTheDocument())
       expect(fetchSpy).toHaveBeenCalledWith('/api/purchasing/china-shipments/available-stock', { cache: 'no-store' })
+    } finally { fetchSpy.mockRestore() }
+  })
+
+  it('filters lazily loaded additional stock by saved category without losing entered quantities', async () => {
+    addShipmentItems.mockResolvedValue({ ok: true })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [
+      { ...inventoryItem, itemCategory: '[상품]' },
+      { ...inventoryItem, id: 'material', sku: 'PACK-1', productName: '추가 포장재', itemCategory: '[부재료]' },
+    ] })))
+    try {
+      render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+      fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+      fireEvent.click(await screen.findByRole('checkbox', { name: /중국창고/ }))
+      const categories = within(screen.getByRole('group', { name: '출고 품목구분 선택' }))
+      fireEvent.click(categories.getByRole('button', { name: /^상품/ }))
+      expect(screen.queryByText('추가 포장재')).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('추가 출고'), { target: { value: '2' } })
+      fireEvent.click(categories.getByRole('button', { name: /^부자재/ }))
+      expect(screen.queryByText('새 상품')).not.toBeInTheDocument()
+      expect(screen.getByText('추가 포장재')).toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('추가 출고'), { target: { value: '4' } })
+      fireEvent.click(categories.getByRole('button', { name: /^상품/ }))
+      expect(screen.getByLabelText('추가 출고')).toHaveValue(2)
+      fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
+      await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [
+        { inventoryId: 'inventory-new', quantity: 2 },
+        { inventoryId: 'material', quantity: 4 },
+      ] }))
     } finally { fetchSpy.mockRestore() }
   })
 

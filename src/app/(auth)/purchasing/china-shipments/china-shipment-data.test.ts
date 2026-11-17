@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ detail: vi.fn(), stock: vi.fn(), images: vi.fn
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.detail, getSaasChinaInventory: mocks.stock }))
 vi.mock('@/lib/new-products/catalogue-images', () => ({ findSavedNewProductImagesBatch: mocks.images }))
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mocks.names }))
-import { loadChinaShipmentDetailView } from './china-shipment-data'
+import { loadChinaShipmentDetailView, loadChinaShipmentStockItems } from './china-shipment-data'
 
 beforeEach(() => vi.resetAllMocks())
 it('starts Chinese names without waiting for photo lookup and preserves measurement snapshots', async () => {
@@ -30,4 +30,21 @@ it('does no catalogue work for a missing or unauthorized shipment', async () => 
   mocks.detail.mockResolvedValue(null)
   expect(await loadChinaShipmentDetailView('owner', 'other')).toBeNull()
   expect(mocks.images).not.toHaveBeenCalled(); expect(mocks.names).not.toHaveBeenCalled()
+})
+it('preserves each saved stock category without merging identical SKUs across locations', async () => {
+  mocks.stock.mockResolvedValue({ items: [
+    { id: 'product-stock', warehouseCode: '중국창고', sku: 'SKU1', productName: '상품', itemCategory: '[상품]', optionName: '대', onHandQuantity: 8, reservedQuantity: 2, availableQuantity: 6 },
+    { id: 'material-stock', warehouseCode: '부자재창고', sku: 'SKU1', productName: '상품', itemCategory: '[부재료]', optionName: '대', onHandQuantity: 4, reservedQuantity: 0, availableQuantity: 4 },
+    { id: 'legacy-stock', warehouseCode: '중국창고', sku: 'SKU2', productName: '기존 상품', optionName: null, onHandQuantity: 1, reservedQuantity: 0, availableQuantity: 1 },
+  ] })
+  mocks.names.mockResolvedValue(new Map([['SKU1', { chineseProductName: '商品' }]]))
+  const items = await loadChinaShipmentStockItems('canonical-owner')
+  expect(mocks.stock).toHaveBeenCalledWith('canonical-owner')
+  expect(mocks.names).toHaveBeenCalledWith('canonical-owner', ['SKU1', 'SKU1', 'SKU2'])
+  expect(items).toMatchObject([
+    { id: 'product-stock', sku: 'SKU1', itemCategory: '[상품]', availableQuantity: 6, chineseProductName: '商品' },
+    { id: 'material-stock', sku: 'SKU1', itemCategory: '[부재료]', availableQuantity: 4, chineseProductName: '商品' },
+    { id: 'legacy-stock', sku: 'SKU2', itemCategory: null, availableQuantity: 1 },
+  ])
+  expect(mocks.images).not.toHaveBeenCalled()
 })

@@ -28,3 +28,22 @@ it('resolves the shared owner and returns only available stock with Chinese name
   expect(response.headers.get('Cache-Control')).toBe('private, no-store')
   expect((await response.json()).items).toMatchObject([{ id: 'available', chineseProductName: '商品', lastReceivedAt: '2026-11-03T00:00:00.000Z' }])
 })
+it('preserves saved product and material categories per available inventory row under the owner', async () => {
+  mocks.user.mockResolvedValue({ id: 'admin-other' }); mocks.owner.mockResolvedValue('canonical-owner')
+  mocks.stock.mockResolvedValue({ items: [
+    { id: 'product-stock', warehouseCode: '중국창고', sku: 'SKU1', productName: '상품', itemCategory: '[상품]', availableQuantity: 6 },
+    { id: 'material-stock', warehouseCode: '부자재창고', sku: 'SKU1', productName: '상품', itemCategory: '[부재료]', availableQuantity: 4 },
+    { id: 'legacy-stock', warehouseCode: '중국창고', sku: 'SKU2', productName: '기존 상품', availableQuantity: 1 },
+    { id: 'reserved-stock', warehouseCode: '중국창고', sku: 'SKU3', itemCategory: '[원재료]', availableQuantity: 0 },
+  ] })
+  mocks.names.mockResolvedValue(new Map())
+  const response = await GET()
+  expect(mocks.owner).toHaveBeenCalledWith('admin-other')
+  expect(mocks.stock).toHaveBeenCalledWith('canonical-owner')
+  expect(mocks.names).toHaveBeenCalledWith('canonical-owner', ['SKU1', 'SKU1', 'SKU2'])
+  expect((await response.json()).items).toMatchObject([
+    { id: 'product-stock', sku: 'SKU1', itemCategory: '[상품]', availableQuantity: 6 },
+    { id: 'material-stock', sku: 'SKU1', itemCategory: '[부재료]', availableQuantity: 4 },
+    { id: 'legacy-stock', sku: 'SKU2', itemCategory: null, availableQuantity: 1 },
+  ])
+})

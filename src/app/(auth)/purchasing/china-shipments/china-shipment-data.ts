@@ -20,6 +20,7 @@ export async function loadChinaShipmentStockItems(userId: string): Promise<China
   const names = await getPurchasingItemLabelDataBySku(userId, items.map((item) => item.sku))
   return items.map((item) => ({
     id: item.id, warehouseCode: item.warehouseCode, sku: item.sku, productName: item.productName,
+    itemCategory: item.itemCategory ?? null,
     chineseProductName: names.get(item.sku)?.chineseProductName ?? '', lastReceivedAt: item.lastReceivedAt?.toISOString() ?? null,
     optionName: item.optionName, onHandQuantity: item.onHandQuantity, reservedQuantity: item.reservedQuantity, availableQuantity: item.availableQuantity,
   }))

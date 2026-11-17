@@ -15,6 +15,7 @@ export async function GET() {
   const names = await getPurchasingItemLabelDataBySku(owner, available.map((item) => item.sku))
   return NextResponse.json({ items: available.map((item) => ({
     id: item.id, warehouseCode: item.warehouseCode, sku: item.sku, productName: item.productName,
+    itemCategory: item.itemCategory ?? null,
     chineseProductName: names.get(item.sku)?.chineseProductName ?? '', optionName: item.optionName,
     onHandQuantity: item.onHandQuantity, reservedQuantity: item.reservedQuantity, availableQuantity: item.availableQuantity,
     lastReceivedAt: item.lastReceivedAt?.toISOString() ?? null,

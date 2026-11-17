@@ -7,7 +7,7 @@ vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSch
 import { getPurchaseFundLedgerData, type PurchaseFundDebitSourceRow } from './purchase-fund-ledger'
 
 const candidate = (partial: Partial<PurchaseFundDebitSourceRow>): PurchaseFundDebitSourceRow => ({
-  id: 'request', status: 'purchased', requestDate: '2026-11-04', outboundExpectedDate: null, createdAt: new Date('2026-11-04T00:00:00Z'), sku: 'B', productName: '상품 B', optionName: null, requestedQuantity: 20, actualPurchaseQuantity: null, purchaseManagementCode: 'BUY-B', supplierOrderNumber: null, costExchangeRateKrw: null, specialPriceCny: '10', newCostCny: null, rawData: {}, ...partial,
+  id: 'request', status: 'purchase_completed', requestDate: '2026-11-04', outboundExpectedDate: null, createdAt: new Date('2026-11-04T00:00:00Z'), sku: 'B', productName: '상품 B', optionName: null, requestedQuantity: 20, actualPurchaseQuantity: null, purchaseManagementCode: 'BUY-B', supplierOrderNumber: null, costExchangeRateKrw: null, specialPriceCny: '10', newCostCny: null, rawData: {}, ...partial,
 })
 
 function mockRows(rows: unknown[], sources: PurchaseFundDebitSourceRow[]) {
@@ -19,6 +19,13 @@ describe('purchase fund overview', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     dbMock.execute.mockResolvedValue([{ hasTable: true, hasSourceKeyIndex: true, hasOccurredOnIndex: true, hasRls: true }])
+  })
+
+  it('does not deduct a purchase request before it moves to purchase-completed', async () => {
+    mockRows([{ id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') }], [candidate({ status: 'purchased' })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDepositedCny: 1000, totalDebitedCny: 0, balanceCny: 1000, missingCostOrderCount: 0 })
+    expect(result.requestReviewItems).toEqual([])
   })
 
   it('adds a request without counting its already-recorded completed order twice', async () => {
@@ -47,11 +54,29 @@ describe('purchase fund overview', () => {
     expect(result.summary).toMatchObject({ totalDepositedCny: 1000, totalDebitedCny: 100, balanceCny: 900 })
   })
 
-  it('does not present an inflated balance when an outbound-completed row has no linkable original charge', async () => {
+  it('keeps a recorded debit after the same item reaches outbound completion without an order number', async () => {
+    mockRows([
+      { id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '10000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') },
+      { id: 'debit', entryType: 'purchase_debit', occurredOn: '2026-11-17', amountKrw: '420000', amountCny: '2000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: { lines: [{ sourcePurchaseItemId: 'same-item', sku: 'B', purchaseManagementCode: 'BUY-B', productName: '상품 B', totalCostYuan: 2000 }] }, voidedAt: null, createdAt: new Date('2026-11-17T00:00:00Z') },
+    ], [candidate({ id: 'same-item', status: 'completed', supplierOrderNumber: null })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDepositedCny: 10000, totalDebitedCny: 2000, balanceCny: 8000 })
+    expect(result.requestReviewItems).toEqual([])
+  })
+  it('does not add an estimated shipment copy when a same-date completion snapshot already represents it', async () => {
+    mockRows([
+      { id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '10000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') },
+      { id: 'debit', entryType: 'purchase_debit', occurredOn: '2026-11-17', amountKrw: '420000', amountCny: '2000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: { lines: [{ sourcePurchaseItemId: 'original', sku: 'B', requestDate: '2026-11-04', purchaseManagementCode: 'BUY-B', productName: '상품 B', totalCostYuan: 2000 }] }, voidedAt: null, createdAt: new Date('2026-11-17T00:00:00Z') },
+    ], [candidate({ id: 'shipment-copy', status: 'completed', purchaseManagementCode: null, supplierOrderNumber: null })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.summary).toMatchObject({ totalDepositedCny: 10000, totalDebitedCny: 2000, balanceCny: 8000 })
+  })
+
+  it('estimates an older outbound-completed row when the original charge is unavailable', async () => {
     mockRows([{ id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-01', amountKrw: '0', amountCny: '1000', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-01T00:00:00Z') }], [candidate({ id: 'outbound-copy', status: 'completed', purchaseManagementCode: null, supplierOrderNumber: null })])
     const result = await getPurchaseFundLedgerData('workspace', 100, 200)
-    expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null })
-    expect(result.requestReviewItems).toMatchObject([{ id: 'outbound-copy', reason: '출고완료 전 기존 차감 기록 확인' }])
+    expect(result.summary).toMatchObject({ totalDebitedCny: 200, balanceCny: 800 })
+    expect(result.requestReviewItems).toEqual([])
   })
 
   it('keeps known totals separate from unresolved possible duplicates', async () => {

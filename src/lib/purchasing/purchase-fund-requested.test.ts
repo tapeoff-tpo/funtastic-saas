@@ -3,12 +3,21 @@ import { buildRequestedFundCharges, requestedChargeOpeningBoundary } from './pur
 import type { PurchaseFundDebitSourceRow } from './purchase-fund-ledger'
 
 function row(overrides: Partial<PurchaseFundDebitSourceRow> = {}): PurchaseFundDebitSourceRow {
-  return { id: 'r1', status: 'purchased', requestDate: '2026-11-03', outboundExpectedDate: null, createdAt: new Date('2026-11-03T00:00:00Z'), sku: 'SKU1', productName: '상품', optionName: null, requestedQuantity: 10, actualPurchaseQuantity: null, purchaseManagementCode: 'BUY1', supplierOrderNumber: null, costExchangeRateKrw: null, specialPriceCny: '10', newCostCny: null, rawData: {}, ...overrides }
+  return { id: 'r1', status: 'purchase_completed', requestDate: '2026-11-03', outboundExpectedDate: null, createdAt: new Date('2026-11-03T00:00:00Z'), sku: 'SKU1', productName: '상품', optionName: null, requestedQuantity: 10, actualPurchaseQuantity: null, purchaseManagementCode: 'BUY1', supplierOrderNumber: null, costExchangeRateKrw: null, specialPriceCny: '10', newCostCny: null, rawData: {}, ...overrides }
 }
 
 describe('requested purchase charges', () => {
-  it('includes a purchase request without a supplier order number', () => {
+  it('includes a purchase-completed item without a supplier order number', () => {
     expect(buildRequestedFundCharges([row()], [], 200)).toMatchObject([{ id: 'r1', amountCny: 100 }])
+  })
+  it('does not charge a purchase request, even when it has a supplier order number', () => {
+    expect(buildRequestedFundCharges([row({ status: 'purchased', supplierOrderNumber: '3316362603001063953' })], [], 200)).toEqual([])
+  })
+  it('keeps a completed purchase charged after outbound completion without a supplier number', () => {
+    const before = buildRequestedFundCharges([row({ status: 'purchase_completed', supplierOrderNumber: null })], [], 200)
+    const after = buildRequestedFundCharges([row({ status: 'completed', supplierOrderNumber: null })], [], 200)
+    expect(before[0]?.amountCny).toBe(100)
+    expect(after[0]?.amountCny).toBe(100)
   })
   it('does not deduct the same item when its completed charge already exists', () => {
     const debit = { details: { lines: [{ sourcePurchaseItemId: 'other', purchaseManagementCode: 'BUY1', sku: 'SKU1' }] } }
@@ -20,23 +29,23 @@ describe('requested purchase charges', () => {
   })
 
   it('does not create a new charge from an identified outbound-completed copy', () => {
-    const request = row({ id: 'request', status: 'purchased' })
+    const request = row({ id: 'request', status: 'purchase_completed' })
     const finished = row({ id: 'finished', status: 'completed' })
     expect(buildRequestedFundCharges([request, finished], [], 200)).toMatchObject([{ id: 'request', amountCny: 100 }])
   })
-  it('marks an unlinked finished record unknown without adding a second charge', () => {
+  it('uses the available cost as an estimate for an older unlinked finished record', () => {
     const finished = row({ id: 'finished', status: 'completed', purchaseManagementCode: null })
-    expect(buildRequestedFundCharges([finished], [], 200)).toMatchObject([{ id: 'finished', amountCny: null, completedUnverified: true }])
+    expect(buildRequestedFundCharges([finished], [], 200)).toMatchObject([{ id: 'finished', amountCny: 100, completedUnverified: false }])
   })
   it('treats a new request after a confirmed arrival as a distinct purchase', () => {
     const prior = row({ id: 'arrival', status: 'china_arrived', requestDate: '2026-11-03', chinaReceivedAt: new Date('2026-11-05T00:00:00Z'), purchaseManagementCode: null })
-    const later = row({ id: 'new-request', status: 'purchased', requestDate: '2026-11-07', purchaseManagementCode: null })
+    const later = row({ id: 'new-request', status: 'purchase_completed', requestDate: '2026-11-07', purchaseManagementCode: null })
     const debit = { details: { lines: [{ sku: 'SKU1', sourcePurchaseItemId: 'arrival' }] } }
     expect(buildRequestedFundCharges([prior, later], [debit], 200)).toMatchObject([{ id: 'new-request', amountCny: 100, ambiguous: false }])
   })
   it('does not mistake an imported purchase date for the confirmed warehouse-arrival date', () => {
     const prior = row({ id: 'arrival', status: 'china_arrived', chinaReceivedAt: new Date('2026-11-05T00:00:00Z'), purchaseManagementCode: null, rawData: { source: 'ecount_purchasing_snapshot_china_arrived', syncedAt: '2026-11-08T00:00:00Z' } })
-    const later = row({ id: 'new-request', status: 'purchased', requestDate: '2026-11-07', purchaseManagementCode: null })
+    const later = row({ id: 'new-request', status: 'purchase_completed', requestDate: '2026-11-07', purchaseManagementCode: null })
     const debit = { details: { lines: [{ sku: 'SKU1', sourcePurchaseItemId: 'arrival' }] } }
     expect(buildRequestedFundCharges([prior, later], [debit], 200)).toMatchObject([{ id: 'new-request', amountCny: null, ambiguous: true }])
   })
@@ -58,9 +67,9 @@ describe('requested purchase charges', () => {
     const oldDebit = { details: { lines: [{ sku: 'SKU1', sourcePurchaseItemId: 'old' }] }, supplierOrderNumber: null }
     expect(buildRequestedFundCharges([row()], [oldDebit], 200)[0]).toMatchObject({ ambiguous: true, amountCny: null })
   })
-  it('does not merge different management codes in the same supplier order', () => {
+  it('leaves supplier-numbered completed orders to the durable ledger', () => {
     const debit = { details: { lines: [{ sku: 'SKU1', purchaseManagementCode: 'BUY2' }] }, supplierOrderNumber: '3316362603001063953' }
-    expect(buildRequestedFundCharges([row({ supplierOrderNumber: '3316362603001063953' })], [debit], 200)[0].amountCny).toBe(100)
+    expect(buildRequestedFundCharges([row({ supplierOrderNumber: '3316362603001063953' })], [debit], 200)).toEqual([])
   })
   it('includes requests dated after an opening even when the row was created before it', () => {
     const opening = new Date('2026-11-02T03:00:00Z')

@@ -4,14 +4,14 @@ import { type PurchaseInspection } from './purchase-inspection'
 
 const fixture = vi.hoisted(() => ({
   current: {} as Record<string, unknown>, writes: [] as Array<Record<string, unknown>>,
-  receive: vi.fn(), adjust: vi.fn(),
+  receive: vi.fn(), adjust: vi.fn(), recordCompletion: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({ db: { transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
   execute: vi.fn(), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
   update: () => ({ set: (values: Record<string, unknown>) => { fixture.writes.push(values); return { where: () => ({ returning: async () => [{ id: fixture.current.id }] }) } } }),
 }) } }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
-vi.mock('./purchase-fund-ledger', () => ({ ensurePurchaseFundLedgerSchema: async () => {}, reconcilePurchaseFundDebitsInTransaction: vi.fn() }))
+vi.mock('./purchase-fund-ledger', () => ({ ensurePurchaseFundLedgerSchema: async () => {}, reconcilePurchaseFundDebitsInTransaction: vi.fn(), recordPurchaseCompletionInTransaction: fixture.recordCompletion }))
 vi.mock('@/lib/new-products/cny-cost', () => ({ getLatestCnyKrwReferenceRate: async () => ({ rate: 200, date: '2026-10-30' }) }))
 vi.mock('./saas-china-outbound', () => ({
   ensureSaasChinaOutboundSchema: async () => {}, hasSaasChinaPurchaseLinkInTransaction: async () => false,
@@ -23,6 +23,16 @@ describe('inspection persistence and arrival safety', () => {
   beforeEach(() => {
     vi.clearAllMocks(); fixture.writes = []
     fixture.current = { id: 'purchase-id', userId: 'workspace-id', status: 'purchase_completed', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: null, supplierOrderNumber: '3317159640039018761', trackingNumber: null, rawData: { saasChinaMode: true }, purchaseInspection: null, costExchangeRateKrw: '200', sku: 'SKU-A', productName: '상품A' }
+  })
+  it('records one fund debit only when the purchase request moves to purchase completed', async () => {
+    fixture.current.status = 'purchased'
+    await updatePurchaseRequestStatus({ userId: 'workspace-id', id: 'purchase-id', status: 'purchase_completed' })
+    expect(fixture.recordCompletion).toHaveBeenCalledOnce()
+    expect(fixture.recordCompletion).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userId: 'workspace-id', itemId: 'purchase-id' }))
+    fixture.recordCompletion.mockClear()
+    fixture.current.status = 'purchase_completed'
+    await updatePurchaseRequestStatus({ userId: 'workspace-id', id: 'purchase-id', status: 'purchase_completed' })
+    expect(fixture.recordCompletion).not.toHaveBeenCalled()
   })
   it('moves a successful initial waybill lookup into inspection without assuming box quantities or receiving inventory', async () => {
     await applyPurchaseRequest1688TrackingLookup({

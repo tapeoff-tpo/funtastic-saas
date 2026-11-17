@@ -3,12 +3,12 @@ import { isUniqueSupplierOrderIdentifier, normalizeSupplierOrderReference } from
 import type { PurchaseFundDebitSourceRow } from './purchase-fund-ledger'
 
 type ExistingDebit = { details: unknown; supplierOrderNumber?: string | null }
-type Line = { sourcePurchaseItemId?: unknown; purchaseManagementCode?: unknown; sku?: unknown }
+type Line = { sourcePurchaseItemId?: unknown; purchaseManagementCode?: unknown; sku?: unknown; requestDate?: unknown }
 
 /** Read-only provisional charges for requests not already represented by a debit. */
 export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], existing: ExistingDebit[], rate: number) {
   const chargedIds = new Set<string>()
-  const linesBySku = new Map<string, Array<{ management: string | null; supplier: string | null; sourceId: string | null }>>()
+  const linesBySku = new Map<string, Array<{ management: string | null; supplier: string | null; sourceId: string | null; requestDate: string | null }>>()
   const unidentifiableOrders: Array<string | null> = []
   for (const debit of existing) {
     const details = debit.details as { lines?: Line[] } | null
@@ -23,7 +23,8 @@ export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], ex
       if (typeof line.sku === 'string' && line.sku.trim()) {
         const sku = line.sku.trim().replace(/\s+/g, ' ')
         const matches = linesBySku.get(sku) ?? []
-        matches.push({ management, supplier, sourceId: typeof line.sourcePurchaseItemId === 'string' ? line.sourcePurchaseItemId : null })
+        matches.push({ management, supplier, sourceId: typeof line.sourcePurchaseItemId === 'string' ? line.sourcePurchaseItemId : null,
+          requestDate: typeof line.requestDate === 'string' ? line.requestDate : null })
         linesBySku.set(sku, matches)
       }
     }
@@ -31,7 +32,8 @@ export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], ex
   const candidates = new Map<string, PurchaseFundDebitSourceRow>()
   const unverifiedCompleted: PurchaseFundDebitSourceRow[] = []
   for (const row of rows) {
-    if (row.status === 'requested') continue
+    // 발주검토(requested)와 발주요청(purchased)은 차감 대상이 아니다.
+    if (row.status === 'requested' || row.status === 'purchased') continue
     const date = row.requestDate ?? kstDate(row.createdAt)
     if (date < '2026-11-01') continue
     const management = managementKey(row.purchaseManagementCode, row.sku)
@@ -41,14 +43,14 @@ export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], ex
     const alreadyCharged = matchingLines.some((line) => (
       management && line.management ? management === line.management
         : supplier && line.supplier ? supplier === line.supplier
-          : false
+          : row.status === 'completed' && !management && !supplier && !!row.requestDate && row.requestDate === line.requestDate
     ))
     if (chargedIds.has(row.id) || alreadyCharged) continue
     if (row.status === 'completed') {
       // The completed row is not another charge. If its original charge is
       // unavailable, keep the balance unknown instead of silently restoring it.
       const representedByActiveRow = rows.some((other) => {
-        if (other.status === 'completed' || other.status === 'requested' || other.sku.trim() !== row.sku.trim()) return false
+        if (other.status === 'completed' || other.status === 'requested' || other.status === 'purchased' || other.sku.trim() !== row.sku.trim()) return false
         const otherManagement = managementKey(other.purchaseManagementCode, other.sku)
         const otherSupplier = supplierKey(other.supplierOrderNumber, other.sku)
         return Boolean(management && otherManagement ? management === otherManagement : supplier && otherSupplier && supplier === otherSupplier)
@@ -58,7 +60,7 @@ export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], ex
     }
     // Items with a supplier number at later stages are handled by the existing
     // durable purchase-debit ledger, including its missing-cost handling.
-    if (row.status !== 'purchased' && normalizeSupplierOrderReference(row.supplierOrderNumber)) continue
+    if (normalizeSupplierOrderReference(row.supplierOrderNumber)) continue
     const key = identity ?? `row:${row.id}`
     const previous = candidates.get(key)
     if (!previous || priority[row.status] > priority[previous.status] || (priority[row.status] === priority[previous.status] && quantity(row) > quantity(previous))) candidates.set(key, row)
@@ -85,16 +87,22 @@ export function buildRequestedFundCharges(rows: PurchaseFundDebitSourceRow[], ex
     const ambiguous = ambiguousLine || ambiguousOrder || ambiguousCandidate
     return { id: row.id, occurredOn: row.requestDate ?? kstDate(row.createdAt), requestDate: row.requestDate, createdAt: row.createdAt, amountCny: ambiguous ? null : costs.totalCostYuan, amountKrw: ambiguous ? null : costs.totalCostKrw, sku: row.sku, productName: row.productName, purchaseManagementCode: row.purchaseManagementCode, ambiguous, completedUnverified: false }
   })
-  return [...pending, ...unverifiedCompleted.map((row) => ({
-    id: row.id, occurredOn: row.requestDate ?? kstDate(row.createdAt), requestDate: row.requestDate, createdAt: row.createdAt,
-    amountCny: null, amountKrw: null, sku: row.sku, productName: row.productName, purchaseManagementCode: row.purchaseManagementCode,
-    ambiguous: true, completedUnverified: true,
-  }))]
+  // Older completed items may predate the one-time completion snapshot.
+  // Include their available cost as an estimate; a missing cost remains unknown.
+  return [...pending, ...unverifiedCompleted.map((row) => {
+    const costs = calculatePurchaseCosts({ requestedQuantity: quantity(row), specialPriceCny: row.specialPriceCny,
+      newCostCny: row.newCostCny, exchangeRateKrw: row.costExchangeRateKrw ?? rate })
+    return {
+      id: row.id, occurredOn: row.requestDate ?? kstDate(row.createdAt), requestDate: row.requestDate, createdAt: row.createdAt,
+      amountCny: costs.totalCostYuan, amountKrw: costs.totalCostKrw, sku: row.sku, productName: row.productName,
+      purchaseManagementCode: row.purchaseManagementCode, ambiguous: false, completedUnverified: false,
+    }
+  })]
 }
 
 /** Only a verified earlier warehouse arrival can separate an unidentified repeat order. */
 function wasReceivedBeforeRequest(earlier: PurchaseFundDebitSourceRow, later: PurchaseFundDebitSourceRow) {
-  if (later.status !== 'purchased' || !later.requestDate) return false
+  if (later.status !== 'purchase_completed' || !later.requestDate) return false
   if (!['china_arrived', 'outbound_requested', 'completed'].includes(earlier.status)) return false
   const rawSource = earlier.rawData.source
   // For Ecount-imported warehouse rows chinaReceivedAt may be the purchase

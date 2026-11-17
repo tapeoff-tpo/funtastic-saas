@@ -9,9 +9,9 @@ function row(overrides: Partial<PurchaseFundDebitSourceRow> = {}): PurchaseFundD
   return {
     id: '11111111-1111-4111-8111-111111111111',
     status: 'purchase_completed',
-    requestDate: '2026-09-01',
+    requestDate: '2026-11-01',
     outboundExpectedDate: null,
-    createdAt: new Date('2026-09-01T00:00:00Z'),
+    createdAt: new Date('2026-11-01T00:00:00Z'),
     sku: '100000-0001',
     productName: '테스트 상품',
     optionName: '기본',
@@ -36,7 +36,7 @@ describe('purchase fund debit snapshots', () => {
         status: 'outbound_requested',
         requestedQuantity: 40,
         actualPurchaseQuantity: 40,
-        requestDate: '2026-09-05',
+        requestDate: '2026-11-05',
         rawData: { purchasedQuantity: 100 },
       }),
     ], 200)
@@ -44,7 +44,7 @@ describe('purchase fund debit snapshots', () => {
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]).toMatchObject({
       supplierOrderNumber: '3316362603001063953',
-      occurredOn: '2026-09-01',
+      occurredOn: '2026-11-01',
       amountCny: 1_000,
       amountKrw: 210_000,
       missingCostCount: 0,
@@ -150,8 +150,8 @@ describe('purchase fund debit snapshots', () => {
         status: 'completed',
         supplierOrderNumber: '웨이신',
         purchaseManagementCode: null,
-        requestDate: '2026-09-05',
-        rawData: { sourceDateNo: '20260905-1' },
+        requestDate: '2026-11-05',
+        rawData: { sourceDateNo: '20261105-1' },
       }),
     ], 200)
 
@@ -169,6 +169,7 @@ describe('purchase fund debit persistence', () => {
     const onConflictDoNothing = vi.fn().mockResolvedValue(undefined)
     const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined)
     const tx = {
+      execute: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ item_id: sourceRows[0]?.id, source_key: 'supplier-order:3316362603001063953', supplier_order_number: '3316362603001063953', details: { lines: [{ sourcePurchaseItemId: sourceRows[0]?.id, sku: sourceRows[0]?.sku, purchaseManagementCode: sourceRows[0]?.purchaseManagementCode }] } }]),
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           leftJoin: vi.fn(() => ({

@@ -40,6 +40,7 @@ import { ensurePurchaseInspectionIssueSchema, getPurchaseInspectionIssues } from
 import {
   ensurePurchaseFundLedgerSchema,
   reconcilePurchaseFundDebitsInTransaction,
+  recordPurchaseCompletionInTransaction,
 } from './purchase-fund-ledger'
 import {
   ensureIgnoredPurchasingItemsTable,
@@ -2031,6 +2032,7 @@ export async function updatePurchaseRequestStatus(input: {
   status: PurchaseRequestStatus
 }) {
   await ensurePurchasePaymentTrackingSchema()
+  if (input.status === 'purchase_completed') await ensurePurchaseFundLedgerSchema()
   if (input.status === 'china_arrived' || input.status === 'outbound_requested' || input.status === 'completed') {
     await ensureSaasChinaOutboundSchema()
   }
@@ -2138,6 +2140,13 @@ export async function updatePurchaseRequestStatus(input: {
       .set(values)
       .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
       .returning({ id: purchaseRequestItems.id })
+
+    if (row && current.status === 'purchased' && input.status === 'purchase_completed') {
+      await recordPurchaseCompletionInTransaction(tx, {
+        userId: input.userId, itemId: current.id, occurredOn: todayKstDate(),
+        fallbackExchangeRateKrw: exchangeRateReference?.rate ?? 200,
+      })
+    }
 
     return row ?? null
   })

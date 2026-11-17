@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   products,
@@ -341,11 +341,10 @@ export async function ensurePurchaseFundDebitBackfill(input: {
       eq(purchaseFundEntries.entryType, 'purchase_debit'),
     ))
 
-  // Reconcile on each balance-page load so status changes are reflected without
-  // modifying the purchase workflow or its status-update handler.
+  // Preserve previously recorded debit amounts when the balance page is read.
   const result = await reconcilePurchaseFundDebits({
     ...input,
-    existingEntryMode: 'recalculate',
+    existingEntryMode: 'preserve',
   })
   return { ...result, backfilled: Number(existing?.count ?? 0) === 0 }
 }
@@ -359,7 +358,23 @@ export async function reconcilePurchaseFundDebitsInTransaction(
     supplierOrderNumber?: string | null
   },
 ) {
-  const rows = await loadPurchaseDebitSourceRows(tx, input.userId, input.supplierOrderNumber)
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`purchase-fund-ledger:${input.userId}`}))`)
+  const existing = resultRows<RecordedCompletion & { source_key: string | null }>(await tx.execute(sql`
+    SELECT source_purchase_item_id::text AS item_id, supplier_order_number, details, source_key
+    FROM purchase_fund_entries
+    WHERE user_id = ${input.userId}::uuid AND entry_type = 'purchase_debit'
+      AND voided_at IS NULL
+  `))
+  const sourceItems = await loadRequestedFundSourceRows(tx, input.userId)
+  const backfilled = buildMissingCompletionSnapshots(sourceItems, existing, input.userId, input.fallbackExchangeRateKrw, input.supplierOrderNumber)
+  for (const group of chunks(backfilled, 250)) {
+    await tx.insert(purchaseFundEntries).values(group).onConflictDoNothing({ target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey] })
+  }
+  const captured = [
+    ...existing.filter((entry) => entry.source_key?.startsWith('completion:')),
+    ...backfilled.map((entry) => ({ item_id: entry.sourcePurchaseItemId, supplier_order_number: entry.supplierOrderNumber, details: entry.details })),
+  ]
+  const rows = excludeCapturedCompletionRows(await loadPurchaseDebitSourceRows(tx, input.userId, input.supplierOrderNumber), captured)
   const snapshots = buildPurchaseDebitSnapshots(rows, input.fallbackExchangeRateKrw)
 
   for (const values of chunks(snapshots, 250)) {
@@ -381,14 +396,7 @@ export async function reconcilePurchaseFundDebitsInTransaction(
       })))
 
     if (input.existingEntryMode !== 'recalculate') {
-      await insertQuery.onConflictDoUpdate({
-        target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey],
-        set: {
-          voidedAt: null,
-          voidedBy: null,
-          updatedAt: new Date(),
-        },
-      })
+      await insertQuery.onConflictDoNothing({ target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey] })
       continue
     }
 
@@ -410,26 +418,96 @@ export async function reconcilePurchaseFundDebitsInTransaction(
       })
   }
 
-  if (!input.supplierOrderNumber) {
-    const activeSourceKeys = snapshots.map((snapshot) => snapshot.sourceKey)
-    await tx
-      .update(purchaseFundEntries)
-      .set({
-        voidedAt: new Date(),
-        details: sql`jsonb_set(COALESCE(${purchaseFundEntries.details}, '{}'::jsonb), '{schemaVersion}', '"2"'::jsonb, true)`,
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(purchaseFundEntries.userId, input.userId),
-        eq(purchaseFundEntries.entryType, 'purchase_debit'),
-        isNull(purchaseFundEntries.voidedAt),
-        ...(activeSourceKeys.length
-          ? [notInArray(purchaseFundEntries.sourceKey, activeSourceKeys)]
-          : []),
-      ))
-  }
-
   return { reconciledOrderCount: snapshots.length }
+}
+
+type RecordedCompletion = { item_id: string | null; supplier_order_number: string | null; details: unknown }
+
+function completionSnapshot(item: PurchaseFundDebitSourceRow, userId: string, rate: number, occurredOn: string) {
+  const quantity = Math.max(0, Math.trunc(item.actualPurchaseQuantity ?? item.requestedQuantity))
+  const costs = calculatePurchaseCosts({ requestedQuantity: quantity, specialPriceCny: item.specialPriceCny,
+    newCostCny: item.newCostCny, exchangeRateKrw: item.costExchangeRateKrw ?? rate })
+  return {
+    userId, entryType: 'purchase_debit' as const, occurredOn,
+    amountKrw: String(costs.totalCostKrw ?? 0), amountCny: costs.totalCostYuan === null ? null : String(costs.totalCostYuan),
+    missingCostCount: costs.totalCostYuan === null || costs.totalCostKrw === null ? 1 : 0,
+    memo: '구매완료 시 자동 차감', sourceKey: `completion:${item.id}`, supplierOrderNumber: item.supplierOrderNumber,
+    sourcePurchaseItemId: item.id, details: { schemaVersion: 3, productSummary: item.productName,
+      lines: [{ sourcePurchaseItemId: item.id, purchaseManagementCode: item.purchaseManagementCode, sku: item.sku, requestDate: item.requestDate,
+        productName: item.productName, optionName: item.optionName, quantity, unitCostYuan: costs.unitCostYuan,
+        totalCostYuan: costs.totalCostYuan, totalCostKrw: costs.totalCostKrw }] },
+  }
+}
+
+export function buildMissingCompletionSnapshots(rows: PurchaseFundDebitSourceRow[], existing: RecordedCompletion[], userId: string, rate: number, supplierOrderNumber?: string | null) {
+  const order = normalizeSupplierOrderReference(supplierOrderNumber)
+  const candidates = excludeCapturedCompletionRows(rows.filter((row) => row.status === 'purchase_completed'
+    && (!order || normalizeSupplierOrderReference(row.supplierOrderNumber) === order)), existing)
+  const seen = new Set<string>()
+  return candidates.flatMap((item) => {
+    const occurredOn = item.requestDate ?? kstDate(new Date(item.createdAt))
+    if (occurredOn < PURCHASE_FUND_DEBIT_START_DATE) return []
+    const management = item.purchaseManagementCode?.trim()
+    const supplier = item.supplierOrderNumber?.trim()
+    const identity = management ? JSON.stringify(['management', management, item.sku.trim()])
+      : supplier && isUniqueSupplierOrderIdentifier(supplier) ? JSON.stringify(['supplier', supplier, item.sku.trim()]) : `row:${item.id}`
+    if (seen.has(identity)) return []
+    seen.add(identity)
+    return [completionSnapshot(item, userId, rate, occurredOn)]
+  })
+}
+
+export function excludeCapturedCompletionRows(rows: PurchaseFundDebitSourceRow[], recorded: RecordedCompletion[]) {
+  const ids = new Set<string>()
+  const managementKeys = new Set<string>()
+  const supplierKeys = new Set<string>()
+  const requestDateKeys = new Set<string>()
+  const key = (first: string, second: string) => JSON.stringify([first.trim(), second.trim()])
+  for (const entry of recorded) {
+    if (entry.item_id) ids.add(entry.item_id)
+    const lines = (entry.details as { lines?: Array<{ sourcePurchaseItemId?: string; sku?: string; purchaseManagementCode?: string | null; requestDate?: string | null }> } | null)?.lines
+    for (const line of Array.isArray(lines) ? lines : []) {
+      if (line.sourcePurchaseItemId) ids.add(line.sourcePurchaseItemId)
+      if (!line.sku?.trim()) continue
+      if (line.requestDate) requestDateKeys.add(key(line.requestDate, line.sku))
+      if (line.purchaseManagementCode?.trim()) managementKeys.add(key(line.purchaseManagementCode, line.sku))
+      else if (entry.supplier_order_number && isUniqueSupplierOrderIdentifier(entry.supplier_order_number)) {
+        supplierKeys.add(key(entry.supplier_order_number, line.sku))
+      }
+    }
+  }
+  return rows.filter((row) => {
+    if (ids.has(row.id)) return false
+    if (row.purchaseManagementCode?.trim()) return !managementKeys.has(key(row.purchaseManagementCode, row.sku))
+    if (!row.supplierOrderNumber && row.requestDate && requestDateKeys.has(key(row.requestDate, row.sku))) return false
+    return !row.supplierOrderNumber || !isUniqueSupplierOrderIdentifier(row.supplierOrderNumber)
+      || !supplierKeys.has(key(row.supplierOrderNumber, row.sku))
+  })
+}
+
+/** Records the amount once in the same transaction as the purchase-completed transition. */
+export async function recordPurchaseCompletionInTransaction(tx: DbTransaction, input: {
+  userId: string; itemId: string; fallbackExchangeRateKrw: number; occurredOn: string
+}) {
+  if (input.occurredOn < PURCHASE_FUND_DEBIT_START_DATE) return
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`purchase-fund-ledger:${input.userId}`}))`)
+  const [item] = await loadRequestedFundSourceRows(tx, input.userId, input.itemId)
+  if (!item || item.status !== 'purchase_completed') return
+  const prior = resultRows<{ found: number }>(await tx.execute(sql`
+    SELECT 1 AS found FROM purchase_fund_entries f
+    WHERE f.user_id = ${input.userId}::uuid AND f.entry_type = 'purchase_debit' AND f.voided_at IS NULL
+      AND (f.source_purchase_item_id = ${item.id}::uuid OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.details->'lines') = 'array' THEN f.details->'lines' ELSE '[]'::jsonb END) line
+        WHERE line->>'sourcePurchaseItemId' = ${item.id}
+          OR (line->>'sku' = ${item.sku} AND NULLIF(BTRIM(line->>'purchaseManagementCode'), '') IS NOT NULL
+            AND line->>'purchaseManagementCode' = ${item.purchaseManagementCode})
+          OR (line->>'sku' = ${item.sku} AND ${!item.purchaseManagementCode?.trim() && !!item.supplierOrderNumber && isUniqueSupplierOrderIdentifier(item.supplierOrderNumber)}
+            AND NULLIF(BTRIM(line->>'purchaseManagementCode'), '') IS NULL AND f.supplier_order_number = ${item.supplierOrderNumber})
+      )) LIMIT 1
+  `))
+  if (prior.length) return
+  await tx.insert(purchaseFundEntries).values(completionSnapshot(item, input.userId, input.fallbackExchangeRateKrw, input.occurredOn))
+    .onConflictDoNothing({ target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey] })
 }
 
 export async function createPurchaseFundCredit(input: {
@@ -688,7 +766,7 @@ async function loadPurchaseDebitSourceRows(
     .where(and(...conditions)) as Promise<PurchaseFundDebitSourceRow[]>
 }
 
-async function loadRequestedFundSourceRows(executor: DbExecutor, userId: string) {
+async function loadRequestedFundSourceRows(executor: DbExecutor, userId: string, itemId?: string) {
   return executor.select({
     id: purchaseRequestItems.id,
     status: purchaseRequestItems.status,
@@ -713,6 +791,7 @@ async function loadRequestedFundSourceRows(executor: DbExecutor, userId: string)
   )).where(and(
     eq(purchaseRequestItems.userId, userId),
     inArray(purchaseRequestItems.status, ['purchased', 'purchase_completed', 'inspecting', 'china_arrived', 'outbound_requested', 'completed']),
+    ...(itemId ? [eq(purchaseRequestItems.id, itemId)] : []),
   )) as Promise<PurchaseFundDebitSourceRow[]>
 }
 

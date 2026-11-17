@@ -174,7 +174,7 @@ describe('China import documents', () => {
     expect(sheet.getCell('R14').value).toBe('1plt + 1ctn')
     expect(sheet.getCell('W14').value).toBe(2)
     expect(JSON.stringify(detail)).toBe(original)
-    expect(workbook.worksheets).toHaveLength(1)
+    expect(workbook.worksheets.map((worksheet) => worksheet.name)).toEqual(['sheet', '신상품_HS미등록', '기존_HS코드'])
     expect(sheet.getCell('Y20').value).toBe('상품A')
     expect(sheet.getCell('Y110').value).toBeNull()
     expect(sheet.pageSetup.orientation).toBe('portrait')
@@ -212,5 +212,56 @@ describe('China import documents', () => {
   it('requires missing price and weight to be supplied explicitly', async () => {
     await expect(exportChinaImportDocument(detail, metadata, { ...options, items: {} })).rejects.toThrow('위안화 단가')
     await expect(exportChinaImportDocument(detail, metadata, { ...options, boxes: {} })).rejects.toThrow('총중량')
+  })
+  it('adds one missing-HS row per SKU with one embedded image and a separate registered-HS list', async () => {
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE3sAAAAASUVORK5CYII=', 'base64')
+    const workbook = new ExcelJS.Workbook()
+    const buffer = await exportChinaImportDocument(detail, metadata, options, {
+      productImages: new Map([['SKU-B', { buffer: image, width: 1, height: 1 }]]),
+    })
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    const missing = workbook.getWorksheet('신상품_HS미등록')!
+    const existing = workbook.getWorksheet('기존_HS코드')!
+    expect(missing.rowCount).toBe(2)
+    expect(missing.getCell('B2').value).toBe('SKU-B')
+    expect(missing.getCell('C2').value).toBe('상품B')
+    expect(missing.getCell('E2').value).toBe('Tray')
+    expect(missing.getCell('F2').value).toBe(5)
+    expect(missing.getCell('G2').value).toBeNull()
+    expect(missing.getImages()).toHaveLength(1)
+    expect(existing.rowCount).toBe(2)
+    expect(existing.getCell('A2').value).toBe('SKU-A')
+    expect(existing.getCell('D2').value).toBe('7013')
+    expect(existing.getImages()).toHaveLength(0)
+    const archive = await JSZip.loadAsync(buffer)
+    expect(Object.keys(archive.files).filter((name) => /^xl\/media\/[^/]+$/.test(name))).toHaveLength(1)
+    expect(workbook.worksheets[0].getCell('E21').value).toBe(5)
+  })
+  it('keeps missing images and blank HS codes visible without inventing codes', async () => {
+    const withoutHs = new Map([...metadata].map(([sku, item]) => [sku, { ...item, hsCode: '  ' }]))
+    const buffer = await exportChinaImportDocument(detail, withoutHs, options, { productImages: new Map([['SKU-B', { error: 'unavailable' }]]) })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    const missing = workbook.getWorksheet('신상품_HS미등록')!
+    expect(missing.getCell('A2').value).toBe('이미지 없음')
+    expect(missing.getCell('A3').value).toBe('이미지 불러오기 실패')
+    expect([missing.getCell('B2').value, missing.getCell('B3').value]).toEqual(['SKU-A', 'SKU-B'])
+    expect([missing.getCell('G2').value, missing.getCell('G3').value]).toEqual([null, null])
+    expect(workbook.getWorksheet('기존_HS코드')!.getCell('A2').value).toBe('HS CODE가 등록된 상품이 없습니다.')
+  })
+  it('can include the supplied full registered-HS reference list while keeping codes as text', async () => {
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await exportChinaImportDocument(detail, metadata, options, {
+      existingHsItems: [
+        { sku: '00001', productName: '다른 상품', hsCode: ' 0392.10-0000 ' },
+        { sku: '00001', productName: '다른 상품', hsCode: '0392.10-0000' },
+        { sku: 'UNKNOWN', productName: '코드 없음', hsCode: '' },
+      ],
+    }) as unknown as ExcelJS.Buffer)
+    const existing = workbook.getWorksheet('기존_HS코드')!
+    expect(existing.rowCount).toBe(2)
+    expect(existing.getCell('A2').value).toBe('00001')
+    expect(existing.getCell('D2').value).toBe('0392.10-0000')
+    expect(existing.getCell('D2').numFmt).toBe('@')
   })
 })

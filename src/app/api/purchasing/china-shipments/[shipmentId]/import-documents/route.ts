@@ -6,8 +6,9 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { getUserMenuAccess } from '@/lib/auth/menu-access'
 import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { exportChinaImportDocument, prepareImportDocument } from '@/lib/purchasing/china-import-document'
-import { getPurchasingItemTradeDataBySku } from '@/lib/purchasing/items'
+import { getAllPurchasingItems, getPurchasingItemTradeDataBySku } from '@/lib/purchasing/items'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
+import { getImportDocumentProductImages } from '@/lib/purchasing/import-document-product-images'
 
 export const runtime = 'nodejs'
 const text = z.string().trim().min(1).max(500)
@@ -42,7 +43,7 @@ async function load(context: Context) {
   const metadata = await getPurchasingItemTradeDataBySku(userId, detail.items.map((item) => item.sku))
   const prepared = prepareImportDocument(detail, metadata)
   const snapshot = createHash('sha256').update(JSON.stringify({ prepared, allocations: detail.boxItems })).digest('hex')
-  return { detail, metadata, prepared, snapshot }
+  return { detail, metadata, prepared, snapshot, userId, requestedByUserId: user.id }
 }
 
 export async function GET(_request: Request, context: Context) {
@@ -63,7 +64,19 @@ export async function POST(request: Request, context: Context) {
     const parsed = schema.safeParse(await request.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
     if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 인보이스·패킹리스트를 새로고침해주세요.' }, { status: 409 })
-    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data)
+    const [productImages, allItems] = await Promise.all([
+      getImportDocumentProductImages({
+        userId: loaded.userId, requestedByUserId: loaded.requestedByUserId,
+        items: loaded.prepared.items.filter((item) => !item.hsCode.trim())
+          .map((item) => ({ sku: item.sku, productName: item.productName })),
+      }),
+      getAllPurchasingItems(loaded.userId),
+    ])
+    const existingHsItems = allItems.filter((item) => item.data['HS CODE']?.trim()).map((item) => ({
+      sku: item.data['품목코드']!, productName: item.data['품목명']!,
+      optionName: item.data['규격정보'], hsCode: item.data['HS CODE']!,
+    }))
+    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data, { productImages, existingHsItems })
     const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

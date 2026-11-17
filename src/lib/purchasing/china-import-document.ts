@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import { calculateChinaOutboundBoxCbm, dimensionNumber } from './china-outbound-dimensions'
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
+import { addImportDocumentHsSheets, type ImportDocumentSupplements } from './china-import-hs-sheets'
 
 export type ImportItemMetadata = { englishName: string; chineseName: string; hsCode: string; material: string; unitPriceCny: number | null }
 export type ImportDocumentOptions = {
@@ -75,6 +76,7 @@ export async function exportChinaImportDocument(
   detail: ImportDocumentDetail,
   metadata: Map<string, ImportItemMetadata>,
   options: ImportDocumentOptions,
+  supplements: ImportDocumentSupplements = {},
 ) {
   const prepared = prepareImportDocument(detail, metadata)
   for (const item of prepared.items) {
@@ -246,6 +248,11 @@ export async function exportChinaImportDocument(
   sheet.getCell(`W${totalRow}`).value = 'KG'
   sheet.getCell(`X${totalRow}`).value = totalCbm
   sheet.pageSetup.printArea = `A1:X${totalRow + 1}`
+  addImportDocumentHsSheets(workbook, invoiceRows.map((invoice) => {
+    const item = itemById.get(invoice.itemId)!
+    return { sku: item.sku, productName: item.productName, optionName: item.optionName,
+      englishName: options.items[item.id].englishName, quantity: invoice.quantity, hsCode: item.hsCode }
+  }), supplements)
   clearBlankExcelCells(workbook)
   // ExcelJS resets the Normal font to Calibri on write. Excel measures column
   // widths using that font, so restore the reference's Dotum font as well.

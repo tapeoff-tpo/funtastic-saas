@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn(), images: vi.fn(), allItems: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.access }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.workspace }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.detail }))
-vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemTradeDataBySku: mocks.metadata }))
+vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemTradeDataBySku: mocks.metadata, getAllPurchasingItems: mocks.allItems }))
 vi.mock('@/lib/purchasing/china-import-document', () => ({ prepareImportDocument: mocks.prepare, exportChinaImportDocument: mocks.export }))
+vi.mock('@/lib/purchasing/import-document-product-images', () => ({ getImportDocumentProductImages: mocks.images }))
 import { GET, POST } from './route'
 const shipmentId = '11111111-1111-4111-8111-111111111111'
 const context = () => ({ params: Promise.resolve({ shipmentId }) })
@@ -20,6 +21,8 @@ describe('import document export route', () => {
     mocks.metadata.mockResolvedValue(new Map())
     mocks.prepare.mockReturnValue({ shipmentNo: 'CN-1', items: [], boxes: [] })
     mocks.export.mockResolvedValue(Buffer.from('xlsx'))
+    mocks.images.mockResolvedValue(new Map())
+    mocks.allItems.mockResolvedValue([])
   })
   it('requires authentication before reading operational data', async () => {
     mocks.user.mockResolvedValue(null)
@@ -32,6 +35,33 @@ describe('import document export route', () => {
     expect(mocks.detail).toHaveBeenCalledWith({ userId: 'shared-owner', shipmentId })
     expect(mocks.metadata).toHaveBeenCalledWith('shared-owner', ['SKU-A'])
     expect(response.headers.get('cache-control')).toContain('no-store')
+    expect(mocks.images).not.toHaveBeenCalled()
+    expect(mocks.allItems).not.toHaveBeenCalled()
+  })
+  it('embeds only missing-HS shipment images from the canonical workspace after snapshot validation', async () => {
+    mocks.prepare.mockReturnValue({ shipmentNo: 'CN-1', items: [
+      { sku: 'SKU-A', productName: '기존 상품', hsCode: '7013' },
+      { sku: 'SKU-B', productName: '미등록 상품', hsCode: '  ' },
+    ], boxes: [] })
+    const images = new Map([['SKU-B', { error: 'missing' }]])
+    mocks.images.mockResolvedValue(images)
+    mocks.allItems.mockResolvedValue([
+      { data: { '품목코드': 'OUTSIDE-SHIPMENT', '품목명': '다른 기존 상품', '규격정보': '대', 'HS CODE': '0392.10-0000' } },
+      { data: { '품목코드': 'EMPTY-HS', '품목명': '미등록 상품', 'HS CODE': ' ' } },
+    ])
+    const snapshot = (await (await GET(new Request('http://localhost'), context())).json()).snapshot
+    const response = await POST(request({
+      snapshot, invoiceNo: 'CN-1', invoiceDate: '2026-10-30', sailingDate: '2026-10-30',
+      exporter: 'Exporter', importer: 'Importer', importerAddress: 'Seoul', loadingPort: 'WEIHAI', destinationPort: 'INCHEON', paymentTerms: 'T/T',
+      palletTareKg: 0, palletExtraCbm: 0, items: {}, boxes: {},
+    }), context())
+    expect(response.status).toBe(200)
+    expect(mocks.images).toHaveBeenCalledWith({ userId: 'shared-owner', requestedByUserId: 'admin2', items: [{ sku: 'SKU-B', productName: '미등록 상품' }] })
+    expect(mocks.allItems).toHaveBeenCalledWith('shared-owner')
+    expect(mocks.export).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), {
+      productImages: images,
+      existingHsItems: [{ sku: 'OUTSIDE-SHIPMENT', productName: '다른 기존 상품', optionName: '대', hsCode: '0392.10-0000' }],
+    })
   })
   it('rejects a stale shipment or item snapshot before generating the document', async () => {
     const response = await POST(request({
@@ -41,6 +71,8 @@ describe('import document export route', () => {
     }), context())
     expect(response.status).toBe(409)
     expect(mocks.export).not.toHaveBeenCalled()
+    expect(mocks.images).not.toHaveBeenCalled()
+    expect(mocks.allItems).not.toHaveBeenCalled()
   })
   it('rejects malformed dates and does not silently treat missing information as zero', async () => {
     const response = await POST(request({ invoiceDate: '2026-02-31' }), context())

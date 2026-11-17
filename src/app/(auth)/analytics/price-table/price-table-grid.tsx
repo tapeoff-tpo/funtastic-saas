@@ -26,6 +26,7 @@ export type PriceTableGridRow = {
   registeredProductName: string | null
   rawData: Record<string, string>
   directEntryDate?: string
+  missingMalls?: string[]
 }
 
 type CoreColumn = {

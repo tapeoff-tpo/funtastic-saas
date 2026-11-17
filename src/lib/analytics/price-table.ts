@@ -2,8 +2,10 @@ import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
-import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
+import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, getRegistrationTargets, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
 import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
+
+import { listPriceRegistrationExclusions, priceRegistrationProductKey } from './price-registration-exclusions'
 
 const TARGET_SHEETS = ['상품등록', '메인', '뉴도매']
 const PAGE_SIZE = 100
@@ -17,7 +19,7 @@ export interface PriceTableImportResult {
 }
 
 export interface PriceTableListResult {
-  rows: PriceTableRow[]
+  rows: Array<PriceTableRow & { missingMalls?: string[] }>
   total: number
   overallTotal: number
   page: number
@@ -104,24 +106,24 @@ export async function listPriceTableRows(data: {
   sheetName?: string
   sortKey?: string
   sortOrder?: 'asc' | 'desc'
+  registrationReview?: { mallIds: string[]; showExcluded: boolean }
 }): Promise<PriceTableListResult> {
   await ensurePriceTableSchema()
   const page = Math.max(1, data.page ?? 1)
   const whereClause = buildWhereClause(data.userId, data.search, data.sheetName)
   const orderBy = buildOrderBy(data.sortKey, data.sortOrder)
 
-  const [totalRows, rows, sheetRows, latestRows] = await Promise.all([
-    db
-      .select({ value: count() })
-      .from(analyticsPriceTableRows)
-      .where(whereClause),
-    db
-      .select()
-      .from(analyticsPriceTableRows)
-      .where(whereClause)
-      .orderBy(...orderBy, asc(analyticsPriceTableRows.id))
-      .limit(PAGE_SIZE)
-      .offset((page - 1) * PAGE_SIZE),
+  const offset = (page - 1) * PAGE_SIZE
+  const rowQuery = db.select().from(analyticsPriceTableRows).where(whereClause)
+    .orderBy(...orderBy, asc(analyticsPriceTableRows.id))
+  const review = data.registrationReview
+  const [result, sheetRows, latestRows] = await Promise.all([
+    review
+      ? listRegistrationReviewRows(rowQuery, data.userId, data.sheetName ?? '', review, offset)
+      : Promise.all([
+          db.select({ value: count() }).from(analyticsPriceTableRows).where(whereClause),
+          rowQuery.limit(PAGE_SIZE).offset(offset),
+        ]).then(([totalRows, rows]) => ({ total: totalRows[0]?.value ?? 0, rows })),
     db
       .select({ name: analyticsPriceTableRows.sourceSheetName, value: count() })
       .from(analyticsPriceTableRows)
@@ -139,13 +141,11 @@ export async function listPriceTableRows(data: {
       .limit(1),
   ])
 
-  const total = totalRows[0]?.value ?? 0
   const latest = latestRows[0]
   const sheetCounts = sheetRows.map((row) => ({ name: row.name, count: row.value }))
 
   return {
-    rows,
-    total,
+    ...result,
     overallTotal: sheetCounts.reduce((sum, sheet) => sum + sheet.count, 0),
     page,
     pageSize: PAGE_SIZE,
@@ -154,6 +154,27 @@ export async function listPriceTableRows(data: {
     latestImport: latest?.importedAt ?? null,
     sourceFileName: latest?.sourceFileName ?? null,
   }
+}
+
+async function listRegistrationReviewRows(
+  query: PromiseLike<PriceTableRow[]>,
+  userId: string,
+  sheetName: string,
+  review: { mallIds: string[]; showExcluded: boolean },
+  offset: number,
+) {
+  const columns = review.mallIds.length ? getRegistrationTargets(sheetName, review.mallIds) : []
+  if (!review.showExcluded && !columns.length) return { rows: [], total: 0 }
+  const [rows, exclusions] = await Promise.all([query, listPriceRegistrationExclusions(userId)])
+  const matching = rows.flatMap((row) => {
+    const productKey = priceRegistrationProductKey(row)
+    if (!productKey || exclusions.has(productKey) !== review.showExcluded) return []
+    const missingMalls = columns.filter((column) =>
+      findMarketplaceProductIds(row.rawData as Record<string, string>, column).length === 0,
+    ).map((column) => column.label)
+    return review.showExcluded || missingMalls.length ? [{ ...row, missingMalls }] : []
+  })
+  return { rows: matching.slice(offset, offset + PAGE_SIZE), total: matching.length }
 }
 
 function priceNumberEntries(row: Pick<ParsedPriceTableRow, 'sourceSheetName' | 'productCode' | 'productName' | 'optionName' | 'rawData'>) {

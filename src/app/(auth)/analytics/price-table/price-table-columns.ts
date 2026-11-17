@@ -175,6 +175,12 @@ export function getRegistrationMarketplaceColumns() {
   return productRegistrationColumns.filter((column) => ACTIVE_MARKETPLACE_IDS.has(column.id))
 }
 
+export function getRegistrationTargets(sheetName: string, ids: string[]) {
+  const columns = sheetName === '뉴도매' ? getPriceTableDisplayColumns(sheetName) : getRegistrationMarketplaceColumns()
+  return columns.filter((column) => column.showProductId && column.id !== 'b2b' && column.id !== 'b2c'
+    && (ids.length === 0 || ids.includes(column.id)))
+}
+
 export function getInactiveRegistrationMarketplaceColumns() {
   return productRegistrationColumns.filter((column) => !ACTIVE_MARKETPLACE_IDS.has(column.id))
 }

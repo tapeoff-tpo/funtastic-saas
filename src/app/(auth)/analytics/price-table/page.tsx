@@ -31,6 +31,8 @@ export default async function PriceTablePage({
     sort?: string
     order?: string
     view?: string
+    malls?: string
+    excluded?: string
   }>
 }) {
   const user = await getCurrentUser()
@@ -43,7 +45,9 @@ export default async function PriceTablePage({
   const sortKey = params?.sort?.trim() || 'importedAt'
   const sortOrder = params?.order === 'asc' ? 'asc' : 'desc'
   const activeView = params?.view === 'products' ? 'products' : 'compare'
-  const navigation: PriceTableNavigation = { sheetName: activeSheet, search, sortKey, sortOrder, view: activeView }
+  const malls = (params?.malls ?? '').split(',').slice(0, 80).filter(Boolean)
+  const showExcluded = params?.excluded === '1'
+  const navigation: PriceTableNavigation = { sheetName: activeSheet, search, sortKey, sortOrder, view: activeView, malls, showExcluded }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
@@ -53,6 +57,7 @@ export default async function PriceTablePage({
     sheetName: activeSheet,
     sortKey,
     sortOrder,
+    registrationReview: activeView === 'products' ? { mallIds: malls, showExcluded } : undefined,
   }).catch((error) => {
     console.error('price table list error:', error)
     return {
@@ -81,7 +86,8 @@ export default async function PriceTablePage({
     productName: row.productName,
     optionName: row.optionName,
     registeredProductName: row.registeredProductName,
-    rawData: row.rawData as Record<string, string>,
+    rawData: activeView === 'compare' ? row.rawData as Record<string, string> : {},
+    missingMalls: row.missingMalls,
     directEntryDate: row.sourceFileName === '직접 등록' ? formatPriceNumberDate(row.importedAt) : undefined,
   }))
   return (
@@ -109,6 +115,8 @@ export default async function PriceTablePage({
           <input type="hidden" name="view" value={activeView} />
           <input type="hidden" name="sort" value={sortKey} />
           <input type="hidden" name="order" value={sortOrder} />
+          {malls.length > 0 && <input type="hidden" name="malls" value={malls.join(',')} />}
+          {showExcluded && <input type="hidden" name="excluded" value="1" />}
           <input aria-label="판매가 상품 검색" name="q" defaultValue={search} placeholder="상품코드 · 상품명 · 등록번호 검색" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs" />
           <button type="submit" aria-label="검색" className="inline-flex size-8 items-center justify-center rounded border hover:bg-muted"><Search className="size-3.5" /></button>
           {search && <Link aria-label="검색 초기화" href={priceTableHref({ ...navigation, search: '' })} className="inline-flex size-8 items-center justify-center rounded border"><X className="size-3.5" /></Link>}

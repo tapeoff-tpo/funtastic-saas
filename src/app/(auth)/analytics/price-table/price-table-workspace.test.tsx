@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { priceNumberDateKey } from '@/lib/analytics/price-number-date'
 import { priceTablePages, type PriceTableNavigation } from './price-table-navigation'
 import { PriceTableWorkspace } from './price-table-workspace'
+
+vi.mock('./price-registration-actions', () => ({ setPriceRegistrationExcluded: vi.fn() }))
+const push = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
 
 afterEach(() => { cleanup(); localStorage.clear() })
 
@@ -37,7 +41,7 @@ describe('price table mall selection', () => {
 })
 
 
-it('shows the date for each product number in price comparison and product details', () => {
+it('shows saved dates in price comparison and only missing malls in registration review', () => {
   const key = '쿠팡 상품번호'
   const rows = [{
     id: 'row-1',
@@ -57,14 +61,13 @@ it('shows the date for each product number in price comparison and product detai
   expect(screen.queryByText('입력일 미기록')).not.toBeInTheDocument()
   const sortParams = new URL(screen.getByRole('link', { name: 'No.' }).getAttribute('href')!, 'https://example.com').searchParams
   expect(Object.fromEntries(sortParams)).toEqual({ sheet: '상품등록', sort: 'sourceNumber', order: 'desc', view: 'compare', q: '테스트' })
-  expect(screen.getByRole('link', { name: '상품 기준' })).toHaveAttribute('href', expect.stringContaining('page=14'))
-  rerender(<PriceTableWorkspace {...defaultProps} navigation={{ ...navigation, view: 'products' }} rows={rows} />)
+  expect(screen.getByRole('link', { name: '등록 누락 확인' })).toHaveAttribute('href', expect.stringContaining('page=14'))
+  rerender(<PriceTableWorkspace {...defaultProps} navigation={{ ...navigation, view: 'products', malls: ['coupang', 'toss'] }}
+    rows={rows.map((row) => ({ ...row, missingMalls: ['토스쇼핑'] }))} />)
   expect(screen.getByText('27')).toBeVisible()
-  fireEvent.click(screen.getByRole('button', { name: /테스트 상품/ }))
-  expect(screen.getByText('상품번호 123456')).toBeVisible()
-  expect(screen.getAllByText('상품번호 789012')[0]).toBeVisible()
-  expect(screen.getByText('입력일 2026-11-10')).toBeVisible()
-  expect(screen.queryByText('입력일 미기록')).not.toBeInTheDocument()
+  expect(screen.getByRole('cell', { name: '토스쇼핑' })).toBeVisible()
+  expect(screen.getByRole('button', { name: '등록 제외' })).toBeVisible()
+  expect(screen.queryByText('입력일 2026-11-10')).not.toBeInTheDocument()
 })
 
 
@@ -72,4 +75,14 @@ it('shows up to ten page numbers in each group', () => {
   expect(priceTablePages(1, 24)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   expect(priceTablePages(14, 24)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
   expect(priceTablePages(24, 24)).toEqual([21, 22, 23, 24])
+})
+
+
+it('uses saved mall groups for registration review and skips baseline price columns', async () => {
+  localStorage.setItem('price-table-mall-groups-v1', JSON.stringify({ B2C몰: ['b2b', 'b2c', 'coupang'] }))
+  render(<PriceTableWorkspace {...defaultProps} navigation={{ ...navigation, view: 'products' }} rows={[]} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'B2C몰' }))
+  const url = new URL(push.mock.lastCall![0], 'https://example.com')
+  expect(url.searchParams.get('malls')).toBe('coupang')
+  expect(url.searchParams.get('page')).toBeNull()
 })

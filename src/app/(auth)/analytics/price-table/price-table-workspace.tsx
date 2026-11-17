@@ -2,12 +2,16 @@
 
 import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, PackageSearch, Table2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { setPriceRegistrationExcluded } from './price-registration-actions'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, PackageSearch, Table2 } from 'lucide-react'
 import {
   findMarketplaceProductIds,
   getInactiveRegistrationMarketplaceColumns,
   getRegistrationMarketplaceColumns,
+  getRegistrationTargets,
 } from './price-table-columns'
 import type { PriceTableGridRow } from './price-table-grid'
 import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
@@ -18,7 +22,7 @@ const NUMBER_WIDTH = 52
 
 const VIEW_ITEMS: Array<{ id: PriceTableView; label: string; icon: typeof Table2 }> = [
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
-  { id: 'products', label: '상품 기준', icon: Table2 },
+  { id: 'products', label: '등록 누락 확인', icon: Table2 },
 ]
 
 export function PriceTableWorkspace(props: {
@@ -51,7 +55,7 @@ export function PriceTableWorkspace(props: {
         })}
       </div>
 
-      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} /> : <ProductMarketplaceView rows={props.rows} navigation={props.navigation} />}
+      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} /> : <RegistrationReview key={props.navigation.malls?.join(',')} rows={props.rows} navigation={props.navigation} />}
     </div>
   )
 }
@@ -196,75 +200,108 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
   )
 }
 
-function ProductMarketplaceView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
-  const { width, resize } = usePriceColumnWidths('price-table-products-widths-v1')
-  const codeWidth = width('productCode', 96)
-  const productWidth = width('product', 240)
-  const gridStyle = { gridTemplateColumns: `${NUMBER_WIDTH}px ${codeWidth}px ${productWidth}px minmax(300px, 1fr) 36px`, minWidth: NUMBER_WIDTH + codeWidth + productWidth + 360 }
-  const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
-  const [openRow, setOpenRow] = useState<string | null>(null)
+function RegistrationReview({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
+  const router = useRouter()
+  const [selected, setSelected] = useState(navigation.malls ?? [])
+  const [groups, setGroups] = useState<Record<string, string[]>>({})
+  const [pending, startTransition] = useTransition()
+  const targets = getRegistrationTargets(navigation.sheetName, [])
+  const showExcluded = Boolean(navigation.showExcluded)
+
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem('price-table-mall-groups-v1') || '{}')
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        setGroups(Object.fromEntries(Object.entries(saved).filter(([, ids]) =>
+          Array.isArray(ids) && ids.every((id) => typeof id === 'string'),
+        )))
+      }
+    } catch { /* Groups are optional. */ }
+  }, [])
+
+  function selectGroup(ids: string[]) {
+    const malls = targets.filter((column) => ids.includes(column.id)
+      || (column.id.startsWith('new-') && ids.includes(column.id.slice(4)))).map((column) => column.id)
+    setSelected(malls)
+    router.push(priceTableHref({ ...navigation, malls }), { scroll: false })
+  }
+
+  function changeExclusion(row: PriceTableGridRow) {
+    startTransition(async () => {
+      const result = await setPriceRegistrationExcluded(row.id, !showExcluded)
+      if (result.error) toast.error(result.error)
+      else toast.success(showExcluded ? '등록 대상으로 복원했습니다.' : '등록 대상에서 제외했습니다.')
+    })
+  }
 
   return (
-    <div className="overflow-auto rounded-md border bg-card">
-      <div style={gridStyle} className="grid border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-        <span className="border-r"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></span>
-        <span className="relative border-r px-2"><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></span>
-        <span className="relative border-r px-2"><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></span>
-        <span className="px-2"><SortLink sortKey="registrationCount" label="등록 현황" navigation={navigation} /></span><span />
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {Object.entries(groups).map(([name, ids]) => (
+          <button key={name} type="button" className="rounded border px-2 py-1" onClick={() => selectGroup(ids)}>{name}</button>
+        ))}
+        <details className="relative">
+          <summary className="cursor-pointer rounded border px-2 py-1">대상 몰 선택</summary>
+          <form className="absolute z-30 mt-1 w-72 rounded border bg-popover p-3 shadow-lg" onSubmit={(event) => {
+            event.preventDefault()
+            router.push(priceTableHref({ ...navigation, malls: selected }), { scroll: false })
+          }}>
+            <div className="grid max-h-60 grid-cols-2 gap-2 overflow-auto">
+              {targets.map((column) => (
+                <label key={column.id} className="flex items-center gap-1">
+                  <input type="checkbox" checked={selected.includes(column.id)} onChange={(event) => {
+                    const checked = event.target.checked
+                    setSelected((ids) => checked ? [...ids, column.id] : ids.filter((id) => id !== column.id))
+                  }} />
+                  {column.label}
+                </label>
+              ))}
+            </div>
+            <button type="submit" className="mt-3 rounded bg-primary px-2 py-1 text-primary-foreground">적용</button>
+          </form>
+        </details>
+        <span className="text-muted-foreground">대상 {targets.filter((column) => navigation.malls?.includes(column.id)).length}개 몰</span>
+        <Link href={priceTableHref({ ...navigation, showExcluded: !showExcluded })} prefetch={false} className="ml-auto rounded border px-2 py-1">
+          {showExcluded ? '누락 목록 보기' : '제외한 상품 보기'}
+        </Link>
       </div>
-      {rows.map((row) => {
-        const registrations = columns.flatMap((column) => findMarketplaceProductIds(row.rawData, column).map((id) => ({
-          marketplace: column.label,
-          productId: id.value,
-          enteredDate: getPriceNumberDate(row.rawData, id.key) ?? row.directEntryDate,
-          price: row.rawData[column.valueKey],
-        })))
-        const open = openRow === row.id
-        return (
-          <div key={row.id} style={{ minWidth: gridStyle.minWidth }} className="border-b last:border-b-0">
-            <button
-              type="button"
-              onClick={() => setOpenRow(open ? null : row.id)}
-              style={gridStyle}
-              className="grid h-12 w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted/30"
-            >
-              <span className="border-r text-center text-xs tabular-nums text-muted-foreground">{row.sourceNumber ?? '–'}</span>
-              <span data-no-translate title={row.productCode ?? ''} className="truncate border-r px-2 font-mono text-xs font-medium">{row.productCode || '-'}</span>
-              <span className="min-w-0 border-r px-2">
-                <span data-no-translate className="block truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</span>
-                {row.optionName || row.productCode ? (
-                  <span className="block truncate text-xs text-muted-foreground">
-                    <span data-no-translate className="font-mono lg:hidden">{row.productCode || '-'}</span>
-                    {row.optionName ? <><span className="lg:hidden"> · </span><span data-no-translate>{row.optionName}</span></> : null}
-                  </span>
-                ) : null}
-              </span>
-              <span className="flex min-w-0 flex-wrap gap-1 px-2">
-                {registrations.length ? registrations.slice(0, 4).map((item) => <span key={`${item.marketplace}-${item.productId}`} className="truncate rounded bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700">{item.marketplace} · {item.productId}{item.enteredDate ? ` · ${item.enteredDate}` : null}</span>) : <span className="text-xs text-muted-foreground">등록 이력 없음</span>}
-                {registrations.length > 4 ? <span className="text-xs text-muted-foreground">+{registrations.length - 4}</span> : null}
-              </span>
-              <ChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
-            {open ? (
-              <div className="border-t bg-muted/15 px-4 py-3">
-                <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"><span>원가 <strong>{formatMoney(row.rawData['원가'])}</strong></span><span>B2B <strong>{formatMoney(row.rawData['B2B 판매가'])}</strong></span><span>B2C <strong>{formatMoney(row.rawData['B2C 판매가'])}</strong></span><span className="text-muted-foreground">등록 {registrations.length}건</span></div>
-                {registrations.length ? (
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {registrations.map((item) => (
-                      <div key={`${item.marketplace}-${item.productId}`} className="rounded-md border bg-background px-3 py-2">
-                        <div className="text-xs font-medium">{item.marketplace}</div>
-                        <div className="mt-1 font-mono text-xs text-muted-foreground">상품번호 {item.productId}</div>
-                        {item.enteredDate && <div className="text-xs text-muted-foreground">입력일 {item.enteredDate}</div>}
-                        <div className="mt-1 text-sm font-semibold tabular-nums">판매가 {formatMoney(item.price)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm text-muted-foreground">판매가 원본에서 확인되는 등록 몰 상품번호가 없습니다.</p>}
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
+
+      <div className="overflow-auto rounded-md border bg-card">
+        <table className="w-full min-w-[560px] text-left text-sm">
+          <thead className="bg-muted text-xs text-muted-foreground">
+            <tr>
+              <th className="px-2 py-2"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></th>
+              <th className="px-2 py-2"><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /></th>
+              <th className="px-2 py-2"><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /></th>
+              <th className="px-2 py-2">등록번호 미입력</th>
+              <th className="px-2 py-2"><span className="sr-only">등록 대상 변경</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-t">
+                <td className="px-2 py-2 text-xs tabular-nums">{row.sourceNumber ?? '–'}</td>
+                <td className="px-2 py-2 font-mono text-xs">{row.productCode || '–'}</td>
+                <td className="px-2 py-2">
+                  <div>{row.productName || row.registeredProductName}</div>
+                  {row.optionName && <div className="text-xs text-muted-foreground">{row.optionName}</div>}
+                </td>
+                <td className="px-2 py-2 text-xs">{row.missingMalls?.join(', ')}</td>
+                <td className="px-2 py-2 text-right">
+                  <button type="button" disabled={pending} onClick={() => changeExclusion(row)} className="whitespace-nowrap rounded border px-2 py-1 text-xs disabled:opacity-50">
+                    {showExcluded ? '대상 복원' : '등록 제외'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                {showExcluded ? '제외한 상품이 없습니다.' : navigation.malls?.length ? '등록번호가 비어 있는 상품이 없습니다.' : '확인할 몰 그룹이나 대상 몰을 선택해주세요.'}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

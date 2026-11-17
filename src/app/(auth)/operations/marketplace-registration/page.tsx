@@ -1,65 +1,6 @@
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import { ClipboardPenLine, Database, Layers3 } from 'lucide-react'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { getCurrentUser } from '@/lib/auth/current-user'
-import { listMarketplaceRegistrationProducts } from '@/lib/operations/marketplace-registration'
-import { LinkedPriceRegistration } from './linked-price-registration'
-import { assertMenuAccess } from '@/lib/auth/menu-access'
-import { RegistrationBoard } from './registration-board'
-
+import Content from "./workspace-content"
 export const dynamic = 'force-dynamic'
 
-export default async function MarketplaceRegistrationPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; row?: string; mall?: string; view?: string; malls?: string }>
-}) {
-  const user = await getCurrentUser()
-  if (!user) redirect('/login')
-
-  const params = await searchParams
-  const query = params.q?.trim() ?? ''
-  const workspaceId = await getWorkspaceUserId(user.id)
-  if (params.row) {
-    await assertMenuAccess('/analytics/price-table')
-    return <LinkedPriceRegistration userId={workspaceId} rowId={params.row} mallId={params.mall}
-      search={query} view={params.view === 'products' ? 'products' : 'compare'} malls={(params.malls ?? '').split(',').filter(Boolean)} />
-  }
-  const allRows = await listMarketplaceRegistrationProducts(workspaceId)
-  const rows = query
-    ? allRows.filter((row) => [
-      row.productCode,
-      row.productName,
-      ...row.salesCodes,
-      ...row.inventorySkus,
-      ...row.options.map((option) => option.barcode ?? ''),
-    ].some((value) => value.toLocaleLowerCase('ko-KR').includes(query.toLocaleLowerCase('ko-KR'))))
-    : allRows
-  const optionCount = rows.reduce((total, row) => total + row.options.length, 0)
-  const matchedCodeCount = rows.reduce((total, row) => total + row.matchedSalesCodes, 0)
-  const lastSyncedAt = rows.find((row) => row.lastSyncedAt)?.lastSyncedAt
-
-  return (
-    <div className="space-y-4">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <ClipboardPenLine className="size-6" />
-            상품 등록 관리
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-4 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5"><Database className="size-4" /> 상품 {rows.length.toLocaleString('ko-KR')}개</span>
-          <span className="inline-flex items-center gap-1.5"><Layers3 className="size-4" /> 옵션 {optionCount.toLocaleString('ko-KR')}개</span>
-          <span>판매코드 매칭 {matchedCodeCount.toLocaleString('ko-KR')}개</span>
-          <span>최근 동기화 {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString('ko-KR') : '없음'}</span>
-          <Link href={query ? `/analytics/price-table?q=${encodeURIComponent(query)}&sheet=${encodeURIComponent('상품등록')}&view=products` : '/analytics/price-table'} className="rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
-            판매가 테이블 확인
-          </Link>
-        </div>
-      </header>
-      <RegistrationBoard rows={rows} initialQuery={query} />
-    </div>
-  )
+export default function MarketplaceRegistrationPage({ searchParams }: { searchParams: Parameters<typeof Content>[0]["searchParams"] }) {
+  return <Content searchParams={searchParams} />
 }

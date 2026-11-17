@@ -27,6 +27,7 @@ export const getInventoryList = cache(async function getInventoryList(
   const conditions: SQL[] = [eq(stock.userId, userId)]
 
   if (historicalMonth) conditions.push(eq(inventoryMonthEndStock.referenceMonth, filters.referenceMonth!))
+  if (filters.exactSku) conditions.push(eq(stock.sku, filters.exactSku))
   if (filters.search) {
     const pattern = `%${filters.search}%`
     conditions.push(or(

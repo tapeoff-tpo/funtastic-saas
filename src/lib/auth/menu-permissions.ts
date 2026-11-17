@@ -1,3 +1,5 @@
+import { PRODUCT_OPERATIONS_PATH, PRODUCT_OPERATIONS_TABS } from '@/lib/operations/product-operations'
+
 /** Shared menu catalogue. Parent access never grants a separately listed child. */
 export const MENU_PERMISSION_GROUPS = [
   { title: '기본', items: [['/dashboard', '대시보드']] },
@@ -75,6 +77,7 @@ export function canDeletePurchaseRequests(access: MenuAccess | null): boolean {
 export function canAccessPage(access: MenuAccess, href: string): boolean {
   const path = normalizeMenuPath(href)
   if (matches(path, '/admin/accounts')) return access.superAdmin
+  if (path === PRODUCT_OPERATIONS_PATH) return PRODUCT_OPERATIONS_TABS.some((tab) => tab.menus.some((menu) => canUseMenu(access, menu)))
   if (['/', '/access-denied', '/settings', '/settings/account', '/settings/menu', '/change-password', '/manifest.webmanifest', '/favicon.ico', '/window.svg', '/vercel.svg', '/next.svg', '/globe.svg', '/file.svg'].includes(path)) return true
   if (matches(path, '/downloads')) {
     const menu = path.includes('1688') ? '/costs' : path.includes('sms-bridge') ? '/operations/ai-accounts' : '/operations/marketplace-registration'

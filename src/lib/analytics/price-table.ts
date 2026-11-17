@@ -114,6 +114,7 @@ export async function listPriceTableRows(data: {
   userId: string
   page?: number
   search?: string
+  exactProductCode?: string
   sheetName?: string
   sortKey?: string
   sortOrder?: 'asc' | 'desc'
@@ -121,7 +122,7 @@ export async function listPriceTableRows(data: {
 }): Promise<PriceTableListResult> {
   await ensurePriceTableSchema()
   const page = Math.max(1, data.page ?? 1)
-  const whereClause = buildWhereClause(data.userId, data.search, data.sheetName)
+  const whereClause = buildWhereClause(data.userId, data.search, data.sheetName, data.exactProductCode)
   const orderBy = buildOrderBy(data.sortKey, data.sortOrder)
 
   const offset = (page - 1) * PAGE_SIZE
@@ -330,8 +331,9 @@ function cellText(value: unknown) {
   return String(value).replace(/\s+/g, ' ').trim()
 }
 
-function buildWhereClause(userId: string, search?: string, sheetName?: string) {
+function buildWhereClause(userId: string, search?: string, sheetName?: string, exactProductCode?: string) {
   const conditions = [eq(analyticsPriceTableRows.userId, userId)]
+  if (exactProductCode) conditions.push(eq(analyticsPriceTableRows.productCode, exactProductCode))
   const cleanSheet = sheetName?.trim()
   if (cleanSheet) conditions.push(eq(analyticsPriceTableRows.sourceSheetName, cleanSheet))
 

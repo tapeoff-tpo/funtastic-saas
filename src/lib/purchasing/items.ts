@@ -173,12 +173,14 @@ export async function getPurchasingItems(input: {
   page: number
   pageSize: number
   search?: string
+  exactSku?: string
   filters?: Partial<Record<Esa009mHeader, string>>
   sort?: Esa009mHeader | 'createdAt' | 'updatedAt'
   direction?: PurchasingItemSortDirection
   includeOutgoingMetrics?: boolean
 }) {
   const conditions = purchasingItemConditions(input.userId, input.search, input.filters)
+  if (input.exactSku) conditions.push(eq(products.internalSku, input.exactSku))
   const orderBy = purchasingItemOrderBy(input.sort, input.direction)
   const where = and(...conditions)
   const [rows, [{ total }]] = await Promise.all([

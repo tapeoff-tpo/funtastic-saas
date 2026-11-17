@@ -352,12 +352,12 @@ export async function importPurchasingItems(input: {
     if (options.mode === 'new-only') continue
     const headers = updateHeadersForImport(options)
     const currentData = purchasingItemData(current.metadata)
-    const nextData = ensurePurchasingItemIdentity(
-      mergeEsaData(currentData, row, headers, false),
-      current,
-    )
+    const mergedData = mergeEsaData(currentData, row, headers, false)
+    const nextData = options.mode === 'selected'
+      ? mergedData
+      : ensurePurchasingItemIdentity(mergedData, current)
     const changedHeaders = headers.filter((header) => currentData[header] !== nextData[header])
-    const identityChanged = purchasingItemIdentityChangedHeaders(currentData, nextData)
+    const identityChanged = options.mode === 'selected' ? [] : purchasingItemIdentityChangedHeaders(currentData, nextData)
     if (changedHeaders.length === 0 && identityChanged.length === 0) continue
 
     const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
@@ -1261,12 +1261,12 @@ function buildPurchasingItemsImportPreview(
 
     updateItems += 1
     const currentData = purchasingItemData(current.metadata)
-    const nextData = ensurePurchasingItemIdentity(
-      mergeEsaData(currentData, row, headers, false),
-      current,
-    )
+    const mergedData = mergeEsaData(currentData, row, headers, false)
+    const nextData = options.mode === 'selected'
+      ? mergedData
+      : ensurePurchasingItemIdentity(mergedData, current)
     const changedHeaders = headers.filter((header) => currentData[header] !== nextData[header])
-    const identityChanged = purchasingItemIdentityChangedHeaders(currentData, nextData)
+    const identityChanged = options.mode === 'selected' ? [] : purchasingItemIdentityChangedHeaders(currentData, nextData)
     const allChangedHeaders = [...changedHeaders, ...identityChanged]
     if (allChangedHeaders.length === 0) {
       unchangedItems += 1

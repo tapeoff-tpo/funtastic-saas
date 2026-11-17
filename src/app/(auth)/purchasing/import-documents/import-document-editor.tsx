@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Download, Loader2 } from 'lucide-react'
-import type { prepareImportDocument } from '@/lib/purchasing/china-import-document'
+import { ShipmentCostPanel } from './shipment-cost-panel'
+import type { ImportDocumentDetail, prepareImportDocument } from '@/lib/purchasing/china-import-document'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 
-type Prepared = ReturnType<typeof prepareImportDocument> & { snapshot: string }
+type Prepared = ReturnType<typeof prepareImportDocument> & { snapshot: string; costPacking?: ImportDocumentDetail }
 const inputClass = 'h-9 w-full rounded-md border bg-background px-2 text-sm'
 const fields = [
   ['invoiceNo', '문서번호 / 发票编号', 'text'], ['invoiceDate', '문서일자 / 发票日期', 'date'],
@@ -97,7 +98,8 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
     finally { setBusy(false) }
   }
 
-  return <section aria-label="인보이스·패킹리스트 작성" className="rounded-lg border bg-background p-4">
+  return <div className="space-y-4">
+    <section aria-label="인보이스·패킹리스트 작성" className="rounded-lg border bg-background p-4">
       {error ? <p role="alert" className="my-3 rounded-md border border-red-200 p-3 text-sm text-red-700">{error}</p> : null}
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
@@ -115,4 +117,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
         <button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}인보이스·패킹리스트 다운로드 / 下载发票和装箱单</button>
       </form> : null}
     </section>
+    {data?.costPacking && <ShipmentCostPanel key={data.snapshot} packing={data.costPacking} url={url} snapshot={data.snapshot}
+      prices={Object.fromEntries(Object.entries(items).map(([id, value]) => [id, value.unitPriceCny]))} />}
+  </div>
 }

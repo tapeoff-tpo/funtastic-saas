@@ -28,7 +28,7 @@ const FIELD_GROUPS = [
     id: 'compliance',
     title: '통관·인증',
     initiallyOpen: false,
-    headers: ['HS CODE', '검역대상 여부', '100KG 인증여부', '[식약처]유리/도자기제품 필수확인'],
+    headers: ['HS CODE', '검역대상 여부', '검역만료일', '100KG 인증여부', '[식약처]유리/도자기제품 필수확인'],
   },
   {
     id: 'warehouse',

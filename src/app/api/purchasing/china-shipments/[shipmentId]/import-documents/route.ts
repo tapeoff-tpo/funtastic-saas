@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
+import { calculateShipmentCost } from '@/lib/purchasing/shipment-cost'
+import { confirmShipmentCost } from '@/lib/purchasing/shipment-cost-store'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -26,6 +29,17 @@ const schema = z.object({
   items: z.record(z.string().uuid(), z.object({ englishName: text, unitPriceCny: z.number().finite().min(0).max(100000000) })),
   boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000), cbm: z.number().finite().positive().max(10000) })),
 })
+const costSchema = z.object({
+  snapshot: z.string().length(64),
+  bl: text,
+  date,
+  inputs: z.object({
+    charges: z.number().int().nonnegative(), vat: z.number().int().nonnegative(),
+    exchangeRate: z.number().positive(),
+    prices: z.record(z.string().uuid(), z.number().nonnegative()),
+    mixedBoxCbm: z.record(z.string().uuid(), z.number().positive()),
+  }),
+})
 type Context = { params: Promise<{ shipmentId: string }> }
 
 async function load(context: Context) {
@@ -42,7 +56,7 @@ async function load(context: Context) {
   if (!detail) return { response: NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 }) }
   const metadata = await getPurchasingItemTradeDataBySku(userId, detail.items.map((item) => item.sku))
   const prepared = prepareImportDocument(detail, metadata)
-  const snapshot = createHash('sha256').update(JSON.stringify({ prepared, allocations: detail.boxItems })).digest('hex')
+  const snapshot = createHash('sha256').update(JSON.stringify({ prepared, boxes: detail.boxes, pallets: detail.pallets, allocations: detail.boxItems })).digest('hex')
   return { detail, metadata, prepared, snapshot, userId, requestedByUserId: user.id }
 }
 
@@ -50,7 +64,7 @@ export async function GET(_request: Request, context: Context) {
   try {
     const loaded = await load(context)
     if (loaded.response) return loaded.response
-    return NextResponse.json({ ...loaded.prepared, snapshot: loaded.snapshot }, { headers: { 'Cache-Control': 'private, no-store' } })
+    return NextResponse.json({ ...loaded.prepared, snapshot: loaded.snapshot, costPacking: { shipment: loaded.detail.shipment, items: loaded.detail.items, boxes: loaded.detail.boxes, pallets: loaded.detail.pallets, boxItems: loaded.detail.boxItems } }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('China import document preparation:', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : '인보이스·패킹리스트 정보를 불러오지 못했습니다.' }, { status: 400 })
@@ -61,7 +75,19 @@ export async function POST(request: Request, context: Context) {
   try {
     const loaded = await load(context)
     if (loaded.response) return loaded.response
-    const parsed = schema.safeParse(await request.json().catch(() => null))
+    const body = await request.json().catch(() => null)
+    if (body?.intent === 'confirm-cost') {
+      const cost = costSchema.safeParse(body)
+      if (!cost.success) return NextResponse.json({ error: 'B/L 번호, 원가 기준일 및 계산 입력값을 확인해주세요.' }, { status: 400 })
+      if (cost.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보가 변경되었습니다. 새로고침 후 다시 계산해주세요.' }, { status: 409 })
+      const result = calculateShipmentCost(loaded.detail, cost.data.inputs)
+      const { shipmentId } = await context.params
+      const saved = await confirmShipmentCost({ ...cost.data, userId: loaded.userId, shipmentId, actorId: loaded.requestedByUserId, result })
+      if (!saved) return NextResponse.json({ error: '이미 원가를 확정한 출고 회차입니다.' }, { status: 409 })
+      revalidatePath('/costs')
+      return NextResponse.json({ saved: true })
+    }
+    const parsed = schema.safeParse(body)
     if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
     if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 인보이스·패킹리스트를 새로고침해주세요.' }, { status: 409 })
     const [productImages, allItems] = await Promise.all([

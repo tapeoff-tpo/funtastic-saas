@@ -5,7 +5,7 @@ import { useIntentPrefetch } from './layout/use-intent-prefetch'
 import { usePathname } from 'next/navigation'
 
 const RELATED_WORK = [
-  { href: '/costs', label: '품목' },
+  { href: '/costs', label: '품목리스트' },
   { href: '/inventory', label: '재고' },
   { href: '/purchasing/purchases', label: '발주검토' },
   { href: '/purchasing/orders', label: '발주·입고' },

@@ -12,12 +12,15 @@ import {
   PURCHASING_ITEM_STATUS_LABELS,
 } from '@/lib/purchasing/purchase-delay'
 
+import type { ShipmentCostHistoryRow } from '@/lib/purchasing/shipment-cost-store'
+
 export type CostEditableRow = {
   id: string
   data: Record<string, string | null>
   purchaseUrlVerificationStatus?: 'confirm_required' | null
   purchasingStatus?: string | null
   purchasingStatusNote?: string | null
+  shipmentCostHistory?: ShipmentCostHistoryRow[]
   updatedAt: string
 }
 
@@ -417,6 +420,7 @@ export function CostsEditableTable({
                 <Button type="button" size="sm" variant="outline" onClick={() => setExpandedEditGroups(new Set(editFieldGroups.map((group) => group.id)))}>전체 펼치기</Button>
                 <Button type="button" size="sm" variant="outline" onClick={() => setExpandedEditGroups(new Set())}>전체 접기</Button>
               </div>
+              {editingRow && <ShipmentCostHistory row={editingRow} />}
               {editFieldGroups.map((group) => {
                 const expanded = expandedEditGroups.has(group.id)
                 const panelId = `${editGroupsId}-${group.id}`
@@ -442,7 +446,7 @@ export function CostsEditableTable({
                             id={`purchasing-field-${header.replaceAll(' ', '-')}`}
                             aria-label={itemFieldLabel(header)}
                             maxLength={header === '중국어 상품명' ? 1000 : undefined}
-                            type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
+                            type={header === PURCHASE_URL_HEADER ? 'url' : header === '검역만료일' ? 'date' : 'text'}
                             value={draft[header] ?? ''}
                             disabled={!isCreating && header === codeHeader}
                             onChange={(event) => setDraft((current) => ({ ...current, [header]: event.target.value }))}
@@ -582,4 +586,26 @@ function formatUpdatedAt(value: string) {
   }).formatToParts(date)
   const valueFor = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
   return `${valueFor('year')}-${valueFor('month')}-${valueFor('day')} ${valueFor('hour')}:${valueFor('minute')}`
+}
+
+function ShipmentCostHistory({ row }: { row: CostEditableRow }) {
+  const history = row.shipmentCostHistory ?? []
+  const works = Number((row.data['works 신규 원가'] || row.data['works 기존 원가'] || '').replaceAll(',', ''))
+  const latest = history[0]
+  const delta = works > 0 && latest ? (latest.unitCost - works) / works : null
+  const format = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
+  return <details className="space-y-2 rounded-md border p-3 text-sm" open={Boolean(latest)}>
+    <summary className="cursor-pointer font-semibold">회차별 원가</summary>
+    <p>웍스 기준 원가 {works > 0 ? `${format.format(works)}원` : '미입력'}</p>
+    {latest && delta === null && <p className="text-amber-700">웍스 원가를 입력할지 검토해주세요.</p>}
+    {delta !== null && Math.abs(delta) >= 0.05 && <p className="text-amber-700">
+      최근 회차 원가가 웍스 원가보다 {format.format(Math.abs(delta) * 100)}% {delta > 0 ? '높습니다' : '낮습니다'}. 원가 입력값과 웍스 원가 수정 여부를 확인해주세요.
+    </p>}
+    {latest ? <div className="overflow-auto"><table className="w-full whitespace-nowrap text-left">
+      <thead><tr><th>기준일</th><th>B/L</th><th>수량</th><th>단위원가</th></tr></thead>
+      <tbody>{history.map((entry, index) => <tr key={index} className="border-t">
+        <td>{entry.date}</td><td>{entry.bl}</td><td>{format.format(entry.quantity)}</td><td>{format.format(entry.unitCost)}원</td>
+      </tr>)}</tbody>
+    </table></div> : <p className="text-muted-foreground">확정된 회차 원가가 없습니다.</p>}
+  </details>
 }

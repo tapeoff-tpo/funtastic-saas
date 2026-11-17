@@ -32,7 +32,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/orders/collect': '주문 수집',
   '/orders/import': '주문 가져오기',
   '/orders/claims': '클레임 관리',
-  '/costs': '원가',
+  '/costs': '품목리스트',
   '/purchasing/china-inventory': '중국재고',
   '/purchasing/saas-china-inventory': '중국재고(SaaS)',
   '/purchasing/china-shipments': '중국출고',

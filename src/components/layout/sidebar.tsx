@@ -149,28 +149,22 @@ export const navSections: NavSection[] = [
   },
   {
     id: 'inventory-flow',
-    title: '중국재고·재고관리',
+    title: '중국재고·출고',
     items: [
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
       { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
       { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
       { href: '/purchasing/import-documents', label: '인보이스·패킹리스트', icon: FileSpreadsheet },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
     ],
   },
   {
-    id: 'pricing',
-    title: '원가·판매가',
+    id: 'inventory',
+    title: '상품 운영',
     items: [
-      { href: '/costs', label: '원가', icon: Package },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/costs', label: '품목리스트', icon: Package },
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
-    ],
-  },
-  {
-    id: 'product-registration',
-    title: '상세페이지·상품등록',
-    items: [
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
       { href: '/operations/marketplace-registration', label: '상품등록', icon: Package },
       { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },

@@ -9,7 +9,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/shipping/split', '분할배송'], ['/shipping/templates', '택배 양식 관리'], ['/shipping/print', '배송 라벨 인쇄'],
   ] },
   { title: '상품·품목', items: [
-    ['/new-products', '상품관리'], ['/operations/sourcing', '소싱'], ['/costs', '품목'],
+    ['/new-products', '상품관리'], ['/operations/sourcing', '소싱'], ['/costs', '품목리스트'],
     ['/products', '상품 관리(마켓)'], ['/products/mapping', '매핑관리'], ['/products/mapping-codes', '매핑코드 마스터'],
     ['/products/categories', '카테고리'], ['/products/marketplace-categories', '카테고리 매핑'],
   ] },

@@ -122,7 +122,7 @@ it('moves China stock into purchasing by dropping it on the category title and r
   expect(order.items.purchasing.at(-1)).toBe('/purchasing/china-inventory')
   expect(order.items['inventory-flow']).not.toContain('/purchasing/china-inventory')
   const moved = screen.getByRole('link', { name: '중국재고' })
-  expect(moved.compareDocumentPosition(screen.getByText('중국재고·재고관리')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(moved.compareDocumentPosition(screen.getByText('중국재고·출고')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   await waitFor(() => expect(screen.getByRole('button', { name: '중국재고 순서 변경' })).toHaveAttribute('aria-disabled', 'false'))
 
   view.unmount()
@@ -131,5 +131,5 @@ it('moves China stock into purchasing by dropping it on the category title and r
   await screen.findByRole('button', { name: '중국재고 순서 변경' })
   const links = screen.getAllByRole('link', { name: '중국재고' })
   expect(links).toHaveLength(1)
-  expect(links[0].compareDocumentPosition(screen.getByText('중국재고·재고관리')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(links[0].compareDocumentPosition(screen.getByText('중국재고·출고')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

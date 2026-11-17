@@ -274,8 +274,7 @@ export function Sidebar({ onCollapse, onNavigate, mobile = false }: SidebarProps
   }, [])
 
   const visibleSections = orderedSections.map((section) => {
-    const items = section.items.filter((item) => canAccessPage(access, item.href)
-      && (item.href !== '/operations/marketplace-registration' || !canAccessPage(access, '/analytics/price-table')))
+    const items = section.items.filter((item) => canAccessPage(access, item.href))
     return {
       ...section,
       items,

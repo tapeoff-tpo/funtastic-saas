@@ -119,6 +119,11 @@ export default async function PriceTablePage({
           <h1 className="text-xl font-bold">판매가 테이블</h1>
         </div>
         <div className="flex w-fit gap-2">
+          {canRegister && (
+            <Link href="/operations/marketplace-registration" prefetch={false} className="rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted">
+              상품등록
+            </Link>
+          )}
           <Link href="/analytics" className="rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
             매출분석으로
           </Link>
@@ -144,7 +149,6 @@ export default async function PriceTablePage({
         <details className="group relative ml-auto">
           <summary className="cursor-pointer list-none rounded border px-2 py-1.5 text-xs [&::-webkit-details-marker]:hidden">등록·업로드 ▾</summary>
           <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-[min(900px,calc(100vw-2rem))] space-y-3 overflow-auto rounded-md border bg-popover p-3 shadow-lg">
-            {canRegister && <Link className="block text-sm text-primary underline" href="/operations/marketplace-registration">상품등록 일괄 작업</Link>}
             <ManualPriceProduct sheetName={activeSheet} />
             <ChannelBundleOverridesUpload />
             <details className="rounded border p-2"><summary className="cursor-pointer text-sm font-medium">원본 엑셀 업로드</summary><div className="pt-3"><PriceTableUpload compact /></div></details>

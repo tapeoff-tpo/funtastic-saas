@@ -327,6 +327,24 @@ export function PurchaseFundLedgerPanel({
                   : null}
               </p>
             ) : null}
+            {data.missingDebitItems?.length ? (
+              <div className="rounded-sm border border-amber-200 bg-amber-50/30 px-3 py-2" aria-label="차감에서 제외된 발주 내역">
+                <p className="font-semibold">차감에서 제외된 발주</p>
+                <ul className="mt-2 space-y-2">
+                  {data.missingDebitItems.map((item) => (
+                    <li key={item.id} className="border-t border-amber-200 pt-2 first:border-0 first:pt-0">
+                      <p className="text-muted-foreground">{item.occurredOn}{item.supplierOrderNumber ? ` · 주문번호 ${item.supplierOrderNumber}` : ''}</p>
+                      {item.products.map((product, index) => (
+                        <p key={`${product.sku}-${index}`} className="font-medium">
+                          {product.productName}{product.optionName ? ` · ${product.optionName}` : ''}{product.sku ? ` (${product.sku})` : ''}
+                        </p>
+                      ))}
+                      <p className="text-amber-800">{item.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {data.requestReviewItems?.length ? (
               <details className="rounded-sm border px-2 py-1.5">
                 <summary className="cursor-pointer font-medium">중복·기초잔액 확인이 필요한 발주 {data.requestReviewItems.length.toLocaleString('ko-KR')}건</summary>

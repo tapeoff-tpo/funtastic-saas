@@ -43,6 +43,27 @@ describe('purchase fund overview', () => {
     const result = await getPurchaseFundLedgerData('workspace', 100, 200)
     expect(result.summary).toMatchObject({ totalDebitedCny: null, balanceCny: null, missingCostOrderCount: 1 })
     expect(result.summary).toMatchObject({ knownDepositedCny: 1000, knownDebitedCny: 0, knownBalanceCny: 1000 })
+    expect(result.missingDebitItems).toMatchObject([{ products: [{ productName: '상품 B', sku: 'B' }], reason: expect.stringContaining('기초잔액') }])
+  })
+
+  it('identifies the missing product in an older grouped debit even beyond the recent history limit', async () => {
+    mockRows([
+      { id: 'old-debit', entryType: 'purchase_debit', occurredOn: '2026-11-04', amountKrw: '2000', amountCny: '10', memo: null, supplierOrderNumber: 'order-1', missingCostCount: 1, details: { lines: [
+        { productName: '정상 상품', sku: 'A', totalCostYuan: 10, totalCostKrw: 2000 },
+        { productName: '확인할 상품', sku: 'B', optionName: '파랑', totalCostYuan: null, totalCostKrw: null },
+      ] }, voidedAt: null, createdAt: new Date('2026-11-04T00:00:00Z') },
+      { id: 'deposit', entryType: 'deposit', occurredOn: '2026-11-05', amountKrw: '0', amountCny: '100', memo: null, supplierOrderNumber: null, missingCostCount: 0, details: {}, voidedAt: null, createdAt: new Date('2026-11-05T00:00:00Z') },
+    ], [])
+    const result = await getPurchaseFundLedgerData('workspace', 1, 200)
+    expect(result.entries).toHaveLength(1)
+    expect(result.summary.missingCostOrderCount).toBe(1)
+    expect(result.missingDebitItems).toEqual([{ id: 'old-debit', occurredOn: '2026-11-04', supplierOrderNumber: 'order-1', reason: expect.stringContaining('원가 미확인'), products: [{ productName: '확인할 상품', sku: 'B', optionName: '파랑' }] }])
+  })
+
+  it('uses the source product if the saved debit has no product details', async () => {
+    mockRows([{ id: 'debit', entryType: 'purchase_debit', occurredOn: '2026-11-04', amountKrw: '0', amountCny: null, memo: null, supplierOrderNumber: null, sourcePurchaseItemId: 'request', missingCostCount: 1, details: {}, voidedAt: null, createdAt: new Date('2026-11-04T00:00:00Z') }], [candidate({ status: 'purchased' })])
+    const result = await getPurchaseFundLedgerData('workspace', 100, 200)
+    expect(result.missingDebitItems).toMatchObject([{ reason: expect.stringContaining('위안화 구매금액'), products: [{ productName: '상품 B', sku: 'B' }] }])
   })
 
   it('keeps an existing debit but does not add an outbound-completed copy', async () => {

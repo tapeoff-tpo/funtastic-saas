@@ -57,6 +57,13 @@ export type PurchaseFundDebitSnapshot = {
 export type PurchaseFundLedgerData = {
   monthly: FundMonth[]
   requestReviewItems?: Array<{ id: string; occurredOn: string; sku: string; productName: string; reason: string }>
+  missingDebitItems?: Array<{
+    id: string
+    occurredOn: string
+    supplierOrderNumber: string | null
+    reason: string
+    products: Array<{ productName: string; sku: string; optionName: string }>
+  }>
   summary: {
     totalDepositedKrw: number
     totalDebitedKrw: number
@@ -587,6 +594,7 @@ export async function getPurchaseFundLedgerData(
       amountCny: purchaseFundEntries.amountCny,
       memo: purchaseFundEntries.memo,
       supplierOrderNumber: purchaseFundEntries.supplierOrderNumber,
+      sourcePurchaseItemId: purchaseFundEntries.sourcePurchaseItemId,
       missingCostCount: purchaseFundEntries.missingCostCount,
       details: purchaseFundEntries.details,
       voidedAt: purchaseFundEntries.voidedAt,
@@ -631,6 +639,7 @@ export async function getPurchaseFundLedgerData(
     amountCny: charge.boundary === 'uncertain' || charge.amountCny === null ? null : String(charge.amountCny),
     memo: charge.boundary === 'uncertain' || charge.ambiguous ? '발주요청 중복 또는 기초잔액 기준 확인 필요' : '발주요청 자동 차감',
     supplierOrderNumber: null,
+    sourcePurchaseItemId: charge.id,
     missingCostCount: charge.boundary === 'uncertain' || charge.amountCny === null ? 1 : 0,
     details: { productSummary: charge.productName, lines: [{ sourcePurchaseItemId: charge.id, sku: charge.sku, productName: charge.productName, purchaseManagementCode: charge.purchaseManagementCode, totalCostYuan: charge.boundary === 'uncertain' ? null : charge.amountCny }] },
     voidedAt: null,
@@ -697,6 +706,35 @@ export async function getPurchaseFundLedgerData(
 
   return {
     monthly: summarizeFundMonths(effectiveRows),
+    missingDebitItems: effectiveRows
+      .filter((row) => row.entryType === 'purchase_debit' && row.missingCostCount > 0)
+      .map((row) => {
+        const details = row.details ?? {}
+        const lines = Array.isArray(details.lines)
+          ? details.lines.filter((line): line is Record<string, unknown> => Boolean(line) && typeof line === 'object' && !Array.isArray(line))
+          : []
+        const incomplete = lines.filter((line) => (
+          ('totalCostYuan' in line && line.totalCostYuan == null)
+          || ('totalCostKrw' in line && line.totalCostKrw == null)
+        ))
+        const source = candidateRows.find((item) => item.id === row.sourcePurchaseItemId)
+        const products = (incomplete.length ? incomplete : lines).map((line) => ({
+          productName: rawString(line.productName) || source?.productName || '상품명 정보 없음',
+          sku: rawString(line.sku) || source?.sku || '',
+          optionName: rawString(line.optionName) || source?.optionName || '',
+        }))
+        if (!products.length) products.push({
+          productName: rawString(details.productSummary) || source?.productName || '상품명 정보 없음',
+          sku: source?.sku || '',
+          optionName: source?.optionName || '',
+        })
+        const reason = row.id.startsWith('request:') && row.memo?.includes('기초잔액')
+          ? '기초잔액과 발주 시점의 관계가 확인되지 않아 차감에서 제외되었습니다.'
+          : row.amountCny == null
+            ? '장부에 위안화 구매금액이 기록되지 않아 차감에서 제외되었습니다.'
+            : '장부에 원가 미확인 표시가 있어 차감에서 제외되었습니다.'
+        return { id: row.id, occurredOn: row.occurredOn, supplierOrderNumber: row.supplierOrderNumber, reason, products }
+      }),
     requestReviewItems: charges.filter((charge) => charge.ambiguous || charge.boundary === 'uncertain').map((charge) => ({
       id: charge.id, occurredOn: charge.occurredOn, sku: charge.sku, productName: charge.productName,
       reason: charge.completedUnverified ? '출고완료 전 기존 차감 기록 확인' : charge.boundary === 'uncertain' ? '기초잔액과 발주요청 시점 확인' : '기존 발주와 중복 여부 확인',

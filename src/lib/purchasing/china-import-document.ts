@@ -126,6 +126,45 @@ export async function exportChinaImportDocument(
       }
       return { ...group, rows: values }
     }).filter((group) => group.rows.length)
+  // Invoice rows describe goods, while packing rows describe their physical
+  // locations. Sum a SKU across every location and place it at its largest group.
+  type InvoiceRow = { itemId: string; quantity: number; marks: string[]; groupIndex: number; groupQuantity: number }
+  const invoiceBySku = new Map<string, InvoiceRow>()
+  for (const [groupIndex, group] of groups.entries()) {
+    const groupBySku = new Map<string, { itemId: string; quantity: number; marks: string[] }>()
+    for (const trade of group.rows) {
+      const item = itemById.get(trade.itemId)!
+      const sku = item.sku.trim()
+      const source = options.items[item.id]
+      const previous = groupBySku.get(sku) ?? invoiceBySku.get(sku)
+      if (previous) {
+        const previousSource = options.items[previous.itemId]
+        if (source.englishName.trim() !== previousSource.englishName.trim() || source.unitPriceCny !== previousSource.unitPriceCny) {
+          throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
+        }
+      }
+      const groupRow = groupBySku.get(sku) ?? { itemId: item.id, quantity: 0, marks: [] }
+      groupRow.quantity += trade.quantity
+      groupRow.marks.push(...trade.marks)
+      groupBySku.set(sku, groupRow)
+    }
+    for (const [sku, groupRow] of groupBySku) {
+      const invoice = invoiceBySku.get(sku)
+      if (!invoice) {
+        invoiceBySku.set(sku, { ...groupRow, marks: [...groupRow.marks], groupIndex, groupQuantity: groupRow.quantity })
+        continue
+      }
+      invoice.quantity += groupRow.quantity
+      invoice.marks.push(...groupRow.marks)
+      // Keep the existing pallet order when quantities tie.
+      if (groupRow.quantity > invoice.groupQuantity) {
+        invoice.itemId = groupRow.itemId
+        invoice.groupIndex = groupIndex
+        invoice.groupQuantity = groupRow.quantity
+      }
+    }
+  }
+  const invoiceRows = [...invoiceBySku.values()].sort((a, b) => a.groupIndex - b.groupIndex)
   const count = groups.reduce((sum, group) => sum + group.rows.length, 0)
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
@@ -133,7 +172,12 @@ export async function exportChinaImportDocument(
   // The reference was saved with product rows filtered out. Those old visibility
   // settings must not hide the new shipment's goods.
   sheet.autoFilter = undefined
-  for (let row = 20; row <= totalRow; row++) sheet.getRow(row).hidden = false
+  for (let row = 20; row <= totalRow; row++) {
+    sheet.getRow(row).hidden = false
+    if (row < totalRow) {
+      for (let column = 1; column <= 10; column++) sheet.getRow(row).getCell(column).value = null
+    }
+  }
   for (const [address, value] of Object.entries({
     A3: options.exporter, K3: options.exporter,
     E3: `${options.invoiceNo}/ ${options.invoiceDate}`, R3: `${options.invoiceNo}/ ${options.invoiceDate}`,
@@ -146,28 +190,16 @@ export async function exportChinaImportDocument(
   })) sheet.getCell(address).value = value
   for (const address of ['C17', 'O17']) sheet.getCell(address).value = new Date(`${options.sailingDate}T00:00:00Z`)
   let nextRow = 20
-  let totalAmount = 0
   for (const group of groups) {
     const start = nextRow
     for (const trade of group.rows) {
       const row = nextRow++
       const item = itemById.get(trade.itemId)!
-      const source = options.items[item.id]
       const marks = [...new Set(trade.marks)]
       const markText = marks.join(', ')
       for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
       sheet.getRow(row).height = 21
-      for (const column of ['A', 'K']) sheet.getCell(`${column}${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
-      sheet.getCell(`B${row}`).value = group.no
-      sheet.getCell(`C${row}`).value = source.englishName
-      // Keep this as text. HS codes can contain punctuation or leading zeroes.
-      sheet.getCell(`D${row}`).value = item.hsCode || null
-      sheet.getCell(`E${row}`).value = trade.quantity
-      sheet.getCell(`F${row}`).value = 'ea'
-      sheet.getCell(`G${row}`).value = source.unitPriceCny
-      const amount = money(trade.quantity * source.unitPriceCny)
-      totalAmount += amount
-      sheet.getCell(`J${row}`).value = { formula: `ROUND(G${row}*E${row},2)`, result: amount }
+      sheet.getCell(`K${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
       sheet.getCell(`L${row}`).value = trade.boxCount || null
       sheet.getCell(`M${row}`).value = group.no
       sheet.getCell(`O${row}`).value = group.id ? (row === start ? 1 : null) : trade.boxCount || null
@@ -178,6 +210,25 @@ export async function exportChinaImportDocument(
       sheet.getCell(`Y${row}`).value = item.productName
     }
     if (group.id && nextRow - start > 1) sheet.mergeCells(`O${start}:O${nextRow - 1}`)
+  }
+  let totalAmount = 0
+  for (const [index, invoice] of invoiceRows.entries()) {
+    const row = 20 + index
+    const item = itemById.get(invoice.itemId)!
+    const source = options.items[item.id]
+    const marks = [...new Set(invoice.marks)]
+    const markText = marks.join(', ')
+    sheet.getCell(`A${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
+    sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
+    sheet.getCell(`C${row}`).value = source.englishName
+    // Keep this as text. HS codes can contain punctuation or leading zeroes.
+    sheet.getCell(`D${row}`).value = item.hsCode || null
+    sheet.getCell(`E${row}`).value = invoice.quantity
+    sheet.getCell(`F${row}`).value = 'ea'
+    sheet.getCell(`G${row}`).value = source.unitPriceCny
+    const amount = money(invoice.quantity * source.unitPriceCny)
+    totalAmount += amount
+    sheet.getCell(`J${row}`).value = { formula: `ROUND(G${row}*E${row},2)`, result: amount }
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
   const grossWeight = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0)

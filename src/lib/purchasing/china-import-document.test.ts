@@ -34,7 +34,93 @@ const options: ImportDocumentOptions = {
   boxes: { 'box-a': { grossWeightKg: 10, cbm: 0.06 }, 'box-b': { grossWeightKg: 3, cbm: 0.02 } },
 }
 
+function splitAcrossPallets(quantities: number[], unitPriceCny = 2) {
+  const shipment: ImportDocumentDetail = {
+    ...detail,
+    items: [{ ...detail.items[0], reservedQuantity: quantities.reduce((sum, value) => sum + value, 0) }],
+    pallets: quantities.map((_, index) => ({ id: `pallet-${index}`, palletNo: `P${index + 1}` })),
+    boxes: quantities.map((_, index) => ({ id: `box-${index}`, boxNo: `BOX-${index + 1}`, palletId: `pallet-${index}`, status: 'open' })),
+    boxItems: quantities.map((quantity, index) => ({ id: `allocation-${index}`, boxId: `box-${index}`, shipmentItemId: 'item-a', quantity })),
+  }
+  const overrides: ImportDocumentOptions = {
+    ...options,
+    items: { 'item-a': { englishName: 'Glass', unitPriceCny } },
+    boxes: Object.fromEntries(shipment.boxes.map((box) => [box.id, { grossWeightKg: 1, cbm: 0.01 }])),
+  }
+  return { shipment, overrides }
+}
+
+async function exportedSheet(shipment: ImportDocumentDetail, overrides: ImportDocumentOptions) {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(shipment, metadata, overrides) as unknown as ExcelJS.Buffer)
+  return workbook.worksheets[0]
+}
+
 describe('China import documents', () => {
+  it.each([
+    [[60, 20, 10], 'P1'],
+    [[10, 60, 20], 'P2'],
+    [[10, 20, 60], 'P3'],
+    [[40, 40, 10], 'P1'],
+  ] as const)('combines invoice quantities %j at %s while keeping actual packing rows', async (quantities, palletNo) => {
+    const { shipment, overrides } = splitAcrossPallets([...quantities])
+    const sheet = await exportedSheet(shipment, overrides)
+    expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
+    expect(sheet.getCell('B20').value).toBe(palletNo)
+    expect(sheet.getCell('C20').value).toBe('Glass')
+    expect(sheet.getCell('D20').value).toBe('7013')
+    expect(sheet.getCell('E20').value).toBe(90)
+    expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 180 })
+    for (const row of [21, 22]) {
+      for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
+    }
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1', 'P2', 'P3'])
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([...quantities])
+    expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
+    expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)', result: 3 })
+    expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
+  })
+  it('chooses the largest per-SKU pallet total even when the SKU has multiple shipment item IDs', async () => {
+    const shipment: ImportDocumentDetail = {
+      ...detail,
+      items: [
+        { ...detail.items[0], reservedQuantity: 95 },
+        { ...detail.items[1], sku: ' SKU-A ', reservedQuantity: 35 },
+      ],
+      pallets: [{ id: 'pallet-a', palletNo: 'P1' }, { id: 'pallet-b', palletNo: 'P2' }],
+      boxes: [detail.boxes[0], { ...detail.boxes[1], palletId: 'pallet-b' }],
+      boxItems: [
+        { id: 'a', boxId: 'box-a', shipmentItemId: 'item-a', quantity: 35 },
+        { id: 'b', boxId: 'box-a', shipmentItemId: 'item-b', quantity: 35 },
+        { id: 'c', boxId: 'box-b', shipmentItemId: 'item-a', quantity: 60 },
+      ],
+    }
+    const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 1.25 }, 'item-b': { englishName: 'Glass', unitPriceCny: 1.25 } } }
+    const sheet = await exportedSheet(shipment, overrides)
+    expect(sheet.getCell('B20').value).toBe('P1')
+    expect(sheet.getCell('E20').value).toBe(130)
+    expect(sheet.getCell('C21').value).toBeNull()
+    expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([35, 35, 60])
+    expect(sheet.model.merges).toContain('O20:O21')
+    for (const conflicting of [{ englishName: 'Other', unitPriceCny: 1.25 }, { englishName: 'Glass', unitPriceCny: 2 }]) {
+      await expect(exportChinaImportDocument(shipment, metadata, { ...overrides, items: { ...overrides.items, 'item-b': conflicting } })).rejects.toThrow('SKU-A: 동일 품목')
+    }
+  })
+  it('keeps different SKUs separate even when their names are identical', async () => {
+    const sheet = await exportedSheet(detail, { ...options, items: { ...options.items, 'item-b': { englishName: 'Glass', unitPriceCny: 2 } } })
+    expect([sheet.getCell('C20').value, sheet.getCell('C21').value]).toEqual(['Glass', 'Glass'])
+    expect([sheet.getCell('E20').value, sheet.getCell('E21').value]).toEqual([20, 5])
+    expect(sheet.getCell('B21').value).toBe('box')
+    expect(sheet.getCell('C22').value).toBeNull()
+  })
+  it('rounds the combined invoice amount once and totals the displayed lines', async () => {
+    const { shipment, overrides } = splitAcrossPallets([1, 1, 1], 0.335)
+    const sheet = await exportedSheet(shipment, overrides)
+    expect(sheet.getCell('G20').value).toBe(0.335)
+    expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 1.01 })
+    expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 1.01 })
+  })
   it('uses the purchasing CNY price precedence without inventing missing prices', () => {
     expect(importUnitPriceCny({ '특가(元)': '16.758', '신규원가(元)': '20' })).toBe(16.758)
     expect(importUnitPriceCny({ '특가(元)': '0', '신규원가(元)': '1,234.5' })).toBe(1234.5)

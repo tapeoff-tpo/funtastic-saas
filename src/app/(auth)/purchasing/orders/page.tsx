@@ -1,5 +1,6 @@
 ﻿import Link from 'next/link'
 import type { Metadata } from 'next'
+import type { ReactNode } from 'react'
 import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getUserAuthorization } from '@/lib/auth/menu-access'
@@ -313,14 +314,8 @@ export async function PurchasingOrdersView({
     reviewStatuses: selectedReviewStatuses,
   }
 
-  return (
-    <div className="min-w-0 space-y-4">
-      <PurchaseOrderRetentionCleanup />
-      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">{title}</h1>
-        </div>
-        <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
+  const searchControls = (
+    <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
           {selectedOutboundDates.map((date) => <input key={date} type="hidden" name="outboundDate" value={date} />)}
           {selectedReviewStatuses.map((reviewStatus) => (
@@ -339,66 +334,52 @@ export async function PurchasingOrdersView({
           />
           <Button type="submit" variant="outline" className="shrink-0">검색</Button>
         </form>
-      </header>
-
-      {showRecommendationGenerator ? (
-        <PurchaseRecommendationGenerator initialTargetStockMonths={latestTargetStockMonths} />
-      ) : null}
-
-      {completedOutboundAutoCleanup && completedOutboundAutoCleanup.reflectedCount > 0 ? (
-        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
-          <strong>중국출고완료 자동 정리</strong>
-          <span className="ml-2">
-            출고일 기준 14일이 지난 {completedOutboundAutoCleanup.reflectedCount.toLocaleString('ko-KR')}건 · {completedOutboundAutoCleanup.reflectedQuantity.toLocaleString('ko-KR')}개를 목록에서 정리했습니다.
-            같은 중국출고 원본을 다시 반영해도 다시 나타나지 않습니다.
-            {completedOutboundAutoCleanup.skippedMissingMatchKeyCount > 0
-              ? ` 식별키가 없는 ${completedOutboundAutoCleanup.skippedMissingMatchKeyCount.toLocaleString('ko-KR')}건은 안전하게 남겨뒀습니다.`
-              : ''}
-          </span>
-        </section>
-      ) : null}
-
-      {newProductFirstSaleItems.length > 0 ? (
-        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
-          <strong>신규상품 첫 판매 확인</strong>
-          <span className="ml-2">
-            <span data-no-translate>{newProductFirstSaleItems.slice(0, 3).map((item) => item.productName).join(', ')}</span>
-            {newProductFirstSaleItems.length > 3 ? ` 외 ${newProductFirstSaleItems.length - 3}건` : ''}의 첫 판매가 감지되었습니다.
-          </span>
-        </section>
-      ) : null}
-
-      {!overdueOnly && status === 'purchased' && overduePurchaseRequestCount > 0 ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-          <strong>구매 지연 확인 필요</strong>
-          <span className="ml-2">
-            2026년 7월 1일 이후 발주요청 중 날짜 기준 7일이 지난 항목 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건이 있습니다.
-            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
-          </span>
-        </section>
-      ) : null}
-
-      {!overdueOnly && status === 'purchase_completed' && overduePurchasedCount > 0 ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-          <strong>도착 지연 확인 필요</strong>
-          <span className="ml-2">
-            구매날짜 기준 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
-            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
-          </span>
-        </section>
-      ) : null}
-
-      {overdueOnly && overdueTotalCount > 0 ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-          <strong>구매/입고지연</strong>
-          <span className="ml-2">
-            발주요청 지연 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건,
-            구매완료 입고지연 {overduePurchaseCompletedCount.toLocaleString('ko-KR')}건입니다.
-          </span>
-        </section>
-      ) : null}
-
-      <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
+  )
+  const listActions = (
+    <div className={isMainOrders ? "flex w-full min-w-0 flex-wrap items-center gap-2 lg:w-auto lg:flex-1 lg:justify-end" : "flex min-w-0 w-full flex-wrap items-center gap-2 md:flex-1 md:justify-end"}>
+              {status === 'completed' ? (
+                <CompletedOutboundDateFilter
+                  dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
+                  selectedDates={outboundDates}
+                />
+              ) : null}
+              {isRequestedStatus ? <PurchaseRequestCreateDialog targetStockMonths={latestTargetStockMonths} /> : null}
+              {isPurchaseReviewList ? (
+                <PurchaseReviewStatusFilter
+                  selectedStatuses={selectedReviewStatuses}
+                  statusCounts={reviewStatusCounts}
+                />
+              ) : null}
+              <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
+              <PurchaseColumnPicker />
+              {!isMainOrders && <Link
+                href={costToggleHref}
+                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+              >
+                {showCosts ? <EyeOff /> : <Eye />}
+                {showCosts ? '원가 닫기' : '원가 보기'}
+              </Link>}
+              {!isMainOrders && <Link
+                href={basisToggleHref}
+                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+              >
+                {showRecommendationBasis ? <EyeOff /> : <Eye />}
+                {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
+              </Link>}
+              {showPaymentControls ? <PurchaseBulkPaymentDialog /> : null}
+              {status === 'purchase_completed' || status === 'inspecting' ? (
+                <PurchaseBulk1688TrackingLookup
+                  scope="all"
+                  mode={status === 'inspecting' ? 'recollect' : 'initial'}
+                />
+              ) : null}
+              {canDelete && <PurchaseBulkDeleteButton />}
+              {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
+              {overdueOnly || status === 'purchase_completed' || status === 'inspecting' ? null : <PurchaseBulkStatusButton />}
+            </div>
+  )
+  const costSummary = (
+    <section className={isMainOrders ? "ml-auto flex max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2" : "flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2"}>
         <span className="text-sm font-medium">
           {listLabel} 예상 발주금액
         </span>
@@ -436,8 +417,9 @@ export async function PurchasingOrdersView({
           </div>
         ) : null}
       </section>
-
-      {overdueOnly ? (
+  )
+  const statusNavigation = (
+    overdueOnly ? (
         <nav className="flex max-w-full gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0" aria-label="지연 상태 필터">
           {[
             { status: undefined, label: '전체', count: overdueTotalCount },
@@ -505,62 +487,101 @@ export async function PurchasingOrdersView({
           )
         })}
       </nav>
-      ) : null}
+      ) : null
+  )
 
+  return (
       <PurchaseBulkSelectionProvider ids={items.flatMap((item) => item.id ? [item.id] : [])} nextStatus={nextStatus}>
         <PurchaseColumns scope={`${user.id}:${basePath}:${status}`} columns={columns}>
+    <div className="min-w-0 space-y-4">
+      <PurchaseOrderRetentionCleanup />
+      <header className={isMainOrders ? "flex min-w-0 flex-wrap items-center justify-between gap-3" : "flex flex-col gap-3 md:flex-row md:items-end md:justify-between"}>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">{title}</h1>
+        </div>
+        {isMainOrders ? listActions : searchControls}
+      </header>
+
+      {showRecommendationGenerator ? (
+        <PurchaseRecommendationGenerator initialTargetStockMonths={latestTargetStockMonths} />
+      ) : null}
+
+      {completedOutboundAutoCleanup && completedOutboundAutoCleanup.reflectedCount > 0 ? (
+        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <strong>중국출고완료 자동 정리</strong>
+          <span className="ml-2">
+            출고일 기준 14일이 지난 {completedOutboundAutoCleanup.reflectedCount.toLocaleString('ko-KR')}건 · {completedOutboundAutoCleanup.reflectedQuantity.toLocaleString('ko-KR')}개를 목록에서 정리했습니다.
+            같은 중국출고 원본을 다시 반영해도 다시 나타나지 않습니다.
+            {completedOutboundAutoCleanup.skippedMissingMatchKeyCount > 0
+              ? ` 식별키가 없는 ${completedOutboundAutoCleanup.skippedMissingMatchKeyCount.toLocaleString('ko-KR')}건은 안전하게 남겨뒀습니다.`
+              : ''}
+          </span>
+        </section>
+      ) : null}
+
+      {newProductFirstSaleItems.length > 0 ? (
+        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <strong>신규상품 첫 판매 확인</strong>
+          <span className="ml-2">
+            <span data-no-translate>{newProductFirstSaleItems.slice(0, 3).map((item) => item.productName).join(', ')}</span>
+            {newProductFirstSaleItems.length > 3 ? ` 외 ${newProductFirstSaleItems.length - 3}건` : ''}의 첫 판매가 감지되었습니다.
+          </span>
+        </section>
+      ) : null}
+
+      {!overdueOnly && status === 'purchased' && overduePurchaseRequestCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>구매 지연 확인 필요</strong>
+          <span className="ml-2">
+            2026년 7월 1일 이후 발주요청 중 날짜 기준 7일이 지난 항목 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건이 있습니다.
+            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
+          </span>
+        </section>
+      ) : null}
+
+      {!overdueOnly && status === 'purchase_completed' && overduePurchasedCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>도착 지연 확인 필요</strong>
+          <span className="ml-2">
+            구매날짜 기준 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
+            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
+          </span>
+        </section>
+      ) : null}
+
+      {overdueOnly && overdueTotalCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>구매/입고지연</strong>
+          <span className="ml-2">
+            발주요청 지연 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건,
+            구매완료 입고지연 {overduePurchaseCompletedCount.toLocaleString('ko-KR')}건입니다.
+          </span>
+        </section>
+      ) : null}
+
+      {!isMainOrders ? costSummary : null}
+
+      {isMainOrders ? <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        {statusNavigation}
+        {costSummary}
+      </div> : statusNavigation}
+
         <section className="min-w-0 rounded-md border bg-background">
+          {!isMainOrders && (
           <div className="flex min-w-0 flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div className="shrink-0">
               <h2 className="text-sm font-semibold">{isPurchaseReviewList ? '전상품 발주검토' : listLabel} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
-            <div className="flex min-w-0 w-full flex-wrap items-center gap-2 md:flex-1 md:justify-end">
-              {status === 'completed' ? (
-                <CompletedOutboundDateFilter
-                  dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
-                  selectedDates={outboundDates}
-                />
-              ) : null}
-              {isRequestedStatus ? <PurchaseRequestCreateDialog targetStockMonths={latestTargetStockMonths} /> : null}
-              {isPurchaseReviewList ? (
-                <PurchaseReviewStatusFilter
-                  selectedStatuses={selectedReviewStatuses}
-                  statusCounts={reviewStatusCounts}
-                />
-              ) : null}
-              <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
-              <PurchaseColumnPicker />
-              {!isMainOrders && <Link
-                href={costToggleHref}
-                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
-              >
-                {showCosts ? <EyeOff /> : <Eye />}
-                {showCosts ? '원가 닫기' : '원가 보기'}
-              </Link>}
-              {!isMainOrders && <Link
-                href={basisToggleHref}
-                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
-              >
-                {showRecommendationBasis ? <EyeOff /> : <Eye />}
-                {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
-              </Link>}
-              {showPaymentControls ? <PurchaseBulkPaymentDialog /> : null}
-              {status === 'purchase_completed' || status === 'inspecting' ? (
-                <PurchaseBulk1688TrackingLookup
-                  scope="all"
-                  mode={status === 'inspecting' ? 'recollect' : 'initial'}
-                />
-              ) : null}
-              {canDelete && <PurchaseBulkDeleteButton />}
-              {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
-              {overdueOnly || status === 'purchase_completed' || status === 'inspecting' ? null : <PurchaseBulkStatusButton />}
-            </div>
+            {listActions}
           </div>
+          )}
 
           <div className="border-b px-3 py-2">
             <PurchaseTablePagination
               placement="top"
+              listLabel={isMainOrders ? listLabel : undefined}
+              searchControls={isMainOrders ? searchControls : undefined}
               basePath={basePath}
               status={selectedStatus}
               search={search}
@@ -960,14 +981,16 @@ export async function PurchasingOrdersView({
             />
           </div>
         </section>
+    </div>
         </PurchaseColumns>
       </PurchaseBulkSelectionProvider>
-    </div>
   )
 }
 
 function PurchaseTablePagination({
   placement,
+  listLabel,
+  searchControls,
   basePath,
   status,
   search,
@@ -983,6 +1006,8 @@ function PurchaseTablePagination({
   reviewStatuses,
 }: {
   placement: 'top' | 'bottom'
+  listLabel?: string
+  searchControls?: ReactNode
   basePath: string
   status: PurchaseRequestStatus | undefined
   search: string | undefined
@@ -1002,8 +1027,14 @@ function PurchaseTablePagination({
 
   return (
     <div className="flex flex-col gap-2 text-sm md:flex-row md:items-center md:justify-between">
-      <div className="text-xs text-muted-foreground">
-        {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex shrink-0 items-baseline gap-2">
+          {listLabel ? <h2 className="text-sm font-semibold">{listLabel} 목록</h2> : null}
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
+          </span>
+        </div>
+        {searchControls}
       </div>
       <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end md:w-auto md:flex-nowrap">
         <PurchasePaginationControls

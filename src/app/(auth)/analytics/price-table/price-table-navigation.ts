@@ -23,3 +23,9 @@ export function priceTablePages(page: number, totalPages: number) {
   const start = Math.floor((page - 1) / 10) * 10 + 1
   return Array.from({ length: Math.min(10, totalPages - start + 1) }, (_, index) => start + index)
 }
+
+export function priceRegistrationHref(rowId: string, mallId: string, navigation: PriceTableNavigation) {
+  const params = new URLSearchParams({ row: rowId, mall: mallId, view: navigation.view, q: navigation.search })
+  if (navigation.malls?.length) params.set('malls', navigation.malls.join(','))
+  return `/operations/marketplace-registration?${params}`
+}

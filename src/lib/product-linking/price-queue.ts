@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { COMMON_PRICE_KEY } from '@/lib/analytics/price-registration-values'
+import { commonPriceSql } from '@/lib/analytics/price-registration-values-sql'
 import { amount } from './plan'
 const rows = <T>(r: unknown): T[] => (r as { rows?: T[] }).rows ?? (r as T[])
 export type PriceQueueRow = {
@@ -7,8 +9,7 @@ export type PriceQueueRow = {
   sku: string
   name: string
   cost: string | null
-  b2b: string | null
-  b2c: string | null
+  commonPrice: string | null
   excluded: boolean
   reason: string
   workflowId: string | null
@@ -19,19 +20,18 @@ export async function listPriceQueue(
   search: string,
 ) {
   const term = `%${search.trim().slice(0, 100)}%`
-  const missingPrice = (key: string) =>
-    sql`COALESCE(regexp_replace(t.raw_data->>${key}, '[,원[:space:]]', '', 'g'), '') !~ '^[0-9]*[1-9][0-9]*(\\.0+)?$'`
+  const commonPrice = commonPriceSql(sql`t.raw_data`)
   const excluded = sql`COALESCE(p.metadata->'priceWorkflow'->>'excluded', 'false') = 'true'`
   const filterClause =
     filter === 'excluded'
       ? excluded
       : filter === 'missing'
-        ? sql`NOT (${excluded}) AND (${missingPrice('B2B 판매가')} OR ${missingPrice('B2C 판매가')})`
+        ? sql`NOT (${excluded}) AND COALESCE(${commonPrice}, 0) <= 0`
         : sql`true`
   return rows<PriceQueueRow>(
     await db.execute(sql`
    SELECT p.id, p.internal_sku AS sku, p.name, p.cost_price::text AS cost,
-     t.raw_data->>'B2B 판매가' AS b2b, t.raw_data->>'B2C 판매가' AS b2c,
+     ${commonPrice}::text AS "commonPrice",
      ${excluded} AS excluded, COALESCE(p.metadata->'priceWorkflow'->>'reason', '') AS reason,
      p.metadata->'newProductWorkflow'->>'itemId' AS "workflowId"
    FROM products p
@@ -52,17 +52,16 @@ export async function saveQueuePrices(
   actorId: string,
   input: {
     id: string
-    b2b: string
-    b2c: string
+    commonPrice: string
     excluded: boolean
     reason: string
   },
 ) {
   if (input.excluded && !input.reason.trim())
     throw new Error('입력 제외 사유를 입력해주세요.')
-  for (const value of [input.b2b, input.b2c])
-    if (value.trim() && (amount(value) == null || amount(value)! > 2147483647))
-      throw new Error('판매가는 0 이상 21억 원 이하 숫자로 입력해주세요.')
+  const price = amount(input.commonPrice)
+  if (input.commonPrice.trim() && (price == null || price > 2147483647))
+    throw new Error('판매가는 0 이상 21억 원 이하 숫자로 입력해주세요.')
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`product-link:${userId}`}))`,
@@ -85,14 +84,13 @@ export async function saveQueuePrices(
     const raw = {
       ...(existing[0]?.raw_data ?? {}),
       상품코드: p.internal_sku,
-      ...(input.b2b.trim() ? { 'B2B 판매가': String(amount(input.b2b)) } : {}),
-      ...(input.b2c.trim() ? { 'B2C 판매가': String(amount(input.b2c)) } : {}),
+      ...(price === null ? {} : { [COMMON_PRICE_KEY]: String(price) }),
     }
     if (existing[0])
       await tx.execute(
         sql`UPDATE analytics_price_table_rows SET raw_data=${JSON.stringify(raw)}::jsonb,updated_at=now() WHERE id=${existing[0].id}::uuid AND user_id=${userId}::uuid`,
       )
-    else if (input.b2b.trim() || input.b2c.trim())
+    else if (price !== null)
       await tx.execute(
         sql`INSERT INTO analytics_price_table_rows(user_id,source_file_name,source_sheet_name,row_number,product_code,product_name,raw_data) VALUES(${userId}::uuid,'상품업무 연계','상품등록',0,${p.internal_sku},${p.name},${JSON.stringify(raw)}::jsonb)`,
       )

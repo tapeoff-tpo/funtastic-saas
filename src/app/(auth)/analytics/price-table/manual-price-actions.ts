@@ -7,6 +7,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
 import { formatPriceNumberDate, priceNumberDateKey } from '@/lib/analytics/price-number-date'
+import { COMMON_PRICE_KEY, priceAmount, registrationPriceKey } from '@/lib/analytics/price-registration-values'
 import { getPriceTableDisplayColumns } from './price-table-columns'
 
 export async function addManualPriceProduct(form: FormData): Promise<{ error?: string }> {
@@ -23,10 +24,16 @@ export async function addManualPriceProduct(form: FormData): Promise<{ error?: s
     const enteredAt = new Date()
     const enteredDate = formatPriceNumberDate(enteredAt)
     const rawData: Record<string, string> = { 상품코드: productCode, 상품명: productName }
+    const commonPrice = text('commonPrice', 40)
+    if (commonPrice && priceAmount(commonPrice) === null) return { error: '공통 판매가를 확인해주세요.' }
+    if (commonPrice) rawData[COMMON_PRICE_KEY] = commonPrice
     for (const column of getPriceTableDisplayColumns(sheetName)) {
       const price = text(`price:${column.id}`, 40).replace(/,/g, '')
       if (price && (!Number.isFinite(Number(price)) || Number(price) < 0)) return { error: `${column.label} 판매가를 확인해주세요.` }
-      if (price) rawData[column.valueKey] = price
+      if (price) {
+        rawData[column.valueKey] = price
+        if (column.showProductId && column.id !== 'b2b' && column.id !== 'b2c') rawData[registrationPriceKey(column.id)] = price
+      }
       const identifier = text(`identifier:${column.id}`, 200)
       if (identifier) {
         const key = column.productIdKeys?.[0] ?? `${column.label} 상품번호`

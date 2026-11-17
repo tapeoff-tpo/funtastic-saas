@@ -1,3 +1,4 @@
+import { REGISTRATION_EDIT_PREFIX, registrationNumberKey } from '@/lib/analytics/price-registration-values'
 import { isPriceNumberDateKey } from '@/lib/analytics/price-number-date'
 
 export type PriceTableDisplayColumn = {
@@ -189,6 +190,8 @@ export function findMarketplaceProductIds(
   rawData: Record<string, string>,
   column: PriceTableDisplayColumn,
 ) {
+  const savedKey = registrationNumberKey(column.id)
+  if (isProductIdentifier(rawData[savedKey])) return [{ key: savedKey, value: rawData[savedKey] }]
   const manualIdentifierKey = `${column.label} 상품번호`
   if (isProductIdentifier(rawData[manualIdentifierKey])) return [{ key: manualIdentifierKey, value: rawData[manualIdentifierKey] }]
   if (column.id === 'b2b' || column.id === 'b2c') return []
@@ -202,7 +205,7 @@ export function findMarketplaceProductIds(
   if (!tokens.length) return []
 
   const candidates = Object.entries(rawData)
-    .filter(([key, value]) => !isPriceNumberDateKey(key) && isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
+    .filter(([key, value]) => !isPriceNumberDateKey(key) && !key.startsWith(REGISTRATION_EDIT_PREFIX) && isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
     .map(([key, value]) => ({ key, value, score: identifierKeyScore(key, tokens) }))
   const namedMatches = candidates
     .filter((entry) => entry.score > 0)

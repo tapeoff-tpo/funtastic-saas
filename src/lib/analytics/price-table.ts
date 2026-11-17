@@ -1,3 +1,5 @@
+import { commonPriceSql, numericPriceField } from './price-registration-values-sql'
+import { COMMON_PRICE_KEY, REGISTRATION_EDIT_PREFIX, registrationPriceKey } from './price-registration-values'
 import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
@@ -19,7 +21,7 @@ export interface PriceTableImportResult {
 }
 
 export interface PriceTableListResult {
-  rows: Array<PriceTableRow & { missingMalls?: string[] }>
+  rows: Array<PriceTableRow & { missingMalls?: Array<{ id: string; label: string }> }>
   total: number
   overallTotal: number
   page: number
@@ -67,9 +69,18 @@ export async function importPriceTableRows(data: {
       optionName: analyticsPriceTableRows.optionName,
       rawData: analyticsPriceTableRows.rawData,
     })
+    const savedEdits = new Map<string, Record<string, string>>()
     const previousDates = new Map<string, string | null>()
     for (const row of previousRows) {
       const rawData = row.rawData as Record<string, string>
+      const identity = priceRowIdentity(row)
+      if (identity) {
+        const edits = Object.fromEntries(Object.entries(rawData).filter(([key]) =>
+          key === COMMON_PRICE_KEY || key.startsWith(REGISTRATION_EDIT_PREFIX)
+            || (isPriceNumberDateKey(key) && key.includes(REGISTRATION_EDIT_PREFIX)),
+        ))
+        savedEdits.set(identity, { ...savedEdits.get(identity), ...edits })
+      }
       for (const identifier of priceNumberEntries({ ...row, rawData })) {
         const date = getPriceNumberDate(rawData, identifier.key)
         const previous = previousDates.get(identifier.identity)
@@ -85,7 +96,7 @@ export async function importPriceTableRows(data: {
           if (date !== null) rawData[priceNumberDateKey(identifier.key)] = date ?? enteredDate
         }
         return {
-          ...row, rawData, userId: data.userId, sourceFileName: data.sourceFileName,
+          ...row, rawData: { ...rawData, ...savedEdits.get(priceRowIdentity(row) ?? '') }, userId: data.userId, sourceFileName: data.sourceFileName,
           importedAt, updatedAt: importedAt,
         }
       }))
@@ -171,10 +182,16 @@ async function listRegistrationReviewRows(
     if (!productKey || exclusions.has(productKey) !== review.showExcluded) return []
     const missingMalls = columns.filter((column) =>
       findMarketplaceProductIds(row.rawData as Record<string, string>, column).length === 0,
-    ).map((column) => column.label)
+    ).map(({ id, label }) => ({ id, label }))
     return review.showExcluded || missingMalls.length ? [{ ...row, missingMalls }] : []
   })
   return { rows: matching.slice(offset, offset + PAGE_SIZE), total: matching.length }
+}
+
+function priceRowIdentity(row: Pick<ParsedPriceTableRow, 'sourceSheetName' | 'productCode' | 'productName' | 'optionName'>) {
+  const code = row.productCode?.trim()
+  const name = row.productName?.trim()
+  return code || name ? JSON.stringify([row.sourceSheetName, code || name, row.optionName?.trim() ?? '']) : null
 }
 
 function priceNumberEntries(row: Pick<ParsedPriceTableRow, 'sourceSheetName' | 'productCode' | 'productName' | 'optionName' | 'rawData'>) {
@@ -273,7 +290,7 @@ function rowToObject(headers: string[], values: Array<string | number | boolean 
   const rawData: Record<string, string> = {}
   for (let index = 0; index < headers.length; index += 1) {
     const value = cellText(values[index])
-    if (value && !isPriceNumberDateKey(headers[index])) rawData[headers[index]] = value
+    if (value && !isPriceNumberDateKey(headers[index]) && !headers[index].startsWith(REGISTRATION_EDIT_PREFIX)) rawData[headers[index]] = value
   }
   return rawData
 }
@@ -365,6 +382,15 @@ function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   }
 
   const rawKey = sortKey?.startsWith('raw:') ? sortKey.slice(4).trim() : ''
+  if (sortKey === 'commonPrice' || sortKey?.startsWith('mallPrice:')) {
+    const raw = analyticsPriceTableRows.rawData
+    const common = commonPriceSql(raw)
+    const effective = sortKey.startsWith('mallPrice:')
+      ? sql`COALESCE(${numericPriceField(raw, registrationPriceKey(sortKey.slice(10, 90)))}, ${common})`
+      : common
+    return [sql`${direction(effective)} NULLS LAST`, asc(analyticsPriceTableRows.rowNumber)]
+  }
+
   const rawValue = sortKey === 'sourceNumber'
     ? sql<string>`CASE WHEN ${analyticsPriceTableRows.sourceSheetName} IN ('상품등록', '뉴도매')
         THEN COALESCE(${sql.join(PRICE_TABLE_SOURCE_NUMBER_KEYS.map((key) => sql`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${key}), '')`), sql`, `)})

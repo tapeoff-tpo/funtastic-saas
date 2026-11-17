@@ -100,8 +100,7 @@ export function PriceQueuePanel() {
                     start(async () => {
                       const r = await saveQueuePricesAction({
                         id: row.id,
-                        b2b: String(f.get('b2b') ?? ''),
-                        b2c: String(f.get('b2c') ?? ''),
+                        commonPrice: String(f.get('commonPrice') ?? ''),
                         excluded: f.get('excluded') === 'on',
                         reason: String(f.get('reason') ?? ''),
                       })
@@ -121,19 +120,10 @@ export function PriceQueuePanel() {
                     </div>
                   </div>
                   <label className="text-xs">
-                    B2B
+                    공통 판매가
                     <input
-                      name="b2b"
-                      defaultValue={row.b2b ?? ''}
-                      className="block w-28 rounded border px-2 py-1"
-                      inputMode="decimal"
-                    />
-                  </label>
-                  <label className="text-xs">
-                    B2C
-                    <input
-                      name="b2c"
-                      defaultValue={row.b2c ?? ''}
+                      name="commonPrice"
+                      defaultValue={row.commonPrice ?? ''}
                       className="block w-28 rounded border px-2 py-1"
                       inputMode="decimal"
                     />

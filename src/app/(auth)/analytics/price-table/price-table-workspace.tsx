@@ -1,5 +1,6 @@
 'use client'
 
+import { getCommonPrice, getRegistrationMargin, marketplaceFeeId } from '@/lib/analytics/price-registration-values'
 import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -10,15 +11,15 @@ import { ArrowDown, ArrowUp, ArrowUpDown, PackageSearch, Table2 } from 'lucide-r
 import {
   findMarketplaceProductIds,
   getInactiveRegistrationMarketplaceColumns,
-  getRegistrationMarketplaceColumns,
   getRegistrationTargets,
 } from './price-table-columns'
 import type { PriceTableGridRow } from './price-table-grid'
 import { ColumnResizeHandle, usePriceColumnWidths } from './column-resize'
 
-import { priceTableHref, type PriceTableNavigation, type PriceTableView } from './price-table-navigation'
+import { priceRegistrationHref, priceTableHref, type PriceTableNavigation, type PriceTableView } from './price-table-navigation'
 
 const NUMBER_WIDTH = 52
+const COMMON_PRICE_WIDTH = 112
 
 const VIEW_ITEMS: Array<{ id: PriceTableView; label: string; icon: typeof Table2 }> = [
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
@@ -29,6 +30,8 @@ export function PriceTableWorkspace(props: {
   rows: PriceTableGridRow[]
   navigation: PriceTableNavigation
   page: number
+  fees?: Record<string, number>
+  canRegister?: boolean
 }) {
   const { view } = props.navigation
 
@@ -55,15 +58,15 @@ export function PriceTableWorkspace(props: {
         })}
       </div>
 
-      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} /> : <RegistrationReview key={props.navigation.malls?.join(',')} rows={props.rows} navigation={props.navigation} />}
+      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} fees={props.fees ?? {}} canRegister={Boolean(props.canRegister)} /> : <RegistrationReview key={props.navigation.malls?.join(',')} rows={props.rows} navigation={props.navigation} canRegister={Boolean(props.canRegister)} />}
     </div>
   )
 }
 
-function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
+function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation; fees: Record<string, number>; canRegister: boolean }) {
   const { width, resize } = usePriceColumnWidths('price-table-compare-widths-v1')
-  const activeColumns = useMemo(() => getRegistrationMarketplaceColumns(), [])
-  const inactiveColumns = useMemo(() => getInactiveRegistrationMarketplaceColumns(), [])
+  const activeColumns = useMemo(() => getRegistrationTargets(navigation.sheetName, []), [navigation.sheetName])
+  const inactiveColumns = navigation.sheetName === '뉴도매' ? [] : getInactiveRegistrationMarketplaceColumns()
   const columns = [...activeColumns, ...inactiveColumns]
   const defaults = columns.map((column) => column.id)
   const [selected, setSelected] = useState<string[]>(defaults)
@@ -79,34 +82,30 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
     setGroups(next)
     try { localStorage.setItem('price-table-mall-groups-v1', JSON.stringify(next)) } catch { /* Selection remains usable without storage. */ }
   }
-  function applyGroup(ids: string[]) { setSelected([...new Set(['b2b', 'b2c', ...ids.filter(id => columns.some(column => column.id === id))])]) }
-  function pinnedLeft(id: string) {
-    const priceStart = NUMBER_WIDTH + codeWidth + productWidth
-    if (id === 'b2b') return priceStart
-    if (id === 'b2c') return priceStart + width('b2b', 132)
+  function applyGroup(ids: string[]) {
+    setSelected(ids.filter((id) => columns.some((column) => column.id === id)))
   }
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
   const codeWidth = width('productCode', 96)
   const productWidth = width('product', 240)
-  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
+  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + COMMON_PRICE_WIDTH + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
 
   function toggle(id: string) {
-    if (id === 'b2b' || id === 'b2c') return
     setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
   return (
     <div className="space-y-1.5">
       <details className="group rounded-md border bg-muted/15">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5 text-xs [&::-webkit-details-marker]:hidden"><span className="font-medium">몰 선택·그룹 ▾</span><span className="text-muted-foreground">{selected.length}개 선택 · B2B / B2C 고정</span></summary>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5 text-xs [&::-webkit-details-marker]:hidden"><span className="font-medium">몰 선택·그룹 ▾</span><span className="text-muted-foreground">{selected.length}개 선택</span></summary>
         <div className="border-t px-3 py-2">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm font-medium">이용 중인 몰</p>
-          <span className="text-xs text-muted-foreground">{selected.length}개 선택 · B2B / B2C 항상 표시</span>
+          <span className="text-xs text-muted-foreground">{selected.length}개 선택</span>
         </div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setSelected(defaults)}>전체 선택</button>
-          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setSelected(['b2b', 'b2c'])}>몰 선택 해제</button>
+          <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => setSelected([])}>몰 선택 해제</button>
           {Object.entries(groups).filter(([, ids]) => Array.isArray(ids)).map(([name, ids]) => <span key={name} className="inline-flex rounded border bg-background"><button type="button" className="px-2 py-1 text-xs font-medium" onClick={() => applyGroup(ids)}>{name}</button><button type="button" aria-label={`${name} 그룹 삭제`} className="px-1 text-xs" onClick={() => { const next = { ...groups }; delete next[name]; setGroups(next); try { localStorage.setItem('price-table-mall-groups-v1', JSON.stringify(next)) } catch {} }}>×</button></span>)}
           <input aria-label="몰 그룹 이름" value={groupName} onChange={event => setGroupName(event.target.value)} className="h-7 w-32 rounded border bg-background px-2 text-xs" placeholder="B2B몰 / B2C몰" />
           <button type="button" onClick={saveGroup} className="rounded border px-2 py-1 text-xs">현재 선택을 그룹 저장</button>
@@ -119,7 +118,6 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
                 type="checkbox"
                 checked={selected.includes(column.id)}
                 onChange={() => toggle(column.id)}
-                disabled={column.id === 'b2b' || column.id === 'b2c'}
                 className="size-3.5 accent-primary"
               />
               {column.label}
@@ -135,8 +133,7 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
                   type="checkbox"
                   checked={selected.includes(column.id)}
                   onChange={() => toggle(column.id)}
-                  disabled={column.id === 'b2b' || column.id === 'b2c'}
-                  className="size-3.5 accent-primary"
+                    className="size-3.5 accent-primary"
                 />
                 {column.label}
               </label>
@@ -148,7 +145,7 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
       <div className="overflow-auto rounded-md border bg-card">
         <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
           <colgroup>
-            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} />
+            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} /><col style={{ width: COMMON_PRICE_WIDTH }} />
             {selectedColumns.map(column => <col key={column.id} style={{ width: width(column.id, 132) }} />)}
           </colgroup>
           <thead>
@@ -156,7 +153,15 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
               <th scope="col" aria-sort={sortDirection(navigation, 'sourceNumber')} className="sticky left-0 z-20 border-r border-b bg-muted px-1 py-2"><SortLink sortKey="sourceNumber" label="No." navigation={navigation} /></th>
               <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH }} aria-sort={sortDirection(navigation, 'productCode')}><SortLink sortKey="productCode" label="상품코드" navigation={navigation} /><ColumnResizeHandle label="상품코드" width={codeWidth} onResize={value => resize('productCode', value)} /></th>
               <th className="sticky z-20 border-r border-b bg-muted px-2 py-2" style={{ left: NUMBER_WIDTH + codeWidth }} aria-sort={sortDirection(navigation, 'productName')}><SortLink sortKey="productName" label="상품 / 옵션" navigation={navigation} /><ColumnResizeHandle label="상품 / 옵션" width={productWidth} onResize={value => resize('product', value)} /></th>
-              {selectedColumns.map((column) => <th key={column.id} aria-sort={sortDirection(navigation, `raw:${column.valueKey}`)} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-20 bg-muted" : "relative"} border-r border-b px-2 py-2 text-right`}><SortLink sortKey={`raw:${column.valueKey}`} label={column.label} navigation={navigation} /><ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={value => resize(column.id, value)} /></th>)}
+              <th className="sticky z-20 border-r border-b bg-muted px-2 py-2 text-right" style={{ left: NUMBER_WIDTH + codeWidth + productWidth }}>
+                <SortLink sortKey="commonPrice" label="공통 판매가" navigation={navigation} />
+              </th>
+              {selectedColumns.map((column) => (
+                <th key={column.id} className="relative border-r border-b px-2 py-2 text-right">
+                  <SortLink sortKey={`mallPrice:${column.id}`} label={column.label} navigation={navigation} />
+                  <ColumnResizeHandle label={column.label} width={width(column.id, 132)} onResize={(value) => resize(column.id, value)} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -174,20 +179,39 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
                   <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
                   <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
+                <td className="sticky z-10 border-r border-b bg-card px-2 py-1.5 text-right text-xs font-medium" style={{ left: NUMBER_WIDTH + codeWidth + productWidth }}>
+                  {canRegister ? (
+                    <Link className="text-primary underline-offset-2 hover:underline" href={priceRegistrationHref(row.id, '', navigation)} prefetch={false}>
+                      {getCommonPrice(row.rawData)?.toLocaleString('ko-KR') ?? '공통가 설정'}
+                    </Link>
+                  ) : getCommonPrice(row.rawData)?.toLocaleString('ko-KR') ?? '–'}
+                </td>
                 {selectedColumns.map((column) => {
                   const identifiers = findMarketplaceProductIds(row.rawData, column)
+                  const fee = fees[marketplaceFeeId(column.id)]
+                  const { override, margin, shipping } = getRegistrationMargin(row.rawData, column.id, fee)
+                  const href = priceRegistrationHref(row.id, column.id, navigation)
+                  const registration = identifiers.length ? identifiers.map((identifier) => {
+                    const enteredDate = getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate
+                    return (
+                      <span key={identifier.key} className="block">
+                        <span className="block truncate" title={identifier.value}>{identifier.value}</span>
+                        {enteredDate && <span className="block text-muted-foreground">입력일 {enteredDate}</span>}
+                      </span>
+                    )
+                  }) : '–'
                   return (
-                    <td key={column.id} style={{ left: pinnedLeft(column.id) }} className={`${pinnedLeft(column.id) !== undefined ? "sticky z-10 bg-card" : ""} h-12 border-r border-b px-2 py-1.5 text-right align-middle tabular-nums`}>
-                      <div className="truncate font-semibold leading-5">{formatMoney(row.rawData[column.valueKey])}</div>
-                      {identifiers.length ? identifiers.map((identifier) => {
-                        const enteredDate = getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate
-                        return (
-                          <div key={identifier.key} className="text-[11px] leading-4 text-muted-foreground">
-                            <div className="truncate" title={identifier.value}>{identifier.value}</div>
-                            {enteredDate && <div>입력일 {enteredDate}</div>}
-                          </div>
-                        )
-                      }) : <div className="h-4 text-[11px] leading-4 text-muted-foreground">-</div>}
+                    <td key={column.id} className="border-r border-b px-2 py-1.5 text-right align-middle text-[11px] tabular-nums">
+                      {canRegister && activeColumns.some((target) => target.id === column.id)
+                        ? <Link href={href} prefetch={false} className="block text-primary hover:underline" aria-label={identifiers.length ? undefined : `${column.label} 상품등록`}>{registration}</Link>
+                        : registration}
+                      {override !== null && <div>예외가 {override.toLocaleString('ko-KR')}원</div>}
+                      {margin !== null && margin <= 0 && (
+                        <div className="font-medium text-red-600">
+                          {margin < 0 ? `예상 적자 ${Math.abs(margin).toLocaleString('ko-KR')}원` : '마진 없음'}
+                          {shipping === null && ' · 배송비 제외'}
+                        </div>
+                      )}
                     </td>
                   )
                 })}
@@ -200,7 +224,7 @@ function PriceCompareView({ rows, navigation }: { rows: PriceTableGridRow[]; nav
   )
 }
 
-function RegistrationReview({ rows, navigation }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation }) {
+function RegistrationReview({ rows, navigation, canRegister }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation; canRegister: boolean }) {
   const router = useRouter()
   const [selected, setSelected] = useState(navigation.malls ?? [])
   const [groups, setGroups] = useState<Record<string, string[]>>({})
@@ -286,7 +310,14 @@ function RegistrationReview({ rows, navigation }: { rows: PriceTableGridRow[]; n
                   <div>{row.productName || row.registeredProductName}</div>
                   {row.optionName && <div className="text-xs text-muted-foreground">{row.optionName}</div>}
                 </td>
-                <td className="px-2 py-2 text-xs">{row.missingMalls?.join(', ')}</td>
+                <td className="px-2 py-2 text-xs">
+                  <div className="flex flex-wrap gap-x-2 gap-y-1">
+                    {row.missingMalls?.map((mall) => canRegister ? (
+                      <Link key={mall.id} className="text-primary underline" prefetch={false}
+                        href={priceRegistrationHref(row.id, mall.id, navigation)}>{mall.label}</Link>
+                    ) : <span key={mall.id}>{mall.label}</span>)}
+                  </div>
+                </td>
                 <td className="px-2 py-2 text-right">
                   <button type="button" disabled={pending} onClick={() => changeExclusion(row)} className="whitespace-nowrap rounded border px-2 py-1 text-xs disabled:opacity-50">
                     {showExcluded ? '대상 복원' : '등록 제외'}
@@ -327,10 +358,4 @@ function SortLink({ sortKey, label, navigation }: { sortKey: string; label: stri
       <Icon aria-hidden="true" className="size-3 shrink-0" />
     </Link>
   )
-}
-
-function formatMoney(value?: string) {
-  if (!value) return '-'
-  const number = Number(value.replace(/,/g, ''))
-  return Number.isFinite(number) ? `${number.toLocaleString('ko-KR')}원` : value
 }

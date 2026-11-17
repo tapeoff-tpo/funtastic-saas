@@ -34,8 +34,7 @@ export async function loadPriceQueueAction(
 }
 export async function saveQueuePricesAction(input: {
   id: string
-  b2b: string
-  b2c: string
+  commonPrice: string
   excluded: boolean
   reason: string
 }) {

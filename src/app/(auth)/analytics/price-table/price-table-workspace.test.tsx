@@ -14,15 +14,15 @@ const navigation: PriceTableNavigation = { view: 'compare', sheetName: '상품�
 const defaultProps = { navigation, page: 14 }
 
 describe('price table mall selection', () => {
-  it('selects every mall initially and keeps baseline prices pinned when clearing', () => {
+  it('selects every mall initially and keeps the common price visible when clearing', () => {
     render(<PriceTableWorkspace {...defaultProps} rows={[]} />)
     fireEvent.click(screen.getByText("몰 선택·그룹 ▾"))
     const inputs = screen.getAllByRole('checkbox') as HTMLInputElement[]
     expect(inputs.length).toBeGreaterThan(6)
     expect(inputs.every(input => input.checked)).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: '몰 선택 해제' }))
-    expect(inputs.filter(input => input.checked)).toHaveLength(2)
-    expect(inputs.filter(input => input.disabled)).toHaveLength(2)
+    expect(inputs.filter(input => input.checked)).toHaveLength(0)
+    expect(screen.getByRole('link', { name: '공통 판매가' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '전체 선택' }))
     expect(inputs.every(input => input.checked)).toBe(true)
   })
@@ -35,7 +35,7 @@ describe('price table mall selection', () => {
     fireEvent.click(screen.getByRole('button', { name: '현재 선택을 그룹 저장' }))
     fireEvent.click(screen.getByRole('button', { name: '전체 선택' }))
     fireEvent.click(screen.getByRole('button', { name: 'B2C몰' }))
-    expect((screen.getAllByRole('checkbox') as HTMLInputElement[]).filter(input => input.checked)).toHaveLength(3)
+    expect((screen.getAllByRole('checkbox') as HTMLInputElement[]).filter(input => input.checked)).toHaveLength(1)
     expect(JSON.parse(localStorage.getItem('price-table-mall-groups-v1')!)).toHaveProperty('B2C몰')
   })
 })
@@ -63,9 +63,9 @@ it('shows saved dates in price comparison and only missing malls in registration
   expect(Object.fromEntries(sortParams)).toEqual({ sheet: '상품등록', sort: 'sourceNumber', order: 'desc', view: 'compare', q: '테스트' })
   expect(screen.getByRole('link', { name: '등록 누락 확인' })).toHaveAttribute('href', expect.stringContaining('page=14'))
   rerender(<PriceTableWorkspace {...defaultProps} navigation={{ ...navigation, view: 'products', malls: ['coupang', 'toss'] }}
-    rows={rows.map((row) => ({ ...row, missingMalls: ['토스쇼핑'] }))} />)
+    canRegister rows={rows.map((row) => ({ ...row, missingMalls: [{ id: 'toss', label: '토스쇼핑' }] }))} />)
   expect(screen.getByText('27')).toBeVisible()
-  expect(screen.getByRole('cell', { name: '토스쇼핑' })).toBeVisible()
+  expect(screen.getByRole('link', { name: '토스쇼핑' })).toHaveAttribute('href', expect.stringContaining('row=row-1&mall=toss'))
   expect(screen.getByRole('button', { name: '등록 제외' })).toBeVisible()
   expect(screen.queryByText('입력일 2026-11-10')).not.toBeInTheDocument()
 })

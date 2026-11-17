@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getCommonPrice, getRegistrationMargin, registrationNumberKey, registrationPriceKey, registrationShippingKey } from "@/lib/analytics/price-registration-values"
 import { getRegistrationMarketplaceColumns, findMarketplaceProductIds, getPriceTableSourceNumber, type PriceTableDisplayColumn } from './price-table-columns'
 
 function column(overrides: Partial<PriceTableDisplayColumn> = {}): PriceTableDisplayColumn {
@@ -103,4 +104,23 @@ it('preserves workbook product numbers, including repeats and blank cells', () =
   expect(rows.map((row) => getPriceTableSourceNumber('상품등록', row))).toEqual(['2', '4', '4', '5', null])
   expect(getPriceTableSourceNumber('뉴도매', { NO: 4 })).toBe('4')
   expect(getPriceTableSourceNumber('메인', { NO: '4' })).toBeNull()
+})
+
+it('uses a saved registration number for its exact mall without borrowing another mall number', () => {
+  const raw = { [registrationNumberKey('coupang')]: '00145' }
+  const columns = getRegistrationMarketplaceColumns()
+  expect(findMarketplaceProductIds(raw, columns.find((column) => column.id === 'coupang')!)).toEqual([
+    { key: registrationNumberKey('coupang'), value: '00145' },
+  ])
+  expect(findMarketplaceProductIds(raw, columns.find((column) => column.id === 'toss')!)).toEqual([])
+})
+
+it('uses the common price and warns about low margins without changing the price', () => {
+  const raw = { '공통 판매가': '10,000', '원가': '8,500' }
+  expect(getRegistrationMargin(raw, 'coupang', 10)).toMatchObject({ price: 10000, margin: 500 })
+  expect(getRegistrationMargin(raw, 'toss', 20)).toMatchObject({ price: 10000, margin: -500 })
+  const override = { ...raw, [registrationPriceKey('toss')]: '12000', [registrationShippingKey('toss')]: '1100' }
+  expect(getRegistrationMargin(override, 'toss', 20)).toMatchObject({ price: 12000, margin: 0 })
+  expect(getRegistrationMargin(raw, 'toss', undefined).margin).toBeNull()
+  expect(getCommonPrice({ 'B2B 판매가': '9000', 'B2C 판매가': '10000' })).toBeNull()
 })

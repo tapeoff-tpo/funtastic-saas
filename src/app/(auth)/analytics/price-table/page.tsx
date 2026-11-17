@@ -1,10 +1,16 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { and, eq, inArray } from 'drizzle-orm'
+import { db } from '@/lib/db'
+import { products } from '@/lib/db/schema'
 import { Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { formatPriceNumberDate } from '@/lib/analytics/price-number-date'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
+import { getUserMenuAccess } from '@/lib/auth/menu-access'
+import { canUseMenu } from '@/lib/auth/menu-permissions'
+import { getPriceRegistrationFees } from '@/lib/analytics/price-registration-fees'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { getPriceTableSourceNumber } from './price-table-columns'
@@ -50,34 +56,47 @@ export default async function PriceTablePage({
   const navigation: PriceTableNavigation = { sheetName: activeSheet, search, sortKey, sortOrder, view: activeView, malls, showExcluded }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  const data = await listPriceTableRows({
-    userId: workspaceUserId,
-    page,
-    search,
-    sheetName: activeSheet,
-    sortKey,
-    sortOrder,
-    registrationReview: activeView === 'products' ? { mallIds: malls, showExcluded } : undefined,
-  }).catch((error) => {
-    console.error('price table list error:', error)
-    return {
-      rows: [],
-      total: 0,
-      overallTotal: 0,
+  const [access, fees, data] = await Promise.all([
+    getUserMenuAccess(user.id),
+    activeView === 'compare' ? getPriceRegistrationFees(workspaceUserId).catch((error) => {
+      console.error('price registration fee lookup error:', error)
+      return {}
+    }) : {},
+    listPriceTableRows({
+      userId: workspaceUserId,
       page,
-      pageSize: 100,
-      sheets: [],
-      sheetCounts: [],
-      latestImport: null,
-      sourceFileName: null,
-    }
-  })
+      search,
+      sheetName: activeSheet,
+      sortKey,
+      sortOrder,
+      registrationReview: activeView === 'products' ? { mallIds: malls, showExcluded } : undefined,
+    }).catch((error) => {
+      console.error('price table list error:', error)
+      return {
+        rows: [],
+        total: 0,
+        overallTotal: 0,
+        page,
+        pageSize: 100,
+        sheets: [],
+        sheetCounts: [],
+        latestImport: null,
+        sourceFileName: null,
+      }
+    }),
+  ])
+  const canRegister = Boolean(access && canUseMenu(access, '/operations/marketplace-registration'))
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize))
   if (page > totalPages) redirect(priceTableHref({ ...navigation, page: totalPages }))
   const sheetCounts = [...data.sheetCounts].sort((left, right) => (
     SHEET_ORDER.indexOf(left.name) - SHEET_ORDER.indexOf(right.name)
   ))
+  const codes = [...new Set(data.rows.flatMap((row) => row.productCode ? [row.productCode] : []))]
+  const productCosts = activeView === 'compare' && codes.length ? await db
+    .select({ code: products.internalSku, cost: products.costPrice }).from(products)
+    .where(and(eq(products.userId, workspaceUserId), inArray(products.internalSku, codes))) : []
+  const costsByCode = new Map(productCosts.map(({ code, cost }) => [code, cost]))
   const gridRows: PriceTableGridRow[] = data.rows.map((row) => ({
     id: row.id,
     rowNumber: row.rowNumber,
@@ -86,7 +105,10 @@ export default async function PriceTablePage({
     productName: row.productName,
     optionName: row.optionName,
     registeredProductName: row.registeredProductName,
-    rawData: activeView === 'compare' ? row.rawData as Record<string, string> : {},
+    rawData: activeView === 'compare' ? {
+      '원가': costsByCode.get(row.productCode ?? ''),
+      ...row.rawData,
+    } as Record<string, string> : {},
     missingMalls: row.missingMalls,
     directEntryDate: row.sourceFileName === '직접 등록' ? formatPriceNumberDate(row.importedAt) : undefined,
   }))
@@ -97,9 +119,6 @@ export default async function PriceTablePage({
           <h1 className="text-xl font-bold">판매가 테이블</h1>
         </div>
         <div className="flex w-fit gap-2">
-          <Link href="/operations/marketplace-registration" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            상품 등록 관리로
-          </Link>
           <Link href="/analytics" className="rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
             매출분석으로
           </Link>
@@ -125,6 +144,7 @@ export default async function PriceTablePage({
         <details className="group relative ml-auto">
           <summary className="cursor-pointer list-none rounded border px-2 py-1.5 text-xs [&::-webkit-details-marker]:hidden">등록·업로드 ▾</summary>
           <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-[min(900px,calc(100vw-2rem))] space-y-3 overflow-auto rounded-md border bg-popover p-3 shadow-lg">
+            {canRegister && <Link className="block text-sm text-primary underline" href="/operations/marketplace-registration">상품등록 일괄 작업</Link>}
             <ManualPriceProduct sheetName={activeSheet} />
             <ChannelBundleOverridesUpload />
             <details className="rounded border p-2"><summary className="cursor-pointer text-sm font-medium">원본 엑셀 업로드</summary><div className="pt-3"><PriceTableUpload compact /></div></details>
@@ -141,6 +161,8 @@ export default async function PriceTablePage({
         rows={gridRows}
         navigation={navigation}
         page={page}
+        fees={fees}
+        canRegister={canRegister}
       />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">

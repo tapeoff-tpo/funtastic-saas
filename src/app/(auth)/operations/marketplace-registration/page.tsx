@@ -4,6 +4,8 @@ import { ClipboardPenLine, Database, Layers3 } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { listMarketplaceRegistrationProducts } from '@/lib/operations/marketplace-registration'
+import { LinkedPriceRegistration } from './linked-price-registration'
+import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { RegistrationBoard } from './registration-board'
 
 export const dynamic = 'force-dynamic'
@@ -11,14 +13,20 @@ export const dynamic = 'force-dynamic'
 export default async function MarketplaceRegistrationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string; row?: string; mall?: string; view?: string; malls?: string }>
 }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
   const params = await searchParams
   const query = params.q?.trim() ?? ''
-  const allRows = await listMarketplaceRegistrationProducts(await getWorkspaceUserId(user.id))
+  const workspaceId = await getWorkspaceUserId(user.id)
+  if (params.row) {
+    await assertMenuAccess('/analytics/price-table')
+    return <LinkedPriceRegistration userId={workspaceId} rowId={params.row} mallId={params.mall}
+      search={query} view={params.view === 'products' ? 'products' : 'compare'} malls={(params.malls ?? '').split(',').filter(Boolean)} />
+  }
+  const allRows = await listMarketplaceRegistrationProducts(workspaceId)
   const rows = query
     ? allRows.filter((row) => [
       row.productCode,

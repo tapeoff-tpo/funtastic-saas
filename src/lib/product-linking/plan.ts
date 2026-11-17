@@ -1,3 +1,4 @@
+import { COMMON_PRICE_KEY } from '@/lib/analytics/price-registration-values'
 export type LinkTarget = 'item' | 'cost' | 'price' | 'registration'
 type ProductNotice = { label: string; value: string }
 
@@ -131,8 +132,8 @@ export function buildLinkChanges(
     add('raw:상품코드', '품목코드', price?.raw_data?.['상품코드'], code)
   } else if (target === 'price') {
     if (!price) throw new Error('판매가 테이블에 먼저 원가를 동기화해주세요.')
-    const b2b = amount(price.raw_data?.['B2B 판매가']),
-      b2c = amount(price.raw_data?.['B2C 판매가'])
+    const b2b = amount(price.raw_data?.[COMMON_PRICE_KEY]) ?? amount(price.raw_data?.['B2B 판매가']),
+      b2c = amount(price.raw_data?.[COMMON_PRICE_KEY]) ?? amount(price.raw_data?.['B2C 판매가'])
     if (!(b2b && b2c) && !item?.metadata?.priceWorkflow?.excluded)
       throw new Error(
         'B2B·B2C 판매가를 입력하거나 입력 제외 사유를 지정해주세요.',
@@ -143,8 +144,8 @@ export function buildLinkChanges(
     if (!item) throw new Error('원가·품목 연결을 먼저 완료해주세요.')
     if (!(amount(price?.raw_data?.['원가']) ?? 0))
       throw new Error('실제 원가를 판매가 테이블에 먼저 동기화해주세요.')
-    const b2b = amount(price?.raw_data?.['B2B 판매가']),
-      b2c = amount(price?.raw_data?.['B2C 판매가'])
+    const b2b = amount(price?.raw_data?.[COMMON_PRICE_KEY]) ?? amount(price?.raw_data?.['B2B 판매가']),
+      b2c = amount(price?.raw_data?.[COMMON_PRICE_KEY]) ?? amount(price?.raw_data?.['B2C 판매가'])
     if (!(b2b && b2c) && !item.metadata?.priceWorkflow?.excluded)
       throw new Error('판매가 테이블의 판매가 입력을 먼저 완료해주세요.')
     if (!s.detail_page_url)

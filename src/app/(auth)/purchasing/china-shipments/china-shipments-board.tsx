@@ -1097,7 +1097,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
   const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
     ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
-    : [createBoxSplitDraft()])))
+    : [{ ...createBoxSplitDraft(), boxNo: nextAvailableBoxNumbers(1, [...allBoxes.map((box) => box.boxNo), ...guard.getBoxNumbers(draftId)])[0], autoNumber: true }])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
   const [quantityPerBox, setQuantityPerBox] = useState(() => {

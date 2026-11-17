@@ -542,6 +542,40 @@ describe('ChinaShipmentsBoard', () => {
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: '预览自动拆分' })).toBeInTheDocument()
   })
 
+  it('starts a new product at box four when boxes one through three are already saved', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.items.push({ ...shipmentA.items[0], id: 'new-item', sku: 'SKU-NEW' })
+    detail.boxes = ['1', '2', '3'].map((boxNo) => ({ ...detail.boxes[0], id: `box-${boxNo}`, boxNo }))
+    detail.boxItems = detail.boxes.map((box, index) => ({ id: `allocation-${index}`, boxId: box.id, shipmentItemId: 'shared-item-id', quantity: index === 2 ? 4 : 3 }))
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SKU-NEW')
+    expect(editor.getByPlaceholderText('1')).toHaveValue('4')
+    fireEvent.change(editor.getByPlaceholderText('0'), { target: { value: '6' } })
+    fireEvent.click(editor.getByRole('button', { name: '박스 추가' }))
+    const rows = editor.getAllByRole('row').slice(1)
+    expect(rows.map((row) => (within(row).getByRole('textbox') as HTMLInputElement).value)).toEqual(['4', '5'])
+    fireEvent.change(within(rows[1]).getByPlaceholderText('0'), { target: { value: '4' } })
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations).toEqual([
+      { boxNo: '4', quantity: 6, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null },
+      { boxNo: '5', quantity: 4, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null },
+    ])
+  })
+
+  it('includes unsaved manual boxes when suggesting the next product number', () => {
+    renderShipment({ ...shipmentA, items: [shipmentA.items[0], { ...shipmentA.items[0], id: 'other-item', sku: 'SKU-B' }] })
+    const first = itemEditor('SKU-A')
+    fireEvent.change(first.getByPlaceholderText('0'), { target: { value: '3' } })
+    fireEvent.click(first.getByRole('button', { name: '박스 추가' }))
+    fireEvent.click(first.getByRole('button', { name: '박스 추가' }))
+    expect(first.getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['1', '2', '3'])
+    expect(itemEditor('SKU-B').getByPlaceholderText('1')).toHaveValue('4')
+    expect(itemEditor('SKU-A').getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['1', '2', '3'])
+    expect(itemEditor('SKU-A').getAllByPlaceholderText('0')[0]).toHaveValue(3)
+  })
+
   it('keeps automatic box numbers distinct across unsaved product editors', () => {
     renderShipment({ ...shipmentA, items: [shipmentA.items[0], { ...shipmentA.items[0], id: 'other-item', sku: 'SKU-B' }] })
     for (const sku of ['SKU-A', 'SKU-B']) {
@@ -950,7 +984,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('heading', { name: '출고 A' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '출고 B' })).toBeInTheDocument()
     expect(screen.getAllByRole('navigation', { name: '중국출고 작업 단계' })).toHaveLength(1)
-    expect(itemEditor('SKU-B').getByPlaceholderText('1')).toHaveValue('')
+    expect(itemEditor('SKU-B').getByPlaceholderText('1')).toHaveValue('1')
     expect(screen.queryByRole('table', { name: '중국출고요청 목록' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '목록으로' })).toBeInTheDocument()
   })
@@ -1374,7 +1408,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({
       shipmentId: 'a',
       shipmentItemId: 'item-1',
-      allocations: [{ boxNo: '1', quantity: 3, lengthCm: null, widthCm: null, heightCm: null }],
+      allocations: [{ boxNo: '1', quantity: 3, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null }],
     }))
     expect(saveBoxSplits.mock.calls.some(([input]) => input.shipmentItemId === 'item-2')).toBe(false)
   })
@@ -1438,35 +1472,37 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
   })
 
-  it('switches immediately with a clean blank box number', () => {
+  it('switches immediately with a clean automatically suggested box number', () => {
     renderShipment()
-    expect(itemEditor('SKU-A').getByPlaceholderText('1')).toHaveValue('')
+    expect(itemEditor('SKU-A').getByPlaceholderText('1')).toHaveValue('1')
     selectOtherShipment()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
     expect(saveBoxSplits).not.toHaveBeenCalled()
   })
 
-  it('leaves every newly added box number blank and hints at numeric numbering', () => {
+  it('automatically numbers the first box and each added box while allowing manual changes', () => {
     renderShipment()
 
     const firstBoxNumber = itemEditor('SKU-A').getByPlaceholderText('1')
-    expect(firstBoxNumber).toHaveValue('')
+    expect(firstBoxNumber).toHaveValue('1')
     expect(firstBoxNumber).toHaveAttribute('inputmode', 'numeric')
 
     fireEvent.click(screen.getByRole('button', { name: '박스 추가' }))
     expect(screen.getAllByPlaceholderText('1')).toHaveLength(2)
     expect(screen.getAllByPlaceholderText('1')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ value: '' }),
-      expect.objectContaining({ value: '' }),
+      expect.objectContaining({ value: '1' }),
+      expect.objectContaining({ value: '2' }),
     ]))
+    fireEvent.change(firstBoxNumber, { target: { value: 'CUSTOM' } })
+    expect(firstBoxNumber).toHaveValue('CUSTOM')
   })
 
   it('does not ask when an edited box is restored to its saved state', () => {
     renderShipment()
     const boxNumber = itemEditor('SKU-A').getByPlaceholderText('1')
     fireEvent.change(boxNumber, { target: { value: '임시' } })
-    fireEvent.change(boxNumber, { target: { value: '' } })
+    fireEvent.change(boxNumber, { target: { value: '1' } })
     selectOtherShipment()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(navigate).toHaveBeenCalledWith('/purchasing/china-shipments')
@@ -1512,7 +1548,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledWith(expect.objectContaining({
       shipmentId: 'a',
       shipmentItemId: 'shared-item-id',
-      allocations: [{ boxNo: '1', quantity: 4, lengthCm: null, widthCm: null, heightCm: null }],
+      allocations: [{ boxNo: '1', quantity: 4, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null }],
     })))
     expect(screen.getByRole('heading', { name: '출고 A' })).toBeInTheDocument()
     expect(navigate).not.toHaveBeenCalled()

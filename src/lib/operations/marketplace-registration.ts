@@ -115,29 +115,31 @@ function registrationOptions(value: unknown): RegistrationOption[] {
   }))
 }
 
-export async function listMarketplaceRegistrationProducts(userId: string) {
+export async function listMarketplaceRegistrationProducts(userId: string, productCode?: string) {
   await ensureMarketplaceRegistrationTables()
-  await db.execute(sql`
-    INSERT INTO marketplace_registration_channels (
-      profile_id, user_id, marketplace_id, status, payload
-    )
-    SELECT profile.id, profile.user_id, 'ohouse', 'needs_info',
-      '{"source":"funtastic-b2b"}'::jsonb
-    FROM marketplace_registration_profiles profile
-    WHERE profile.user_id = ${userId}
-      AND profile.source_type = 'funtastic-b2b'
-    ON CONFLICT (profile_id, marketplace_id) DO NOTHING
-  `)
-  await syncLinkedOhouseRegistrationChannels(userId)
-  // 최초 등록 기준은 B2B 원본 카테고리로 채운다. 사용자가 이미 보정한 값은 절대 덮어쓰지 않는다.
-  await db.execute(sql`
-    UPDATE marketplace_registration_profiles
-    SET common_category = source_category_name, updated_at = now()
-    WHERE user_id = ${userId}
-      AND source_type = 'funtastic-b2b'
-      AND NULLIF(BTRIM(COALESCE(common_category, '')), '') IS NULL
-      AND NULLIF(BTRIM(COALESCE(source_category_name, '')), '') IS NOT NULL
-  `)
+  if (productCode === undefined) {
+    await db.execute(sql`
+      INSERT INTO marketplace_registration_channels (
+        profile_id, user_id, marketplace_id, status, payload
+      )
+      SELECT profile.id, profile.user_id, 'ohouse', 'needs_info',
+        '{"source":"funtastic-b2b"}'::jsonb
+      FROM marketplace_registration_profiles profile
+      WHERE profile.user_id = ${userId}
+        AND profile.source_type = 'funtastic-b2b'
+      ON CONFLICT (profile_id, marketplace_id) DO NOTHING
+    `)
+    await syncLinkedOhouseRegistrationChannels(userId)
+    // 최초 등록 기준은 B2B 원본 카테고리로 채운다. 사용자가 이미 보정한 값은 절대 덮어쓰지 않는다.
+    await db.execute(sql`
+      UPDATE marketplace_registration_profiles
+      SET common_category = source_category_name, updated_at = now()
+      WHERE user_id = ${userId}
+        AND source_type = 'funtastic-b2b'
+        AND NULLIF(BTRIM(COALESCE(common_category, '')), '') IS NULL
+        AND NULLIF(BTRIM(COALESCE(source_category_name, '')), '') IS NOT NULL
+    `)
+  }
   const result = await db.execute<RegistrationRow>(sql`
     SELECT r.id, r.product_code AS "productCode", COALESCE(r.sales_codes, '[]'::jsonb) AS "salesCodes", COALESCE(r.product_name, '') AS "productName",
       r.source_stock_qty::int AS stock, COALESCE(r.source_price, 0)::float8 AS price,
@@ -265,6 +267,7 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
     FROM marketplace_registration_profiles r
     WHERE r.user_id = ${userId}
       AND r.source_type IN ('funtastic-b2b', 'product-workflow')
+    ${productCode === undefined ? sql`
       AND NOT EXISTS (
         SELECT 1
         FROM marketplace_registration_profiles canonical
@@ -277,6 +280,20 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
           )
       )
     ORDER BY r.source_updated_at DESC NULLS LAST, r.product_code DESC
+    ` : sql`
+      AND (
+        r.product_code = ${productCode} OR r.sales_codes ? ${productCode} OR r.source_barcode = ${productCode}
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(r.source_options) = 'array' THEN r.source_options ELSE '[]'::jsonb END
+          ) AS option
+          WHERE option->>'barcode' = ${productCode} OR option->>'sku' = ${productCode}
+        )
+      )
+      ORDER BY (r.product_code = ${productCode}) DESC,
+        (r.source_type = 'funtastic-b2b') DESC, r.source_updated_at DESC NULLS LAST, r.product_code
+      LIMIT 1
+    `}
   `)
   return rows<RegistrationRow>(result).map((row) => ({
     ...row,

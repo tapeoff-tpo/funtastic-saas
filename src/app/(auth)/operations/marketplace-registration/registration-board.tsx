@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { ProductLinkPanel } from '@/components/product-linking/product-link-panel'
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition, type ReactNode } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -102,7 +102,11 @@ function inventoryProductCode(sku: string | null | undefined) {
   return separator > 0 ? sku.slice(0, separator) : sku
 }
 
-export function RegistrationBoard({ rows, initialQuery = '' }: { rows: RegistrationRow[]; initialQuery?: string }) {
+export function RegistrationBoard({ rows, initialQuery = '', focusedRegistration }: {
+  rows: RegistrationRow[]
+  initialQuery?: string
+  focusedRegistration?: ReactNode
+}) {
   const router = useRouter()
   const [query, setQuery] = useState(initialQuery)
   const [filter, setFilter] = useState<Filter>('all')
@@ -111,7 +115,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
   const [selectedChannel, setSelectedChannel] = useState<RegistrationRow['channels'][number] | null>(null)
   const [syncPending, startSyncTransition] = useTransition()
   const [salesCodePending, startSalesCodeTransition] = useTransition()
-  const selected = rows.find((row) => row.productCode === selectedCode) ?? null
+  const selected = focusedRegistration ? rows[0] : rows.find((row) => row.productCode === selectedCode)
   const selectedImages = selected ? registrationImages(selected) : null
   const selectedChecks = selected ? registrationChecks(selected) : []
   const inventorySku = selected?.inventorySkus[0] ?? null
@@ -179,7 +183,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
 
   return (
     <section className="overflow-hidden rounded-md border bg-background">
-      <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 lg:flex-row lg:items-center lg:justify-between">
+      {!focusedRegistration && <div className="flex flex-col gap-3 border-b bg-muted/20 p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {filters.map((item) => (
             <Button
@@ -214,10 +218,10 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
           </Button>
         </div>
         {syncMessage ? <p className="text-xs text-muted-foreground lg:basis-full lg:text-right">{syncMessage}</p> : null}
-      </div>
+      </div>}
 
-      <div className="grid min-h-[620px] xl:grid-cols-[minmax(680px,1fr)_430px]">
-        <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
+      <div className={focusedRegistration ? undefined : 'grid min-h-[620px] xl:grid-cols-[minmax(680px,1fr)_430px]'}>
+        {!focusedRegistration && <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
           <div className="grid grid-cols-[52px_minmax(0,1fr)_28px] items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground xl:grid-cols-[52px_minmax(240px,1fr)_100px_90px_110px_28px]">
             <span>이미지</span>
             <span>상품</span>
@@ -284,7 +288,7 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
               </div>
             ) : null}
           </div>
-        </div>
+        </div>}
 
         <aside className="min-w-0 bg-muted/10">
           {selected ? (
@@ -320,6 +324,18 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                   </div>
                 </div>
               </div>
+
+              {focusedRegistration && (
+                <div className="space-y-3 border-b p-4">
+                  {selected.sourceProductUrl && /^https?:\/\//i.test(selected.sourceProductUrl) && (
+                    <div className="text-xs">
+                      <span className="mr-2 font-medium">B2B 상품 URL</span>
+                      <a href={selected.sourceProductUrl} target="_blank" rel="noreferrer" className="break-all text-primary underline">{selected.sourceProductUrl}</a>
+                    </div>
+                  )}
+                  {focusedRegistration}
+                </div>
+              )}
 
               {selected.linkedWorkflowId && (
                 <div className="mb-3 space-y-2">
@@ -479,6 +495,17 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                     <p className="mt-1.5 text-[11px] text-muted-foreground">채널을 누르면 실제 등록 상품·가격·배송·검수 상태를 확인할 수 있습니다.</p>
                   </div>
 
+                  {focusedRegistration && selected.productNotice.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold">상품정보 제공고시</h3>
+                      <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                        {selected.productNotice.map((notice, index) => (
+                          <div key={index}><dt className="text-muted-foreground">{notice.label}</dt><dd>{notice.value}</dd></div>
+                        ))}
+                      </dl>
+                    </div>
+                  )}
+
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <h3 className="text-sm font-semibold">등록용 이미지</h3>
@@ -505,6 +532,13 @@ export function RegistrationBoard({ rows, initialQuery = '' }: { rows: Registrat
                       />
                     </label>
                     <p className="mt-1 text-xs text-muted-foreground">상세페이지 원본 이미지 {selected.detailImageUrls.length}장 · B2B 원본 이미지는 자동으로 유지됩니다.</p>
+                    {focusedRegistration && selected.detailImageUrls.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selected.detailImageUrls.filter((url) => /^https?:\/\//i.test(url)).map((url, index) => (
+                          <a key={index} href={url} target="_blank" rel="noreferrer" className="text-xs text-primary underline">원본 이미지 {index + 1}</a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="sticky bottom-0 flex items-center justify-between border-t bg-background p-3">

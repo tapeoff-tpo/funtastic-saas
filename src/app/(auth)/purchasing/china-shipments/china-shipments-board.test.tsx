@@ -361,6 +361,122 @@ describe('ChinaShipmentsBoard', () => {
     }
   })
 
+  it.each([
+    { entered: '7.125', expected: 7.125 },
+    { entered: '', expected: null },
+  ])('loads measured box weight and saves an explicit change to $entered with the split', async ({ entered, expected }) => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes[0].grossWeightKg = 6.75
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SKU-A')
+    expect(editor.getByRole('columnheader', { name: '총중량(kg)' })).toBeInTheDocument()
+    const weight = editor.getByLabelText('박스 1 총중량(kg)')
+    expect(weight).toHaveValue(6.75)
+    fireEvent.change(weight, { target: { value: entered } })
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations).toEqual([
+      { boxNo: '1', quantity: 10, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: expected },
+    ])
+    expect(saveWeight).not.toHaveBeenCalled()
+  })
+
+  it('preserves a weight-only draft when closing and reopening the box editor', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes[0].grossWeightKg = 6.75
+    renderShipment(detail)
+    fireEvent.change(itemEditor('SKU-A').getByLabelText('박스 1 총중량(kg)'), { target: { value: '7.5' } })
+    parkEditor()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const editor = itemEditor('SKU-A')
+    expect(editor.getByLabelText('박스 1 총중량(kg)')).toHaveValue(7.5)
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBe(7.5)
+  })
+
+  it('retains the existing weight but leaves newly split boxes unweighed', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes[0].grossWeightKg = 6.75
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SKU-A')
+    fireEvent.change(editor.getByLabelText('SKU-A 총 박스 수'), { target: { value: '2' } })
+    fireEvent.click(editor.getByRole('button', { name: '자동 분할 미리보기' }))
+    expect(editor.getByLabelText('박스 1 총중량(kg)')).toHaveValue(6.75)
+    expect(editor.getByLabelText('박스 2 총중량(kg)')).toHaveValue(null)
+    fireEvent.change(editor.getByLabelText('박스 2 총중량(kg)'), { target: { value: '3.5' } })
+    fireEvent.click(editor.getByRole('button', { name: '박스 추가' }))
+    expect(editor.getByLabelText('박스 3 총중량(kg)')).toHaveValue(null)
+    fireEvent.click(editor.getAllByRole('button', { name: '삭제' })[2])
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBeUndefined()
+    expect(saveBoxSplits.mock.calls[0][0].allocations[1].grossWeightKg).toBe(3.5)
+  })
+
+  it('omits an untouched shared-box weight when saving another product split', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeShipmentWithSharedBoxDimensions()
+    detail.boxes[0].grossWeightKg = 8.5
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SHARED-01')
+    expect(editor.getByLabelText('박스 COMMON-1 총중량(kg)')).toHaveValue(8.5)
+    fireEvent.change(editor.getByPlaceholderText('0'), { target: { value: '4' } })
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBeUndefined()
+  })
+
+  it.each([
+    { boxNo: 'NEW', weight: null },
+    { boxNo: 'TARGET', weight: 12.5 },
+  ])('uses the physical destination weight when moving a shared allocation to $boxNo', async ({ boxNo, weight }) => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeShipmentWithSharedBoxDimensions()
+    detail.boxes[0].grossWeightKg = 8.5
+    detail.boxes.push({ ...detail.boxes[0], id: 'target-box', boxNo: 'TARGET', grossWeightKg: 12.5 })
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SHARED-01')
+    fireEvent.change(editor.getByRole('textbox'), { target: { value: boxNo } })
+    expect(editor.getByLabelText(`박스 ${boxNo} 총중량(kg)`)).toHaveValue(weight)
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo })
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBeUndefined()
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].existingBoxId).toBeUndefined()
+  })
+
+  it('keeps an entered weight when renaming the same exclusive physical box', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes[0].grossWeightKg = 6.75
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SKU-A')
+    fireEvent.change(editor.getByLabelText('박스 1 총중량(kg)'), { target: { value: '7.5' } })
+    fireEvent.change(editor.getByRole('textbox'), { target: { value: '7' } })
+    expect(editor.getByLabelText('박스 7 총중량(kg)')).toHaveValue(7.5)
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo: '7', existingBoxId: 'box-1', grossWeightKg: 7.5 })
+  })
+
+  it('compares an edited destination weight against that physical box instead of the source weight', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeShipmentWithSharedBoxDimensions()
+    detail.boxes[0].grossWeightKg = 8.5
+    detail.boxes.push({ ...detail.boxes[0], id: 'target-box', boxNo: 'TARGET', grossWeightKg: 12.5 })
+    renderShipment(detail, 'items')
+    const editor = itemEditor('SHARED-01')
+    fireEvent.change(editor.getByRole('textbox'), { target: { value: 'TARGET' } })
+    fireEvent.change(editor.getByLabelText('박스 TARGET 총중량(kg)'), { target: { value: '8.5' } })
+    fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo: 'TARGET', grossWeightKg: 8.5 })
+  })
+
   it('preloads saved boxes and retains their numbers and measurements when increasing the box count', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail = makeFullyPackedInProgressShipment()
@@ -372,13 +488,13 @@ describe('ChinaShipmentsBoard', () => {
     expect(dialog.getByLabelText('SKU-A 박스당 수량')).toHaveValue(10)
     const savedRow = dialog.getAllByRole('row')[1]
     expect(within(savedRow).getByRole('textbox')).toHaveValue('1')
-    expect(within(savedRow).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['10', '50', '40', '30'])
+    expect(within(savedRow).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['10', '50', '40', '30', ''])
 
     fireEvent.change(dialog.getByLabelText('SKU-A 총 박스 수'), { target: { value: '2' } })
     fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
     expect(dialog.getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['1', '2'])
     for (const row of dialog.getAllByRole('row').slice(1)) {
-      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['5', '50', '40', '30'])
+      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['5', '50', '40', '30', ''])
     }
     // Repeated previews must keep the same boxes too.
     fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
@@ -474,7 +590,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.change(first[3], { target: { value: '20' } })
     fireEvent.click(apply)
     for (const row of rows) {
-      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['30', '10', '20', '20'])
+      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['30', '10', '20', '20', ''])
       expect(within(row).getByText('0.0040')).toBeInTheDocument()
     }
     fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))

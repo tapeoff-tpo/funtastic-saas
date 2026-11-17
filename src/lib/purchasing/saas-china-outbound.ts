@@ -249,6 +249,8 @@ export type ChinaOutboundBoxSplitInput = {
   lengthCm?: number | null
   widthCm?: number | null
   heightCm?: number | null
+  /** Omitted preserves the saved measurement; null explicitly clears it. */
+  grossWeightKg?: number | null
 }
 
 export type ChinaOutboundPalletAssignmentInput = {
@@ -4467,6 +4469,7 @@ function normalizeChinaOutboundWorkbookBoxSplits(boxSplits: ChinaOutboundWorkboo
     }
     allocationsByShipmentItemId.set(shipmentItemId, normalizeChinaOutboundBoxSplitAllocations(boxSplit.allocations))
   }
+  assertChinaOutboundBoxSplitWeightConsistency([...allocationsByShipmentItemId.values()].flat())
   return [...allocationsByShipmentItemId.entries()].map(([shipmentItemId, allocations]) => ({ shipmentItemId, allocations }))
 }
 
@@ -4476,9 +4479,11 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
     const boxNo = requiredText(allocation.boxNo, '박스 번호')
     const quantity = positiveInteger(allocation.quantity, '박스 적재 수량')
     const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    const grossWeightKg = normalizeOptionalChinaOutboundBoxWeight(allocation.grossWeightKg)
     const current = allocationsByBoxNo.get(boxNo)
     if (current) {
       if (current.existingBoxId && allocation.existingBoxId && current.existingBoxId !== allocation.existingBoxId) throw new Error('서로 다른 박스를 같은 번호로 변경할 수 없습니다.')
+      if (current.grossWeightKg !== undefined && grossWeightKg !== undefined && current.grossWeightKg !== grossWeightKg) throw new Error(`${boxNo} 박스에 서로 다른 총중량이 입력되었습니다.`)
       const currentDimensions = normalizeOptionalChinaOutboundBoxDimensions(current)
 
       allocationsByBoxNo.set(boxNo, {
@@ -4486,13 +4491,35 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
         ...(current.existingBoxId || allocation.existingBoxId ? { existingBoxId: current.existingBoxId ?? allocation.existingBoxId } : {}),
         ...(current.autoNumber || allocation.autoNumber ? { autoNumber: true } : {}),
         quantity: current.quantity + quantity,
+        ...(current.grossWeightKg !== undefined || grossWeightKg !== undefined ? { grossWeightKg: current.grossWeightKg !== undefined ? current.grossWeightKg : grossWeightKg } : {}),
         ...(largestChinaOutboundBox([currentDimensions, dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? {}),
       })
       continue
     }
-    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(allocation.existingBoxId ? { existingBoxId: allocation.existingBoxId } : {}), ...(allocation.autoNumber ? { autoNumber: true } : {}), ...(dimensions ?? {}) })
+    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(allocation.existingBoxId ? { existingBoxId: allocation.existingBoxId } : {}), ...(allocation.autoNumber ? { autoNumber: true } : {}), ...(grossWeightKg !== undefined ? { grossWeightKg } : {}), ...(dimensions ?? {}) })
   }
-  return [...allocationsByBoxNo.values()]
+  const normalized = [...allocationsByBoxNo.values()]
+  assertChinaOutboundBoxSplitWeightConsistency(normalized)
+  return normalized
+}
+
+function normalizeOptionalChinaOutboundBoxWeight(value: number | null | undefined) {
+  if (value === undefined || value === null) return value
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.001 || value > 999_999_999) throw new Error('총중량은 0.001kg 이상, 999,999,999kg 이하인 숫자로 입력해주세요.')
+  return value
+}
+
+/** One shared physical box has one measurement, including across workbook products. */
+function assertChinaOutboundBoxSplitWeightConsistency(allocations: ChinaOutboundBoxSplitInput[]) {
+  const weightsByBox = new Map<string, number | null>()
+  for (const allocation of allocations) {
+    if (allocation.grossWeightKg === undefined) continue
+    const keys = [`number:${allocation.boxNo}`, ...(allocation.existingBoxId ? [`id:${allocation.existingBoxId}`] : [])]
+    for (const key of keys) {
+      if (weightsByBox.has(key) && weightsByBox.get(key) !== allocation.grossWeightKg) throw new Error(`${allocation.boxNo} 박스에 서로 다른 총중량이 입력되었습니다.`)
+      weightsByBox.set(key, allocation.grossWeightKg)
+    }
+  }
 }
 
 function normalizeChinaOutboundPalletAssignments(assignments: ChinaOutboundPalletAssignmentInput[]) {
@@ -4607,6 +4634,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         lengthCm: dimensions ? String(dimensions.lengthCm) : null,
         widthCm: dimensions ? String(dimensions.widthCm) : null,
         heightCm: dimensions ? String(dimensions.heightCm) : null,
+        grossWeightKg: allocation.grossWeightKg == null ? null : String(allocation.grossWeightKg),
       }
     })).returning()
     if (created.length !== batch.length) throw new Error('박스를 저장하지 못했습니다.')
@@ -4641,6 +4669,18 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         .where(eq(chinaOutboundBoxes.id, box.id))
         .returning()
       if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
+      const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
+      if (index >= 0) input.boxes[index] = updated
+      box = updated
+      boxesByNo.set(updated.boxNo, updated)
+    }
+
+    if (allocation.grossWeightKg !== undefined && (allocation.grossWeightKg === null ? box.grossWeightKg != null : box.grossWeightKg == null || Number(box.grossWeightKg) !== allocation.grossWeightKg)) {
+      const [updated] = await input.tx.update(chinaOutboundBoxes)
+        .set({ grossWeightKg: allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg), updatedAt: new Date() })
+        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipment.id), eq(chinaOutboundBoxes.id, box.id)))
+        .returning()
+      if (!updated) throw new Error('박스 총중량을 저장하지 못했습니다.')
       const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
       if (index >= 0) input.boxes[index] = updated
       box = updated

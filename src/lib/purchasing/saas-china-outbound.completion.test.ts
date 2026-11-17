@@ -177,6 +177,98 @@ describe('China outbound box and pallet completion', () => {
     await expect(saveChinaOutboundPackageWeight({ userId, shipmentId, packageId, kind, grossWeightKg: -1 })).rejects.toThrow('0보다')
   })
 
+  it.each([0, -1, 0.0001, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1_000_000_000, '12'])('rejects invalid split weight %s before changing any allocations', async (weight) => {
+    const original = JSON.stringify({ boxes, boxItems, items, inventory })
+    await expect(saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ boxNo: '1', quantity: 5, grossWeightKg: 3 }, { boxNo: '2', quantity: 5, grossWeightKg: weight as number }],
+    })).rejects.toThrow('총중량')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(JSON.stringify({ boxes, boxItems, items, inventory })).toBe(original)
+  })
+
+  it('creates split boxes with optional measured weight in the allocation transaction', async () => {
+    boxes = []
+    boxItems = []
+    const original = JSON.stringify(inventory)
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ boxNo: '1', quantity: 3, grossWeightKg: 12.345 }, { boxNo: '2', quantity: 3 }, { boxNo: '3', quantity: 3, grossWeightKg: null }, { boxNo: '4', quantity: 1, grossWeightKg: 0.001 }],
+    })
+    expect(boxes.map((box) => [box.boxNo, box.grossWeightKg])).toEqual([['1', '12.345'], ['2', null], ['3', null], ['4', '0.001']])
+    expect(boxItems.map((allocation) => allocation.quantity)).toEqual([3, 3, 3, 1])
+    expect(items[0]!.packedQuantity).toBe(10)
+    expect(mocks.transaction).toHaveBeenCalledOnce()
+    expect(JSON.stringify(inventory)).toBe(original)
+  })
+
+  it('updates and explicitly clears weight while retaining box identity and measurements', async () => {
+    Object.assign(boxes[0]!, { grossWeightKg: '8.5', note: 'SF001' })
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ existingBoxId: 'box-1', boxNo: 'CUSTOM', quantity: 5, grossWeightKg: 999_999_999 }, { boxNo: '2', quantity: 5 }],
+    })
+    expect(boxes[0]).toMatchObject({ id: 'box-1', boxNo: 'CUSTOM', grossWeightKg: '999999999', palletId: 'pallet-1', lengthCm: '10', widthCm: '20', heightCm: '30', note: 'SF001' })
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1',
+      allocations: [{ boxNo: 'CUSTOM', quantity: 5, grossWeightKg: null }, { boxNo: '2', quantity: 5 }],
+    })
+    expect(boxes[0]).toMatchObject({ id: 'box-1', boxNo: 'CUSTOM', grossWeightKg: null, palletId: 'pallet-1', note: 'SF001' })
+  })
+
+  it('preserves shared weights when omitted even if quantity changes, and accepts an explicit measurement', async () => {
+    boxes[0]!.grossWeightKg = '8.5'
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 2, packedQuantity: 2 })
+    boxItems.push({ id: 'other', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-2', quantity: 2 })
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 4 }, { boxNo: '2', quantity: 5 }] })
+    expect(boxes[0]).toMatchObject({ grossWeightKg: '8.5', completionStatus: 'in_progress' })
+    expect(boxItems.find((allocation) => allocation.id === 'other')).toMatchObject({ quantity: 2 })
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 4, grossWeightKg: 9.25 }, { boxNo: '2', quantity: 5 }] })
+    expect(boxes[0]!.grossWeightKg).toBe('9.25')
+    expect(boxItems.find((allocation) => allocation.id === 'other')).toMatchObject({ quantity: 2 })
+  })
+
+  it('keeps completion when only weight changes and skips identical stored weight updates', async () => {
+    boxes[0]!.grossWeightKg = '8.500'
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 5, grossWeightKg: 8.5 }, { boxNo: '2', quantity: 5 }] })
+    expect(tx.update).not.toHaveBeenCalledWith(chinaOutboundBoxes)
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 5, grossWeightKg: 9 }, { boxNo: '2', quantity: 5 }] })
+    expect(boxes[0]).toMatchObject({ grossWeightKg: '9', completionStatus: 'completed' })
+    expect(pallets[0]!.completionStatus).toBe('completed')
+  })
+
+  it.each([[3, 4], [null, 4], [3, null]] as const)('rejects duplicate box weights %s and %s before the transaction', async (first, second) => {
+    const original = JSON.stringify({ boxes, boxItems })
+    await expect(saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 5, grossWeightKg: first }, { boxNo: ' 1 ', quantity: 5, grossWeightKg: second }] })).rejects.toThrow('서로 다른 총중량')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(JSON.stringify({ boxes, boxItems })).toBe(original)
+  })
+
+  it.each([3, null])('merges duplicate box quantities with consistent explicit weight %s', async (weight) => {
+    boxes[0]!.grossWeightKg = '8.5'
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 3 }, { boxNo: '1', quantity: 3, grossWeightKg: weight }, { boxNo: '1', quantity: 4, grossWeightKg: weight }] })
+    expect(boxes[0]!.grossWeightKg).toBe(weight === null ? null : '3')
+    expect(boxItems).toHaveLength(1)
+    expect(boxItems[0]).toMatchObject({ boxId: 'box-1', quantity: 10 })
+  })
+
+  it('rejects conflicting weights for the same existing box even when renamed differently', async () => {
+    await expect(saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ existingBoxId: 'box-1', boxNo: 'A', quantity: 5, grossWeightKg: 3 }, { existingBoxId: 'box-1', boxNo: 'B', quantity: 5, grossWeightKg: 4 }] })).rejects.toThrow('서로 다른 총중량')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('validates shared workbook weights across products before applying any product', async () => {
+    const original = JSON.stringify({ boxes, boxItems, items })
+    await expect(applyChinaOutboundWorkbook({ userId, shipmentId, boxSplits: [
+      { shipmentItemId: 'item-1', allocations: [{ boxNo: 'SHARED', quantity: 10, grossWeightKg: 12 }] },
+      { shipmentItemId: 'item-2', allocations: [{ boxNo: 'SHARED', quantity: 2, grossWeightKg: null }] },
+    ], palletAssignments: [] })).rejects.toThrow('서로 다른 총중량')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(JSON.stringify({ boxes, boxItems, items })).toBe(original)
+  })
+
   it('stores a Chinese name only on the requested outbound item', async () => {
     await saveChinaOutboundItemChineseName({ userId, shipmentId, shipmentItemId: 'item-1', chineseProductName: '水杯' })
     expect(items[0]!.chineseProductName).toBe('水杯')
@@ -354,7 +446,7 @@ describe('China outbound box and pallet completion', () => {
     await applyChinaOutboundWorkbook({
       userId, shipmentId,
       boxSplits: [
-        { shipmentItemId: 'item-1', allocations: [{ boxNo: 'MIXED', quantity: 5, lengthCm: 10, widthCm: 20, heightCm: 30 }] },
+        { shipmentItemId: 'item-1', allocations: [{ boxNo: 'MIXED', quantity: 5, lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 12.345 }] },
         { shipmentItemId: 'item-2', allocations: [{ boxNo: 'MIXED', quantity: 7, lengthCm: 5, widthCm: 5, heightCm: 5 }] },
       ],
       palletAssignments: [{ boxNo: 'MIXED', palletNo: 'P1' }],
@@ -364,7 +456,7 @@ describe('China outbound box and pallet completion', () => {
     expect(boxItems.map((row) => [row.boxId, row.shipmentItemId, row.quantity])).toEqual([
       [boxes[0]!.id, 'item-1', 5], [boxes[0]!.id, 'item-2', 7],
     ])
-    expect(boxes[0]).toMatchObject({ boxNo: 'MIXED', lengthCm: '10', widthCm: '20', heightCm: '30', palletId: pallets[0]!.id })
+    expect(boxes[0]).toMatchObject({ boxNo: 'MIXED', lengthCm: '10', widthCm: '20', heightCm: '30', grossWeightKg: '12.345', palletId: pallets[0]!.id })
     expect(items.map((item) => item.packedQuantity)).toEqual([5, 7])
     expect(JSON.stringify(inventory)).toBe(balances)
     expect(movements).toHaveLength(0)

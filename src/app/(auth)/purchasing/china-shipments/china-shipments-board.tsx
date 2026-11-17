@@ -115,7 +115,7 @@ export type ChinaShipmentDetailView = {
   boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number }>
 }
 
-type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string; boxId?: string; autoNumber?: boolean }
+type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string; grossWeightKg: string; boxId?: string; autoNumber?: boolean }
 type BoxSplitStatus = 'in_progress' | 'completed'
 type BoxSplitDraftSnapshot = {
   drafts: BoxSplitDraft[]
@@ -1096,7 +1096,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   const draftId = `box:${item.id}`
   const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
   const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
-    ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm) }))
+    ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm), grossWeightKg: box.grossWeightKg == null ? '' : String(box.grossWeightKg) }))
     : [{ ...createBoxSplitDraft(), boxNo: nextAvailableBoxNumbers(1, [...allBoxes.map((box) => box.boxNo), ...guard.getBoxNumbers(draftId)])[0], autoNumber: true }])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
@@ -1142,15 +1142,39 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   const currentBoxSplitStatus: BoxSplitStatus = splitQuantity === item.reservedQuantity ? 'completed' : 'in_progress'
 
   function patchDraft(key: string, patch: Partial<BoxSplitDraft>) {
-    setDrafts((current) => current.map((draft) => draft.key === key ? { ...draft, ...patch, ...(patch.boxNo !== undefined ? { autoNumber: false } : {}) } : draft))
+    setDrafts((current) => current.map((draft) => {
+      if (draft.key !== key) return draft
+      if (patch.boxNo === undefined) return { ...draft, ...patch }
+      const nextBoxNo = patch.boxNo.trim()
+      let grossWeightKg = draft.grossWeightKg
+      if (nextBoxNo !== draft.boxNo.trim()) {
+        const destination = allBoxes.find((box) => box.boxNo === nextBoxNo)
+        const source = allBoxes.find((box) => box.id === draft.boxId)
+        const sourceIsShared = source && allBoxItems.some((entry) => entry.boxId === source.id && entry.shipmentItemId !== item.id)
+        const previousDestination = allBoxes.find((box) => box.boxNo === draft.boxNo.trim())
+        // A shared allocation moves to another physical box; only exclusive boxes can be renamed.
+        if (destination) grossWeightKg = destination.grossWeightKg == null ? '' : String(destination.grossWeightKg)
+        else if (sourceIsShared || (!source && previousDestination)) grossWeightKg = ''
+        else if (source && previousDestination && previousDestination.id !== source.id) grossWeightKg = source.grossWeightKg == null ? '' : String(source.grossWeightKg)
+      }
+      return { ...draft, ...patch, grossWeightKg, autoNumber: false }
+    }))
   }
 
   async function saveDraft(options: { quiet?: boolean } = {}) {
     const nextAllocations = drafts
-      .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm].some((value) => value.trim()))
+      .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm, draft.grossWeightKg].some((value) => value.trim()))
       .map((draft) => {
         const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
         const dimensionsChanged = !previous || [draft.lengthCm, draft.widthCm, draft.heightCm].some((value, index) => value !== [previous.lengthCm, previous.widthCm, previous.heightCm][index])
+        const weightBaseline = initialDrafts.find((candidate) => candidate.key === draft.key)
+        const weightDestination = allBoxes.find((box) => box.boxNo === draft.boxNo.trim())
+        const renamesOriginalBox = draft.boxId && (!weightDestination || weightDestination.id === draft.boxId)
+          && !allBoxItems.some((entry) => entry.boxId === draft.boxId && entry.shipmentItemId !== item.id)
+        const movesToDifferentBox = draft.boxNo.trim() !== weightBaseline?.boxNo.trim() && !renamesOriginalBox
+        const previousWeight = movesToDifferentBox
+          ? weightDestination?.grossWeightKg == null ? '' : String(weightDestination.grossWeightKg)
+          : weightBaseline?.grossWeightKg ?? ''
         return {
           boxNo: draft.boxNo.trim(),
           ...(draft.autoNumber ? { autoNumber: true } : {}),
@@ -1163,6 +1187,8 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
           lengthCm: dimensionsChanged ? optionalNumber(draft.lengthCm) : null,
           widthCm: dimensionsChanged ? optionalNumber(draft.widthCm) : null,
           heightCm: dimensionsChanged ? optionalNumber(draft.heightCm) : null,
+          // An untouched shared-box weight must not overwrite a later measurement.
+          ...(draft.grossWeightKg !== previousWeight ? { grossWeightKg: optionalNumber(draft.grossWeightKg) } : {}),
         }
       })
     const hasBoxSplitStatusChange = currentBoxSplitStatus !== initialBoxSplitStatus
@@ -1239,17 +1265,19 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
           첫 박스 규격 전체 적용
         </button>}
       </div>
+      <p className="border-b px-3 py-2 text-xs text-muted-foreground">총중량은 포장재를 포함한 박스 전체 무게입니다. 분할 수량을 바꾸면 무게를 다시 확인해주세요.</p>
       <div className="overflow-x-auto">
-        <table className="min-w-[880px] w-full text-sm">
+        <table className="min-w-[1000px] w-full text-sm">
           <thead className="bg-muted/10 text-xs text-muted-foreground">
             <tr>
-              <th className="w-[22%] px-3 py-2 text-left font-medium">박스번호</th>
-              <th className="w-[14%] px-3 py-2 text-right font-medium">적재수량</th>
-              <th className="w-[13%] px-3 py-2 text-right font-medium">가로(cm)</th>
-              <th className="w-[13%] px-3 py-2 text-right font-medium">세로(cm)</th>
-              <th className="w-[13%] px-3 py-2 text-right font-medium">높이(cm)</th>
-              <th className="w-[15%] px-3 py-2 text-right font-medium">CBM</th>
-              <th className="w-[10%] px-3 py-2 text-center font-medium">관리</th>
+              <th className="w-[18%] px-3 py-2 text-left font-medium">박스번호</th>
+              <th className="w-[12%] px-3 py-2 text-right font-medium">적재수량</th>
+              <th className="w-[12%] px-3 py-2 text-right font-medium">가로(cm)</th>
+              <th className="w-[12%] px-3 py-2 text-right font-medium">세로(cm)</th>
+              <th className="w-[12%] px-3 py-2 text-right font-medium">높이(cm)</th>
+              <th className="w-[14%] px-3 py-2 text-right font-medium">총중량(kg)</th>
+              <th className="w-[12%] px-3 py-2 text-right font-medium">CBM</th>
+              <th className="w-[8%] px-3 py-2 text-center font-medium">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -1317,6 +1345,20 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
                       disabled={!editable || isPending}
                       className={`${compactInputClass} text-right tabular-nums`}
                       placeholder="선택"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      aria-label={`박스 ${draft.boxNo} 총중량(kg)`}
+                      type="number"
+                      min="0.001"
+                      max="999999999"
+                      step="0.001"
+                      value={draft.grossWeightKg}
+                      onChange={(event) => patchDraft(draft.key, { grossWeightKg: event.target.value })}
+                      disabled={!editable || isPending}
+                      className={`${compactInputClass} text-right tabular-nums`}
+                      placeholder="미입력"
                     />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td>
@@ -1677,7 +1719,7 @@ function today() {
 }
 
 function createBoxSplitDraft(): BoxSplitDraft {
-  return { key: `box-${Date.now()}-${Math.random()}`, boxNo: '', quantity: '', lengthCm: '', widthCm: '', heightCm: '' }
+  return { key: `box-${Date.now()}-${Math.random()}`, boxNo: '', quantity: '', lengthCm: '', widthCm: '', heightCm: '', grossWeightKg: '' }
 }
 
 function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
@@ -1693,11 +1735,11 @@ function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
 }
 
 function cloneBoxSplitDrafts(drafts: BoxSplitDraft[]) {
-  return drafts.map((draft) => ({ ...draft }))
+  return drafts.map((draft) => ({ ...draft, grossWeightKg: draft.grossWeightKg ?? '' }))
 }
 
 function boxDraftValues(drafts: BoxSplitDraft[]) {
-  return JSON.stringify(drafts.map(({ boxNo, quantity, lengthCm, widthCm, heightCm }) => ({ boxNo, quantity, lengthCm, widthCm, heightCm })))
+  return JSON.stringify(drafts.map(({ boxNo, quantity, lengthCm, widthCm, heightCm, grossWeightKg }) => ({ boxNo, quantity, lengthCm, widthCm, heightCm, grossWeightKg })))
 }
 
 function optionalNumber(value: string) {

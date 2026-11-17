@@ -145,6 +145,7 @@ const saveItemBoxSplitsSchema = z.object({
     lengthCm: splitDimension,
     widthCm: splitDimension,
     heightCm: splitDimension,
+    grossWeightKg: z.number().finite('총중량은 숫자로 입력해주세요.').min(0.001, '총중량은 0.001kg 이상으로 입력해주세요.').max(999_999_999, '총중량이 너무 큽니다.').nullable().optional(),
   }).superRefine((value, context) => {
     const dimensions = [value.lengthCm, value.widthCm, value.heightCm]
     const filledCount = dimensions.filter((dimension) => dimension != null).length

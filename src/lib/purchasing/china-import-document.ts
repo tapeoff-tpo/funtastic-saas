@@ -93,6 +93,13 @@ export async function exportChinaImportDocument(
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(await readFile(join(process.cwd(), 'src/lib/purchasing/templates/china-invoice-packing-list.xlsx')) as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
+  // The source template merges the invoice description header across C:D.
+  // Keep the commercial invoice layout, but use D for the per-item HS code
+  // that comes from the item master's 통관·인증 field.
+  sheet.unMergeCells('C18:D18')
+  sheet.getCell('C18').value = 'NAME'
+  sheet.getCell('D18').value = 'HS CODE'
+  sheet.getCell('D18').style = structuredClone(sheet.getCell('C18').style)
   const rowStyle = Array.from({ length: 25 }, (_, index) => structuredClone(sheet.getRow(20).getCell(index + 1).style))
   for (const range of [...sheet.model.merges]) {
     if (/^O\d+:O\d+$/.test(range) && Number(range.match(/\d+/)![0]) >= 20) sheet.unMergeCells(range)
@@ -153,6 +160,8 @@ export async function exportChinaImportDocument(
       for (const column of ['A', 'K']) sheet.getCell(`${column}${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
       sheet.getCell(`B${row}`).value = group.no
       sheet.getCell(`C${row}`).value = source.englishName
+      // Keep this as text. HS codes can contain punctuation or leading zeroes.
+      sheet.getCell(`D${row}`).value = item.hsCode || null
       sheet.getCell(`E${row}`).value = trade.quantity
       sheet.getCell(`F${row}`).value = 'ea'
       sheet.getCell(`G${row}`).value = source.unitPriceCny

@@ -73,6 +73,10 @@ describe('China import documents', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const sheet = workbook.getWorksheet('sheet')!
     expect(sheet.getCell('G20').value).toBe(16.758)
+    expect(sheet.getCell('C18').value).toBe('NAME')
+    expect(sheet.getCell('D18').value).toBe('HS CODE')
+    expect(sheet.getCell('D20').value).toBe('7013')
+    expect(sheet.getCell('D21').value).toBeNull()
     expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 335.16 })
     expect(sheet.getCell('V20').value).toBe(15)
     expect(sheet.getCell('V21').value).toBeNull()
@@ -91,7 +95,8 @@ describe('China import documents', () => {
     expect(sheet.pageSetup.scale).toBe(31)
     expect(sheet.getColumn('A').width).toBe(19.296875)
     expect(sheet.getColumn('N').width).toBe(28.59765625)
-    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'C18:D18', 'R18:S18', 'T18:U18', 'V18:W18', 'O20:O21']))
+    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'R18:S18', 'T18:U18', 'V18:W18', 'O20:O21']))
+    expect(sheet.model.merges).not.toContain('C18:D18')
     const reference = new ExcelJS.Workbook()
     await reference.xlsx.load(await readFile(join(process.cwd(), 'src/lib/purchasing/templates/china-invoice-packing-list.xlsx')) as unknown as ExcelJS.Buffer)
     const template = reference.worksheets[0]
@@ -99,6 +104,7 @@ describe('China import documents', () => {
     for (const address of ['A1', 'K1', 'A2', 'A3', 'E3', 'A18', 'C18', 'R18', 'V18']) {
       expect(sheet.getCell(address).style).toEqual(template.getCell(address).style)
     }
+    expect(sheet.getCell('D18').style).toEqual(template.getCell('C18').style)
     expect(sheet.pageSetup.margins).toEqual(template.pageSetup.margins)
     expect(sheet.getRow(20).height).toBe(21)
     expect(sheet.getRow(20).hidden).toBe(false)

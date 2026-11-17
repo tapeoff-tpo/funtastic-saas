@@ -19,7 +19,7 @@ export function nextAvailableBoxNumbers(count: number, occupied: Iterable<string
   return result
 }
 
-export function planAutomaticBoxSplit(quantity: number, input: { quantityPerBox?: number; boxCount?: number }, occupied: Iterable<string>) {
+export function planAutomaticBoxSplit(quantity: number, input: { quantityPerBox?: number; boxCount?: number }, occupied: Iterable<string>, existingBoxNumbers: Iterable<string> = []) {
   if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error('실제 출고수량을 확인해주세요.')
   let quantities: number[]
   if (input.quantityPerBox !== undefined) {
@@ -34,7 +34,9 @@ export function planAutomaticBoxSplit(quantity: number, input: { quantityPerBox?
     const base = Math.floor(quantity / count), remainder = quantity % count
     quantities = Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0))
   }
-  const numbers = nextAvailableBoxNumbers(quantities.length, occupied)
+  const existing = [...existingBoxNumbers].map((number) => number.trim()).filter(Boolean)
+  const additionalCount = Math.max(0, quantities.length - existing.length)
+  const numbers = [...existing, ...(additionalCount ? nextAvailableBoxNumbers(additionalCount, [...occupied, ...existing]) : [])]
   return quantities.map((quantity, index) => ({ boxNo: numbers[index], quantity }))
 }
 

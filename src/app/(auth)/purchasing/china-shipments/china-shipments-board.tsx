@@ -894,7 +894,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
         const receipts = [...new Map((item.receiptPacking ?? []).map((piece) => [piece.receiptBoxId, piece])).values()]
         return <tr key={item.id} className="border-t align-top">
           <td data-no-translate className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.itemCategory || '상품'}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-3 py-3"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
-          <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong>{item.availableQuantity != null && <div className="mt-1 text-xs text-muted-foreground">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</div>}</td>
+          <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong><div className="mt-1 text-xs text-muted-foreground">작업 가능 {Math.max(0, item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}개</div></td>
           <td className="px-3 py-3 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
           <td className="px-3 py-3"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>
           <td className="px-3 py-3">{allocations.length ? <details><summary className="cursor-pointer text-xs">{allocations.length}박스 · {[...quantities].map(([quantity, count]) => `${quantity}개 × ${count}`).join(' / ')}</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">{allocations.map((allocation) => <p key={allocation.id}><span data-no-translate>{boxes.find((box) => box.id === allocation.boxId)?.boxNo}</span>번: {allocation.quantity}개</p>)}</div></details> : <span className="text-xs text-muted-foreground">미분할</span>}</td>
@@ -1100,8 +1100,17 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     : [createBoxSplitDraft()])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
-  const [quantityPerBox, setQuantityPerBox] = useState('')
-  const [boxCount, setBoxCount] = useState('')
+  const [quantityPerBox, setQuantityPerBox] = useState(() => {
+    const quantities = drafts.filter((draft) => draft.boxNo.trim()).map((draft) => positiveInteger(draft.quantity) ?? 0)
+    const first = quantities[0]
+    return first && quantities.reduce((sum, quantity) => sum + quantity, 0) === item.reservedQuantity
+      && quantities.every((quantity, index) => quantity > 0 && (index === quantities.length - 1 ? quantity <= first : quantity === first))
+      ? String(first) : ''
+  })
+  const [boxCount, setBoxCount] = useState(() => {
+    const count = drafts.filter((draft) => draft.boxNo.trim()).length
+    return count ? String(count) : ''
+  })
   const firstBox = drafts[0]
   const canApplyFirstBoxDimensions = firstBox && [firstBox.lengthCm, firstBox.widthCm, firstBox.heightCm]
     .every((value) => Number.isFinite(Number(value)) && Number(value) > 0)
@@ -1119,8 +1128,13 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   function occupiedNumbers() { return [...allBoxes.map((box) => box.boxNo), ...(guard.getBoxNumbers?.(draftId) ?? [])] }
   function generateSplits() {
     try {
-      const plan = planAutomaticBoxSplit(item.reservedQuantity, quantityPerBox.trim() ? { quantityPerBox: Number(quantityPerBox), ...(boxCount.trim() ? { boxCount: Number(boxCount) } : {}) } : { boxCount: Number(boxCount) }, occupiedNumbers())
-      setDrafts(plan.map((entry) => ({ ...createBoxSplitDraft(), boxNo: entry.boxNo, quantity: String(entry.quantity), autoNumber: true })))
+      const existingDrafts = drafts.filter((draft) => draft.boxNo.trim())
+      const plan = planAutomaticBoxSplit(item.reservedQuantity, quantityPerBox.trim() ? { quantityPerBox: Number(quantityPerBox), ...(boxCount.trim() ? { boxCount: Number(boxCount) } : {}) } : { boxCount: Number(boxCount) }, occupiedNumbers(), existingDrafts.map((draft) => draft.boxNo))
+      setDrafts(plan.map((entry, index) => ({
+        ...(existingDrafts[index] ?? { ...createBoxSplitDraft(), lengthCm: firstBox?.lengthCm ?? '', widthCm: firstBox?.widthCm ?? '', heightCm: firstBox?.heightCm ?? '', autoNumber: true }),
+        boxNo: entry.boxNo,
+        quantity: String(entry.quantity),
+      })))
     } catch (error) { toast.error(error instanceof Error ? error.message : '박스분할 값을 확인해주세요.') }
   }
   const splitQuantity = drafts.reduce((total, draft) => total + (positiveInteger(draft.quantity) ?? 0), 0)

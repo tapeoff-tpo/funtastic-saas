@@ -352,6 +352,64 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits).not.toHaveBeenCalled()
   })
 
+  it('shows remaining split work even when the shipment has reserved all available inventory', () => {
+    const detail = makeShipmentWithCompletionFilters()
+    renderShipment({ ...detail, items: detail.items.map((item) => ({ ...item, onHandQuantity: 5, availableQuantity: 0 })) }, 'items')
+    for (const [sku, remaining] of [['DONE-01', 0], ['WORK-01', 3], ['WAIT-01', 5]]) {
+      const row = screen.getByText(sku).closest('tr')!
+      expect(within(row).getByText(`작업 가능 ${remaining}개`)).toBeInTheDocument()
+    }
+  })
+
+  it('preloads saved boxes and retains their numbers and measurements when increasing the box count', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    const detail = makeFullyPackedInProgressShipment()
+    detail.boxes[0] = { ...detail.boxes[0], lengthCm: 50, widthCm: 40, heightCm: 30 }
+    renderShipment(detail, 'items')
+    fireEvent.click(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' }))
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByLabelText('SKU-A 총 박스 수')).toHaveValue(1)
+    expect(dialog.getByLabelText('SKU-A 박스당 수량')).toHaveValue(10)
+    const savedRow = dialog.getAllByRole('row')[1]
+    expect(within(savedRow).getByRole('textbox')).toHaveValue('1')
+    expect(within(savedRow).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['10', '50', '40', '30'])
+
+    fireEvent.change(dialog.getByLabelText('SKU-A 총 박스 수'), { target: { value: '2' } })
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    expect(dialog.getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual(['1', '2'])
+    for (const row of dialog.getAllByRole('row').slice(1)) {
+      expect(within(row).getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value)).toEqual(['5', '50', '40', '30'])
+    }
+    // Repeated previews must keep the same boxes too.
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0].allocations).toEqual([
+      { boxNo: '1', quantity: 5, lengthCm: null, widthCm: null, heightCm: null },
+      { boxNo: '2', quantity: 5, autoNumber: true, lengthCm: 50, widthCm: 40, heightCm: 30 },
+    ])
+  })
+
+  it('keeps a shared custom box while replanning and leaves its other product intact', async () => {
+    saveBoxSplits.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithSharedBoxDimensions(), 'items')
+    const dialog = itemEditor('SHARED-01')
+    expect(dialog.getByLabelText('SHARED-01 총 박스 수')).toHaveValue(1)
+    expect(dialog.getByLabelText('SHARED-01 박스당 수량')).toHaveValue(null)
+    fireEvent.change(dialog.getByLabelText('SHARED-01 총 박스 수'), { target: { value: '2' } })
+    fireEvent.click(dialog.getByRole('button', { name: '자동 분할 미리보기' }))
+    fireEvent.click(dialog.getByRole('button', { name: '박스분할 저장' }))
+    await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
+    expect(saveBoxSplits.mock.calls[0][0]).toMatchObject({
+      shipmentItemId: 'shared-item-one',
+      allocations: [
+        { boxNo: 'COMMON-1', quantity: 5, lengthCm: null, widthCm: null, heightCm: null },
+        { boxNo: '1', quantity: 5, autoNumber: true, lengthCm: 10, widthCm: 20, heightCm: 30 },
+      ],
+    })
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0].existingBoxId).toBeUndefined()
+  })
+
   it('splits the actual outbound quantity from the items dialog and supports manual numbering', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail: ChinaShipmentDetailView = { ...shipmentA, items: [{ ...shipmentA.items[0], onHandQuantity: 1000, availableQuantity: 900, reservedQuantity: 100 }] }

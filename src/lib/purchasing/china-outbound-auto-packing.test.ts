@@ -25,6 +25,15 @@ describe('outbound automatic box splitting', () => {
   it('skips both persisted numbers and unsaved drafts, including zero-padded numbers', () => {
     expect(nextAvailableBoxNumbers(3, ['1', '002', 'A-3', '4'])).toEqual(['3', '5', '6'])
   })
+  it('retains existing box numbers and adds only the extra boxes when replanning', () => {
+    expect(planAutomaticBoxSplit(10, { boxCount: 2 }, ['1'], ['1'])).toEqual([
+      { boxNo: '1', quantity: 5 }, { boxNo: '2', quantity: 5 },
+    ])
+    expect(planAutomaticBoxSplit(10, { boxCount: 3 }, ['1', '002', 'CUSTOM', '4'], ['CUSTOM', '002'])).toEqual([
+      { boxNo: 'CUSTOM', quantity: 4 }, { boxNo: '002', quantity: 3 }, { boxNo: '3', quantity: 3 },
+    ])
+    expect(planAutomaticBoxSplit(10, { boxCount: 1 }, ['1', '2'], ['2', '1'])).toEqual([{ boxNo: '2', quantity: 10 }])
+  })
   it('rejects empty boxes, invalid values, inconsistent totals and enormous plans', () => {
     for (const input of [{ boxCount: 11 }, { quantityPerBox: 0 }, { boxCount: 1.5 }, { quantityPerBox: 3, boxCount: 2 }]) expect(() => planAutomaticBoxSplit(10, input, [])).toThrow()
     expect(() => planAutomaticBoxSplit(100_000, { quantityPerBox: 1 }, [])).toThrow('5,000')

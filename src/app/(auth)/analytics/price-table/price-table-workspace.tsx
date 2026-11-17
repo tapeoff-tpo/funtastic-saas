@@ -176,7 +176,7 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
                   ) : '-'}
                 </td>
                 <td className="sticky z-10 h-12 border-r border-b bg-card px-2 py-1.5 align-middle" style={{ left: NUMBER_WIDTH + codeWidth }}>
-                  <div data-no-translate className="truncate font-medium leading-5" title={row.productName || row.registeredProductName || ''}>{row.productName || row.registeredProductName || '-'}</div>
+                  <RegistrationProductName row={row} navigation={navigation} canRegister={canRegister} />
                   <div data-no-translate title={row.optionName ?? ''} className="h-4 truncate text-xs leading-4 text-muted-foreground">{row.optionName || '\u00a0'}</div>
                 </td>
                 <td className="sticky z-10 border-r border-b bg-card px-2 py-1.5 text-right text-xs font-medium" style={{ left: NUMBER_WIDTH + codeWidth + productWidth }}>
@@ -307,7 +307,7 @@ function RegistrationReview({ rows, navigation, canRegister }: { rows: PriceTabl
                 <td className="px-2 py-2 text-xs tabular-nums">{row.sourceNumber ?? '–'}</td>
                 <td className="px-2 py-2 font-mono text-xs">{row.productCode || '–'}</td>
                 <td className="px-2 py-2">
-                  <div>{row.productName || row.registeredProductName}</div>
+                  <RegistrationProductName row={row} navigation={navigation} canRegister={canRegister} />
                   {row.optionName && <div className="text-xs text-muted-foreground">{row.optionName}</div>}
                 </td>
                 <td className="px-2 py-2 text-xs">
@@ -335,6 +335,18 @@ function RegistrationReview({ rows, navigation, canRegister }: { rows: PriceTabl
       </div>
     </div>
   )
+}
+
+function RegistrationProductName({ row, navigation, canRegister }: {
+  row: PriceTableGridRow
+  navigation: PriceTableNavigation
+  canRegister: boolean
+}) {
+  const name = row.productName || row.registeredProductName || '–'
+  return canRegister ? (
+    <Link data-no-translate title={name} prefetch={false} className="block truncate font-medium leading-5 text-primary hover:underline"
+      href={priceRegistrationHref(row.id, '', navigation)}>{name}</Link>
+  ) : <span data-no-translate title={name} className="block truncate font-medium leading-5">{name}</span>
 }
 
 function sortDirection(navigation: PriceTableNavigation, sortKey: string) {

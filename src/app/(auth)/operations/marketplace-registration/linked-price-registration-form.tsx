@@ -8,7 +8,7 @@ import { saveLinkedPriceRegistration } from '../../analytics/price-table/price-r
 import { priceRegistrationHref, type PriceTableNavigation } from '../../analytics/price-table/price-table-navigation'
 import { priceAmount, type getRegistrationMargin } from '@/lib/analytics/price-registration-values'
 
-export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall, targets, commonPrice, number, amounts, fee }: {
+export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall, targets, commonPrice, number, amounts, fee, defaultShipping }: {
   rowId: string
   updatedAt: string
   navigation: PriceTableNavigation
@@ -18,14 +18,16 @@ export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall
   number?: string
   amounts: ReturnType<typeof getRegistrationMargin>
   fee?: number
+  defaultShipping?: number | null
 }) {
   const router = useRouter()
   const [common, setCommon] = useState(String(commonPrice ?? ''))
   const [override, setOverride] = useState(String(amounts.override ?? ''))
   const [shipping, setShipping] = useState(String(amounts.shipping ?? ''))
   const applied = priceAmount(override) ?? priceAmount(common)
+  const appliedShipping = priceAmount(shipping) ?? defaultShipping
   const margin = applied !== null && amounts.cost !== null && fee !== undefined
-    ? Math.round(applied * (1 - fee / 100) - amounts.cost) - (priceAmount(shipping) ?? 0)
+    ? Math.round(applied * (1 - fee / 100) - amounts.cost) - (appliedShipping ?? 0)
     : null
   return (
     <form action={async (form) => {
@@ -59,7 +61,7 @@ export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall
           <input name="override" inputMode="decimal" pattern="([0-9]{1,10}([.][0-9]{1,2})?)?" value={override} onChange={(e) => setOverride(e.target.value)} placeholder="비워두면 공통 판매가 적용" className="rounded border bg-background p-2" />
         </label>
         <label className="grid gap-1 text-sm">우리 부담 배송비
-          <input name="shipping" inputMode="decimal" pattern="([0-9]{1,10}([.][0-9]{1,2})?)?" value={shipping} onChange={(e) => setShipping(e.target.value)} className="rounded border bg-background p-2" />
+          <input name="shipping" inputMode="decimal" pattern="([0-9]{1,10}([.][0-9]{1,2})?)?" value={shipping} placeholder={defaultShipping == null ? undefined : `품목 배송비 ${defaultShipping.toLocaleString('ko-KR')}원`} onChange={(e) => setShipping(e.target.value)} className="rounded border bg-background p-2" />
         </label>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -67,7 +69,7 @@ export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall
         <span>수수료 {fee === undefined ? '미설정' : `${fee}%`}</span>
         <span>원가 {amounts.cost === null ? '미입력' : `${amounts.cost.toLocaleString('ko-KR')}원`}</span>
         {margin !== null && <span className={margin <= 0 ? 'font-medium text-red-600' : ''}>
-          {margin < 0 ? '예상 적자' : margin === 0 ? '마진 없음' : '예상 마진'} {margin.toLocaleString('ko-KR')}원{shipping === '' ? ' (배송비 제외)' : ''}
+          {margin < 0 ? '예상 적자' : margin === 0 ? '마진 없음' : '예상 마진'} {margin.toLocaleString('ko-KR')}원{appliedShipping == null ? ' (배송비 제외)' : ''}
         </span>}
       </div>
       <SaveButton />

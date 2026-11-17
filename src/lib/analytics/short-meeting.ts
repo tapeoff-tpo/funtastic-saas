@@ -108,11 +108,13 @@ export async function getShortMeetingData(userId: string, meetingDate = todayInS
     getSkuOutgoingMetrics(userId, skus, new Date(`${meetingDate}T12:00:00+09:00`)),
     getSaasChinaInventory(userId),
     db.select({
+      id: purchaseRequestItems.id,
       sku: purchaseRequestItems.sku,
       status: purchaseRequestItems.status,
       requestDate: purchaseRequestItems.requestDate,
       outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
       rawData: purchaseRequestItems.rawData,
+      createdAt: purchaseRequestItems.createdAt,
     }).from(purchaseRequestItems).where(and(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.sku, skus),
@@ -176,11 +178,13 @@ export function emptyShortMeetingData(meetingDate = todayInSeoul()): ShortMeetin
 }
 
 type MeetingPurchase = {
+  id?: string
   sku: string
   status: PurchaseRequestStatus
   requestDate: string | null
   outboundExpectedDate: string | null
   rawData: Record<string, unknown>
+  createdAt?: Date | string
 }
 
 type MeetingPurchaseSummary = {
@@ -191,7 +195,7 @@ type MeetingPurchaseSummary = {
 
 /** An unknown purchase date is retained: it is not demonstrably older than one month. */
 export function summarizeMeetingPurchases(rows: MeetingPurchase[], today: string): Map<string, MeetingPurchaseSummary> {
-  const groups = new Map<string, { shipmentDates: Set<string>; orderDates: Set<string>; statuses: Set<string> }>()
+  const groups = new Map<string, { shipmentDates: Set<string>; latestOrder: { date: string | null; row: MeetingPurchase } | null }>()
   const cutoff = previousCalendarMonth(today)
   for (const row of rows) {
     const rawPurchaseDate = row.rawData?.purchaseDate
@@ -203,21 +207,34 @@ export function summarizeMeetingPurchases(rows: MeetingPurchase[], today: string
           ? row.outboundExpectedDate : null
     )
     if (row.status !== 'completed' && purchaseDate && purchaseDate <= cutoff) continue
-    const group = groups.get(row.sku) ?? { shipmentDates: new Set<string>(), orderDates: new Set<string>(), statuses: new Set<string>() }
+    const group = groups.get(row.sku) ?? { shipmentDates: new Set<string>(), latestOrder: null }
     if (row.status === 'completed') {
       if (row.outboundExpectedDate) group.shipmentDates.add(row.outboundExpectedDate)
     } else {
-      group.statuses.add(PURCHASE_REQUEST_STATUS_LABELS[row.status])
       const date = purchaseDate ?? (row.status === 'purchased' ? row.requestDate : null)
-      if (date) group.orderDates.add(date)
+      const candidate = { date, row }
+      if (!group.latestOrder || compareMeetingOrders(candidate, group.latestOrder) > 0) group.latestOrder = candidate
     }
     groups.set(row.sku, group)
   }
   return new Map(Array.from(groups, ([sku, group]) => [sku, {
     chinaShipmentDate: Array.from(group.shipmentDates).sort().reverse().join(', ') || null,
-    chinaOrderDate: Array.from(group.orderDates).sort().reverse().join(', ') || null,
-    chinaOrderStatus: Array.from(group.statuses).join(', ') || null,
+    chinaOrderDate: group.latestOrder?.date ?? null,
+    chinaOrderStatus: group.latestOrder ? PURCHASE_REQUEST_STATUS_LABELS[group.latestOrder.row.status] : null,
   }]))
+}
+
+/** Explicit business dates take priority; creation time and ID break ties deterministically. */
+function compareMeetingOrders(left: { date: string | null; row: MeetingPurchase }, right: { date: string | null; row: MeetingPurchase }): number {
+  if (left.date !== right.date) {
+    if (!left.date) return -1
+    if (!right.date) return 1
+    return left.date.localeCompare(right.date)
+  }
+  const leftCreated = left.row.createdAt ? new Date(left.row.createdAt).getTime() : 0
+  const rightCreated = right.row.createdAt ? new Date(right.row.createdAt).getTime() : 0
+  const timeDifference = (Number.isFinite(leftCreated) ? leftCreated : 0) - (Number.isFinite(rightCreated) ? rightCreated : 0)
+  return timeDifference || (left.row.id ?? '').localeCompare(right.row.id ?? '')
 }
 
 function seoulToday(): string {

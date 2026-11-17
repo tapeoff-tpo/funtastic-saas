@@ -114,9 +114,30 @@ describe('short meeting purchases', () => {
     ], '2026-11-11')
     expect(rows.get('A')).toEqual({
       chinaShipmentDate: null,
-      chinaOrderDate: '2026-10-12, 2026-08-01',
-      chinaOrderStatus: '발주요청, 검수',
+      chinaOrderDate: '2026-10-12',
+      chinaOrderStatus: '검수',
     })
+  })
+
+  it('uses the most recent eligible business date and shows its own status', () => {
+    const rows = summarizeMeetingPurchases([
+      { id: '2', sku: 'A', status: 'purchase_completed', requestDate: null, outboundExpectedDate: '2026-11-14', rawData: {}, createdAt: '2026-11-15T00:00:00Z' },
+      { id: '1', sku: 'A', status: 'purchased', requestDate: '2026-11-16', outboundExpectedDate: null, rawData: {}, createdAt: '2026-11-13T00:00:00Z' },
+      { id: '3', sku: 'A', status: 'inspecting', requestDate: null, outboundExpectedDate: null, rawData: {}, createdAt: '2026-11-17T00:00:00Z' },
+      { id: '4', sku: 'A', status: 'china_arrived', requestDate: null, outboundExpectedDate: '2026-11-11', rawData: { purchaseDate: '2026-10-01' }, createdAt: '2026-11-17T00:00:00Z' },
+    ], '2026-11-17')
+    expect(rows.get('A')).toMatchObject({ chinaOrderDate: '2026-11-16', chinaOrderStatus: '발주요청' })
+  })
+
+  it('breaks same-day or undated ties by creation timestamp and ID without inventing a date', () => {
+    const rows = summarizeMeetingPurchases([
+      { id: 'a', sku: 'A', status: 'purchased', requestDate: '2026-11-14', outboundExpectedDate: null, rawData: {}, createdAt: '2026-11-14T01:00:00Z' },
+      { id: 'b', sku: 'A', status: 'inspecting', requestDate: null, outboundExpectedDate: '2026-11-14', rawData: {}, createdAt: '2026-11-14T01:00:00Z' },
+      { id: 'a', sku: 'B', status: 'purchased', requestDate: null, outboundExpectedDate: null, rawData: {}, createdAt: '2026-11-14T01:00:00Z' },
+      { id: 'b', sku: 'B', status: 'inspecting', requestDate: null, outboundExpectedDate: null, rawData: {}, createdAt: '2026-11-15T01:00:00Z' },
+    ], '2026-11-17')
+    expect(rows.get('A')).toMatchObject({ chinaOrderDate: '2026-11-14', chinaOrderStatus: '검수' })
+    expect(rows.get('B')).toMatchObject({ chinaOrderDate: null, chinaOrderStatus: '검수' })
   })
 
   it('aggregates distinct completed outbound dates separately from active purchases', () => {

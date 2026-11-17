@@ -9,6 +9,15 @@ const rows: ShortMeetingRow[] = [
 ]
 
 describe('ShortMeetingTable', () => {
+  it('shows twelve columns without the location and spans the empty state correctly', () => {
+    const { rerender } = render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
+    expect(screen.getAllByRole('columnheader')).toHaveLength(12)
+    expect(screen.queryByRole('columnheader', { name: '로케이션' })).not.toBeInTheDocument()
+    expect(screen.queryByText('A1')).not.toBeInTheDocument()
+    rerender(<ShortMeetingTable rows={[]} sheetStatus="available" />)
+    expect(screen.getByText('반영된 주문서에 표시할 상품이 없습니다.')).toHaveAttribute('colspan', '12')
+  })
+
   it('shows source status and filters the meeting list by code and risk', () => {
     render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
     expect(screen.getByText('11/11 품절')).toBeInTheDocument()

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react'
 import type { ShortMeetingRow } from '@/lib/analytics/short-meeting'
 
-type SortKey = 'sku' | 'productName' | 'todayOutbound' | 'currentStock' | 'stockAfterOutbound' | 'averageDailyOutbound' | 'monthOutbound' | 'outOfStock' | 'chinaStock' | 'chinaShipmentDate' | 'chinaOrderStatus' | 'chinaOrderDate' | 'location'
+type SortKey = 'sku' | 'productName' | 'todayOutbound' | 'currentStock' | 'stockAfterOutbound' | 'averageDailyOutbound' | 'monthOutbound' | 'outOfStock' | 'chinaStock' | 'chinaShipmentDate' | 'chinaOrderStatus' | 'chinaOrderDate'
 type SortDirection = 'ascending' | 'descending'
 const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
 
@@ -68,17 +68,17 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1800px] text-sm">
           <thead className="bg-muted/50 text-muted-foreground"><tr>
-            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '기준일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}{sortable('location', '로케이션')}
+            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '기준일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}
           </tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={13}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
+            {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={12}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
               <tr className="border-t" key={row.sku}>
                 <td data-no-translate className="whitespace-nowrap px-3 py-2 font-mono text-xs font-medium">{row.sku}</td>
                 <td className="min-w-[220px] max-w-[320px] px-3 py-2"><div data-no-translate className="font-medium">{row.productName}</div><div data-no-translate className="text-xs text-muted-foreground">{row.optionName}</div></td>
                 <Td>{formatQuantity(row.todayOutbound)}</Td><Td>{formatQuantity(row.currentStock)}</Td><Td className={row.stockAfterOutbound <= 0 ? 'font-semibold text-red-600' : ''}>{formatQuantity(row.stockAfterOutbound)}</Td><Td>{formatQuantity(row.averageDailyOutbound)}</Td><Td>{formatQuantity(row.monthOutbound)}</Td>
                 <td className="whitespace-pre-line px-3 py-2">{sheetStatus === 'unavailable' ? <span className="text-amber-700">확인 불가</span> : row.outOfStock ? <span className="font-medium text-red-700">{row.outOfStock}</span> : <span className="text-muted-foreground">미등록</span>}</td>
                 <Td>{row.chinaStock == null ? '자료 없음' : formatQuantity(row.chinaStock)}</Td>
-                <td className="whitespace-pre-line px-3 py-2">{row.chinaShipmentDate || '-'}</td><td className="whitespace-pre-line px-3 py-2">{row.chinaOrderStatus || '-'}</td><td className="whitespace-pre-line px-3 py-2">{row.chinaOrderDate || '-'}</td><td className="px-3 py-2">{row.location}</td>
+                <td className="whitespace-pre-line px-3 py-2">{row.chinaShipmentDate || '-'}</td><td className="whitespace-pre-line px-3 py-2">{row.chinaOrderStatus || '-'}</td><td className="whitespace-pre-line px-3 py-2">{row.chinaOrderDate || '-'}</td>
               </tr>
             ))}
           </tbody>

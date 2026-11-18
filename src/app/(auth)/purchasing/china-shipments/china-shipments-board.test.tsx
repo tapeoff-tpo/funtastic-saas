@@ -1246,27 +1246,53 @@ describe('ChinaShipmentsBoard', () => {
 
 
 
-  it('shows only used pallets and expands boxes and their products independently', () => {
+  it('keeps pallet measurements visible and expands product names and box weights together', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
     expect(screen.getAllByRole('heading', { name: '사용 파렛트' })).toHaveLength(1)
     expect(screen.queryByRole('heading', { name: '파렛트 상태' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'BOX-01 박스 상품 펼치기' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toBeVisible()
+    expect(screen.getByLabelText('파렛트 P1 자체 무게(kg)')).toBeVisible()
+    expect(screen.queryByRole('group', { name: '박스 BOX-01 적재 상품·중량' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     const article = screen.getByRole('button', { name: '파렛트 P1 접기' }).closest('article')!
-    const boxButton = within(article).getByRole('button', { name: /박스 상품 펼치기/ })
-    expect(within(article).queryByText(/DONE-01 · 완료 상품/)).not.toBeInTheDocument()
-    fireEvent.click(boxButton)
-    expect(within(article).getByText(/DONE-01 · 완료 상품/)).toBeInTheDocument()
-    fireEvent.click(within(article).getByRole('button', { name: /박스 상품 접기/ }))
-    expect(within(article).queryByText(/DONE-01 · 완료 상품/)).not.toBeInTheDocument()
+    const boxRow = within(article).getByRole('group', { name: '박스 BOX-01 적재 상품·중량' })
+    expect(within(boxRow).getByText(/DONE-01 · 완료 상품/)).toBeVisible()
+    expect(within(boxRow).getByLabelText('박스 BOX-01 총중량(kg)')).toBeVisible()
+    expect(within(boxRow).queryByRole('button', { name: /박스 상품 펼치기/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 접기' }))
-    expect(screen.queryByRole('button', { name: /박스 상품 펼치기/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: '박스 BOX-01 적재 상품·중량' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toBeVisible()
+    expect(screen.getByLabelText('파렛트 P1 자체 무게(kg)')).toBeVisible()
+  })
+
+  it('keeps one weight editor for a mixed physical box while showing all loaded products', () => {
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P2 펼치기' }))
+    const boxRow = screen.getByRole('group', { name: '박스 BOX-02 적재 상품·중량' })
+    expect(within(boxRow).getByText(/DONE-01 · 완료 상품/)).toBeVisible()
+    expect(within(boxRow).getByText(/WORK-01 · 진행 상품/)).toBeVisible()
+    expect(within(boxRow).getAllByLabelText('박스 BOX-02 총중량(kg)')).toHaveLength(1)
+    expect(within(boxRow).getAllByRole('button', { name: '중량 저장' })).toHaveLength(1)
+  })
+
+  it('shows pallet dimensions and calculated weight without opening read-only pallet contents', () => {
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    detail.pallets[0] = { ...detail.pallets[0], lengthCm: 120, widthCm: 100, heightCm: 150 }
+    detail.boxes[0].grossWeightKg = 10
+    renderShipment(detail, 'summary')
+    const card = screen.getByRole('button', { name: '파렛트 P1 펼치기' }).closest('article')!
+    expect(within(card).getByText('파렛트 실측 규격: 120 × 100 × 150 cm')).toBeVisible()
+    expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
+    expect(within(card).getByText('최종 파렛트 CBM: 1.8000 CBM')).toBeVisible()
+    expect(within(card).queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(within(card).queryByRole('group', { name: /적재 상품·중량/ })).not.toBeInTheDocument()
+    fireEvent.click(within(card).getByRole('button', { name: '파렛트 P1 펼치기' }))
+    expect(within(card).getByRole('group', { name: '박스 BOX-01 적재 상품·중량' })).toBeVisible()
   })
 
   it('calculates final CBM from measured pallet dimensions independently of product CBM', async () => {
     savePalletDimensions.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     fireEvent.change(screen.getByLabelText('파렛트 P1 가로(cm)'), { target: { value: '120' } })
     fireEvent.change(screen.getByLabelText('파렛트 P1 세로(cm)'), { target: { value: '100' } })
     fireEvent.change(screen.getByLabelText('파렛트 P1 높이(cm)'), { target: { value: '150' } })
@@ -1277,9 +1303,13 @@ describe('ChinaShipmentsBoard', () => {
 
   it('retains pallet dimension edits after collapsing and reopening', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
-    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     fireEvent.change(screen.getByLabelText('파렛트 P1 가로(cm)'), { target: { value: '120' } })
+    fireEvent.change(screen.getByLabelText('파렛트 P1 자체 무게(kg)'), { target: { value: '7' } })
+    expect(screen.getByRole('button', { name: '파렛트 P1 펼치기' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 접기' }))
+    expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toHaveValue(120)
+    expect(screen.getByLabelText('파렛트 P1 자체 무게(kg)')).toHaveValue(7)
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toHaveValue(120)
     selectOtherShipment()
@@ -1328,7 +1358,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(await screen.findByRole('button', { name: '托盘 P1 展开/收起' }))
     const root = document.querySelector('[data-purchasing-translate]')!
     await waitFor(() => expect(visibleKoreanUi(root)).toEqual([]))
-    fireEvent.click(screen.getByRole('button', { name: /箱 BOX-01 商品/ }))
+    expect(screen.getByRole('group', { name: '箱 BOX-01 装载商品和重量' })).toBeVisible()
     await waitFor(() => expect(visibleKoreanUi(root)).toEqual([]))
     expect(screen.getByText(/DONE-01 · 완료 상품/)).toBeInTheDocument()
     rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="items" showCreate={false} /></>)
@@ -1389,7 +1419,6 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 무게 저장' }))
     await waitFor(() => expect(savePalletTare).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', tareWeightKg: 7.5 }))
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
-    fireEvent.click(screen.getByRole('button', { name: 'BOX-01 박스 상품 펼치기' }))
     fireEvent.change(screen.getByLabelText('박스 BOX-01 총중량(kg)'), { target: { value: '12.25' } })
     const input = screen.getByLabelText('박스 BOX-01 총중량(kg)')
     fireEvent.click(within(input.closest('div')!).getByRole('button', { name: '중량 저장' }))

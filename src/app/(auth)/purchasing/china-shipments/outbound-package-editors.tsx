@@ -9,8 +9,8 @@ import { mergeChinaOutboundBoxesAction, saveChinaOutboundItemChineseNameAction, 
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaShipmentDetailView } from './china-shipments-board'
 
-export function PackageWeightEditor({ shipmentId, packageId, packageNo, kind, initialWeight, editable, isPending }: {
-  shipmentId: string; packageId: string; packageNo: string; kind: 'box' | 'pallet'; initialWeight?: number | null; editable: boolean; isPending: boolean
+export function PackageWeightEditor({ shipmentId, packageId, packageNo, kind, initialWeight, editable, isPending, compact = false }: {
+  shipmentId: string; packageId: string; packageNo: string; kind: 'box' | 'pallet'; initialWeight?: number | null; editable: boolean; isPending: boolean; compact?: boolean
 }) {
   const guard = useChinaWorkGuard()
   const router = useRouter()
@@ -25,8 +25,8 @@ export function PackageWeightEditor({ shipmentId, packageId, packageNo, kind, in
     setBaseline(weight); guard.setDraft(draftId, null); router.refresh(); toast.success('총중량을 저장했습니다.'); return true
   }
   useChinaWorkDraft(draftId, weight !== baseline ? { kind: kind === 'box' ? 'box' : 'pallet', label: '총중량(kg)', snapshot: weight, save, discard: () => setWeight(baseline) } : null)
-  if (!editable) return <p className="px-3 py-2 text-sm">총중량(kg): {initialWeight ?? '미입력'}</p>
-  return <div className="flex items-end gap-2 px-3 py-2"><label className="text-xs">총중량(kg)<input aria-label={`${kind === 'box' ? '박스' : '파렛트'} ${packageNo} 총중량(kg)`} value={weight} onChange={(event) => setWeight(event.target.value)} disabled={isPending || pending || guard.busy} type="number" min="0.001" step="0.001" className="mt-1 block h-8 w-32 rounded-md border bg-background px-2" /></label><button type="button" disabled={isPending || pending || guard.busy || weight === baseline} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-xs">중량 저장</button></div>
+  if (!editable) return <p className={`${compact ? '' : 'px-3 py-2'} text-sm`}>총중량(kg): {initialWeight ?? '미입력'}</p>
+  return <div className={`flex items-end gap-2 ${compact ? '' : 'px-3 py-2'}`}><label className="text-xs">총중량(kg)<input aria-label={`${kind === 'box' ? '박스' : '파렛트'} ${packageNo} 총중량(kg)`} value={weight} onChange={(event) => setWeight(event.target.value)} disabled={isPending || pending || guard.busy} type="number" min="0.001" step="0.001" className="mt-1 block h-8 w-32 rounded-md border bg-background px-2" /></label><button type="button" disabled={isPending || pending || guard.busy || weight === baseline} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-xs">중량 저장</button></div>
 }
 
 export function ChineseNameEditor({ shipmentId, item, editable, isPending }: { shipmentId: string; item: ChinaShipmentDetailView['items'][number]; editable: boolean; isPending: boolean }) {

@@ -49,3 +49,16 @@ export function marketplaceFeeId(mallId: string) {
   if (id === 'funtab2b') return 'funtastic-b2b'
   return id
 }
+
+const B2B_MARKETPLACES = new Set([
+  'domeme', 'domemae', 'onchannel', 'firstmall', 'funtab2b', 'ownerclan', 'domechango',
+  'wtrading', 'domesin', 'funn', 'tobizon', 'specialoffer', 'banana',
+])
+
+export function getMallBasePrice(raw: Record<string, unknown>, mallId: string, sourceKey: string) {
+  const key = B2B_MARKETPLACES.has(mallId.replace(/^new-/, '')) ? 'B2B' : 'B2C'
+  return priceAmount(raw[`__product${key}Price`])
+    ?? priceAmount(raw[sourceKey])
+    ?? priceAmount(raw[`${key} 판매가`])
+    ?? getCommonPrice(raw)
+}

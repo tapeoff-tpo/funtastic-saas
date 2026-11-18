@@ -90,7 +90,7 @@ it('uses saved mall groups for registration review and skips baseline price colu
 
 it('keeps distinct B2B and B2C prices visible when every marketplace is deselected', () => {
   render(<PriceTableWorkspace {...defaultProps} rows={[{
-    id: 'separate-prices', rowNumber: 1, productCode: 'SKU-PRICE', productName: '가격 확인',
+    id: 'separate-prices', rowNumber: 1, sourceNumber: null, productCode: 'SKU-PRICE', productName: '가격 확인',
     optionName: null, registeredProductName: null,
     rawData: { 'B2B 판매가': '12,000', 'B2C 판매가': '15000' },
   }]} />)

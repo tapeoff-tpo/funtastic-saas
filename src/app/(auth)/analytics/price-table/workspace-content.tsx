@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 import { Search, X } from 'lucide-react'
@@ -98,6 +98,15 @@ export default async function PriceTablePage({
   const productCosts = activeView === 'compare' && codes.length ? await db
     .select({ code: products.internalSku, cost: products.costPrice }).from(products)
     .where(and(eq(products.userId, workspaceUserId), inArray(products.internalSku, codes))) : []
+  const workflowPrices = activeView === 'compare' && codes.length ? await db.execute<{
+    sku: string; b2b: number | null; b2c: number | null;
+  }>(sql`
+    SELECT DISTINCT ON (sabangnet_code) sabangnet_code AS sku, b2b_price AS b2b, b2c_price AS b2c
+    FROM new_product_workflow_items
+    WHERE user_id = ${workspaceUserId}::uuid AND sabangnet_code IN (${sql.join(codes.map((code) => sql`${code}`), sql`, `)})
+    ORDER BY sabangnet_code, created_at DESC, id DESC
+  `) : []
+  const workflowByCode = new Map(workflowPrices.map((item) => [item.sku, item]))
   const costsByCode = new Map(productCosts.map(({ code, cost }) => [code, cost]))
   const gridRows: PriceTableGridRow[] = data.rows.map((row) => ({
     id: row.id,
@@ -110,6 +119,14 @@ export default async function PriceTablePage({
     rawData: activeView === 'compare' ? {
       '원가': costsByCode.get(row.productCode ?? ''),
       ...row.rawData,
+      ...(workflowByCode.get(row.productCode ?? '')?.b2b != null ? {
+        'B2B 판매가': String(workflowByCode.get(row.productCode ?? '')!.b2b),
+        '__productB2BPrice': String(workflowByCode.get(row.productCode ?? '')!.b2b),
+      } : {}),
+      ...(workflowByCode.get(row.productCode ?? '')?.b2c != null ? {
+        'B2C 판매가': String(workflowByCode.get(row.productCode ?? '')!.b2c),
+        '__productB2CPrice': String(workflowByCode.get(row.productCode ?? '')!.b2c),
+      } : {}),
     } as Record<string, string> : {},
     missingMalls: row.missingMalls,
     directEntryDate: row.sourceFileName === '직접 등록' ? formatPriceNumberDate(row.importedAt) : undefined,
@@ -158,11 +175,11 @@ export default async function PriceTablePage({
         </details>
         <details className="relative">
           <summary className="cursor-pointer list-none px-2 py-1 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">데이터 정보 ⓘ</summary>
-          <div className="absolute right-0 z-30 mt-1 w-64 space-y-2 rounded-md border bg-popover p-3 text-xs shadow-lg"><SummaryItem label="전체" value={`${data.overallTotal.toLocaleString('ko-KR')}건`} /><SummaryItem label="최근 업로드" value={formatDateTime(data.latestImport)} /><p className="text-muted-foreground">최근 추가 순 · 같은 파일 내 원본 행 순서</p></div>
+          <div className="absolute right-0 z-30 mt-1 w-64 space-y-2 rounded-md border bg-popover p-3 text-xs shadow-lg"><SummaryItem label="전체" value={`${data.overallTotal.toLocaleString('ko-KR')}건`} /><SummaryItem label="최근 업로드" value={formatDateTime(data.latestImport)} /><p className="text-muted-foreground">최근 품목 등록순</p></div>
         </details>
       </div>
 
-      <PriceTableWorkspace
+      <PriceTableWorkspace canEditPrices={Boolean(access && canUseMenu(access, '/analytics/price-table'))}
         key={activeSheet}
         rows={gridRows}
         navigation={navigation}

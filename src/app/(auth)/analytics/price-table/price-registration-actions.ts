@@ -1,10 +1,10 @@
 'use server'
 
 import { and, eq, sql } from 'drizzle-orm'
-import { getRegistrationTargets, findMarketplaceProductIds } from './price-table-columns'
+import { getRegistrationTargets, getInactiveRegistrationMarketplaceColumns, findMarketplaceProductIds } from './price-table-columns'
 import { priceTableHref } from './price-table-navigation'
 import { formatPriceNumberDate, priceNumberDateKey } from '@/lib/analytics/price-number-date'
-import { COMMON_PRICE_KEY, registrationNumberKey, registrationPriceKey, registrationShippingKey } from '@/lib/analytics/price-registration-values'
+import { COMMON_PRICE_KEY, priceAmount, registrationNumberKey, registrationPriceKey, registrationShippingKey } from '@/lib/analytics/price-registration-values'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -88,4 +88,49 @@ export async function saveLinkedPriceRegistration(form: FormData) {
     view: form.get('view') === 'products' ? 'products' : 'compare',
     malls,
   })
+}
+
+export async function saveMallPrice(input: {
+  rowId: string
+  mallId: string
+  price: string
+  previousPrice: number | null
+}) {
+  try {
+    await assertMenuAccess('/analytics/price-table')
+    const user = await getCurrentUser()
+    if (!user || user.mustChangePassword) return { error: '다시 로그인해주세요.' }
+    const parsed = z.object({
+      rowId: z.string().uuid(), mallId: z.string().min(1).max(80),
+      price: z.string().trim().regex(/^(?:\d{1,10}(?:\.\d{1,2})?)?$/),
+      previousPrice: z.number().finite().nonnegative().nullable(),
+    }).safeParse(input)
+    if (!parsed.success) return { error: '가격은 0 이상의 숫자로 입력해주세요.' }
+    const workspaceId = await getWorkspaceUserId(user.id)
+    const { rowId, mallId, price, previousPrice } = parsed.data
+    await db.transaction(async (tx) => {
+      const table = analyticsPriceTableRows
+      const [row] = await tx.select().from(table).where(and(eq(table.id, rowId), eq(table.userId, workspaceId))).for('update')
+      if (!row) throw new Error('상품을 찾을 수 없습니다.')
+      const columns = [...getRegistrationTargets(row.sourceSheetName, []), ...getInactiveRegistrationMarketplaceColumns()]
+      if (!columns.some((column) => column.id === mallId)) throw new Error('쇼핑몰을 확인해주세요.')
+      const key = registrationPriceKey(mallId)
+      if (priceAmount(row.rawData[key]) !== previousPrice) throw new Error('다른 사용자가 가격을 수정했습니다. 새로고침 후 다시 확인해주세요.')
+      const raw = { ...row.rawData }
+      if (price !== '') {
+        raw[key] = price
+        raw[`__registrationEdit:priceActor:${mallId}`] = user.id
+        raw[`__registrationEdit:priceDate:${mallId}`] = new Date().toISOString()
+      } else {
+        delete raw[key]
+        delete raw[`__registrationEdit:priceActor:${mallId}`]
+        delete raw[`__registrationEdit:priceDate:${mallId}`]
+      }
+      await tx.update(table).set({ rawData: raw, updatedAt: new Date() }).where(and(eq(table.id, rowId), eq(table.userId, workspaceId)))
+    })
+    revalidatePath('/analytics/price-table')
+    return { saved: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : '판매가를 저장하지 못했습니다.' }
+  }
 }

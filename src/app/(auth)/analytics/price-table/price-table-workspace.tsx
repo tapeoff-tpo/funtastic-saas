@@ -1,8 +1,9 @@
 'use client'
 
-import { priceAmount, getCommonPrice, getRegistrationMargin, marketplaceFeeId } from '@/lib/analytics/price-registration-values'
+import { getMallBasePrice, priceAmount, getCommonPrice, getRegistrationMargin, marketplaceFeeId } from '@/lib/analytics/price-registration-values'
 import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
+import { MallPriceCell } from './mall-price-cell'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { setPriceRegistrationExcluded } from './price-registration-actions'
@@ -31,6 +32,7 @@ export function PriceTableWorkspace(props: {
   navigation: PriceTableNavigation
   page: number
   fees?: Record<string, number>
+  canEditPrices?: boolean
   canRegister?: boolean
 }) {
   const { view } = props.navigation
@@ -58,15 +60,15 @@ export function PriceTableWorkspace(props: {
         })}
       </div>
 
-      {view === 'compare' ? <PriceCompareView rows={props.rows} navigation={props.navigation} fees={props.fees ?? {}} canRegister={Boolean(props.canRegister)} /> : <RegistrationReview key={props.navigation.malls?.join(',')} rows={props.rows} navigation={props.navigation} canRegister={Boolean(props.canRegister)} />}
+      {view === 'compare' ? <PriceCompareView canEditPrices={Boolean(props.canEditPrices)} rows={props.rows} navigation={props.navigation} fees={props.fees ?? {}} canRegister={Boolean(props.canRegister)} /> : <RegistrationReview key={props.navigation.malls?.join(',')} rows={props.rows} navigation={props.navigation} canRegister={Boolean(props.canRegister)} />}
     </div>
   )
 }
 
-function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: PriceTableGridRow[]; navigation: PriceTableNavigation; fees: Record<string, number>; canRegister: boolean }) {
+function PriceCompareView({ rows, navigation, fees, canRegister, canEditPrices }: { canEditPrices: boolean; rows: PriceTableGridRow[]; navigation: PriceTableNavigation; fees: Record<string, number>; canRegister: boolean }) {
   const { width, resize } = usePriceColumnWidths('price-table-compare-widths-v1')
   const activeColumns = useMemo(() => getRegistrationTargets(navigation.sheetName, []), [navigation.sheetName])
-  const inactiveColumns = navigation.sheetName === '뉴도매' ? [] : getInactiveRegistrationMarketplaceColumns()
+  const inactiveColumns = navigation.sheetName === '뉴도매' ? [] : getInactiveRegistrationMarketplaceColumns().filter((column) => !['b2b', 'b2c'].includes(column.id))
   const columns = [...activeColumns, ...inactiveColumns]
   const defaults = columns.map((column) => column.id)
   const [selected, setSelected] = useState<string[]>(defaults)
@@ -199,8 +201,9 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
                 {selectedColumns.map((column) => {
                   const identifiers = findMarketplaceProductIds(row.rawData, column)
                   const fee = fees[marketplaceFeeId(column.id)]
-                  const { override, margin, shipping } = getRegistrationMargin(row.rawData, column.id, fee)
-                  const href = priceRegistrationHref(row.id, column.id, navigation)
+                  const base = getMallBasePrice(row.rawData, column.id, column.valueKey)
+                  const { override, margin, shipping, price } = getRegistrationMargin(
+                    { ...row.rawData, '공통 판매가': base }, column.id, fee)
                   const registration = identifiers.length ? identifiers.map((identifier) => {
                     const enteredDate = getPriceNumberDate(row.rawData, identifier.key) ?? row.directEntryDate
                     return (
@@ -212,10 +215,10 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
                   }) : '–'
                   return (
                     <td key={column.id} className="border-r border-b px-2 py-1.5 text-right align-middle text-[11px] tabular-nums">
-                      {canRegister && activeColumns.some((target) => target.id === column.id)
-                        ? <Link href={href} prefetch={false} className="block text-primary hover:underline" aria-label={identifiers.length ? undefined : `${column.label} 상품등록`}>{registration}</Link>
-                        : registration}
-                      {override !== null && <div>예외가 {override.toLocaleString('ko-KR')}원</div>}
+                      <MallPriceCell rowId={row.id} mallId={column.id} mallName={column.label}
+                        productName={row.productName ?? row.productCode ?? ''} price={price} override={override} canEdit={canEditPrices}>
+                        {registration}
+                      </MallPriceCell>
                       {margin !== null && margin <= 0 && (
                         <div className="font-medium text-red-600">
                           {margin < 0 ? `예상 적자 ${Math.abs(margin).toLocaleString('ko-KR')}원` : '마진 없음'}

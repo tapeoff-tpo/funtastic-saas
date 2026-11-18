@@ -3,7 +3,7 @@ import { COMMON_PRICE_KEY, REGISTRATION_EDIT_PREFIX, registrationPriceKey } from
 import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { analyticsPriceTableRows } from '@/lib/db/schema'
+import { analyticsPriceTableRows, products } from '@/lib/db/schema'
 import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, getRegistrationTargets, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
 import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
 
@@ -354,6 +354,13 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string, e
 
 function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   const direction = sortOrder === 'desc' ? desc : asc
+  if (sortKey === 'createdAt') {
+    const registeredAt = sql`COALESCE((SELECT ${products.createdAt} FROM ${products}
+      WHERE ${products.userId} = ${analyticsPriceTableRows.userId}
+        AND ${products.internalSku} = ${analyticsPriceTableRows.productCode}
+      ORDER BY ${products.createdAt} DESC, ${products.id} DESC LIMIT 1), ${analyticsPriceTableRows.importedAt})`
+    return [direction(registeredAt), asc(analyticsPriceTableRows.productCode), asc(analyticsPriceTableRows.rowNumber)]
+  }
   if (sortKey === 'registrationCount') {
     const registered = sql`(SELECT count(*) FROM jsonb_each_text(${analyticsPriceTableRows.rawData}) AS item(key, value)
       WHERE key ~* ${PRODUCT_ID_FIELD_PATTERN.source}

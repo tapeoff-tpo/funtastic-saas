@@ -86,3 +86,18 @@ it('uses saved mall groups for registration review and skips baseline price colu
   expect(url.searchParams.get('malls')).toBe('coupang')
   expect(url.searchParams.get('page')).toBeNull()
 })
+
+
+it('keeps distinct B2B and B2C prices visible when every marketplace is deselected', () => {
+  render(<PriceTableWorkspace {...defaultProps} rows={[{
+    id: 'separate-prices', rowNumber: 1, productCode: 'SKU-PRICE', productName: '가격 확인',
+    optionName: null, registeredProductName: null,
+    rawData: { 'B2B 판매가': '12,000', 'B2C 판매가': '15000' },
+  }]} />)
+  fireEvent.click(screen.getByText('몰 선택·그룹 ▾'))
+  fireEvent.click(screen.getByRole('button', { name: '몰 선택 해제' }))
+  expect(screen.getByRole('columnheader', { name: 'B2B 판매가' })).toBeVisible()
+  expect(screen.getByRole('columnheader', { name: 'B2C 판매가' })).toBeVisible()
+  expect(screen.getByRole('cell', { name: '12,000' })).toBeVisible()
+  expect(screen.getByRole('cell', { name: '15,000' })).toBeVisible()
+})

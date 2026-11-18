@@ -49,7 +49,7 @@ export default async function PriceTablePage({
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
   const search = params?.q?.trim() ?? ''
   const activeSheet = params?.sheet?.trim() || '상품등록'
-  const sortKey = params?.sort?.trim() || 'importedAt'
+  const sortKey = params?.sort?.trim() || 'createdAt'
   const sortOrder = params?.order === 'asc' ? 'asc' : 'desc'
   const activeView = params?.view === 'products' ? 'products' : 'compare'
   const malls = (params?.malls ?? '').split(',').slice(0, 80).filter(Boolean)

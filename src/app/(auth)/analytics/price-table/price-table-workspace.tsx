@@ -1,6 +1,6 @@
 'use client'
 
-import { getCommonPrice, getRegistrationMargin, marketplaceFeeId } from '@/lib/analytics/price-registration-values'
+import { priceAmount, getCommonPrice, getRegistrationMargin, marketplaceFeeId } from '@/lib/analytics/price-registration-values'
 import { getPriceNumberDate } from '@/lib/analytics/price-number-date'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -88,7 +88,7 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
   const codeWidth = width('productCode', 96)
   const productWidth = width('product', 240)
-  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + COMMON_PRICE_WIDTH + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
+  const tableWidth = NUMBER_WIDTH + codeWidth + productWidth + COMMON_PRICE_WIDTH * 3 + selectedColumns.reduce((sum, column) => sum + width(column.id, 132), 0)
 
   function toggle(id: string) {
     setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
@@ -145,7 +145,7 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
       <div className="overflow-auto rounded-md border bg-card">
         <table className="table-fixed border-separate border-spacing-0 text-sm" style={{ width: tableWidth }}>
           <colgroup>
-            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} /><col style={{ width: COMMON_PRICE_WIDTH }} />
+            <col style={{ width: NUMBER_WIDTH }} /><col style={{ width: codeWidth }} /><col style={{ width: productWidth }} /><col style={{ width: COMMON_PRICE_WIDTH }} /><col style={{ width: COMMON_PRICE_WIDTH }} /><col style={{ width: COMMON_PRICE_WIDTH }} />
             {selectedColumns.map(column => <col key={column.id} style={{ width: width(column.id, 132) }} />)}
           </colgroup>
           <thead>
@@ -156,6 +156,11 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
               <th className="sticky z-20 border-r border-b bg-muted px-2 py-2 text-right" style={{ left: NUMBER_WIDTH + codeWidth + productWidth }}>
                 <SortLink sortKey="commonPrice" label="공통 판매가" navigation={navigation} />
               </th>
+              {(['B2B 판매가', 'B2C 판매가'] as const).map((key, index) => <th key={key}
+                className="sticky z-20 border-r border-b bg-muted px-2 py-2 text-right"
+                style={{ left: NUMBER_WIDTH + codeWidth + productWidth + COMMON_PRICE_WIDTH * (index + 1) }}>
+                <SortLink sortKey={`raw:${key}`} label={key} navigation={navigation} />
+              </th>)}
               {selectedColumns.map((column) => (
                 <th key={column.id} className="relative border-r border-b px-2 py-2 text-right">
                   <SortLink sortKey={`mallPrice:${column.id}`} label={column.label} navigation={navigation} />
@@ -186,6 +191,11 @@ function PriceCompareView({ rows, navigation, fees, canRegister }: { rows: Price
                     </Link>
                   ) : getCommonPrice(row.rawData)?.toLocaleString('ko-KR') ?? '–'}
                 </td>
+                {(['B2B 판매가', 'B2C 판매가'] as const).map((key, index) => <td key={key}
+                  className="sticky z-10 border-r border-b bg-card px-2 py-1.5 text-right text-xs font-medium tabular-nums"
+                  style={{ left: NUMBER_WIDTH + codeWidth + productWidth + COMMON_PRICE_WIDTH * (index + 1) }}>
+                  {priceAmount(row.rawData[key])?.toLocaleString('ko-KR') ?? '–'}
+                </td>)}
                 {selectedColumns.map((column) => {
                   const identifiers = findMarketplaceProductIds(row.rawData, column)
                   const fee = fees[marketplaceFeeId(column.id)]

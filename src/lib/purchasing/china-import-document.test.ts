@@ -138,14 +138,23 @@ describe('China import documents', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     expect(workbook.getWorksheet('sheet')!.getCell('X112').value).toBeCloseTo(1.82)
   })
-  it('uses measured pallet gross weight once and preserves an outbound Chinese-name override', async () => {
+  it('calculates pallet weight from box overrides plus default tare instead of legacy gross and preserves Chinese names', async () => {
     const measured = { ...detail, items: detail.items.map((item) => ({ ...item, chineseProductName: '出库名称' })), pallets: [{ ...detail.pallets[0]!, grossWeightKg: 25 }] }
     expect(prepareImportDocument(measured, metadata).items[0]!.chineseName).toBe('出库名称')
     const buffer = await exportChinaImportDocument(measured, metadata, options)
     const workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
-    expect(workbook.getWorksheet('sheet')!.getCell('V20').value).toBe(25)
-    expect(workbook.getWorksheet('sheet')!.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 28 })
+    expect(workbook.getWorksheet('sheet')!.getCell('V20').value).toBe(15)
+    expect(workbook.getWorksheet('sheet')!.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
+  })
+  it.each([0, 7.125])('uses per-pallet tare %s once for a mixed box and recalculates edited document box weights', async (tareWeightKg) => {
+    const shipment = { ...detail, pallets: [{ ...detail.pallets[0]!, grossWeightKg: 99, tareWeightKg }] }
+    const overrides = { ...options, palletTareKg: 123, boxes: { ...options.boxes, 'box-a': { grossWeightKg: 12.25, cbm: 0.06 } } }
+    const sheet = await exportedSheet(shipment, overrides)
+    expect(prepareImportDocument(shipment, metadata).pallets[0].tareWeightKg).toBe(tareWeightKg)
+    expect(sheet.getCell('V20').value).toBe(12.25 + tareWeightKg)
+    expect(sheet.getCell('V21').value).toBeNull()
+    expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 15.25 + tareWeightKg })
   })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
     expect(() => prepareImportDocument({ ...detail, boxItems: detail.boxItems.slice(0, 2) }, metadata)).toThrow('출고수량')

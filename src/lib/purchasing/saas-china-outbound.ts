@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
 import { dimensionNumber } from './china-outbound-dimensions'
+import { palletTareWeightKg } from './china-outbound-pallet-weight'
 import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-state'
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
@@ -601,6 +602,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     completion_status varchar(20),
     sort_order integer NOT NULL DEFAULT 0,
     gross_weight_kg numeric(12, 3),
+    tare_weight_kg numeric(12, 3) DEFAULT 5,
     length_cm numeric(12, 2),
     width_cm numeric(12, 2),
     height_cm numeric(12, 2),
@@ -617,6 +619,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     CONSTRAINT china_outbound_pallets_completion_status CHECK (
       completion_status IS NULL OR completion_status IN ('in_progress', 'completed')
     ),
+    CONSTRAINT china_outbound_pallets_tare_nonnegative CHECK (tare_weight_kg IS NULL OR tare_weight_kg >= 0),
     CONSTRAINT china_outbound_pallets_measurements_nonnegative CHECK (
       (gross_weight_kg IS NULL OR gross_weight_kg >= 0)
       AND (length_cm IS NULL OR length_cm >= 0)
@@ -626,7 +629,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   );
 
   ALTER TABLE china_outbound_pallets
-    ADD COLUMN IF NOT EXISTS completion_status varchar(20);
+    ADD COLUMN IF NOT EXISTS completion_status varchar(20),
+    ADD COLUMN IF NOT EXISTS tare_weight_kg numeric(12, 3) DEFAULT 5;
   DO $$
   BEGIN
     IF NOT EXISTS (
@@ -636,6 +640,17 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ) THEN
       ALTER TABLE china_outbound_pallets ADD CONSTRAINT china_outbound_pallets_completion_status
         CHECK (completion_status IS NULL OR completion_status IN ('in_progress', 'completed'));
+    END IF;
+  END $$;
+
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'china_outbound_pallets_tare_nonnegative'
+        AND conrelid = 'china_outbound_pallets'::regclass
+    ) THEN
+      ALTER TABLE china_outbound_pallets ADD CONSTRAINT china_outbound_pallets_tare_nonnegative
+        CHECK (tare_weight_kg IS NULL OR tare_weight_kg >= 0);
     END IF;
   END $$;
 
@@ -2408,6 +2423,26 @@ export async function saveChinaOutboundPalletDimensions(input: {
       lengthCm: String(input.lengthCm), widthCm: String(input.widthCm), heightCm: String(input.heightCm), updatedAt: new Date(),
     }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
     return pallet
+  })
+}
+
+export async function saveChinaOutboundPalletTareWeight(input: {
+  userId: string; shipmentId: string; palletId: string; tareWeightKg: number
+}) {
+  if (typeof input.tareWeightKg !== 'number' || !Number.isFinite(input.tareWeightKg) || input.tareWeightKg < 0 || input.tareWeightKg > 999_999_999) {
+    throw new Error('파렛트 무게는 0 이상, 999,999,999kg 이하인 숫자로 입력해주세요.')
+  }
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const pallet = await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    const tareWeightKg = palletTareWeightKg(input.tareWeightKg)
+    if (pallet.tareWeightKg != null && Number(pallet.tareWeightKg) === tareWeightKg) return pallet
+    const [updated] = await tx.update(chinaOutboundPallets).set({ tareWeightKg: String(tareWeightKg), updatedAt: new Date() })
+      .where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
+    if (!updated) throw new Error('파렛트 무게를 저장하지 못했습니다.')
+    return updated
   })
 }
 

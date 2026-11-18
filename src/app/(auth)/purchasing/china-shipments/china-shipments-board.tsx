@@ -99,7 +99,7 @@ export type ChinaShipmentDetailView = {
     receiptPacking?: InspectionPackingPiece[]
     productImage?: ProductImageResult
   }>
-  pallets: Array<{ id: string; palletNo: string; note: string | null; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null; completionStatus?: 'in_progress' | 'completed' | null }>
+  pallets: Array<{ id: string; palletNo: string; note: string | null; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null; tareWeightKg?: number | null; completionStatus?: 'in_progress' | 'completed' | null }>
   boxes: Array<{
     id: string
     shipmentId: string
@@ -1391,6 +1391,7 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   const [initialNumbers, setInitialNumbers] = useState<Record<string, string>>(() => Object.fromEntries(sortedBoxes.map((box) => [box.boxNo, box.palletId ? palletById.get(box.palletId)?.palletNo ?? '' : ''])))
   const [palletNumbers, setPalletNumbers] = useState<Record<string, string>>(() => ({ ...initialNumbers }))
   const [selectedBoxNos, setSelectedBoxNos] = useState<string[]>([])
+  const [batchPalletNo, setBatchPalletNo] = useState('')
   const changedBoxes = sortedBoxes.filter((box) => (palletNumbers[box.boxNo] ?? '').trim() !== (initialNumbers[box.boxNo] ?? '').trim())
   const selected = new Set(selectedBoxNos)
   const allSelected = sortedBoxes.length > 0 && sortedBoxes.every((box) => selected.has(box.boxNo))
@@ -1402,6 +1403,13 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   function selectAll(checked: boolean) {
     const visible = new Set(sortedBoxes.map((box) => box.boxNo))
     setSelectedBoxNos((current) => checked ? [...new Set([...current, ...visible])] : current.filter((boxNo) => !visible.has(boxNo)))
+  }
+
+  function applySelectedPalletNumber() {
+    const palletNo = batchPalletNo.trim()
+    if (!palletNo || !selected.size) return
+    const boxNos = sortedBoxes.filter((box) => selected.has(box.boxNo)).map((box) => box.boxNo)
+    setPalletNumbers((current) => ({ ...current, ...Object.fromEntries(boxNos.map((boxNo) => [boxNo, palletNo])) }))
   }
 
   async function saveDraft(boxNos?: string[], quiet = false) {
@@ -1429,6 +1437,11 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   } : null)
 
   return <section className="overflow-hidden rounded-lg border">
+    <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 p-3">
+      <label className="text-xs font-medium">선택 박스 일괄 파렛트 번호<input aria-label="선택 박스 일괄 파렛트 번호" value={batchPalletNo} onChange={(event) => setBatchPalletNo(event.target.value)} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 block w-40`} placeholder="예: P1" /></label>
+      <button type="button" disabled={!editable || isPending || guard.busy || !selected.size || !batchPalletNo.trim()} onClick={applySelectedPalletNumber} className="h-8 rounded-md border bg-background px-3 text-xs font-medium disabled:opacity-60">선택 박스에 번호 적용</button>
+      <p className="py-2 text-xs text-muted-foreground">박스를 선택하고 번호를 적용한 뒤 파렛트 배정 저장을 누르세요.</p>
+    </div>
     <div className="overflow-x-auto"><table className="min-w-[850px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-center font-medium"><input type="checkbox" aria-label="표시된 파렛트 배정 전체 선택" checked={allSelected} onChange={(event) => selectAll(event.target.checked)} disabled={!editable || isPending || guard.busy} className="size-3.5 accent-primary" /></th><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th></tr></thead><tbody>{sortedBoxes.map((box) => {
       const boxItems = boxItemsByBox.get(box.id) ?? []
       const quantity = boxItems.reduce((total, item) => total + item.quantity, 0)

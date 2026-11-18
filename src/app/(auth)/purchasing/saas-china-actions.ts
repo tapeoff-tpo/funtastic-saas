@@ -13,6 +13,7 @@ import {
   saveChinaOutboundItemChineseName,
   addChinaOutboundSample,
   saveChinaOutboundPalletDimensions,
+  saveChinaOutboundPalletTareWeight,
   addChinaOutboundShipmentItems,
   addChinaOutboundBox,
   addChinaOutboundBoxItem,
@@ -393,6 +394,17 @@ export async function mergeChinaOutboundBoxesAction(input: unknown): Promise<Act
     const actor = await getActor()
     await mergeChinaOutboundBoxes({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundPalletTareWeightAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({ shipmentId, palletId: z.string().uuid(), tareWeightKg: z.number().finite().min(0).max(999_999_999) }).parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundPalletTareWeight({ ...value, userId: actor.userId })
+    revalidatePath('/purchasing/china-shipments')
+    revalidatePath('/purchasing/import-documents')
   })
 }
 

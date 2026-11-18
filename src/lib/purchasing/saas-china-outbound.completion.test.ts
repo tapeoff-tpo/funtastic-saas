@@ -27,6 +27,7 @@ import {
   saveChinaOutboundBoxDimensions,
   saveChinaOutboundItemBoxSplits,
   saveChinaOutboundPalletCompletionStatuses,
+  saveChinaOutboundPalletTareWeight,
 } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
@@ -153,6 +154,37 @@ describe('China outbound box and pallet completion', () => {
       { id: 'allocation-1', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-1', quantity: 5 },
       { id: 'allocation-2', userId, shipmentId, boxId: 'box-2', shipmentItemId: 'item-1', quantity: 5 },
     ]
+  })
+
+  it.each([0, 5, 7.125])('saves pallet tare %s without changing physical dimensions, legacy gross, or inventory', async (weight) => {
+    Object.assign(pallets[0]!, { tareWeightKg: '5', grossWeightKg: '99', lengthCm: '120', widthCm: '100', heightCm: '150' })
+    const balances = JSON.stringify(inventory)
+    await saveChinaOutboundPalletTareWeight({ userId, shipmentId, palletId: 'pallet-1', tareWeightKg: weight })
+    expect(pallets[0]).toMatchObject({ tareWeightKg: String(weight), grossWeightKg: '99', lengthCm: '120', widthCm: '100', heightCm: '150' })
+    expect(JSON.stringify(inventory)).toBe(balances)
+    expect(movements).toHaveLength(0)
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000_000, '5'])('rejects invalid pallet tare %s before writes', async (weight) => {
+    const original = JSON.stringify(pallets)
+    await expect(saveChinaOutboundPalletTareWeight({ userId, shipmentId, palletId: 'pallet-1', tareWeightKg: weight as number })).rejects.toThrow('파렛트 무게')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(JSON.stringify(pallets)).toBe(original)
+  })
+
+  it('scopes tare edits to this workspace and an editable shipment', async () => {
+    await expect(saveChinaOutboundPalletTareWeight({ userId: 'other', shipmentId, palletId: 'pallet-1', tareWeightKg: 6 })).rejects.toThrow('찾을 수 없습니다')
+    await expect(saveChinaOutboundPalletTareWeight({ userId, shipmentId, palletId: 'other', tareWeightKg: 6 })).rejects.toThrow('찾을 수 없습니다')
+    shipments[0]!.status = 'dispatched'
+    await expect(saveChinaOutboundPalletTareWeight({ userId, shipmentId, palletId: 'pallet-1', tareWeightKg: 6 })).rejects.toThrow('초안 또는 포장중')
+  })
+
+  it('skips rewriting unchanged pallet tare', async () => {
+    pallets[0]!.tareWeightKg = '5.000'
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await saveChinaOutboundPalletTareWeight({ userId, shipmentId, palletId: 'pallet-1', tareWeightKg: 5 })
+    expect(tx.update).not.toHaveBeenCalled()
   })
 
   it('merges mixed contents into the real largest box without changing stock or per-item totals', async () => {

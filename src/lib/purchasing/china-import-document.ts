@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import { calculateChinaOutboundBoxCbm, dimensionNumber } from './china-outbound-dimensions'
+import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from './china-outbound-pallet-weight'
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 import { addImportDocumentHsSheets, type ImportDocumentSupplements } from './china-import-hs-sheets'
 
@@ -66,7 +67,7 @@ export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Ma
       palletNo: box.palletId ? palletById.get(box.palletId)!.palletNo : null,
       grossWeightKg: dimensionNumber(box.grossWeightKg), cbm: calculateChinaOutboundBoxCbm(box),
     })),
-    pallets,
+    pallets: pallets.map((pallet) => ({ ...pallet, tareWeightKg: palletTareWeightKg(pallet.tareWeightKg) })),
     boxCount: boxes.length, palletCount: pallets.length, looseBoxCount,
     packageCount: pallets.length + looseBoxCount,
   }
@@ -87,7 +88,7 @@ export async function exportChinaImportDocument(
   }
   for (const box of prepared.boxes) {
     const override = options.boxes[box.id]
-    if (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg <= 0
+    if (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg < 0.001 || override.grossWeightKg > 999_999_999
       || !Number.isFinite(override.cbm) || override.cbm <= 0) throw new Error(`${box.boxNo}: 총중량과 CBM을 입력해주세요.`)
   }
   // The supplied INV/PL workbook owns every header, merge, width, font and
@@ -122,9 +123,11 @@ export async function exportChinaImportDocument(
       }
       const values = [...rows.values()]
       if (group.id && values.length) {
-        const measured = dimensionNumber(prepared.pallets.find((pallet) => pallet.id === group.id)?.grossWeightKg)
-        if (measured != null) { for (const row of values) row.gross = 0; values[0].gross = measured }
-        else values[0].gross += options.palletTareKg
+        const pallet = prepared.pallets.find((pallet) => pallet.id === group.id)!
+        const weight = calculateChinaOutboundPalletWeight(prepared.boxes.filter((box) => box.palletId === group.id)
+          .map((box) => ({ id: box.id, grossWeightKg: options.boxes[box.id].grossWeightKg })), pallet.tareWeightKg)
+        for (const row of values) row.gross = 0
+        values[0].gross = weight.grossWeightKg!
       }
       return { ...group, rows: values }
     }).filter((group) => group.rows.length)
@@ -234,9 +237,10 @@ export async function exportChinaImportDocument(
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
   const grossWeight = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0)
-    + prepared.pallets.reduce((sum, pallet) => sum + (dimensionNumber(pallet.grossWeightKg) ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((subtotal, box) => subtotal + options.boxes[box.id].grossWeightKg, options.palletTareKg)), 0)
-  // A measured loaded pallet is one external package. Never add its inner
-  // boxes again. Unmeasured legacy pallets retain their document override.
+    + prepared.pallets.reduce((sum, pallet) => sum + calculateChinaOutboundPalletWeight(prepared.boxes.filter((box) => box.palletId === pallet.id)
+      .map((box) => ({ id: box.id, grossWeightKg: options.boxes[box.id].grossWeightKg })), pallet.tareWeightKg).grossWeightKg!, 0)
+  // A loaded pallet is one external package. Its dimensions are measured as
+  // a whole; its weight is the boxes plus the saved pallet packaging tare.
   const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].cbm, 0)
     + prepared.pallets.reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet)
       ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + options.boxes[box.id].cbm, options.palletExtraCbm)), 0)

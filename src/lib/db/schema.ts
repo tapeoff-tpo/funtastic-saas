@@ -1298,6 +1298,7 @@ export const chinaOutboundPallets = pgTable(
     completionStatus: varchar('completion_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    tareWeightKg: numeric('tare_weight_kg', { precision: 12, scale: 3 }).default('5'),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
     widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
     heightCm: numeric('height_cm', { precision: 12, scale: 2 }),
@@ -1321,6 +1322,7 @@ export const chinaOutboundPallets = pgTable(
     index('china_outbound_pallets_user_shipment').on(table.userId, table.shipmentId),
     check('china_outbound_pallets_sort_nonnegative', sql`${table.sortOrder} >= 0`),
     check('china_outbound_pallets_completion_status', sql`${table.completionStatus} IS NULL OR ${table.completionStatus} IN ('in_progress', 'completed')`),
+    check('china_outbound_pallets_tare_nonnegative', sql`${table.tareWeightKg} IS NULL OR ${table.tareWeightKg} >= 0`),
     check(
       'china_outbound_pallets_measurements_nonnegative',
       sql`(${table.grossWeightKg} IS NULL OR ${table.grossWeightKg} >= 0)

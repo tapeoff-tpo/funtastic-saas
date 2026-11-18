@@ -16,6 +16,7 @@ describe('China outbound schema initialization', () => {
     expect(query.sql).toContain('indisvalid')
     expect(query.params.join(' ')).toContain('chinese_product_name')
     expect(query.params.join(' ')).toContain('inspection_boxes')
+    expect(query.params.join(' ')).toContain('tare_weight_kg')
   })
   it('keeps the complete bootstrap for missing columns, indexes, or security protections', async () => {
     const bootstrap = sql`SELECT 'bootstrap'`

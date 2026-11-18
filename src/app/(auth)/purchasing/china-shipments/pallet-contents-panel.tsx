@@ -4,7 +4,8 @@ import { useRef, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm, formatChinaOutboundBoxDimensions } from '@/lib/purchasing/china-outbound-dimensions'
-import { saveChinaOutboundPalletDimensionsAction } from '../saas-china-actions'
+import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from '@/lib/purchasing/china-outbound-pallet-weight'
+import { saveChinaOutboundPalletDimensionsAction, saveChinaOutboundPalletTareWeightAction } from '../saas-china-actions'
 import { PackageWeightEditor } from './outbound-package-editors'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaShipmentDetailView, PalletSummary } from './china-shipments-board'
@@ -38,13 +39,13 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">사용 파렛트</h3><div className="flex gap-2 text-sm"><span>{summaries.length} PLT + {unassignedBoxes.length} BOX</span>{assignmentEditor && <button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.showModal()} className="rounded-md border px-3 py-1">파렛트 배정 수정</button>}</div></div>
     {summaries.map((summary) => <article key={summary.pallet.id} className="overflow-hidden rounded-lg border bg-background">
       <button type="button" aria-expanded={expanded.has(summary.pallet.id)} aria-label={`파렛트 ${summary.palletNo} ${expanded.has(summary.pallet.id) ? '접기' : '펼치기'}`} onClick={() => toggle(summary.pallet.id, setExpanded)} className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left">
-        <div><p className="font-semibold">파렛트 <span data-no-translate>{summary.palletNo}</span></p><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length}개 · 상품 {summary.quantity}개</p><p className="text-xs text-muted-foreground">총중량(kg): {summary.pallet.grossWeightKg ?? '미입력'}</p></div>
+        <div><p className="font-semibold">파렛트 <span data-no-translate>{summary.palletNo}</span></p><p className="mt-1 text-xs text-muted-foreground">박스 {summary.boxes.length}개 · 상품 {summary.quantity}개</p></div>
         <div className="text-right text-sm tabular-nums"><p>제품 적재 CBM: {formatChinaOutboundCbm(summary.cbm)} CBM</p><p className="font-semibold">최종 파렛트 CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(summary.pallet)) ?? '미입력'} CBM</p></div><span className="text-xs">{expanded.has(summary.pallet.id) ? '접기' : '펼치기'}</span>
       </button>
+      <PalletWeightMeasurements key={`${summary.pallet.id}:${summary.pallet.tareWeightKg ?? 5}`} shipmentId={shipmentId} pallet={summary.pallet} boxes={summary.boxes.filter((box) => boxItems.some((allocation) => allocation.boxId === box.id && allocation.quantity > 0))} editable={editable} isPending={isPending} />
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
       {expanded.has(summary.pallet.id) && <>
         <PalletMeasurements key={`${summary.pallet.id}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}`} shipmentId={shipmentId} pallet={summary.pallet} editable={editable} isPending={isPending} />
-        <PackageWeightEditor key={`${summary.pallet.id}:${summary.pallet.grossWeightKg}`} shipmentId={shipmentId} kind="pallet" packageId={summary.pallet.id} packageNo={summary.palletNo} initialWeight={summary.pallet.grossWeightKg} editable={editable} isPending={isPending} />
         {boxList(summary.boxes)}
       </>}
     </article>)}
@@ -52,6 +53,42 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
     {!!summaries.length && <div className="rounded-lg bg-muted/30 p-3 text-sm"><p>제품 적재 CBM 합계: {formatChinaOutboundCbm(summaries.reduce((sum, row) => sum + row.cbm, 0))} CBM</p><p className="font-semibold">최종 파렛트 CBM 합계: {finalCbms.some((value) => value == null) ? '미입력' : `${formatChinaOutboundCbm(finalCbms.reduce<number>((sum, value) => sum + (value ?? 0), 0))} CBM`}</p></div>}
     {assignmentEditor && <dialog ref={dialog} data-purchasing-translate aria-label="파렛트 배정 수정" onCancel={(event) => { if (isPending || guard.busy) event.preventDefault() }} className="m-auto max-h-[90dvh] w-[min(72rem,96vw)] overflow-auto rounded-xl border bg-background p-4 text-foreground backdrop:bg-black/40"><div className="mb-3 flex items-center justify-between"><h3 className="font-semibold">파렛트 배정 수정</h3><button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.close()} className="rounded border px-3 py-1">닫기</button></div>{assignmentEditor}</dialog>}
   </section>
+}
+
+function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPending }: {
+  shipmentId: string; pallet: PalletSummary['pallet']; boxes: ChinaShipmentDetailView['boxes']; editable: boolean; isPending: boolean
+}) {
+  const guard = useChinaWorkGuard()
+  const [pending, start] = useTransition()
+  const draftId = `pallet-tare:${pallet.id}`
+  const [baseline, setBaseline] = useState(() => String(palletTareWeightKg(pallet.tareWeightKg)))
+  const [tare, setTare] = useState(() => (guard.getDraft(draftId)?.snapshot as string | undefined) ?? baseline)
+  const dirty = tare !== baseline
+  const validTare = tare.trim() !== '' && Number.isFinite(Number(tare)) && Number(tare) >= 0 && Number(tare) <= 999_999_999
+  const measurement = calculateChinaOutboundPalletWeight(boxes, validTare ? Number(tare) : baseline)
+  const grossWeight = validTare ? measurement.grossWeightKg : null
+  const formatWeight = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 3 })
+
+  async function save() {
+    if (!validTare) { toast.error('파렛트 무게는 0 이상인 숫자로 입력해주세요.'); return false }
+    const result = await saveChinaOutboundPalletTareWeightAction({ shipmentId, palletId: pallet.id, tareWeightKg: Number(tare) })
+    if (!result.ok) { toast.error(result.error ?? '파렛트 무게를 저장하지 못했습니다.'); return false }
+    setBaseline(tare)
+    guard.setDraft(draftId, null)
+    toast.success('파렛트 무게를 저장했습니다.')
+    return true
+  }
+  useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${pallet.palletNo} 자체 무게`, snapshot: tare, save, discard: () => setTare(baseline) } : null)
+
+  return <div className="flex flex-wrap items-center gap-3 border-t px-4 py-3 text-sm">
+    <p className="font-semibold tabular-nums">총중량(kg): {grossWeight == null ? '미입력' : formatWeight(grossWeight)}</p>
+    {editable ? <>
+      <label className="inline-flex items-center gap-2 text-xs">파렛트 무게<input aria-label={`파렛트 ${pallet.palletNo} 자체 무게(kg)`} value={tare} onChange={(event) => setTare(event.target.value)} disabled={isPending || pending || guard.busy} type="number" min="0" max="999999999" step="0.001" className="h-8 w-24 rounded-md border bg-background px-2 text-right" />kg</label>
+      <button type="button" aria-label={`파렛트 ${pallet.palletNo} 무게 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-xs">파렛트 무게 저장</button>
+    </> : <p className="text-xs">파렛트 무게 {formatWeight(measurement.tareWeightKg)}kg</p>}
+    <p className="w-full text-xs text-muted-foreground">박스 중량 합계 {measurement.boxWeightKg == null ? '미입력' : `${formatWeight(measurement.boxWeightKg)}kg`} + 파렛트 무게 {validTare ? `${formatWeight(measurement.tareWeightKg)}kg` : '미입력'}</p>
+    {measurement.missingBoxWeightCount > 0 && <p className="w-full text-xs text-amber-700">무게 미입력 박스 {measurement.missingBoxWeightCount}개가 있어 총중량을 계산할 수 없습니다.</p>}
+  </div>
 }
 
 function PalletMeasurements({ shipmentId, pallet, editable, isPending }: { shipmentId: string; pallet: PalletSummary['pallet']; editable: boolean; isPending: boolean }) {

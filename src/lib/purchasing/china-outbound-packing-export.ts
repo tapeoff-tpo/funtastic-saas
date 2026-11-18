@@ -1,5 +1,6 @@
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
+import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from './china-outbound-pallet-weight'
 import {
   calculateChinaOutboundBoxCbm,
   dimensionNumber,
@@ -29,6 +30,7 @@ export type ChinaOutboundPackingExportDetail = {
     id: string
     palletNo: string
     grossWeightKg?: number | string | null
+    tareWeightKg?: number | string | null
     lengthCm?: number | string | null
     widthCm?: number | string | null
     heightCm?: number | string | null
@@ -194,11 +196,14 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     '파렛트 총중량(kg)',
     '박스 총중량(kg)',
     '상품명(중국어)',
-  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26, 20, 20, 34])
+    '파렛트 무게(kg)',
+  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26, 20, 20, 34, 20])
 
   let palletRowNo = 1
   for (const pallet of detail.pallets) {
     const palletBoxes = detail.boxes.filter((box) => box.palletId === pallet.id)
+    const loadedBoxes = palletBoxes.filter((box) => (boxItemsByBox.get(box.id) ?? []).some((allocation) => allocation.quantity > 0))
+    const palletWeight = loadedBoxes.length ? calculateChinaOutboundPalletWeight(loadedBoxes, pallet.tareWeightKg).grossWeightKg : null
     const palletPackedQuantity = palletBoxes.reduce((total, box) => total + (boxItemsByBox.get(box.id) ?? []).reduce((boxTotal, item) => boxTotal + item.quantity, 0), 0)
     const palletCbms = palletBoxes.map((box) => cbmByBoxId.get(box.id)).filter((cbm): cbm is number => cbm != null)
     const palletCbm = palletCbms.length > 0 ? palletCbms.reduce((total, cbm) => total + cbm, 0) : ''
@@ -225,9 +230,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
           packedItem?.quantity ?? 0,
           calculateChinaOutboundBoxCbm(pallet) ?? '',
           formatChinaOutboundBoxDimensions(pallet) ?? '',
-          dimensionNumber(pallet.grossWeightKg) ?? '',
+          palletWeight ?? '',
           dimensionNumber(box?.grossWeightKg) ?? '',
           item?.chineseProductName ?? '',
+          palletTareWeightKg(pallet.tareWeightKg),
         ])
       }
     }

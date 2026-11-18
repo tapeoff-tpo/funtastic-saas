@@ -5,9 +5,10 @@ import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-swi
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { mergeBoxes, saveWeight, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
   mergeBoxes: vi.fn(),
   saveWeight: vi.fn(),
+  savePalletTare: vi.fn(),
   saveChineseName: vi.fn(),
   addSample: vi.fn(),
   savePalletDimensions: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('../saas-china-actions', () => ({
   saveChinaOutboundItemChineseNameAction: saveChineseName,
   addChinaOutboundSampleAction: addSample,
   saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
+  saveChinaOutboundPalletTareWeightAction: savePalletTare,
   addChinaOutboundShipmentItemsAction: addShipmentItems,
   assignChinaOutboundBoxesToPalletsAction: savePalletAssignments,
   cancelChinaOutboundShipmentAction: vi.fn(),
@@ -307,6 +309,7 @@ describe('ChinaShipmentsBoard', () => {
     mergeBoxes.mockReset(); saveWeight.mockReset(); saveChineseName.mockReset()
     addSample.mockReset()
     savePalletDimensions.mockReset()
+    savePalletTare.mockReset()
     toastError.mockReset()
     navigate.mockReset()
     refresh.mockReset()
@@ -1350,13 +1353,42 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getAllByText('0 PLT + 1 BOX').length).toBeGreaterThan(0)
   })
 
-  it('saves a measured gross weight for a box and a pallet', async () => {
-    saveWeight.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+  it('automatically totals each physical box once plus editable pallet tare while dimensions stay manual', () => {
+    const detail = makeShipmentWithCompletionFilters()
+    detail.boxes.forEach((box) => { box.grossWeightKg = box.id === 'box-saved' ? 10.125 : box.id === 'box-shared' ? 20.25 : 999 })
+    detail.boxes[1].palletId = 'pallet-1'
+    detail.pallets[0].grossWeightKg = 888
+    const view = renderShipment(detail, 'pallets')
+    expect(screen.getByText('총중량(kg): 35.375')).toBeInTheDocument()
+    expect(screen.getByLabelText('파렛트 P1 자체 무게(kg)')).toHaveValue(5)
+    expect(screen.queryByLabelText('파렛트 P1 총중량(kg)')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('파렛트 P1 자체 무게(kg)'), { target: { value: '7.125' } })
+    expect(screen.getByText('총중량(kg): 37.5')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
-    fireEvent.change(screen.getByLabelText('파렛트 P1 총중량(kg)'), { target: { value: '52.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '중량 저장' }))
-    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'a', kind: 'pallet', packageId: 'pallet-1', grossWeightKg: 52.5 }))
+    expect(screen.getByLabelText('파렛트 P1 가로(cm)')).toHaveValue(null)
+    expect(screen.getByLabelText('파렛트 P1 세로(cm)')).toHaveValue(null)
+    expect(screen.getByLabelText('파렛트 P1 높이(cm)')).toHaveValue(null)
+    fireEvent.change(screen.getByLabelText('파렛트 P1 자체 무게(kg)'), { target: { value: '5' } })
+    view.rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={{ ...detail, boxes: detail.boxes.map((box) => box.id === 'box-shared' ? { ...box, grossWeightKg: 30.25 } : box) }} selectedStep="pallets" showCreate={false} />)
+    expect(screen.getByText('총중량(kg): 45.375')).toBeInTheDocument()
+  })
+
+  it('does not show a misleading pallet total when a loaded box has no measured weight', () => {
+    const detail = makeShipmentWithCompletionFilters()
+    detail.boxes[1].palletId = 'pallet-1'
+    renderShipment(detail, 'pallets')
+    expect(screen.getByText('총중량(kg): 미입력')).toBeInTheDocument()
+    expect(screen.getByText('무게 미입력 박스 2개가 있어 총중량을 계산할 수 없습니다.')).toBeInTheDocument()
+  })
+
+  it('saves pallet tare separately and retains measured box weight editing', async () => {
+    saveWeight.mockResolvedValue({ ok: true })
+    savePalletTare.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    fireEvent.change(screen.getByLabelText('파렛트 P1 자체 무게(kg)'), { target: { value: '7.5' } })
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 무게 저장' }))
+    await waitFor(() => expect(savePalletTare).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', tareWeightKg: 7.5 }))
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 펼치기' }))
     fireEvent.click(screen.getByRole('button', { name: 'BOX-01 박스 상품 펼치기' }))
     fireEvent.change(screen.getByLabelText('박스 BOX-01 총중량(kg)'), { target: { value: '12.25' } })
     const input = screen.getByLabelText('박스 BOX-01 총중량(kg)')
@@ -1800,6 +1832,28 @@ describe('ChinaShipmentsBoard', () => {
       shipmentId: 'a',
       assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P4' }],
     }))
+  })
+
+  it('applies a shared pallet number to checked boxes only before saving the batch', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithCompletionFilters(), 'pallets')
+    const input = screen.getByLabelText('선택 박스 일괄 파렛트 번호')
+    const apply = screen.getByRole('button', { name: '선택 박스에 번호 적용' })
+    expect(apply).toBeDisabled()
+    fireEvent.change(input, { target: { value: ' NEW-7 ' } })
+    expect(apply).toBeDisabled()
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
+    fireEvent.click(apply)
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toHaveValue('NEW-7')
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('')
+    expect(savePalletAssignments).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText('박스 BOX-02 파렛트 배정 선택'))
+    fireEvent.click(apply)
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('NEW-7')
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'a', assignments: [
+      { boxNo: 'BOX-01', palletNo: 'NEW-7' }, { boxNo: 'BOX-02', palletNo: 'NEW-7' },
+    ] }))
   })
 
   it('selects all displayed pallet assignments together', async () => {

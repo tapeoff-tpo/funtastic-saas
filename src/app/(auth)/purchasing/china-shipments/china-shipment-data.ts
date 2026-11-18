@@ -3,6 +3,7 @@ import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
+import { palletTareWeightKg } from '@/lib/purchasing/china-outbound-pallet-weight'
 import type { ChinaShipmentDetailView, ChinaShipmentStockItem } from './china-shipments-board'
 
 export async function loadChinaShipmentDetailView(userId: string, shipmentId: string) {
@@ -63,7 +64,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       receiptPacking: item.receiptPacking,
       productImage: productImages[item.id],
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
+    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), tareWeightKg: palletTareWeightKg(pallet.tareWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,

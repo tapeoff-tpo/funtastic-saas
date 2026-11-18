@@ -22,12 +22,12 @@ describe('exportChinaOutboundPackingWorkbook', () => {
         { id: 'item-c', warehouseCode: '중국창고A', sku: '100003-0001', productName: '상품 C', optionName: null, reservedQuantity: 5, packedQuantity: 0 },
       ],
       pallets: [
-        { id: 'pallet-1', palletNo: '파렛트 1', lengthCm: 120, widthCm: 100, heightCm: 150, grossWeightKg: 42.125 },
+        { id: 'pallet-1', palletNo: '파렛트 1', lengthCm: 120, widthCm: 100, heightCm: 150, grossWeightKg: 999, tareWeightKg: 7.125 },
         { id: 'pallet-2', palletNo: '파렛트 2' },
       ],
       boxes: [
-        { id: 'box-1', palletId: 'pallet-1', boxNo: '박스 1', status: 'open', lengthCm: 50, widthCm: 40, heightCm: 30 },
-        { id: 'box-2', palletId: 'pallet-1', boxNo: '박스 2', status: 'open', lengthCm: 10, widthCm: 20, heightCm: 30 },
+        { id: 'box-1', palletId: 'pallet-1', boxNo: '박스 1', status: 'open', lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 15 },
+        { id: 'box-2', palletId: 'pallet-1', boxNo: '박스 2', status: 'open', lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 20 },
         { id: 'box-3', palletId: null, boxNo: '박스 3', status: 'open', lengthCm: 10, widthCm: 10, heightCm: 10 },
       ],
       boxItems: [
@@ -59,6 +59,7 @@ describe('exportChinaOutboundPackingWorkbook', () => {
     expect(workbook.getWorksheet('파렛트별 적재')?.getCell('N2').value).toBe('120 × 100 × 150 cm')
     expect(workbook.getWorksheet('파렛트별 적재')?.getCell('O2').value).toBe(42.125)
     expect(workbook.getWorksheet('파렛트별 적재')?.getCell('O2').numFmt).toBe('#,##0.000')
+    expect(workbook.getWorksheet('파렛트별 적재')?.getCell('R2').value).toBe(7.125)
     expect(workbook.getWorksheet('파렛트 미지정')?.getCell('I2').value).toBe(5)
     expect(workbook.getWorksheet('요약')?.getCell('B14').value).toBe(0.067)
   })

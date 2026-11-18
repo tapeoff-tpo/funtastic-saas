@@ -60,6 +60,7 @@ export function getMallBasePrice(raw: Record<string, unknown>, mallId: string, s
   return priceAmount(raw[`__product${key}Price`])
     ?? priceAmount(raw[sourceKey])
     ?? priceAmount(raw[`${key} 판매가`])
+    ?? priceAmount(raw[`__parent${key}Price`])
     ?? getCommonPrice(raw)
 }
 

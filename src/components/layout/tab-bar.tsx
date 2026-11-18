@@ -41,6 +41,7 @@ export function TabBar() {
         // tab.href may include query string (e.g. "/orders?from=...") so compare by pathname.
         const tabPath = tabPathname(tab)
         const active = pathname === tabPath
+        const label = getRouteLabel(tabPath)
         return (
           <div
             key={tabPath}
@@ -58,9 +59,9 @@ export function TabBar() {
               onMouseLeave={intent.cancel}
               onBlur={intent.cancel}
               className="flex items-center px-3 py-1 text-xs font-medium"
-              title={tab.label}
+              title={label}
             >
-              <span className="max-w-[140px] truncate">{tab.label}</span>
+              <span className="max-w-[140px] truncate">{label}</span>
             </Link>
             <button
               type="button"
@@ -69,7 +70,7 @@ export function TabBar() {
                 e.stopPropagation()
                 closeTab(tab.href)
               }}
-              aria-label={`${tab.label} 탭 닫기`}
+              aria-label={`${label} 탭 닫기`}
               className="mr-1 flex h-4 w-4 items-center justify-center rounded text-gray-400 opacity-60 hover:bg-gray-300 hover:text-gray-700 hover:opacity-100"
             >
               <X className="h-3 w-3" />

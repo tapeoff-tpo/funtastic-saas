@@ -32,7 +32,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/orders/collect': '주문 수집',
   '/orders/import': '주문 가져오기',
   '/orders/claims': '클레임 관리',
-  '/costs': '품목리스트',
+  '/costs': '품목·원가',
   '/purchasing/china-inventory': '중국재고',
   '/purchasing/saas-china-inventory': '중국재고(SaaS)',
   '/purchasing/china-shipments': '중국출고',
@@ -113,7 +113,11 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const t = localStorage.getItem(TABS_KEY)
-      if (t) setTabs(JSON.parse(t))
+      if (t) {
+        const saved: unknown = JSON.parse(t)
+        if (Array.isArray(saved)) setTabs(saved.filter((tab): tab is OpenTab =>
+          tab && typeof tab.href === 'string').map((tab) => ({ ...tab, label: getRouteLabel(stripQuery(tab.href)) })))
+      }
       const f = localStorage.getItem(FAVS_KEY)
       if (f) setFavorites(JSON.parse(f))
     } catch {

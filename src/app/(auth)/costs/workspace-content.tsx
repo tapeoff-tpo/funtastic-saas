@@ -5,7 +5,7 @@ import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { listShipmentCostHistory, type ShipmentCostHistoryRow } from '@/lib/purchasing/shipment-cost-store'
 import { CostsPageClient } from './costs-page-client'
 
-export const metadata: Metadata = { title: '품목리스트' }
+export const metadata: Metadata = { title: '품목·원가' }
 
 export default async function CostsPage({
   searchParams, exactSku,

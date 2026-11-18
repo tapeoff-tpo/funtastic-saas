@@ -129,7 +129,7 @@ export function CostsPageClient({
     <>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">품목리스트</h1>
+          <h1 className="text-xl font-bold">품목·원가</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {total.toLocaleString('ko-KR')}개 품목
           </p>

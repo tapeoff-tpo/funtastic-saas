@@ -186,9 +186,35 @@ export function getInactiveRegistrationMarketplaceColumns() {
   return productRegistrationColumns.filter((column) => !ACTIVE_MARKETPLACE_IDS.has(column.id))
 }
 
+type IdentifierIndex = {
+  keys: string[]
+  tokens?: Map<PriceTableDisplayColumn, string[]>
+  candidates: Array<{ key: string; value: string; normalizedKey: string; index: number }>
+}
+
+function indexIdentifiers(rawData: Record<string, string>): IdentifierIndex {
+  const keys = Object.keys(rawData)
+  return {
+    keys,
+    candidates: Object.entries(rawData).flatMap(([key, value], index) =>
+      !isPriceNumberDateKey(key) && !key.startsWith(REGISTRATION_EDIT_PREFIX)
+        && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key))
+        && isProductIdentifier(value) ? [{ key, value, normalizedKey: key.toLowerCase().replace(/\s+/g, ''), index }] : []),
+  }
+}
+
+export function createMarketplaceIdentifierReaders(rows: Record<string, string>[], columns: PriceTableDisplayColumn[]) {
+  const tokens = new Map(columns.map((column) => [column, marketplaceTokens(column)]))
+  return new Map(rows.map((raw) => {
+    const index = { ...indexIdentifiers(raw), tokens }
+    return [raw, (column: PriceTableDisplayColumn) => findMarketplaceProductIds(raw, column, index)] as const
+  }))
+}
+
 export function findMarketplaceProductIds(
   rawData: Record<string, string>,
   column: PriceTableDisplayColumn,
+  prepared?: IdentifierIndex,
 ) {
   const savedIdentifiers = rawData[registrationIdentifiersKey(column.id)]
   if (typeof savedIdentifiers === 'string') {
@@ -211,27 +237,34 @@ export function findMarketplaceProductIds(
     .filter((entry): entry is { key: string; value: string } => isProductIdentifier(entry.value))
   if (exactKeys.length) return exactMatches
 
-  const tokens = marketplaceTokens(column)
+  const tokens = prepared?.tokens?.get(column) ?? marketplaceTokens(column)
   if (!tokens.length) return []
 
-  const candidates = Object.entries(rawData)
-    .filter(([key, value]) => !isPriceNumberDateKey(key) && !key.startsWith(REGISTRATION_EDIT_PREFIX) && isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
-    .map(([key, value]) => ({ key, value, score: identifierKeyScore(key, tokens) }))
-  const namedMatches = candidates
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.key.localeCompare(right.key, 'ko'))
-    .filter((entry, index, entries) => index === 0 || entry.score === entries[0]?.score)
-    .map(({ key, value }) => ({ key, value }))
-  if (namedMatches.length) return namedMatches
+  const indexed = prepared ?? indexIdentifiers(rawData)
+  let bestScore = 0
+  const matches: Array<{ key: string; value: string }> = []
+  for (const entry of indexed.candidates) {
+    const score = identifierKeyScore(entry.normalizedKey, tokens)
+    if (score > bestScore) {
+      bestScore = score
+      matches.length = 0
+    }
+    if (score > 0 && score === bestScore) matches.push({ key: entry.key, value: entry.value })
+  }
+  if (matches.length) return matches.sort((left, right) => left.key.localeCompare(right.key, 'ko'))
 
-  const keys = Object.keys(rawData)
-  const priceIndex = keys.indexOf(column.valueKey)
+  const priceIndex = indexed.keys.indexOf(column.valueKey)
   if (priceIndex < 0) return []
-  const nearbyMatch = candidates
-    .map((entry) => ({ ...entry, distance: Math.abs(keys.indexOf(entry.key) - priceIndex) }))
-    .filter((entry) => entry.distance <= 4)
-    .sort((left, right) => left.distance - right.distance)[0]
-  return nearbyMatch ? [{ key: nearbyMatch.key, value: nearbyMatch.value }] : []
+  let nearest: { key: string; value: string } | null = null
+  let nearestDistance = 5
+  for (const entry of indexed.candidates) {
+    const distance = Math.abs(entry.index - priceIndex)
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearest = { key: entry.key, value: entry.value }
+    }
+  }
+  return nearest ? [nearest] : []
 }
 
 function priceColumn(
@@ -275,8 +308,7 @@ function marketplaceTokens(column: PriceTableDisplayColumn) {
   return [...new Set(tokens)]
 }
 
-function identifierKeyScore(key: string, tokens: string[]) {
-  const normalizedKey = key.toLowerCase().replace(/\s+/g, '')
+function identifierKeyScore(normalizedKey: string, tokens: string[]) {
   return tokens.reduce((score, token) => {
     const normalizedToken = token.replace(/\s+/g, '')
     if (!normalizedToken || !normalizedKey.includes(normalizedToken)) return score

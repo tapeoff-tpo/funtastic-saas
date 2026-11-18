@@ -1,7 +1,7 @@
 import { commonPriceSql, numericPriceField } from './price-registration-values-sql'
 import { COMMON_PRICE_KEY, REGISTRATION_EDIT_PREFIX, registrationPriceKey } from './price-registration-values'
 import * as XLSX from 'xlsx'
-import { and, asc, count, desc, eq, ilike, or, sql, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, or, sql, ne, getTableColumns, type SQLWrapper } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { analyticsPriceTableRows, products } from '@/lib/db/schema'
 import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, getRegistrationTargets, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
@@ -123,10 +123,17 @@ export async function listPriceTableRows(data: {
   await ensurePriceTableSchema()
   const page = Math.max(1, data.page ?? 1)
   const whereClause = buildWhereClause(data.userId, data.search, data.sheetName, data.exactProductCode)
-  const orderBy = buildOrderBy(data.sortKey, data.sortOrder)
+  const itemDates = db.select({
+    code: sql<string>`regexp_replace(${products.internalSku}, '-[0-9]{4}$', '')`.as('group_code'),
+    latest: sql<Date>`max(${products.createdAt})`.as('latest'),
+  }).from(products).where(eq(products.userId, data.userId))
+    .groupBy(sql`regexp_replace(${products.internalSku}, '-[0-9]{4}$', '')`).as('item_registration_dates')
+  const orderBy = buildOrderBy(data.sortKey, data.sortOrder, itemDates.latest)
 
   const offset = (page - 1) * PAGE_SIZE
-  const rowQuery = db.select().from(analyticsPriceTableRows).where(whereClause)
+  const rowQuery = db.select(getTableColumns(analyticsPriceTableRows)).from(analyticsPriceTableRows)
+    .leftJoin(itemDates, sql`${itemDates.code} = regexp_replace(btrim(${analyticsPriceTableRows.productCode}), '-[0-9]{4}$', '')`)
+    .where(whereClause)
     .orderBy(...orderBy, asc(analyticsPriceTableRows.id))
   const review = data.registrationReview
   const [result, sheetRows, latestRows] = await Promise.all([
@@ -358,14 +365,12 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string, e
   return and(...conditions)!
 }
 
-function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
+function buildOrderBy(sortKey: string | undefined, sortOrder: 'asc' | 'desc' | undefined, registeredAt: SQLWrapper) {
   const direction = sortOrder === 'desc' ? desc : asc
   if (sortKey === 'createdAt') {
-    const registeredAt = sql`(SELECT ${products.createdAt} FROM ${products}
-      WHERE ${products.userId} = ${analyticsPriceTableRows.userId}
-        AND ${products.internalSku} = ${analyticsPriceTableRows.productCode}
-      ORDER BY ${products.createdAt} DESC, ${products.id} DESC LIMIT 1)`
-    return [sql`${direction(registeredAt)} NULLS LAST`, asc(analyticsPriceTableRows.productCode), asc(analyticsPriceTableRows.rowNumber)]
+    return [sql`${direction(registeredAt)} NULLS LAST`,
+      asc(sql`regexp_replace(btrim(${analyticsPriceTableRows.productCode}), '-[0-9]{4}$', '')`),
+      asc(analyticsPriceTableRows.productCode), asc(analyticsPriceTableRows.rowNumber)]
   }
   if (sortKey === 'registrationCount') {
     const registered = sql`(SELECT count(*) FROM jsonb_each_text(${analyticsPriceTableRows.rawData}) AS item(key, value)

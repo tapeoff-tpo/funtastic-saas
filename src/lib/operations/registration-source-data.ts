@@ -1,13 +1,15 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { registrationBaseCode } from './registration-groups'
 import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
 
 export async function getRegistrationSourceData(userId: string, sku: string) {
   const purchases = purchaseRequestItems
+  const codes = [...new Set([sku, registrationBaseCode(sku) ?? sku])]
   const [[item], [purchase], workflows] = await Promise.all([
     db.select({
       name: products.name, cost: products.costPrice, shipping: products.shippingCost, metadata: products.metadata,
-    }).from(products).where(and(eq(products.userId, userId), eq(products.internalSku, sku))).limit(1),
+    }).from(products).where(and(eq(products.userId, userId), inArray(products.internalSku, codes))).orderBy(sql`CASE WHEN ${products.internalSku} = ${sku} THEN 0 ELSE 1 END`).limit(1),
     db.select({
       status: purchases.status, requestDate: purchases.requestDate,
       managementCode: purchases.purchaseManagementCode, supplierOrderNumber: purchases.supplierOrderNumber,
@@ -24,8 +26,8 @@ export async function getRegistrationSourceData(userId: string, sku: string) {
         notice_manufacturer AS manufacturer, notice_country AS country, notice_weight AS weight,
         notice_capacity AS capacity, notice_components AS components, notice_special_notes AS "specialNotes"
       FROM new_product_workflow_items
-      WHERE user_id = ${userId}::uuid AND sabangnet_code = ${sku}
-      ORDER BY created_at DESC, id DESC LIMIT 1
+      WHERE user_id = ${userId}::uuid AND sabangnet_code IN (${sql.join(codes.map((code) => sql`${code}`), sql`, `)})
+      ORDER BY CASE WHEN sabangnet_code = ${sku} THEN 0 ELSE 1 END, created_at DESC, id DESC LIMIT 1
     `),
   ])
   const master = item?.metadata?.esa009m as Record<string, unknown> | undefined

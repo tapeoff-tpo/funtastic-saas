@@ -218,6 +218,11 @@ function makeShipmentWithBoxAndPalletStatuses(): ChinaShipmentDetailView {
   }
 }
 
+function makeShipmentWithUnassignedBoxes(): ChinaShipmentDetailView {
+  const detail = makeShipmentWithCompletionFilters()
+  return { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: null })) }
+}
+
 function makeShipmentWithSharedBoxDimensions(lengthCm = 10, widthCm = 20, heightCm = 30): ChinaShipmentDetailView {
   return {
     ...shipmentA,
@@ -1819,7 +1824,7 @@ describe('ChinaShipmentsBoard', () => {
 
   it('retains an unselected pallet assignment after saving a selected box', async () => {
     savePalletAssignments.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    renderShipment(makeShipmentWithUnassignedBoxes(), 'pallets')
     fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
     fireEvent.change(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1'), { target: { value: 'P4' } })
     fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
@@ -1838,7 +1843,7 @@ describe('ChinaShipmentsBoard', () => {
 
   it('keeps a failed selected pallet assignment and selection for retry', async () => {
     savePalletAssignments.mockResolvedValue({ ok: false, error: '파렛트 배정 저장 실패' })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    renderShipment(makeShipmentWithUnassignedBoxes(), 'pallets')
     fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
     fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
 
@@ -1846,6 +1851,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1')).toHaveValue('P3')
     expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeChecked()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeEnabled()
     expect(navigate).not.toHaveBeenCalled()
   })
 
@@ -1865,7 +1871,7 @@ describe('ChinaShipmentsBoard', () => {
 
   it('applies a shared pallet number to checked boxes only before saving the batch', async () => {
     savePalletAssignments.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithCompletionFilters(), 'pallets')
+    renderShipment(makeShipmentWithUnassignedBoxes(), 'pallets')
     const input = screen.getByLabelText('선택 박스 일괄 파렛트 번호')
     const apply = screen.getByRole('button', { name: '선택 박스에 번호 적용' })
     expect(apply).toBeDisabled()
@@ -1887,7 +1893,7 @@ describe('ChinaShipmentsBoard', () => {
 
   it('selects all displayed pallet assignments together', async () => {
     savePalletAssignments.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    renderShipment(makeShipmentWithUnassignedBoxes(), 'pallets')
     fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
     fireEvent.change(palletAssignmentRow('BOX-02').getByPlaceholderText('예: 1'), { target: { value: 'P4' } })
 
@@ -1898,6 +1904,66 @@ describe('ChinaShipmentsBoard', () => {
       shipmentId: 'a',
       assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P4' }],
     }))
+  })
+
+  it('excludes saved pallet assignments from bulk selection and locks newly saved boxes immediately', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithCompletionFilters(), 'pallets')
+    const savedBox = screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')
+    const newBox = screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')
+    const selectAll = screen.getByLabelText('표시된 파렛트 배정 전체 선택')
+    expect(savedBox).toBeDisabled()
+    expect(savedBox).not.toBeChecked()
+    expect(newBox).toBeEnabled()
+    fireEvent.click(savedBox)
+    expect(savedBox).not.toBeChecked()
+    fireEvent.click(selectAll)
+    expect(selectAll).toBeChecked()
+    expect(savedBox).not.toBeChecked()
+    expect(newBox).toBeChecked()
+    fireEvent.change(screen.getByLabelText('선택 박스 일괄 파렛트 번호'), { target: { value: 'P3' } })
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스에 번호 적용' }))
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toHaveValue('P1')
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('P3')
+    expect(newBox).toBeEnabled()
+    expect(newBox).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledExactlyOnceWith({
+      shipmentId: 'a', assignments: [{ boxNo: 'BOX-02', palletNo: 'P3' }],
+    }))
+    await waitFor(() => expect(newBox).toBeDisabled())
+    expect(newBox).not.toBeChecked()
+    expect(selectAll).toBeDisabled()
+    expect(selectAll).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '파렛트 배정 선택 저장' })).toBeDisabled()
+  })
+
+  it('disables bulk selection when every displayed box already has a saved pallet', () => {
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    expect(screen.getByLabelText('표시된 파렛트 배정 전체 선택')).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toBeEnabled()
+  })
+
+  it('allows bulk selection again only after an existing pallet assignment is cleared and saved', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBox(), 'pallets')
+    const checkbox = screen.getByLabelText('박스 A-01 파렛트 배정 선택')
+    expect(checkbox).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('박스 A-01 파렛트 번호'), { target: { value: '' } })
+    expect(checkbox).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 전체 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledExactlyOnceWith({
+      shipmentId: 'a', assignments: [{ boxNo: 'A-01', palletNo: null }],
+    }))
+    await waitFor(() => expect(checkbox).toBeEnabled())
+    expect(screen.getByLabelText('표시된 파렛트 배정 전체 선택')).toBeEnabled()
+    fireEvent.click(checkbox)
+    fireEvent.change(screen.getByLabelText('선택 박스 일괄 파렛트 번호'), { target: { value: 'P2' } })
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스에 번호 적용' }))
+    expect(screen.getByLabelText('박스 A-01 파렛트 번호')).toHaveValue('P2')
+    expect(checkbox).toBeChecked()
   })
 
   it('uses three stages and maps old box-split links to the first stage', () => {

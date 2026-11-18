@@ -32,7 +32,9 @@ export function LinkedPriceRegistrationForm({ rowId, updatedAt, navigation, mall
   return (
     <form action={async (form) => {
       try {
-        router.push(await saveLinkedPriceRegistration(form))
+        await saveLinkedPriceRegistration(form)
+        toast.success('상품등록 정보를 저장했습니다.')
+        router.refresh()
       } catch {
         toast.error('저장하지 못했습니다. 입력값과 메뉴 권한을 확인해주세요.')
       }

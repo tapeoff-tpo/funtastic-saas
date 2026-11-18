@@ -16,9 +16,10 @@ import { PurchasingProductImageButton } from '@/components/purchasing-product-im
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { TitleHelp } from './title-help'
 import { ChineseNameEditor, MergeBoxesButton } from './outbound-package-editors'
-import { matchesChinaStockPeriod, chinaStockDate } from '@/lib/purchasing/china-outbound-packaging'
+import { matchesChinaStockPeriod } from '@/lib/purchasing/china-outbound-packaging'
 import { ManualSamplePanel } from './manual-sample-panel'
 import { PalletContentsPanel } from './pallet-contents-panel'
+import { ChinaShipmentStockTable } from './china-shipment-stock-table'
 import { SavedBoxContentsPanel } from './saved-box-contents-panel'
 import { ShipmentLabelMenu } from './shipment-label-menu'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
@@ -412,23 +413,11 @@ function ChinaShipmentsBoardContent({
               {selectedWarehouseInventory.length > 0 ? (
                 <>
                   <input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
-                  <div className="mt-3 max-h-[1440px] space-y-2 overflow-y-auto pr-1">
-                    {shownInventory.length === 0 ? <p className="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 작업 가능 재고가 없습니다.</p> : shownInventory.map((item) => (
-                      <article key={item.id} className="rounded-md border bg-background p-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p>
-                            <span className="mt-1 inline-block rounded border px-1.5 py-0.5 text-xs text-muted-foreground">{stockItemCategory(item)}</span>
-                            <p data-no-translate className="mt-1 truncate font-medium">{item.productName}</p>{item.chineseProductName && <p data-no-translate className="mt-1 text-sm text-muted-foreground">{item.chineseProductName}</p>}
-                            <p data-no-translate className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p>
-                          </div>
-                          <div className="flex items-end gap-3">
-                            <div className="text-right text-xs text-muted-foreground"><p>현재고 {item.onHandQuantity.toLocaleString('ko-KR')}개</p><p className="mt-1 font-medium text-emerald-700">작업 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p></div>
-                            <label className="block"><span className="mb-1 block text-xs text-muted-foreground">이번 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" /></label>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
+                  <div className="mt-3">
+                    <ChinaShipmentStockTable items={shownInventory} quantities={quantities}
+                      onQuantityChange={(inventoryId, value) => setQuantities((current) => ({ ...current, [inventoryId]: value }))}
+                      quantityLabel="이번 출고" tableLabel="신규 출고 상품 목록" emptyMessage="조건에 맞는 작업 가능 재고가 없습니다."
+                      categoryForItem={stockItemCategory} disabled={isPending || isSelecting || guard.busy} />
                   </div>
                 </>
               ) : <p className="mt-3 rounded-md border border-dashed bg-background px-3 py-10 text-center text-sm text-muted-foreground">
@@ -966,7 +955,6 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes,
     .filter((item) => matchesChinaStockPeriod(item.lastReceivedAt, fromDate, toDate))
     .filter((item) => !searchKeyword || [item.sku, item.productName, item.chineseProductName ?? '', item.optionName ?? '', item.warehouseCode]
       .some((value) => value.toLocaleLowerCase('ko-KR').includes(searchKeyword)))
-    .sort(compareShipmentItems)
   const additionalLines = stock.flatMap((item) => {
     const quantity = positiveInteger(quantities[item.id] ?? '')
     return quantity ? [{ inventoryId: item.id, quantity }] : []
@@ -1034,7 +1022,12 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes,
       <StockCategoryFilter items={selectedWarehouseCodes.length ? availableStock.filter((item) => selectedWarehouseCodes.includes(item.warehouseCode)) : availableStock} value={stockCategory} onChange={setStockCategory} disabled={disabled} />
     </section>
 {selectedWarehouseCodes.length > 0 ? <>
-<div className="flex flex-wrap gap-3"><label className="text-xs">최근 입고·재고등록일 시작<input type="date" aria-label="입고일 시작" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={inputClass} /></label><label className="text-xs">최근 입고·재고등록일 종료<input type="date" aria-label="입고일 종료" value={toDate} onChange={(event) => setToDate(event.target.value)} className={inputClass} /></label><button type="button" onClick={() => { setFromDate(''); setToDate('') }} className="self-end rounded border px-3 py-2 text-xs">기간 초기화</button></div>{fromDate && toDate && fromDate > toDate && <p role="alert">조회 시작일과 종료일을 확인해주세요.</p>}<input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} /><div className="max-h-[1440px] space-y-2 overflow-y-auto pr-1">{availableItems.length === 0 ? <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">조건에 맞는 추가 가능 재고가 없습니다.</p> : availableItems.map((item) => <article key={item.id} className="rounded-md border bg-background p-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">출고 창고: {item.warehouseCode}</p><p data-no-translate className="mt-1 truncate font-medium">{item.productName}</p>{item.chineseProductName && <p data-no-translate className="text-sm text-muted-foreground">{item.chineseProductName}</p>}<p className="text-xs text-muted-foreground">최근 입고·재고등록일: {chinaStockDate(item.lastReceivedAt) || '미입력'}</p><p data-no-translate className="mt-1 truncate text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</p></div><div className="flex items-end gap-3"><p className="text-right text-xs font-medium text-emerald-700">추가 가능 {item.availableQuantity.toLocaleString('ko-KR')}개</p><label className="block"><span className="mb-1 block text-xs text-muted-foreground">추가 출고</span><input type="number" min="0" max={item.availableQuantity} step="1" value={quantities[item.id] ?? ''} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-24 rounded-md border px-2 text-right text-sm tabular-nums" placeholder="0" disabled={disabled} /></label></div></div></article>)}</div>
+<div className="flex flex-wrap gap-3"><label className="text-xs">최근 입고·재고등록일 시작<input type="date" aria-label="입고일 시작" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={inputClass} /></label><label className="text-xs">최근 입고·재고등록일 종료<input type="date" aria-label="입고일 종료" value={toDate} onChange={(event) => setToDate(event.target.value)} className={inputClass} /></label><button type="button" onClick={() => { setFromDate(''); setToDate('') }} className="self-end rounded border px-3 py-2 text-xs">기간 초기화</button></div>{fromDate && toDate && fromDate > toDate && <p role="alert">조회 시작일과 종료일을 확인해주세요.</p>}
+<input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} />
+<ChinaShipmentStockTable items={availableItems} quantities={quantities}
+  onQuantityChange={(inventoryId, value) => setQuantities((current) => ({ ...current, [inventoryId]: value }))}
+  quantityLabel="추가 출고" tableLabel="추가 출고 상품 목록" emptyMessage="조건에 맞는 추가 가능 재고가 없습니다."
+  categoryForItem={stockItemCategory} disabled={disabled || guard.busy} />
 </> : <p className="rounded-md border border-dashed bg-background px-3 py-8 text-center text-sm text-muted-foreground">출고할 재고 위치를 하나 이상 체크하면 해당 창고의 상품과 작업 가능 수량이 나옵니다.</p>}
 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"><p className="text-xs text-muted-foreground">추가 예정: {additionalLines.length.toLocaleString('ko-KR')}개 품목 · {totalQuantity.toLocaleString('ko-KR')}개</p><div className="flex gap-2"><button type="button" disabled={disabled} onClick={() => { setQuantities({}); setSelectedWarehouseCodes([]); setSearch(''); setIsOpen(false) }} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">취소</button><button type="submit" disabled={disabled || additionalLines.length === 0} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">{isAdding ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} 선택 품목 추가</button></div></div></form> : null}</section>
 }

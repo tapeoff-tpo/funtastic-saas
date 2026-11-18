@@ -138,7 +138,7 @@ function visibleKoreanUi(root: Element) {
     }
   }
 
-  const attributes = [...root.querySelectorAll<HTMLElement>('*')].flatMap((element) =>
+  const attributes = [...root.querySelectorAll<HTMLElement>('*')].filter((element) => !element.closest('[data-no-translate]')).flatMap((element) =>
     ['placeholder', 'title', 'aria-label'].flatMap((attribute) => {
       const value = element.getAttribute(attribute)
       return value && /[가-힣]/.test(value) ? [`${element.tagName}.${attribute}: ${value}`] : []
@@ -830,7 +830,7 @@ describe('ChinaShipmentsBoard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '添加品项' }))
     fireEvent.click(within(await screen.findByRole('group', { name: '选择出库库存位置' })).getByRole('checkbox'))
-    await waitFor(() => expect(screen.getByText(/出库仓库：/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: '出库仓库' })).toBeInTheDocument())
     const stageOneRoot = document.querySelector('[data-purchasing-translate]')
     expect(stageOneRoot).not.toBeNull()
     expect(visibleKoreanUi(stageOneRoot!)).toEqual([])
@@ -1114,6 +1114,43 @@ describe('ChinaShipmentsBoard', () => {
       destinationName: '인천',
       lines: [{ inventoryId: 'inventory-new', quantity: 3 }],
     })))
+  })
+
+  it('sorts new-shipment stock by code and name without moving entered quantities to another product', async () => {
+    createShipment.mockResolvedValue({ ok: false, error: '테스트 종료' })
+    const stock = [
+      { ...inventoryItem, id: 'stock-10', sku: 'SKU-10', productName: '나무 컵' },
+      { ...inventoryItem, id: 'stock-2', sku: 'SKU-2', productName: '다용도 선반' },
+      { ...inventoryItem, id: 'stock-1', sku: 'SKU-1', productName: '가방' },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={null} selectedStep="items" showCreate />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /중국창고/ }))
+    const table = screen.getByRole('table', { name: '신규 출고 상품 목록' })
+    const productOrder = () => within(table).getAllByRole('row').slice(1).map((row) => row.textContent)
+    expect(productOrder()).toEqual(['가방', '다용도 선반', '나무 컵'].map((name) => expect.stringContaining(name)))
+    fireEvent.change(within(screen.getByText('나무 컵').closest('tr')!).getByLabelText('이번 출고'), { target: { value: '7' } })
+    const codeSort = within(table).getByRole('button', { name: '상품코드 정렬' })
+    const nameSort = within(table).getByRole('button', { name: '상품명 정렬' })
+    fireEvent.click(codeSort)
+    expect(codeSort.closest('th')).toHaveAttribute('aria-sort', 'descending')
+    expect(productOrder()).toEqual(['나무 컵', '다용도 선반', '가방'].map((name) => expect.stringContaining(name)))
+    fireEvent.click(codeSort)
+    expect(codeSort.closest('th')).toHaveAttribute('aria-sort', 'ascending')
+    expect(productOrder()).toEqual(['가방', '다용도 선반', '나무 컵'].map((name) => expect.stringContaining(name)))
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')).toHaveAttribute('aria-sort', 'ascending')
+    expect(productOrder()).toEqual(['가방', '나무 컵', '다용도 선반'].map((name) => expect.stringContaining(name)))
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')).toHaveAttribute('aria-sort', 'descending')
+    expect(productOrder()).toEqual(['다용도 선반', '나무 컵', '가방'].map((name) => expect.stringContaining(name)))
+    expect(createShipment).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션 검색'), { target: { value: '가방' } })
+    expect(screen.queryByText('나무 컵')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션 검색'), { target: { value: '' } })
+    expect(within(screen.getByText('나무 컵').closest('tr')!).getByLabelText('이번 출고')).toHaveValue(7)
+    fireEvent.change(screen.getByLabelText('도착지'), { target: { value: '인천' } })
+    fireEvent.click(screen.getByRole('button', { name: '중국출고요청 만들기' }))
+    await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [{ inventoryId: 'stock-10', quantity: 7 }] })))
   })
 
   it('views saved goods and subsidiary materials separately and fills only the visible category', async () => {
@@ -1456,13 +1493,55 @@ describe('ChinaShipmentsBoard', () => {
     render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
     fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
     fireEvent.click(within(screen.getByRole('group', { name: '출고 재고 위치 선택' })).getByRole('checkbox', { name: /중국창고/ }))
-    fireEvent.change(screen.getAllByLabelText('추가 출고')[1]!, { target: { value: '2' } })
+    fireEvent.change(within(screen.getByText('오래된 상품').closest('tr')!).getByLabelText('추가 출고'), { target: { value: '2' } })
     fireEvent.change(screen.getByLabelText('입고일 시작'), { target: { value: '2026-11-03' } })
     fireEvent.change(screen.getByLabelText('입고일 종료'), { target: { value: '2026-11-03' } })
     expect(screen.queryByText('오래된 상품')).not.toBeInTheDocument()
     expect(screen.getByText('새 상품')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
     await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [{ inventoryId: 'older', quantity: 2 }] }))
+  })
+
+  it('sorts additional stock while preserving separate quantities for the same SKU in different warehouses', async () => {
+    addShipmentItems.mockResolvedValue({ ok: true })
+    const stock = [
+      { ...inventoryItem, id: 'same-b', warehouseCode: 'B창고', sku: 'SKU-2', productName: '동일 상품' },
+      { ...inventoryItem, id: 'stock-10', warehouseCode: 'A창고', sku: 'SKU-10', productName: '가방' },
+      { ...inventoryItem, id: 'same-a', warehouseCode: 'A창고', sku: 'SKU-2', productName: '동일 상품' },
+    ]
+    render(<ChinaShipmentsBoard inventoryItems={stock} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '품목 추가' }))
+    fireEvent.click(screen.getByRole('button', { name: '전체 선택' }))
+    const table = screen.getByRole('table', { name: '추가 출고 상품 목록' })
+    const rows = () => within(table).getAllByRole('row').slice(1)
+    const sameSkuRow = (warehouse: string) => rows().find((row) => within(row).queryByText('동일 상품') && within(row).queryByText(warehouse))!
+    expect(rows().map((row) => row.textContent)).toEqual(['동일 상품', '동일 상품', '가방'].map((name) => expect.stringContaining(name)))
+    fireEvent.change(within(sameSkuRow('A창고')).getByLabelText('추가 출고'), { target: { value: '3' } })
+    fireEvent.change(within(sameSkuRow('B창고')).getByLabelText('추가 출고'), { target: { value: '4' } })
+    const codeSort = within(table).getByRole('button', { name: '상품코드 정렬' })
+    fireEvent.click(codeSort)
+    expect(codeSort.closest('th')).toHaveAttribute('aria-sort', 'descending')
+    expect(rows()[0]).toHaveTextContent('SKU-10')
+    const nameSort = within(table).getByRole('button', { name: '상품명 정렬' })
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')).toHaveAttribute('aria-sort', 'ascending')
+    expect(rows()[0]).toHaveTextContent('가방')
+    fireEvent.click(nameSort)
+    expect(nameSort.closest('th')).toHaveAttribute('aria-sort', 'descending')
+    expect(rows()[2]).toHaveTextContent('가방')
+    expect(within(sameSkuRow('A창고')).getByLabelText('추가 출고')).toHaveValue(3)
+    expect(within(sameSkuRow('B창고')).getByLabelText('추가 출고')).toHaveValue(4)
+    expect(addShipmentItems).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: 'B창고' } })
+    expect(rows()).toHaveLength(1)
+    expect(within(rows()[0]!).getByLabelText('추가 출고')).toHaveValue(4)
+    fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: '' } })
+    expect(within(sameSkuRow('A창고')).getByLabelText('추가 출고')).toHaveValue(3)
+    fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
+    await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [
+      { inventoryId: 'same-b', quantity: 4 },
+      { inventoryId: 'same-a', quantity: 3 },
+    ] }))
   })
 
   it('loads current stock only when the existing shipment addition panel is opened', async () => {
@@ -1524,23 +1603,23 @@ describe('ChinaShipmentsBoard', () => {
 
     fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
     expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
-    fireEvent.change(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고'), { target: { value: '3' } })
+    fireEvent.change(within(screen.getByText('A창고 재고').closest('tr')!).getByLabelText('추가 출고'), { target: { value: '3' } })
     fireEvent.click(warehouses.getByRole('checkbox', { name: /B창고/ }))
-    fireEvent.change(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고'), { target: { value: '4' } })
+    fireEvent.change(within(screen.getByText('B창고 재고').closest('tr')!).getByLabelText('추가 출고'), { target: { value: '4' } })
     fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: 'B창고' } })
     expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
-    expect(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(4)
+    expect(within(screen.getByText('B창고 재고').closest('tr')!).getByLabelText('추가 출고')).toHaveValue(4)
     fireEvent.change(screen.getByPlaceholderText('상품명, 상품코드, 옵션, 창고 검색'), { target: { value: '' } })
-    expect(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(3)
+    expect(within(screen.getByText('A창고 재고').closest('tr')!).getByLabelText('추가 출고')).toHaveValue(3)
     fireEvent.click(warehouses.getByRole('checkbox', { name: /B창고/ }))
     expect(screen.queryByText('B창고 재고')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '전체 선택' }))
-    expect(within(screen.getByText('B창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(4)
+    expect(within(screen.getByText('B창고 재고').closest('tr')!).getByLabelText('추가 출고')).toHaveValue(4)
     expect(screen.queryByText('추가 불가 재고')).not.toBeInTheDocument()
     fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
     expect(screen.queryByText('A창고 재고')).not.toBeInTheDocument()
     fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
-    expect(within(screen.getByText('A창고 재고').closest('article')!).getByLabelText('추가 출고')).toHaveValue(3)
+    expect(within(screen.getByText('A창고 재고').closest('tr')!).getByLabelText('추가 출고')).toHaveValue(3)
     fireEvent.click(warehouses.getByRole('checkbox', { name: /A창고/ }))
     fireEvent.click(screen.getByRole('button', { name: '선택 품목 추가' }))
     await waitFor(() => expect(addShipmentItems).toHaveBeenCalledWith({ shipmentId: 'a', lines: [

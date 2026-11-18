@@ -39,11 +39,12 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">사용 파렛트</h3><div className="flex gap-2 text-sm"><span>{summaries.length} PLT + {unassignedBoxes.length} BOX</span>{assignmentEditor && <button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.showModal()} className="rounded-md border px-3 py-1">파렛트 배정 수정</button>}</div></div>
     {summaries.map((summary) => <article key={summary.pallet.id} className="overflow-hidden rounded-lg border bg-background">
       <div className="overflow-x-auto"><div className="flex min-w-max items-center gap-6 p-4">
-        <button type="button" aria-expanded={expanded.has(summary.pallet.id)} aria-label={`파렛트 ${summary.palletNo} ${expanded.has(summary.pallet.id) ? '접기' : '펼치기'}`} onClick={() => toggle(summary.pallet.id, setExpanded)} className="flex w-28 shrink-0 flex-col items-start justify-center gap-1 rounded-md text-left hover:bg-muted/20">
-          <p className="font-semibold">파렛트 <span data-no-translate>{summary.palletNo}</span></p><p className="text-xs text-muted-foreground">박스 {summary.boxes.length}개 · 상품 {summary.quantity}개</p><span className="mt-1 text-xs underline">{expanded.has(summary.pallet.id) ? '접기' : '펼치기'}</span>
-        </button>
+        <div className="w-28 shrink-0 space-y-1">
+          <p className="font-semibold">파렛트 <span data-no-translate>{summary.palletNo}</span></p><p className="text-xs text-muted-foreground">박스 {summary.boxes.length}개 · 상품 {summary.quantity}개</p>
+        </div>
         <PalletMeasurements key={`${summary.pallet.id}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}`} shipmentId={shipmentId} pallet={summary.pallet} editable={editable} isPending={isPending} productCbm={summary.cbm}
-          renderWeight={(dimensionsEditor) => <PalletWeightMeasurements key={`${summary.pallet.id}:${summary.pallet.tareWeightKg ?? 5}`} shipmentId={shipmentId} pallet={summary.pallet} boxes={summary.boxes.filter((box) => boxItems.some((allocation) => allocation.boxId === box.id && allocation.quantity > 0))} editable={editable} isPending={isPending}>{dimensionsEditor}</PalletWeightMeasurements>} />
+          renderWeight={(dimensionsEditor) => <PalletWeightMeasurements key={`${summary.pallet.id}:${summary.pallet.tareWeightKg ?? 5}`} shipmentId={shipmentId} pallet={summary.pallet} boxes={summary.boxes.filter((box) => boxItems.some((allocation) => allocation.boxId === box.id && allocation.quantity > 0))} editable={editable} isPending={isPending}
+            contentsToggle={<button type="button" aria-expanded={expanded.has(summary.pallet.id)} aria-label={`파렛트 ${summary.palletNo} ${expanded.has(summary.pallet.id) ? '접기' : '펼치기'}`} onClick={() => toggle(summary.pallet.id, setExpanded)} className="h-8 shrink-0 rounded-md border px-3 text-xs hover:bg-muted/20">{expanded.has(summary.pallet.id) ? '접기' : '펼치기'}</button>}>{dimensionsEditor}</PalletWeightMeasurements>} />
       </div></div>
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
       {expanded.has(summary.pallet.id) && boxList(summary.boxes)}
@@ -54,8 +55,8 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
   </section>
 }
 
-function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPending, children }: {
-  shipmentId: string; pallet: PalletSummary['pallet']; boxes: ChinaShipmentDetailView['boxes']; editable: boolean; isPending: boolean; children: ReactNode
+function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPending, children, contentsToggle }: {
+  shipmentId: string; pallet: PalletSummary['pallet']; boxes: ChinaShipmentDetailView['boxes']; editable: boolean; isPending: boolean; children: ReactNode; contentsToggle: ReactNode
 }) {
   const guard = useChinaWorkGuard()
   const [pending, start] = useTransition()
@@ -81,12 +82,13 @@ function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPendi
 
   return <div className="shrink-0 text-sm">
     <div className="flex items-center gap-3 whitespace-nowrap">
-      <p title={`박스 중량 합계 ${measurement.boxWeightKg == null ? '—' : `${formatWeight(measurement.boxWeightKg)}kg`} + 파렛트 무게 ${validTare ? `${formatWeight(measurement.tareWeightKg)}kg` : '—'}`} className="shrink-0 font-semibold tabular-nums">총중량(kg): {grossWeight == null ? '미입력' : formatWeight(grossWeight)}</p>
       {children}
     {editable ? <>
       <label className="inline-flex shrink-0 items-center gap-1 text-xs">파렛트 무게<input aria-label={`파렛트 ${pallet.palletNo} 자체 무게(kg)`} value={tare} onChange={(event) => setTare(event.target.value)} disabled={isPending || pending || guard.busy} type="number" min="0" max="999999999" step="0.001" className="h-8 w-16 rounded-md border bg-background px-2 text-right" />kg</label>
       <button type="button" aria-label={`파렛트 ${pallet.palletNo} 무게 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 shrink-0 rounded-md border px-3 text-xs">파렛트 무게 저장</button>
     </> : <p className="text-xs">파렛트 무게 {formatWeight(measurement.tareWeightKg)}kg</p>}
+      <p title={`박스 중량 합계 ${measurement.boxWeightKg == null ? '—' : `${formatWeight(measurement.boxWeightKg)}kg`} + 파렛트 무게 ${validTare ? `${formatWeight(measurement.tareWeightKg)}kg` : '—'}`} className="shrink-0 font-semibold tabular-nums">총중량(kg): {grossWeight == null ? '미입력' : formatWeight(grossWeight)}</p>
+      {contentsToggle}
     </div>
     {measurement.missingBoxWeightCount > 0 && <p className="mt-2 text-xs text-amber-700">무게 미입력 박스 {measurement.missingBoxWeightCount}개가 있어 총중량을 계산할 수 없습니다.</p>}
   </div>

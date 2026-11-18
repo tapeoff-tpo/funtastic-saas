@@ -43,7 +43,7 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
           <p className="font-semibold">파렛트 <span data-no-translate>{summary.palletNo}</span></p><p className="text-xs text-muted-foreground">박스 {summary.boxes.length}개 · 상품 {summary.quantity}개</p><span className="mt-1 text-xs underline">{expanded.has(summary.pallet.id) ? '접기' : '펼치기'}</span>
         </button>
         <PalletMeasurements key={`${summary.pallet.id}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}`} shipmentId={shipmentId} pallet={summary.pallet} editable={editable} isPending={isPending} productCbm={summary.cbm}
-          weightEditor={<PalletWeightMeasurements key={`${summary.pallet.id}:${summary.pallet.tareWeightKg ?? 5}`} shipmentId={shipmentId} pallet={summary.pallet} boxes={summary.boxes.filter((box) => boxItems.some((allocation) => allocation.boxId === box.id && allocation.quantity > 0))} editable={editable} isPending={isPending} />} />
+          renderWeight={(dimensionsEditor) => <PalletWeightMeasurements key={`${summary.pallet.id}:${summary.pallet.tareWeightKg ?? 5}`} shipmentId={shipmentId} pallet={summary.pallet} boxes={summary.boxes.filter((box) => boxItems.some((allocation) => allocation.boxId === box.id && allocation.quantity > 0))} editable={editable} isPending={isPending}>{dimensionsEditor}</PalletWeightMeasurements>} />
       </div>
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
       {expanded.has(summary.pallet.id) && boxList(summary.boxes)}
@@ -54,8 +54,8 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
   </section>
 }
 
-function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPending }: {
-  shipmentId: string; pallet: PalletSummary['pallet']; boxes: ChinaShipmentDetailView['boxes']; editable: boolean; isPending: boolean
+function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPending, children }: {
+  shipmentId: string; pallet: PalletSummary['pallet']; boxes: ChinaShipmentDetailView['boxes']; editable: boolean; isPending: boolean; children: ReactNode
 }) {
   const guard = useChinaWorkGuard()
   const [pending, start] = useTransition()
@@ -79,18 +79,23 @@ function PalletWeightMeasurements({ shipmentId, pallet, boxes, editable, isPendi
   }
   useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${pallet.palletNo} 자체 무게`, snapshot: tare, save, discard: () => setTare(baseline) } : null)
 
-  return <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-    <p className="font-semibold tabular-nums">총중량(kg): {grossWeight == null ? '미입력' : formatWeight(grossWeight)}</p>
+  return <div className="space-y-2 text-sm">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <p className="shrink-0 whitespace-nowrap font-semibold tabular-nums">총중량(kg): {grossWeight == null ? '미입력' : formatWeight(grossWeight)}</p>
+      {children}
+    </div>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
     {editable ? <>
       <label className="inline-flex items-center gap-2 text-xs">파렛트 무게<input aria-label={`파렛트 ${pallet.palletNo} 자체 무게(kg)`} value={tare} onChange={(event) => setTare(event.target.value)} disabled={isPending || pending || guard.busy} type="number" min="0" max="999999999" step="0.001" className="h-8 w-24 rounded-md border bg-background px-2 text-right" />kg</label>
       <button type="button" aria-label={`파렛트 ${pallet.palletNo} 무게 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-xs">파렛트 무게 저장</button>
     </> : <p className="text-xs">파렛트 무게 {formatWeight(measurement.tareWeightKg)}kg</p>}
-    <p className="w-full text-xs text-muted-foreground">박스 중량 합계 {measurement.boxWeightKg == null ? '미입력' : `${formatWeight(measurement.boxWeightKg)}kg`} + 파렛트 무게 {validTare ? `${formatWeight(measurement.tareWeightKg)}kg` : '미입력'}</p>
-    {measurement.missingBoxWeightCount > 0 && <p className="w-full text-xs text-amber-700">무게 미입력 박스 {measurement.missingBoxWeightCount}개가 있어 총중량을 계산할 수 없습니다.</p>}
+    <p className="text-xs text-muted-foreground">박스 중량 합계 {measurement.boxWeightKg == null ? '미입력' : `${formatWeight(measurement.boxWeightKg)}kg`} + 파렛트 무게 {validTare ? `${formatWeight(measurement.tareWeightKg)}kg` : '미입력'}</p>
+    </div>
+    {measurement.missingBoxWeightCount > 0 && <p className="text-xs text-amber-700">무게 미입력 박스 {measurement.missingBoxWeightCount}개가 있어 총중량을 계산할 수 없습니다.</p>}
   </div>
 }
 
-function PalletMeasurements({ shipmentId, pallet, editable, isPending, weightEditor, productCbm }: { shipmentId: string; pallet: PalletSummary['pallet']; editable: boolean; isPending: boolean; weightEditor: ReactNode; productCbm: number }) {
+function PalletMeasurements({ shipmentId, pallet, editable, isPending, renderWeight, productCbm }: { shipmentId: string; pallet: PalletSummary['pallet']; editable: boolean; isPending: boolean; renderWeight: (dimensionsEditor: ReactNode) => ReactNode; productCbm: number }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
   const [pending, start] = useTransition()
@@ -107,10 +112,8 @@ function PalletMeasurements({ shipmentId, pallet, editable, isPending, weightEdi
   }
   useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${pallet.palletNo} 실측 규격`, snapshot: dimensions, save, discard: () => setDimensions({ ...baseline }) } : null)
   return <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
-    <div className="space-y-3">{weightEditor}
-      {editable ? <div className="flex flex-wrap items-end gap-2">{([['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)']] as const).map(([key, label]) => <label key={key} className="text-xs">{label}<input aria-label={`파렛트 ${pallet.palletNo} ${label}`} type="number" min="0.01" max="9999999.99" step="0.01" value={dimensions[key]} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block h-8 w-24 rounded-md border bg-background px-2 text-sm" /></label>)}<button type="button" aria-label={`파렛트 ${pallet.palletNo} 규격 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-sm">규격 저장</button></div>
-        : <p className="text-sm">파렛트 실측 규격: {formatChinaOutboundBoxDimensions(pallet) ?? '미입력'}</p>}
-    </div>
+    {renderWeight(editable ? <div className="flex flex-wrap items-end gap-2">{([['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)']] as const).map(([key, label]) => <label key={key} className="text-xs">{label}<input aria-label={`파렛트 ${pallet.palletNo} ${label}`} type="number" min="0.01" max="9999999.99" step="0.01" value={dimensions[key]} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block h-8 w-20 rounded-md border bg-background px-2 text-sm" /></label>)}<button type="button" aria-label={`파렛트 ${pallet.palletNo} 규격 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-sm">규격 저장</button></div>
+      : <p className="text-sm">파렛트 실측 규격: {formatChinaOutboundBoxDimensions(pallet) ?? '미입력'}</p>)}
     <div className="text-right text-sm tabular-nums lg:border-l lg:pl-4"><p className="font-semibold">최종 파렛트 CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(dimensions)) ?? '미입력'} CBM</p><p className="mt-1 text-xs text-muted-foreground">제품 적재 CBM: {formatChinaOutboundCbm(productCbm)} CBM</p></div>
   </div>
 }

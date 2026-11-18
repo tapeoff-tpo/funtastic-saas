@@ -21,6 +21,7 @@ export type ChinaOutboundBoxSplitSavedState = {
     grossWeightKg: number | null
   }>
   /** Replace this item's allocations only; other products in mixed boxes stay intact. */
-  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number }>
+  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null }>
+  updatedOtherBoxItems?: ChinaOutboundBoxSplitSavedState['boxItems']
   reopenedPalletIds: string[]
 }

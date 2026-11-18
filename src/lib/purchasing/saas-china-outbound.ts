@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
-import { dimensionNumber } from './china-outbound-dimensions'
+import { calculateChinaOutboundBoxCbm, dimensionNumber } from './china-outbound-dimensions'
 import { palletTareWeightKg } from './china-outbound-pallet-weight'
 import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-state'
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -753,6 +753,11 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     CONSTRAINT china_outbound_box_items_quantity_positive CHECK (quantity > 0),
     CONSTRAINT china_outbound_box_items_sort_nonnegative CHECK (sort_order >= 0)
   );
+
+  ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS gross_weight_kg numeric(12, 3);
+  ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS length_cm numeric(12, 2);
+  ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS width_cm numeric(12, 2);
+  ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2);
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_box_items_box_shipment_item
     ON china_outbound_box_items(box_id, shipment_item_id);
@@ -2491,12 +2496,29 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     const allocations = await tx.select().from(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), inArray(chinaOutboundBoxItems.boxId, ids)))
     // Empty source boxes make a retry a no-op, including the measured weight.
     if (!allocations.some((row) => row.boxId !== target.id)) return target
-    const quantities = new Map<string, number>()
-    for (const row of allocations) quantities.set(row.shipmentItemId, (quantities.get(row.shipmentItemId) ?? 0) + row.quantity)
+    const products = new Map<string, typeof allocations>()
+    for (const row of allocations) {
+      const box = boxes.find((candidate) => candidate.id === row.boxId)!
+      const source = allocations.filter((candidate) => candidate.boxId === box.id)
+      const fields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg'] as const
+      const measured = source.length === 1 && fields.every((field) => row[field] == null)
+        ? { ...row, ...Object.fromEntries(fields.map((field) => [field, box[field] ?? null])) } : row
+      products.set(row.shipmentItemId, [...(products.get(row.shipmentItemId) ?? []), measured])
+    }
     await tx.delete(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), inArray(chinaOutboundBoxItems.boxId, ids)))
-    for (const [shipmentItemId, quantity] of quantities) await tx.insert(chinaOutboundBoxItems).values({ userId: input.userId, shipmentId: input.shipmentId, boxId: target.id, shipmentItemId, quantity })
-    // Repacked contents require a fresh physical gross-weight measurement.
-    const grossWeightKg = null
+    for (const [shipmentItemId, rows] of products) {
+      const dimensions = largestChinaOutboundBox(rows)
+      const weights = rows.map((row) => dimensionNumber(row.grossWeightKg))
+      await tx.insert(chinaOutboundBoxItems).values({ userId: input.userId, shipmentId: input.shipmentId, boxId: target.id, shipmentItemId,
+        quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+        lengthCm: dimensions?.lengthCm ?? null, widthCm: dimensions?.widthCm ?? null, heightCm: dimensions?.heightCm ?? null,
+        grossWeightKg: weights.every((weight) => weight != null) ? String(Math.round(weights.reduce((sum, weight) => sum + weight!, 0) * 1000) / 1000) : null,
+      })
+    }
+    const weights = boxes.filter((box) => allocations.some((row) => row.boxId === box.id)).map((box) => dimensionNumber(box.grossWeightKg))
+    const weight = weights.every((value) => value != null) ? Math.round(weights.reduce((sum, value) => sum + value!, 0) * 1000) / 1000 : null
+    if (weight != null && weight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
+    const grossWeightKg = weight == null ? null : String(weight)
     await tx.update(chinaOutboundBoxes).set({ grossWeightKg, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
     // Retain emptied box records for references, but exclude their former weight and pallet.
     await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))
@@ -2904,7 +2926,12 @@ export async function saveChinaOutboundItemBoxSplits(input: {
         note: box.note, lengthCm: dimensionNumber(box.lengthCm), widthCm: dimensionNumber(box.widthCm),
         heightCm: dimensionNumber(box.heightCm), grossWeightKg: dimensionNumber(box.grossWeightKg),
       })),
-      boxItems: savedBoxItems.map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity })),
+      boxItems: savedBoxItems.map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity,
+        lengthCm: dimensionNumber(row.lengthCm), widthCm: dimensionNumber(row.widthCm), heightCm: dimensionNumber(row.heightCm), grossWeightKg: dimensionNumber(row.grossWeightKg),
+      })),
+      updatedOtherBoxItems: saved.boxItems.filter((row) => row.shipmentItemId !== shipmentItem.id && affectedBoxIds.has(row.boxId)).map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity,
+        lengthCm: dimensionNumber(row.lengthCm), widthCm: dimensionNumber(row.widthCm), heightCm: dimensionNumber(row.heightCm), grossWeightKg: dimensionNumber(row.grossWeightKg),
+      })),
       reopenedPalletIds: saved.reopenedPalletIds,
     }
   })
@@ -4528,7 +4555,6 @@ function normalizeChinaOutboundWorkbookBoxSplits(boxSplits: ChinaOutboundWorkboo
     }
     allocationsByShipmentItemId.set(shipmentItemId, normalizeChinaOutboundBoxSplitAllocations(boxSplit.allocations))
   }
-  assertChinaOutboundBoxSplitWeightConsistency([...allocationsByShipmentItemId.values()].flat())
   return [...allocationsByShipmentItemId.entries()].map(([shipmentItemId, allocations]) => ({ shipmentItemId, allocations }))
 }
 
@@ -4565,7 +4591,7 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
 function normalizeOptionalChinaOutboundBoxWeight(value: number | null | undefined) {
   if (value === undefined || value === null) return value
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.001 || value > 999_999_999) throw new Error('총중량은 0.001kg 이상, 999,999,999kg 이하인 숫자로 입력해주세요.')
-  return value
+  return Math.round(value * 1000) / 1000
 }
 
 /** One shared physical box has one measurement, including across workbook products. */
@@ -4623,6 +4649,18 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   boxes: ChinaOutboundBoxRow[]
   boxItems: ChinaOutboundBoxItemRow[]
 }) {
+  const measurementFields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg'] as const
+  const originalBoxItemsById = new Map(input.boxItems.map((row) => [row.id, row]))
+  const originalItemsByBox = new Map<string, ChinaOutboundBoxItemRow[]>()
+  for (const row of input.boxItems) originalItemsByBox.set(row.boxId, [...(originalItemsByBox.get(row.boxId) ?? []), row])
+  // A legacy single-product box has an unambiguous owner for its measured values.
+  // A legacy mixed total cannot safely be copied to each component.
+  input.boxItems = input.boxItems.map((row) => {
+    if (originalItemsByBox.get(row.boxId)?.length !== 1) return { ...row }
+    const box = input.boxes.find((candidate) => candidate.id === row.boxId)
+    if (!box || measurementFields.some((field) => row[field] != null)) return { ...row }
+    return { ...row, ...Object.fromEntries(measurementFields.map((field) => [field, box[field] ?? null])) }
+  })
   const totalQuantity = input.allocations.reduce((total, allocation) => total + allocation.quantity, 0)
   if (totalQuantity > input.shipmentItem.reservedQuantity) {
     throw new Error(`${input.shipmentItem.sku}의 분할 수량은 출고수량 ${input.shipmentItem.reservedQuantity.toLocaleString('ko-KR')}개를 넘을 수 없습니다.`)
@@ -4715,26 +4753,31 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   const boxItemValues: Array<typeof chinaOutboundBoxItems.$inferInsert> = []
   const measurementUpdates = new Map<string, ChinaOutboundBoxRow>()
   const measurementUpdatedAt = new Date()
+  const componentUpdates = new Map<string, ChinaOutboundBoxItemRow>()
+  const affectedBoxIds = new Set([...previousBoxItems.map((row) => row.boxId)])
+  const recalculateBoxIds = new Set<string>()
+  const recalculateWeightBoxIds = new Set<string>()
 
   for (const allocation of input.allocations) {
-    let box = boxesByNo.get(allocation.boxNo)
+    const box = boxesByNo.get(allocation.boxNo)
     if (!box) throw new Error('박스를 저장하지 못했습니다.')
-    let dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
-    if (box && dimensions && input.boxItems.some((row) => row.boxId === box!.id && row.shipmentItemId !== input.shipmentItem.id)) {
-      dimensions = largestChinaOutboundBox([normalizeOptionalChinaOutboundBoxDimensions({ lengthCm: box.lengthCm == null ? null : Number(box.lengthCm), widthCm: box.widthCm == null ? null : Number(box.widthCm), heightCm: box.heightCm == null ? null : Number(box.heightCm) }), dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? dimensions
+    const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
+    const previous = previousBoxItems.find((row) => row.boxId === box!.id)
+    const component = {
+      lengthCm: dimensions ? String(dimensions.lengthCm) : previous?.lengthCm ?? null,
+      widthCm: dimensions ? String(dimensions.widthCm) : previous?.widthCm ?? null,
+      heightCm: dimensions ? String(dimensions.heightCm) : previous?.heightCm ?? null,
+      grossWeightKg: allocation.grossWeightKg !== undefined ? allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg) : previous?.grossWeightKg ?? null,
     }
-    const dimensionsChanged = dimensions && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)
-    const weightChanged = allocation.grossWeightKg !== undefined && (allocation.grossWeightKg === null ? box.grossWeightKg != null : box.grossWeightKg == null || Number(box.grossWeightKg) !== allocation.grossWeightKg)
-    if (dimensionsChanged) changedBoxIds.add(box.id)
-    if (dimensionsChanged || weightChanged) {
-      box = {
-        ...box,
-        ...(dimensions && dimensionsChanged ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
-        ...(weightChanged ? { grossWeightKg: allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg) } : {}),
-        updatedAt: measurementUpdatedAt,
-      }
-      measurementUpdates.set(box.id, box)
-      boxesByNo.set(box.boxNo, box)
+    affectedBoxIds.add(box.id)
+    if (!previous || previous.quantity !== allocation.quantity || measurementFields.some((field) => dimensionNumber(previous[field]) !== dimensionNumber(component[field]))) recalculateBoxIds.add(box.id)
+    if (!previous || (allocation.grossWeightKg !== undefined && (dimensionNumber(previous.grossWeightKg) !== dimensionNumber(component.grossWeightKg) || (allocation.grossWeightKg === null && box.grossWeightKg != null)))) {
+      recalculateWeightBoxIds.add(box.id)
+      recalculateBoxIds.add(box.id)
+    }
+    if (previous && !allocationContentChanged) {
+      const updated = { ...previous, ...component }
+      nextBoxItems[nextBoxItems.findIndex((row) => row.id === previous.id)] = updated
     }
 
     if (previousQuantitiesByBox.get(box.id) !== allocation.quantity) changedBoxIds.add(box.id)
@@ -4746,8 +4789,37 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         shipmentItemId: input.shipmentItem.id,
         userId: input.userId,
         quantity: allocation.quantity,
+        ...component,
       })
     }
+  }
+  for (const old of previousBoxItems) if (!input.allocations.some((allocation) => boxesByNo.get(allocation.boxNo)?.id === old.boxId)) { recalculateBoxIds.add(old.boxId); recalculateWeightBoxIds.add(old.boxId) }
+  for (const row of nextBoxItems) {
+    const original = originalBoxItemsById.get(row.id)
+    if (affectedBoxIds.has(row.boxId) && original && measurementFields.some((field) => dimensionNumber(original[field]) !== dimensionNumber(row[field]))) componentUpdates.set(row.id, row)
+  }
+  const components = [...nextBoxItems, ...boxItemValues]
+  for (const boxId of recalculateBoxIds) {
+    const current = input.boxes.find((box) => box.id === boxId)
+    if (!current) continue
+    const rows = components.filter((row) => row.boxId === boxId)
+    const measuredDimensions = rows.map((row) => ({ lengthCm: row.lengthCm, widthCm: row.widthCm, heightCm: row.heightCm }))
+    const dimensions = largestChinaOutboundBox([...measuredDimensions, ...(measuredDimensions.some((row) => calculateChinaOutboundBoxCbm(row) == null) ? [current] : [])])
+    const weights = rows.map((row) => dimensionNumber(row.grossWeightKg))
+    const totalWeight = rows.length && weights.every((weight) => weight != null) ? Math.round(weights.reduce((sum, weight) => sum + weight!, 0) * 1000) / 1000 : null
+    if (totalWeight != null && totalWeight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
+    const grossWeightKg = !recalculateWeightBoxIds.has(boxId) ? current.grossWeightKg : totalWeight == null ? null : String(totalWeight)
+    const nextDimensions = dimensions && calculateChinaOutboundBoxCbm(dimensions) != null ? dimensions : current
+    const box = { ...current, lengthCm: nextDimensions.lengthCm ?? null, widthCm: nextDimensions.widthCm ?? null, heightCm: nextDimensions.heightCm ?? null, grossWeightKg, updatedAt: measurementUpdatedAt }
+    const dimensionsChanged = ['lengthCm', 'widthCm', 'heightCm'].some((field) => dimensionNumber(current[field as 'lengthCm']) !== dimensionNumber(box[field as 'lengthCm']))
+    if (dimensionsChanged) changedBoxIds.add(box.id)
+    if (dimensionsChanged || dimensionNumber(current.grossWeightKg) !== dimensionNumber(grossWeightKg)) measurementUpdates.set(box.id, box)
+  }
+  for (let offset = 0; offset < componentUpdates.size; offset += batchSize) {
+    const batch = [...componentUpdates.values()].slice(offset, offset + batchSize)
+    const measurement = (field: typeof measurementFields[number]) => sql`CASE ${chinaOutboundBoxItems.id} ${sql.join(batch.map((row) => sql`WHEN ${row.id} THEN ${row[field]}::numeric`), sql` `)} ELSE ${chinaOutboundBoxItems[field]} END`
+    await input.tx.update(chinaOutboundBoxItems).set({ lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), grossWeightKg: measurement('grossWeightKg'), updatedAt: measurementUpdatedAt })
+      .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipment.id), inArray(chinaOutboundBoxItems.id, batch.map((row) => row.id))))
   }
   const changedMeasurements = [...measurementUpdates.values()]
   const boxIndexesById = new Map(input.boxes.map((box, index) => [box.id, index]))

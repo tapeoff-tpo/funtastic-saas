@@ -5,9 +5,10 @@ import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-swi
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { mergeBoxes, saveWeight, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, saveBoxDimensions, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
   mergeBoxes: vi.fn(),
   saveWeight: vi.fn(),
+  saveBoxDimensions: vi.fn(),
   savePalletTare: vi.fn(),
   saveChineseName: vi.fn(),
   addSample: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => naviga
 vi.mock('../saas-china-actions', () => ({
   mergeChinaOutboundBoxesAction: mergeBoxes,
   saveChinaOutboundPackageWeightAction: saveWeight,
+  saveChinaOutboundBoxDimensionsAction: saveBoxDimensions,
   saveChinaOutboundItemChineseNameAction: saveChineseName,
   addChinaOutboundSampleAction: addSample,
   saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
@@ -115,17 +117,11 @@ const shipments = [asListItem(shipmentA), asListItem(shipmentB)]
 const inventoryItem = { id: 'inventory-new', warehouseCode: '중국창고', sku: 'NEW-1', productName: '새 상품', optionName: null, onHandQuantity: 20, reservedQuantity: 5, availableQuantity: 15 }
 
 function renderShipment(detail = shipmentA, stage: 'items' | 'boxes' | 'pallets' | 'summary' = 'items') {
-  const result = render(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} />)
-  const savedReview = screen.queryByText('저장된 박스 확인·수정')
-  if (savedReview) fireEvent.click(savedReview)
-  return result
+  return render(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} />)
 }
 
 function renderShipmentWithLanguage(detail = shipmentA, stage: 'items' | 'boxes' | 'pallets' | 'summary' = 'items') {
-  const result = render(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} /></>)
-  const savedReview = screen.queryByText('저장된 박스 확인·수정')
-  if (savedReview) fireEvent.click(savedReview)
-  return result
+  return render(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep={stage} showCreate={false} /></>)
 }
 
 function visibleKoreanUi(root: Element) {
@@ -165,7 +161,7 @@ function makeShipmentWithBox(): ChinaShipmentDetailView {
   return {
     ...shipmentA,
     pallets: [{ id: 'pallet-1', palletNo: 'P1', note: null }],
-    boxes: [{ id: 'box-1', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: 'A-01', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
+    boxes: [{ id: 'box-1', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: 'A-01', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null }],
     boxItems: [{ id: 'allocation-1', boxId: 'box-1', shipmentItemId: 'shared-item-id', quantity: 3 }],
   }
 }
@@ -175,7 +171,7 @@ function makeFullyPackedInProgressShipment(): ChinaShipmentDetailView {
     ...shipmentA,
     items: [{ ...shipmentA.items[0], packedQuantity: 10, boxSplitStatus: 'in_progress' }],
     pallets: [{ id: 'pallet-1', palletNo: 'P1', note: null }],
-    boxes: [{ id: 'box-1', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: '1', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
+    boxes: [{ id: 'box-1', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: '1', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null }],
     boxItems: [{ id: 'allocation-1', boxId: 'box-1', shipmentItemId: 'shared-item-id', quantity: 10 }],
   }
 }
@@ -190,9 +186,9 @@ function makeShipmentWithCompletionFilters(): ChinaShipmentDetailView {
     ],
     pallets: [{ id: 'pallet-1', palletNo: 'P1', note: null }],
     boxes: [
-      { id: 'box-saved', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: 'BOX-01', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
-      { id: 'box-shared', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-02', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
-      { id: 'box-empty', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-03', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null },
+      { id: 'box-saved', shipmentId: 'a', editable: true, palletId: 'pallet-1', boxNo: 'BOX-01', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null },
+      { id: 'box-shared', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-02', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null },
+      { id: 'box-empty', shipmentId: 'a', editable: true, palletId: null, boxNo: 'BOX-03', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null },
     ],
     boxItems: [
       { id: 'allocation-done-1', boxId: 'box-saved', shipmentItemId: 'complete-item', quantity: 3 },
@@ -230,7 +226,7 @@ function makeShipmentWithSharedBoxDimensions(lengthCm = 10, widthCm = 20, height
       { ...shipmentA.items[0], id: 'shared-item-one', sku: 'SHARED-01', productName: '공유 박스 상품 1', reservedQuantity: 10, packedQuantity: 3 },
       { ...shipmentA.items[0], id: 'shared-item-two', sku: 'SHARED-02', productName: '공유 박스 상품 2', reservedQuantity: 10, packedQuantity: 3 },
     ],
-    boxes: [{ id: 'shared-box', shipmentId: 'a', editable: true, palletId: null, boxNo: 'COMMON-1', status: 'packing', note: null, lengthCm, widthCm, heightCm }],
+    boxes: [{ id: 'shared-box', shipmentId: 'a', editable: true, palletId: null, boxNo: 'COMMON-1', status: 'open', note: null, lengthCm, widthCm, heightCm }],
     boxItems: [
       { id: 'shared-allocation-one', boxId: 'shared-box', shipmentItemId: 'shared-item-one', quantity: 3 },
       { id: 'shared-allocation-two', boxId: 'shared-box', shipmentItemId: 'shared-item-two', quantity: 3 },
@@ -256,7 +252,7 @@ function makeShipmentWithCompletedBoxOnLaterPage(): ChinaShipmentDetailView {
   return {
     ...detail,
     items: detail.items.map((item) => item.id === completedItem.id ? { ...item, packedQuantity: item.reservedQuantity, boxSplitStatus: 'completed' } : item),
-    boxes: [{ id: 'completed-box', shipmentId: 'a', editable: true, palletId: null, boxNo: '11', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
+    boxes: [{ id: 'completed-box', shipmentId: 'a', editable: true, palletId: null, boxNo: '11', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null }],
     boxItems: [{ id: 'completed-allocation', boxId: 'completed-box', shipmentItemId: completedItem.id, quantity: completedItem.reservedQuantity }],
   }
 }
@@ -312,6 +308,7 @@ describe('ChinaShipmentsBoard', () => {
     savePalletStatuses.mockReset()
     addShipmentItems.mockReset()
     mergeBoxes.mockReset(); saveWeight.mockReset(); saveChineseName.mockReset()
+    saveBoxDimensions.mockReset()
     addSample.mockReset()
     savePalletDimensions.mockReset()
     savePalletTare.mockReset()
@@ -501,13 +498,14 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits.mock.calls[0][0].allocations[1].grossWeightKg).toBe(3.5)
   })
 
-  it('omits an untouched shared-box weight when saving another product split', async () => {
+  it('preloads its own shared-box component weight and omits it during a quantity-only save', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail = makeShipmentWithSharedBoxDimensions()
     detail.boxes[0].grossWeightKg = 8.5
+    detail.boxItems[0] = { ...detail.boxItems[0], grossWeightKg: 3.25 }
     renderShipment(detail, 'items')
     const editor = itemEditor('SHARED-01')
-    expect(editor.getByLabelText('박스 COMMON-1 총중량(kg)')).toHaveValue(8.5)
+    expect(editor.getByLabelText('박스 COMMON-1 총중량(kg)')).toHaveValue(3.25)
     fireEvent.change(editor.getByPlaceholderText('0'), { target: { value: '4' } })
     fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
@@ -515,21 +513,23 @@ describe('ChinaShipmentsBoard', () => {
   })
 
   it.each([
-    { boxNo: 'NEW', weight: null },
-    { boxNo: 'TARGET', weight: 12.5 },
-  ])('uses the physical destination weight when moving a shared allocation to $boxNo', async ({ boxNo, weight }) => {
+    { boxNo: 'NEW' },
+    { boxNo: 'TARGET' },
+  ])('preserves its own component weight and dimensions when moving a shared allocation to $boxNo', async ({ boxNo }) => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail = makeShipmentWithSharedBoxDimensions()
     detail.boxes[0].grossWeightKg = 8.5
+    detail.boxItems[0] = { ...detail.boxItems[0], grossWeightKg: 3.25, lengthCm: 8, widthCm: 9, heightCm: 10 }
     detail.boxes.push({ ...detail.boxes[0], id: 'target-box', boxNo: 'TARGET', grossWeightKg: 12.5 })
     renderShipment(detail, 'items')
     const editor = itemEditor('SHARED-01')
+    expect(editor.getByLabelText('박스 COMMON-1 총중량(kg)')).toHaveValue(3.25)
+    expect(editor.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value).slice(-5)).toEqual(['3', '8', '9', '10', '3.25'])
     fireEvent.change(editor.getByRole('textbox'), { target: { value: boxNo } })
-    expect(editor.getByLabelText(`박스 ${boxNo} 총중량(kg)`)).toHaveValue(weight)
+    expect(editor.getByLabelText(`박스 ${boxNo} 총중량(kg)`)).toHaveValue(3.25)
     fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
-    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo })
-    expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBeUndefined()
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo, grossWeightKg: 3.25, lengthCm: 8, widthCm: 9, heightCm: 10 })
     expect(saveBoxSplits.mock.calls[0][0].allocations[0].existingBoxId).toBeUndefined()
   })
 
@@ -547,7 +547,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ boxNo: '7', existingBoxId: 'box-1', grossWeightKg: 7.5 })
   })
 
-  it('compares an edited destination weight against that physical box instead of the source weight', async () => {
+  it('saves an edited component weight separately from the destination physical-box total', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail = makeShipmentWithSharedBoxDimensions()
     detail.boxes[0].grossWeightKg = 8.5
@@ -586,13 +586,15 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
     expect(saveBoxSplits.mock.calls[0][0].allocations).toEqual([
       { boxNo: '1', quantity: 5, lengthCm: null, widthCm: null, heightCm: null },
-      { boxNo: '2', quantity: 5, autoNumber: true, lengthCm: 50, widthCm: 40, heightCm: 30 },
+      { boxNo: '2', quantity: 5, autoNumber: true, lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: null },
     ])
   })
 
   it('keeps a shared custom box while replanning and leaves its other product intact', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithSharedBoxDimensions(), 'items')
+    const detail = makeShipmentWithSharedBoxDimensions()
+    detail.boxItems[0] = { ...detail.boxItems[0], lengthCm: 10, widthCm: 20, heightCm: 30 }
+    renderShipment(detail, 'items')
     const dialog = itemEditor('SHARED-01')
     expect(dialog.getByLabelText('SHARED-01 총 박스 수')).toHaveValue(1)
     expect(dialog.getByLabelText('SHARED-01 박스당 수량')).toHaveValue(null)
@@ -707,7 +709,7 @@ describe('ChinaShipmentsBoard', () => {
 
   it('opens the selected mixed-box product and does not save or select another product', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
-    renderShipment(makeShipmentWithSharedBoxDimensions())
+    renderShipment(makeShipmentWithSharedBoxDimensions(), 'boxes')
     fireEvent.click(screen.getByRole('button', { name: 'COMMON-1 박스 SHARED-02 내용 수정' }))
     const popup = within(screen.getByRole('dialog', { name: 'SHARED-02 박스분할' }))
     fireEvent.change(popup.getByPlaceholderText('0'), { target: { value: '4' } })
@@ -778,7 +780,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
     expect(saveBoxSplits.mock.calls[0][0].allocations).toEqual([
       { boxNo: '4', quantity: 6, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null },
-      { boxNo: '5', quantity: 4, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null },
+      { boxNo: '5', quantity: 4, autoNumber: true, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null },
     ])
   })
 
@@ -840,7 +842,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByText('已保存箱子情况')).toBeInTheDocument())
     expect(screen.getByText('第2步')).toBeInTheDocument()
     expect(screen.getAllByRole('columnheader', { name: '箱号' }).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'SKU-KEEP 编辑装箱拆分' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑箱 BOX-01 内容' }))
     await waitFor(() => expect(screen.getAllByRole('columnheader', { name: '装载数量' }).length).toBeGreaterThan(0))
     expect(screen.getAllByRole('button', { name: '添加箱子' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '保存装箱拆分' }).length).toBeGreaterThan(0)
@@ -884,7 +886,7 @@ describe('ChinaShipmentsBoard', () => {
 
     rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="summary" showCreate={false} /></>)
 
-    await waitFor(() => expect(screen.getByText('最终装载清单')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('托盘分配')).toBeInTheDocument())
     const summaryRoot = document.querySelector('[data-purchasing-translate]')
     expect(summaryRoot).not.toBeNull()
     expect(visibleKoreanUi(summaryRoot!)).toEqual([])
@@ -1232,9 +1234,9 @@ describe('ChinaShipmentsBoard', () => {
   })
 
   it('shows only the selected shipment when the server provides another detail', () => {
-    const { rerender } = render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="boxes" showCreate={false} />)
+    const { rerender } = render(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentA} selectedStep="items" showCreate={false} />)
 
-    rerender(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentB} selectedStep="boxes" showCreate={false} />)
+    rerender(<ChinaShipmentsBoard inventoryItems={[]} shipments={shipments} selectedShipment={shipmentB} selectedStep="items" showCreate={false} />)
 
     expect(screen.queryByRole('heading', { name: '출고 A' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '출고 B' })).toBeInTheDocument()
@@ -1259,13 +1261,12 @@ describe('ChinaShipmentsBoard', () => {
   })
 
   it('shows saved box contents and lets users include empty boxes', () => {
-    renderShipment(makeShipmentWithCompletionFilters())
+    renderShipment(makeShipmentWithCompletionFilters(), 'boxes')
 
     expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeEnabled()
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
-    fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '전체 펼치기' }))
     expect(within(savedBoxPanel).getByText('BOX-01')).toBeInTheDocument()
     expect(within(savedBoxPanel).getByRole('link', { name: 'BOX-01 박스 부착용 쉽먼트 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-saved')
     const sharedBoxRow = within(savedBoxPanel).getByText('BOX-02').closest('tr')
@@ -1321,7 +1322,8 @@ describe('ChinaShipmentsBoard', () => {
     const detail = makeShipmentWithBoxAndPalletStatuses()
     detail.pallets[0] = { ...detail.pallets[0], lengthCm: 120, widthCm: 100, heightCm: 150 }
     detail.boxes[0].grossWeightKg = 10
-    renderShipment(detail, 'summary')
+    detail.shipment = { ...detail.shipment, status: 'dispatched' }
+    renderShipment(detail, 'pallets')
     const card = screen.getByRole('button', { name: '파렛트 P1 펼치기' }).closest('article')!
     expect(within(card).getByText('파렛트 실측 규격: 120 × 100 × 150 cm')).toBeVisible()
     expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
@@ -1358,10 +1360,10 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('shows pallet assignment inputs directly in the second stage', () => {
+  it('shows pallet assignment inputs directly in the third stage', () => {
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '2단계 · 파렛트 배정' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '3단계 · 파렛트 배정' })).toBeInTheDocument()
     expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toBeVisible()
     expect(screen.getByRole('button', { name: '파렛트 배정 전체 저장' })).toBeVisible()
     expect(screen.queryByRole('button', { name: '파렛트 배정 수정' })).not.toBeInTheDocument()
@@ -1655,7 +1657,7 @@ describe('ChinaShipmentsBoard', () => {
     const detail = makeShipmentWithBoxAndPalletStatuses()
     detail.boxes[0] = { ...detail.boxes[0]!, lengthCm: 50, widthCm: 40, heightCm: 30 }
     detail.boxes[1] = { ...detail.boxes[1]!, lengthCm: 10, widthCm: 20, heightCm: 30 }
-    renderShipment(detail)
+    renderShipment(detail, 'boxes')
     fireEvent.click(screen.getByRole('button', { name: '박스 합치기' }))
     fireEvent.click(screen.getByLabelText('BOX-01 합치기 선택'))
     fireEvent.click(screen.getByLabelText('BOX-02 합치기 선택'))
@@ -1683,11 +1685,10 @@ describe('ChinaShipmentsBoard', () => {
   })
 
   it('opens a completed saved box in its editable product editor', () => {
-    renderShipment(makeShipmentWithCompletedBoxOnLaterPage())
+    renderShipment(makeShipmentWithCompletedBoxOnLaterPage(), 'boxes')
 
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
-    fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '전체 펼치기' }))
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '11 박스 내용 수정' }))
 
     expect(screen.getByRole('dialog', { name: 'SKU-11 박스분할' })).toBeInTheDocument()
@@ -1721,13 +1722,12 @@ describe('ChinaShipmentsBoard', () => {
   })
 
   it('opens label printing in a separate tab without discarding drafts', async () => {
-    renderShipment(makeShipmentWithBox())
+    renderShipment(makeShipmentWithBox(), 'boxes')
     fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
     const link = await screen.findByRole('menuitem', { name: '박스 쉽먼트 바로 인쇄' })
     expect(link).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes&format=print')
     expect(link).toHaveAttribute('target', '_blank')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: '전체 펼치기' }))
     expect(screen.getByRole('link', { name: 'A-01 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-1&format=print')
   })
 
@@ -2045,22 +2045,30 @@ describe('ChinaShipmentsBoard', () => {
     expect(checkbox).toBeChecked()
   })
 
-  it('uses three stages and maps old box-split links to the first stage', () => {
+  it('uses item splitting, saved box review, and pallet assignment as three client-side stages', () => {
     renderShipment(makeShipmentWithBox(), 'items')
     const nav = screen.getByRole('navigation', { name: '중국출고 작업 단계' })
     expect(within(nav).getAllByRole('button')).toHaveLength(3)
-    for (const [step, title] of [['pallets', '2단계.*파렛트 배정'], ['summary', '3단계.*최종 적재리스트'], ['items', '1단계.*출고품목·박스분할']]) {
+    expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '다음: 저장된 박스현황' }))
+    expect(screen.getByRole('heading', { name: '저장된 박스 현황' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: '1단계 · 출고품목·박스분할' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 배정' }))
+    expect(screen.getByRole('heading', { name: '3단계 · 파렛트 배정' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
+    for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['items', '1단계.*출고품목·박스분할']]) {
       const button = within(nav).getByRole('button', { name: new RegExp(title) })
       fireEvent.click(button)
       expect(button).toHaveAttribute('aria-current', 'step')
       expect(new URLSearchParams(window.location.search).get('step')).toBe(step)
     }
     expect(navigate).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
     act(() => {
       window.history.replaceState(null, '', '/purchasing/china-shipments?shipment=a&step=boxes')
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
-    expect(within(nav).getByRole('button', { name: /1단계.*출고품목·박스분할/ })).toHaveAttribute('aria-current', 'step')
+    expect(within(nav).getByRole('button', { name: /2단계.*저장된 박스현황/ })).toHaveAttribute('aria-current', 'step')
   })
 
   it('returns through visited stages with browser Back and Forward while retaining the list period', async () => {
@@ -2069,8 +2077,8 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment(makeShipmentWithBox(), 'items')
     const stages = [
       ['items', /1단계.*출고품목/],
-      ['pallets', /2단계.*파렛트 배정/],
-      ['summary', /3단계.*최종 적재리스트/],
+      ['boxes', /2단계.*저장된 박스현황/],
+      ['pallets', /3단계.*파렛트 배정/],
     ] as const
 
     for (const [, title] of stages.slice(1)) fireEvent.click(screen.getByRole('button', { name: title }))
@@ -2100,7 +2108,7 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment()
     editBox()
     parkEditor()
-    fireEvent.click(screen.getByRole('button', { name: /2단계.*파렛트 배정/ }))
+    fireEvent.click(screen.getByRole('button', { name: /2단계.*저장된 박스현황/ }))
 
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
     expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
@@ -2130,10 +2138,10 @@ describe('ChinaShipmentsBoard', () => {
     const refreshed: ChinaShipmentDetailView = {
       ...detail,
       items: detail.items.map((item) => item.id === 'item-1' ? { ...item, packedQuantity: 10, boxSplitStatus: 'completed' } : item),
-      boxes: [{ id: 'saved-box', shipmentId: 'a', editable: true, palletId: null, boxNo: 'SKU-01-1', status: 'packing', note: null, lengthCm: null, widthCm: null, heightCm: null }],
+      boxes: [{ id: 'saved-box', shipmentId: 'a', editable: true, palletId: null, boxNo: 'SKU-01-1', status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null }],
       boxItems: [{ id: 'saved-allocation', boxId: 'saved-box', shipmentItemId: 'item-1', quantity: 10 }],
     }
-    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={refreshed} selectedStep="boxes" showCreate={false} />)
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={refreshed} selectedStep="items" showCreate={false} />)
 
     expect(screen.getByText('SKU-01')).toBeInTheDocument()
     expect(itemEditor('SKU-02').getByPlaceholderText('0')).toHaveValue(5)
@@ -2149,7 +2157,7 @@ describe('ChinaShipmentsBoard', () => {
 
     rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={initial} selectedStep="items" showCreate={false} />)
     const refreshed = makeShipmentWithSharedBoxDimensions(40, 50, 60)
-    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={refreshed} selectedStep="boxes" showCreate={false} />)
+    rerender(<ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={refreshed} selectedStep="items" showCreate={false} />)
 
     const editor = itemEditor('SHARED-02')
     expect(editor.getByPlaceholderText('0')).toHaveValue(4)

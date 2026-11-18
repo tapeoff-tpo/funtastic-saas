@@ -1398,6 +1398,11 @@ export const chinaOutboundBoxItems = pgTable(
     userId: uuid('user_id').notNull(),
     quantity: integer('quantity').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
+    // Per-product measurements allow a mixed physical box to be recomputed on edits.
+    grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
+    widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
+    heightCm: numeric('height_cm', { precision: 12, scale: 2 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

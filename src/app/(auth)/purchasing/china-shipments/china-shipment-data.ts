@@ -79,7 +79,8 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       widthCm: dimensionNumber(box.widthCm),
       heightCm: dimensionNumber(box.heightCm),
     })),
-    boxItems: detail.boxItems.map((item) => ({ id: item.id, boxId: item.boxId, shipmentItemId: item.shipmentItemId, quantity: item.quantity })),
+    boxItems: detail.boxItems.map((item) => ({ id: item.id, boxId: item.boxId, shipmentItemId: item.shipmentItemId, quantity: item.quantity,
+      lengthCm: dimensionNumber(item.lengthCm), widthCm: dimensionNumber(item.widthCm), heightCm: dimensionNumber(item.heightCm), grossWeightKg: dimensionNumber(item.grossWeightKg) })),
   }
 }
 

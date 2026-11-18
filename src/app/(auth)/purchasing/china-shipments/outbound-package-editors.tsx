@@ -4,10 +4,45 @@ import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { largestChinaOutboundBox } from '@/lib/purchasing/china-outbound-packaging'
-import { formatChinaOutboundBoxDimensions } from '@/lib/purchasing/china-outbound-dimensions'
-import { mergeChinaOutboundBoxesAction, saveChinaOutboundItemChineseNameAction, saveChinaOutboundPackageWeightAction } from '../saas-china-actions'
+import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
+import { mergeChinaOutboundBoxesAction, saveChinaOutboundBoxDimensionsAction, saveChinaOutboundItemChineseNameAction, saveChinaOutboundPackageWeightAction } from '../saas-china-actions'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaShipmentDetailView } from './china-shipments-board'
+
+export function BoxDimensionsEditor({ shipmentId, box, editable, isPending }: {
+  shipmentId: string; box: ChinaShipmentDetailView['boxes'][number]; editable: boolean; isPending: boolean
+}) {
+  const guard = useChinaWorkGuard()
+  const router = useRouter()
+  const [pending, start] = useTransition()
+  const initial = { lengthCm: String(box.lengthCm ?? ''), widthCm: String(box.widthCm ?? ''), heightCm: String(box.heightCm ?? '') }
+  const [baseline, setBaseline] = useState(initial)
+  const draftId = `box-dimensions:${box.id}`
+  const [dimensions, setDimensions] = useState(() => (guard.getDraft(draftId)?.snapshot as typeof initial | undefined) ?? initial)
+  const dirty = (Object.keys(dimensions) as Array<keyof typeof initial>).some((key) => dimensions[key] !== baseline[key])
+  async function save() {
+    const values = Object.values(dimensions)
+    const empty = values.every((value) => !value.trim())
+    if (!empty && values.some((value) => !value.trim() || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) > 9_999_999.99)) {
+      toast.error('박스 가로·세로·높이를 모두 입력하거나 모두 비워주세요.')
+      return false
+    }
+    const result = await saveChinaOutboundBoxDimensionsAction({
+      shipmentId, boxId: box.id,
+      lengthCm: empty ? null : Number(dimensions.lengthCm),
+      widthCm: empty ? null : Number(dimensions.widthCm),
+      heightCm: empty ? null : Number(dimensions.heightCm),
+    })
+    if (!result.ok) { toast.error(result.error); return false }
+    setBaseline({ ...dimensions }); guard.setDraft(draftId, null); router.refresh(); toast.success('박스 규격을 저장했습니다.'); return true
+  }
+  useChinaWorkDraft(draftId, dirty ? { kind: 'box', label: `박스 ${box.boxNo} 규격`, snapshot: dimensions, save, discard: () => setDimensions({ ...baseline }) } : null)
+  return <div className="space-y-2">
+    {editable ? <div className="flex flex-wrap items-end gap-2">{([['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)']] as const).map(([key, label]) => <label key={key} className="text-xs">{label}<input aria-label={`박스 ${box.boxNo} ${label}`} type="number" min="0.01" max="9999999.99" step="0.01" value={dimensions[key]} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block h-8 w-20 rounded-md border bg-background px-2" /></label>)}<button type="button" aria-label={`박스 ${box.boxNo} 규격 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 rounded-md border px-3 text-xs">규격 저장</button></div>
+      : <p className="text-xs">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</p>}
+    <p className="text-xs tabular-nums text-muted-foreground">CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(editable ? dimensions : box)) ?? '미입력'}</p>
+  </div>
+}
 
 export function PackageWeightEditor({ shipmentId, packageId, packageNo, kind, initialWeight, editable, isPending, compact = false }: {
   shipmentId: string; packageId: string; packageNo: string; kind: 'box' | 'pallet'; initialWeight?: number | null; editable: boolean; isPending: boolean; compact?: boolean

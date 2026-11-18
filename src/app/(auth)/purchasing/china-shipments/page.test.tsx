@@ -54,12 +54,12 @@ it('loads the visible shipment list concurrently with the configured warehouse c
   expect(mocks.stock).not.toHaveBeenCalled()
 })
 
-it('does not reload the hidden list while displaying a selected shipment', async () => {
-  const props = await renderPage({ ...period, shipment: selectedId, step: 'boxes' })
+it.each([['boxes', 'boxes'], ['pallets', 'pallets'], ['summary', 'pallets']])('does not reload the hidden list while displaying a selected shipment at %s', async (step, selectedStep) => {
+  const props = await renderPage({ ...period, shipment: selectedId, step })
   expect(mocks.detail).toHaveBeenCalledExactlyOnceWith('canonical-owner', selectedId)
   expect(mocks.shipments).not.toHaveBeenCalled()
   expect(mocks.stock).not.toHaveBeenCalled()
-  expect(props).toMatchObject({ shipments: [], selectedShipment: selectedDetail, selectedStep: 'items', showCreate: false, outboundWarehouses: warehouses })
+  expect(props).toMatchObject({ shipments: [], selectedShipment: selectedDetail, selectedStep, showCreate: false, outboundWarehouses: warehouses })
 })
 
 it('loads creation stock and warehouses without hidden list or detail queries', async () => {

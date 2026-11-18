@@ -115,7 +115,7 @@ export type ChinaShipmentDetailView = {
     heightCm: number | null
     grossWeightKg?: number | null
   }>
-  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number }>
+  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null }>
 }
 
 type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string; grossWeightKg: string; boxId?: string; autoNumber?: boolean }
@@ -187,7 +187,7 @@ function ChinaShipmentsBoardContent({
   const searchParams = useSearchParams()
   const stepParam = searchParams.get('step')
   const requestedStep = stepParam ?? selectedStep
-  const activeStep = requestedStep === 'pallets' || requestedStep === 'summary' ? requestedStep : 'items'
+  const activeStep = requestedStep === 'summary' ? 'pallets' : requestedStep === 'pallets' || requestedStep === 'boxes' ? requestedStep : 'items'
   const [serverSnapshot, setServerSnapshot] = useState(serverSelectedShipment)
   const [selectedShipment, setSelectedShipment] = useState(serverSelectedShipment)
   const [saveGeneration, setSaveGeneration] = useState(0)
@@ -439,7 +439,7 @@ function ChinaShipmentsBoardContent({
           isPending={isPending || guard.busy}
           startTransition={startTransition}
           onStageChange={(stage) => selectedShipment && stage !== activeStep && guard.requestNavigation(() => {
-            // All four stages use this shipment snapshot; switching stages needs no server request.
+            // All three stages use this shipment snapshot; switching stages needs no server request.
             window.history.pushState(null, '', withChinaShipmentPeriod(shipmentHref(selectedShipment.shipment.id, stage), searchParams.toString()))
           })}
         /> : null}
@@ -776,45 +776,41 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
               className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
             <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a>
           </div>
-          {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
+          {shipment.status === 'ready' || (editable && stage === 'pallets') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>
       </div>
 
       <nav className="grid gap-1 rounded-lg border bg-muted/20 p-1 sm:grid-cols-3" aria-label="중국출고 작업 단계">
         <StageButton active={stage === 'items'} step="1단계" title="출고품목·박스분할" detail={`${items.length.toLocaleString('ko-KR')}종 · ${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('items')} />
-        <StageButton active={stage === 'pallets'} step="2단계" title="파렛트 배정" detail={`${palletSummaries.length} PLT + ${boxesWithItems.filter((box) => !box.palletId).length} BOX`} onClick={() => onStageChange('pallets')} />
-        <StageButton active={stage === 'summary'} step="3단계" title="최종 적재리스트" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('summary')} />
+        <StageButton active={stage === 'boxes'} step="2단계" title="저장된 박스현황" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('boxes')} />
+        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트 배정" detail={`${palletSummaries.length} PLT + ${boxesWithItems.filter((box) => !box.palletId).length} BOX`} onClick={() => onStageChange('pallets')} />
       </nav>
 
       {stage === 'items' ? <section className="space-y-3">
         <ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} warehouseCodes={warehouseCodes} editable={editable} isPending={isPending} />
         <ManualSamplePanel shipmentId={shipment.id} defaultWarehouseCode={shipment.originWarehouseCode} warehouseCodes={[...new Set([...warehouseCodes, ...inventoryItems.map((item) => item.warehouseCode)])]} editable={editable} isPending={isPending} />
         <OutboundItemsPanel detail={detail} editable={editable} isPending={isPending} boxItemsByItem={boxItemsByItem} />
-        <details className="rounded-lg border">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">저장된 박스 확인·수정</summary>
-          <div className="space-y-3 border-t p-3">
-            {editable && <MergeBoxesButton shipmentId={shipment.id} boxes={boxesWithItems} isPending={isPending} />}
-            <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} onEditItem={editSavedBoxItem} />
-          </div>
-        </details>
+        <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('boxes')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 저장된 박스현황</button></div>
+      </section> : null}
+
+      {stage === 'boxes' ? <section className="space-y-3">
+        <div><h3 className="font-semibold">2단계 · 저장된 박스현황</h3><p className="mt-1 text-sm text-muted-foreground">박스번호 순서대로 적재 상품을 확인하고 박스 규격과 중량을 수정하세요. 혼합박스는 같은 목록에 표시됩니다.</p></div>
+        {editable && <MergeBoxesButton shipmentId={shipment.id} boxes={boxesWithItems} isPending={isPending} />}
+        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} onEditItem={editSavedBoxItem} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 파렛트 배정</button></div>
         {editingBoxItem && <ItemBoxSplitDialog key={editingBoxItem.id} detail={detail} item={editingBoxItem} editable={editable} isPending={isPending} allowDeferredSave onClose={() => setEditingBoxItemId(null)} />}
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
-        <div><h3 className="font-semibold">2단계 · 파렛트 배정</h3><p className="mt-1 text-sm text-muted-foreground">각 박스의 파렛트 번호를 입력한 뒤 파렛트 배정 저장을 누르세요. 같은 번호를 입력한 박스는 한 파렛트에 함께 적재됩니다.</p></div>
+        <div><h3 className="font-semibold">3단계 · 파렛트 배정</h3><p className="mt-1 text-sm text-muted-foreground">각 박스의 파렛트 번호를 입력한 뒤 파렛트 배정 저장을 누르세요. 같은 번호를 입력한 박스는 한 파렛트에 함께 적재됩니다.</p></div>
+        {hasIncompleteBoxSplit ? <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p> : null}
+        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p> : null}
         {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="1단계에서 출고품목별 박스 수량과 규격을 저장해주세요." onMove={() => onStageChange('items')} moveLabel="1단계로 이동" /> : <>
           <PalletAssignmentPanel shipmentId={shipment.id} boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} />
           <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} boxItems={detail.boxItems} items={items} editable={editable} isPending={isPending} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} />
-          <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy} onClick={() => onStageChange('summary')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 최종 적재리스트</button></div>
         </>}
       </section> : null}
 
-      {stage === 'summary' ? <section className="space-y-4">
-        {hasIncompleteBoxSplit ? <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p> : null}
-        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p> : null}
-        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} isPending={isPending} /> : <EmptyStage title="파렛트에 적재된 박스가 없습니다." description="2단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="2단계로 이동" />}
-      </section> : null}
     </section>
   )
 }
@@ -1049,8 +1045,17 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   const acceptSavedState = useContext(BoxSplitSavedContext)
   const draftId = `box:${item.id}`
   const retainedSnapshot = asBoxSplitDraftSnapshot(guard.getDraft(draftId)?.snapshot)
+  function allocationDraft(allocation: ChinaShipmentDetailView['boxItems'][number], box: ChinaShipmentDetailView['boxes'][number]): BoxSplitDraft {
+    const exclusive = !allBoxItems.some((entry) => entry.boxId === box.id && entry.shipmentItemId !== item.id)
+    const measurement = (field: 'lengthCm' | 'widthCm' | 'heightCm' | 'grossWeightKg') => {
+      const value = allocation[field] ?? (exclusive ? box[field] : null)
+      return value == null ? '' : String(value)
+    }
+    return { key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity),
+      lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), grossWeightKg: measurement('grossWeightKg') }
+  }
   const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
-    ? allocations.map(({ allocation, box }) => ({ key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity), lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm), heightCm: box.heightCm == null ? '' : String(box.heightCm), grossWeightKg: box.grossWeightKg == null ? '' : String(box.grossWeightKg) }))
+    ? allocations.map(({ allocation, box }) => allocationDraft(allocation, box))
     : [{ ...createBoxSplitDraft(), boxNo: nextAvailableBoxNumbers(1, [...allBoxes.map((box) => box.boxNo), ...guard.getBoxNumbers(draftId)])[0], autoNumber: true }])))
   const [drafts, setDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.drafts ?? initialDrafts))
   const [initialBoxSplitStatus, setInitialBoxSplitStatus] = useState<BoxSplitStatus>(() => retainedSnapshot?.baselineStatus ?? item.boxSplitStatus)
@@ -1101,19 +1106,8 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     setDrafts((current) => current.map((draft) => {
       if (draft.key !== key) return draft
       if (patch.boxNo === undefined) return { ...draft, ...patch }
-      const nextBoxNo = patch.boxNo.trim()
-      let grossWeightKg = draft.grossWeightKg
-      if (nextBoxNo !== draft.boxNo.trim()) {
-        const destination = allBoxes.find((box) => box.boxNo === nextBoxNo)
-        const source = allBoxes.find((box) => box.id === draft.boxId)
-        const sourceIsShared = source && allBoxItems.some((entry) => entry.boxId === source.id && entry.shipmentItemId !== item.id)
-        const previousDestination = allBoxes.find((box) => box.boxNo === draft.boxNo.trim())
-        // A shared allocation moves to another physical box; only exclusive boxes can be renamed.
-        if (destination) grossWeightKg = destination.grossWeightKg == null ? '' : String(destination.grossWeightKg)
-        else if (sourceIsShared || (!source && previousDestination)) grossWeightKg = ''
-        else if (source && previousDestination && previousDestination.id !== source.id) grossWeightKg = source.grossWeightKg == null ? '' : String(source.grossWeightKg)
-      }
-      return { ...draft, ...patch, grossWeightKg, autoNumber: false }
+      // Measurements belong to this product allocation, including when it moves into a mixed box.
+      return { ...draft, ...patch, autoNumber: false }
     }))
   }
 
@@ -1121,16 +1115,9 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     const nextAllocations = drafts
       .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm, draft.grossWeightKg].some((value) => value.trim()))
       .map((draft) => {
-        const previous = initialDrafts.find((candidate) => candidate.boxNo.trim() === draft.boxNo.trim())
-        const dimensionsChanged = !previous || [draft.lengthCm, draft.widthCm, draft.heightCm].some((value, index) => value !== [previous.lengthCm, previous.widthCm, previous.heightCm][index])
-        const weightBaseline = initialDrafts.find((candidate) => candidate.key === draft.key)
-        const weightDestination = allBoxes.find((box) => box.boxNo === draft.boxNo.trim())
-        const renamesOriginalBox = draft.boxId && (!weightDestination || weightDestination.id === draft.boxId)
-          && !allBoxItems.some((entry) => entry.boxId === draft.boxId && entry.shipmentItemId !== item.id)
-        const movesToDifferentBox = draft.boxNo.trim() !== weightBaseline?.boxNo.trim() && !renamesOriginalBox
-        const previousWeight = movesToDifferentBox
-          ? weightDestination?.grossWeightKg == null ? '' : String(weightDestination.grossWeightKg)
-          : weightBaseline?.grossWeightKg ?? ''
+        const previous = initialDrafts.find((candidate) => candidate.key === draft.key)
+        const moved = draft.boxNo.trim() !== previous?.boxNo.trim()
+        const dimensionsChanged = moved || !previous || [draft.lengthCm, draft.widthCm, draft.heightCm].some((value, index) => value !== [previous.lengthCm, previous.widthCm, previous.heightCm][index])
         return {
           boxNo: draft.boxNo.trim(),
           ...(draft.autoNumber ? { autoNumber: true } : {}),
@@ -1139,12 +1126,11 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
             && !allBoxItems.some((entry) => entry.boxId === draft.boxId && entry.shipmentItemId !== item.id)
             ? { existingBoxId: draft.boxId } : {}),
           quantity: Number(draft.quantity),
-          // Existing shared boxes keep their current dimensions unless this editor actually changed them.
+          // Unchanged measurements preserve any manual physical-box override.
           lengthCm: dimensionsChanged ? optionalNumber(draft.lengthCm) : null,
           widthCm: dimensionsChanged ? optionalNumber(draft.widthCm) : null,
           heightCm: dimensionsChanged ? optionalNumber(draft.heightCm) : null,
-          // An untouched shared-box weight must not overwrite a later measurement.
-          ...(draft.grossWeightKg !== previousWeight ? { grossWeightKg: optionalNumber(draft.grossWeightKg) } : {}),
+          ...(moved || draft.grossWeightKg !== (previous?.grossWeightKg ?? '') ? { grossWeightKg: optionalNumber(draft.grossWeightKg) } : {}),
         }
       })
     const hasBoxSplitStatusChange = currentBoxSplitStatus !== initialBoxSplitStatus
@@ -1163,9 +1149,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     const savedBoxes = new Map(result.savedState?.boxes.map((box) => [box.id, box]) ?? [])
     const persistedDrafts = result.savedState ? result.savedState.boxItems.flatMap((allocation) => {
       const box = savedBoxes.get(allocation.boxId)
-      return box ? [{ key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity),
-        lengthCm: box.lengthCm == null ? '' : String(box.lengthCm), widthCm: box.widthCm == null ? '' : String(box.widthCm),
-        heightCm: box.heightCm == null ? '' : String(box.heightCm), grossWeightKg: box.grossWeightKg == null ? '' : String(box.grossWeightKg) }] : []
+      return box && allocation.shipmentItemId === item.id ? [allocationDraft(allocation, box)] : []
     }) : drafts
     setDrafts(cloneBoxSplitDrafts(persistedDrafts))
     setInitialDrafts(cloneBoxSplitDrafts(persistedDrafts))
@@ -1231,7 +1215,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
           첫 박스 규격·무게 전체 적용
         </button>}
       </div>
-      <p className="border-b px-3 py-2 text-xs text-muted-foreground">총중량은 포장재를 포함한 박스 전체 무게입니다. 분할 수량을 바꾸면 무게를 다시 확인해주세요.</p>
+      <p className="border-b px-3 py-2 text-xs text-muted-foreground">혼합박스는 품목별 중량을 합산하고 가장 큰 부피의 규격을 적용합니다. 품목별 중량을 모두 입력해주세요. 박스 전체 실측값은 2단계에서 수정할 수 있습니다.</p>
       <div className="overflow-x-auto">
         <table className="min-w-[1000px] w-full text-sm">
           <thead className="bg-muted/10 text-xs text-muted-foreground">

@@ -26,11 +26,12 @@ function saved(): ChinaOutboundBoxSplitSavedState {
 
 it('applies persisted packing rows immediately while preserving other mixed-box products and enrichment', () => {
   const original = fixture()
-  const result = applyChinaShipmentBoxSplitSavedState(original, saved())!
+  const seededOther = { ...original.boxItems[1], lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 5 }
+  const result = applyChinaShipmentBoxSplitSavedState(original, { ...saved(), updatedOtherBoxItems: [seededOther] })!
   expect(result.shipment).toMatchObject({ status: 'packing', memo: '메모' })
   expect(result.items[0]).toMatchObject({ packedQuantity: 10, boxSplitStatus: 'completed', reservedQuantity: 10, chineseProductName: '中文品名', productImage: original.items[0].productImage })
   expect(result.items[1]).toBe(original.items[1])
-  expect(result.boxItems).toEqual([original.boxItems[1], saved().boxItems[0]])
+  expect(result.boxItems).toEqual([seededOther, saved().boxItems[0]])
   expect(result.boxes).toEqual(saved().boxes)
   expect(result.pallets.map((pallet) => pallet.completionStatus)).toEqual(['in_progress', 'completed'])
   expect(original.shipment.status).toBe('draft')

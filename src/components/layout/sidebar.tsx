@@ -162,7 +162,11 @@ export const navSections: NavSection[] = [
     id: 'inventory',
     title: '상품',
     items: [
-      { href: '/operations/product-operations', label: '상품 운영', icon: Warehouse },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/costs', label: '품목·원가', icon: Package },
+      { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
+      { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
+      { href: '/operations/marketplace-registration', label: '상품등록', icon: Package },
       { href: '/operations/coupang-registration', label: '쿠팡상품등록', icon: FileSpreadsheet },
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
     ],

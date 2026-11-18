@@ -62,3 +62,12 @@ export function getMallBasePrice(raw: Record<string, unknown>, mallId: string, s
     ?? priceAmount(raw[`${key} 판매가`])
     ?? getCommonPrice(raw)
 }
+
+
+export function registrationIdentifiersKey(mallId: string) {
+  return REGISTRATION_EDIT_PREFIX + 'identifiers:' + mallId
+}
+
+export function registrationNumberActorKey(mallId: string, identifierKey: string) {
+  return REGISTRATION_EDIT_PREFIX + 'numberActor:' + mallId + ':' + identifierKey
+}

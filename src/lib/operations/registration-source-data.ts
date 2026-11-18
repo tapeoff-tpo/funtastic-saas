@@ -15,8 +15,14 @@ export async function getRegistrationSourceData(userId: string, sku: string) {
       receivedQuantity: purchases.chinaReceivedQuantity,
     }).from(purchases).where(and(eq(purchases.userId, userId), eq(purchases.sku, sku)))
       .orderBy(desc(sql`COALESCE(${purchases.requestDate}, ${purchases.createdAt}::date)`), desc(purchases.createdAt), desc(purchases.id)).limit(1),
-    db.execute<{ id: string; name: string | null; option: string | null; url: string | null; purchaseUrl: string | null }>(sql`
-      SELECT id, registered_product_name AS name, product_option AS option, detail_page_url AS url, source_url AS "purchaseUrl"
+    db.execute<{ id: string; name: string | null; option: string | null; url: string | null; purchaseUrl: string | null; b2bPrice: number | null; b2cPrice: number | null;
+      material: string | null; size: string | null; manufacturer: string | null; country: string | null;
+      weight: string | null; capacity: string | null; components: string | null; specialNotes: string | null;
+    }>(sql`
+      SELECT id, registered_product_name AS name, product_option AS option, detail_page_url AS url, source_url AS "purchaseUrl",
+        b2b_price AS "b2bPrice", b2c_price AS "b2cPrice", notice_material AS material, notice_size AS size,
+        notice_manufacturer AS manufacturer, notice_country AS country, notice_weight AS weight,
+        notice_capacity AS capacity, notice_components AS components, notice_special_notes AS "specialNotes"
       FROM new_product_workflow_items
       WHERE user_id = ${userId}::uuid AND sabangnet_code = ${sku}
       ORDER BY created_at DESC, id DESC LIMIT 1
@@ -30,7 +36,13 @@ export async function getRegistrationSourceData(userId: string, sku: string) {
   return {
     item, purchase, workflow: workflows[0],
     purchaseUrl: masterText('구매 URL'),
-    manufacturer: masterText('제조사'),
-    countryOfOrigin: masterText('제조국'),
+    manufacturer: masterText('제조사') || workflows[0]?.manufacturer || undefined,
+    countryOfOrigin: masterText('제조국') || workflows[0]?.country || undefined,
+    material: masterText('재질') || workflows[0]?.material || undefined,
+    size: masterText('제품크기') || workflows[0]?.size || undefined,
+    weight: masterText('무게') || workflows[0]?.weight || undefined,
+    capacity: masterText('용량') || workflows[0]?.capacity || undefined,
+    components: masterText('구성품') || workflows[0]?.components || undefined,
+    specialNotes: masterText('특이사항') || workflows[0]?.specialNotes || undefined,
   }
 }

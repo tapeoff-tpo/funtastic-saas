@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCommonPrice, getRegistrationMargin, registrationNumberKey, registrationPriceKey, registrationShippingKey } from "@/lib/analytics/price-registration-values"
+import { getCommonPrice, getRegistrationMargin, registrationIdentifiersKey, registrationNumberKey, registrationPriceKey, registrationShippingKey } from "@/lib/analytics/price-registration-values"
 import { getRegistrationMarketplaceColumns, findMarketplaceProductIds, getPriceTableSourceNumber, type PriceTableDisplayColumn } from './price-table-columns'
 
 function column(overrides: Partial<PriceTableDisplayColumn> = {}): PriceTableDisplayColumn {
@@ -123,4 +123,25 @@ it('uses the common price and warns about low margins without changing the price
   expect(getRegistrationMargin(override, 'toss', 20)).toMatchObject({ price: 12000, margin: 0 })
   expect(getRegistrationMargin(raw, 'toss', undefined).margin).toBeNull()
   expect(getCommonPrice({ 'B2B 판매가': '9000', 'B2C 판매가': '10000' })).toBeNull()
+})
+
+
+it('uses an edited identifier list without bringing the old imported number back', () => {
+  const saved = [
+    { key: '__registrationEdit:number:coupang:원본 상품번호', value: '98765' },
+    { key: '다른 쿠팡 상품번호', value: '24680' },
+  ]
+  const raw = {
+    '쿠팡 상품번호': '12345',
+    [registrationIdentifiersKey('coupang')]: JSON.stringify(saved),
+  }
+  expect(findMarketplaceProductIds(raw, column())).toEqual(saved)
+})
+
+it('treats placeholder numbers as unregistered and tolerates malformed saved data', () => {
+  expect(findMarketplaceProductIds({ '쿠팡 상품번호': '확인필요' }, column())).toEqual([])
+  expect(findMarketplaceProductIds({ '쿠팡 상품번호': '   ' }, column())).toEqual([])
+  expect(findMarketplaceProductIds({
+    '쿠팡 상품번호': '12345', [registrationIdentifiersKey('coupang')]: 'bad json',
+  }, column())).toEqual([{ key: '쿠팡 상품번호', value: '12345' }])
 })

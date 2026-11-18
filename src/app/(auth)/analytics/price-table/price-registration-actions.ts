@@ -1,10 +1,9 @@
 'use server'
 
-import { and, eq, sql } from 'drizzle-orm'
-import { getRegistrationTargets, getInactiveRegistrationMarketplaceColumns, findMarketplaceProductIds } from './price-table-columns'
-import { priceTableHref } from './price-table-navigation'
+import { and, eq } from 'drizzle-orm'
+import { getRegistrationTargets, getInactiveRegistrationMarketplaceColumns, getManualRegistrationTargets, isProductIdentifier, findMarketplaceProductIds } from './price-table-columns'
 import { formatPriceNumberDate, priceNumberDateKey } from '@/lib/analytics/price-number-date'
-import { COMMON_PRICE_KEY, priceAmount, registrationNumberKey, registrationPriceKey, registrationShippingKey } from '@/lib/analytics/price-registration-values'
+import { REGISTRATION_EDIT_PREFIX, priceAmount, registrationNumberKey, registrationPriceKey, registrationIdentifiersKey, registrationNumberActorKey } from '@/lib/analytics/price-registration-values'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -35,59 +34,6 @@ export async function setPriceRegistrationExcluded(rowId: string, excluded: bool
     console.error('price registration exclusion error:', error)
     return { error: '등록 대상 변경을 저장하지 못했습니다.' }
   }
-}
-
-export async function saveLinkedPriceRegistration(form: FormData) {
-  await assertMenuAccess('/analytics/price-table')
-  await assertMenuAccess('/operations/marketplace-registration')
-  const user = await getCurrentUser()
-  const rowId = z.string().uuid().parse(form.get('rowId'))
-  const mallId = z.string().min(1).max(80).parse(form.get('mall'))
-  const updatedAt = z.string().datetime().parse(form.get('updatedAt'))
-  const search = z.string().max(500).parse(form.get('search'))
-  const malls = z.string().max(2000).parse(form.get('malls')).split(',').filter(Boolean)
-  const priceInput = z.string().trim().regex(/^(?:\d{1,10}(?:\.\d{1,2})?)?$/)
-  const commonPrice = priceInput.parse(form.get('commonPrice'))
-  const override = priceInput.parse(form.get('override'))
-  const shipping = priceInput.parse(form.get('shipping'))
-  const number = z.string().trim().max(200).parse(form.get('number'))
-  if (!user) throw new Error('로그인이 필요합니다.')
-  const workspaceId = await getWorkspaceUserId(user.id)
-  const table = analyticsPriceTableRows
-
-  const sheetName = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`product-link:${workspaceId}`}))`)
-    const [row] = await tx.select().from(table).where(and(eq(table.id, rowId), eq(table.userId, workspaceId))).for('update')
-    if (!row || row.updatedAt.toISOString() !== updatedAt) {
-      throw new Error('상품이 변경됐습니다. 새로고침 후 다시 저장해주세요.')
-    }
-    const [column] = getRegistrationTargets(row.sourceSheetName, [mallId])
-    if (!mallId || !column) throw new Error('등록할 몰을 확인해주세요.')
-    const rawData = { ...row.rawData } as Record<string, string>
-    if (commonPrice) rawData[COMMON_PRICE_KEY] = commonPrice
-    else delete rawData[COMMON_PRICE_KEY]
-    for (const [key, value] of [[registrationPriceKey(mallId), override], [registrationShippingKey(mallId), shipping]]) {
-      if (value) rawData[key] = value
-      else delete rawData[key]
-    }
-    const key = registrationNumberKey(mallId)
-    const existing = findMarketplaceProductIds(rawData, column)
-    if (number && !existing.some((identifier) => identifier.value === number)) {
-      rawData[key] = number
-      rawData[priceNumberDateKey(key)] = formatPriceNumberDate(new Date())
-    }
-    await tx.update(table).set({ rawData, updatedAt: new Date() }).where(and(eq(table.id, rowId), eq(table.userId, workspaceId)))
-    return row.sourceSheetName
-  })
-  revalidatePath('/analytics/price-table')
-  return priceTableHref({
-    sheetName,
-    search,
-    sortKey: 'importedAt',
-    sortOrder: 'desc',
-    view: form.get('view') === 'products' ? 'products' : 'compare',
-    malls,
-  })
 }
 
 export async function saveMallPrice(input: {
@@ -132,5 +78,60 @@ export async function saveMallPrice(input: {
     return { saved: true }
   } catch (error) {
     return { error: error instanceof Error ? error.message : '판매가를 저장하지 못했습니다.' }
+  }
+}
+
+
+export async function saveManualRegistrationNumber(input: {
+  rowId: string
+  mallId: string
+  identifierKey: string | null
+  previousValue: string | null
+  number: string
+}) {
+  try {
+    await assertMenuAccess('/operations/marketplace-registration')
+    await assertMenuAccess('/analytics/price-table')
+    const user = await getCurrentUser()
+    if (!user || user.mustChangePassword) return { error: '다시 로그인해주세요.' }
+    const parsed = z.object({
+      rowId: z.string().uuid(), mallId: z.string().min(1).max(80),
+      identifierKey: z.string().min(1).max(500).nullable(),
+      previousValue: z.string().max(200).nullable(),
+      number: z.string().trim().min(1).max(200).refine(isProductIdentifier, '유효한 상품등록번호를 입력해주세요.'),
+    }).safeParse(input)
+    if (!parsed.success) return { error: '유효한 상품등록번호를 200자 이내로 입력해주세요.' }
+    const workspaceId = await getWorkspaceUserId(user.id)
+    const { rowId, mallId, identifierKey, previousValue, number } = parsed.data
+    await db.transaction(async (tx) => {
+      const table = analyticsPriceTableRows
+      const [row] = await tx.select().from(table).where(and(eq(table.id, rowId), eq(table.userId, workspaceId))).for('update')
+      if (!row) throw new Error('상품을 찾을 수 없습니다.')
+      const target = getManualRegistrationTargets(row.sourceSheetName).find((column) => column.id === mallId)
+      if (!target) throw new Error('등록할 몰을 확인해주세요.')
+      const raw = { ...row.rawData } as Record<string, string>
+      const numbers = findMarketplaceProductIds(raw, target)
+      const current = numbers.find((entry) => entry.key === identifierKey)
+      if (identifierKey !== null && (!current || current.value !== previousValue)) {
+        throw new Error('다른 사용자가 번호를 수정했습니다. 새로고침 후 다시 확인해주세요.')
+      }
+      if (identifierKey === null && numbers.length > 0) throw new Error('등록번호가 추가되었습니다. 새로고침 후 다시 확인해주세요.')
+      if (current?.value === number) return
+      if (numbers.some((entry) => entry.key !== identifierKey && entry.value === number)) throw new Error('이미 입력된 등록번호입니다.')
+      let key = identifierKey ?? registrationNumberKey(mallId)
+      if (current && !key.startsWith(REGISTRATION_EDIT_PREFIX)) key = registrationNumberKey(mallId) + ':' + key
+      const next = current ? numbers.map((entry) => entry.key === identifierKey ? { key, value: number } : entry)
+        : [{ key, value: number }]
+      raw[registrationIdentifiersKey(mallId)] = JSON.stringify(next)
+      raw[registrationNumberActorKey(mallId, key)] = user.id
+      raw[priceNumberDateKey(key)] = formatPriceNumberDate(new Date())
+      await tx.update(table).set({ rawData: raw, updatedAt: new Date() })
+        .where(and(eq(table.id, rowId), eq(table.userId, workspaceId)))
+    })
+    revalidatePath('/operations/marketplace-registration')
+    revalidatePath('/analytics/price-table')
+    return { saved: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : '상품등록번호를 저장하지 못했습니다.' }
   }
 }

@@ -1,4 +1,4 @@
-import { REGISTRATION_EDIT_PREFIX, registrationNumberKey } from '@/lib/analytics/price-registration-values'
+import { REGISTRATION_EDIT_PREFIX, registrationIdentifiersKey, registrationNumberKey } from '@/lib/analytics/price-registration-values'
 import { isPriceNumberDateKey } from '@/lib/analytics/price-number-date'
 
 export type PriceTableDisplayColumn = {
@@ -190,6 +190,16 @@ export function findMarketplaceProductIds(
   rawData: Record<string, string>,
   column: PriceTableDisplayColumn,
 ) {
+  const savedIdentifiers = rawData[registrationIdentifiersKey(column.id)]
+  if (typeof savedIdentifiers === 'string') {
+    try {
+      const values: unknown = JSON.parse(savedIdentifiers)
+      if (Array.isArray(values) && values.every((entry) => entry && typeof entry === 'object'
+        && typeof entry.key === 'string' && typeof entry.value === 'string')) {
+        return values.filter((entry) => isProductIdentifier(entry.value)).map(({ key, value }) => ({ key, value }))
+      }
+    } catch { /* Fall back to the imported identifiers if a saved value is malformed. */ }
+  }
   const savedKey = registrationNumberKey(column.id)
   if (isProductIdentifier(rawData[savedKey])) return [{ key: savedKey, value: rawData[savedKey] }]
   const manualIdentifierKey = `${column.label} 상품번호`
@@ -278,8 +288,15 @@ function compactKey(value: string) {
   return value.replace(/\s+/g, '')
 }
 
-function isProductIdentifier(value: string | undefined): value is string {
+export function isProductIdentifier(value: string | undefined): value is string {
   if (!value) return false
   const normalized = value.replace(/\s+/g, '').toLowerCase()
-  return !['0', '-', '미등록', '없음', 'null', 'undefined'].includes(normalized)
+  return !['', '0', '-', '미등록', '없음', 'null', 'undefined', '확인필요', '등록필요'].includes(normalized)
+}
+
+
+export function getManualRegistrationTargets(sheetName: string) {
+  return sheetName === '뉴도매' ? getRegistrationTargets(sheetName, [])
+    : [...getRegistrationTargets(sheetName, []), ...getInactiveRegistrationMarketplaceColumns()
+      .filter((column) => !['b2b', 'b2c'].includes(column.id))]
 }

@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import { registrationPriceKey } from '@/lib/analytics/price-registration-values'
+import { registrationPriceKey, registrationIdentifiersKey } from '@/lib/analytics/price-registration-values'
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(), user: vi.fn(), owner: vi.fn(), row: vi.fn(), write: vi.fn(), revalidate: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('@/lib/db', () => ({
     }),
   },
 }))
-import { saveMallPrice } from './price-registration-actions'
+import { saveMallPrice, saveManualRegistrationNumber } from './price-registration-actions'
 const input = { rowId: '11111111-1111-4111-8111-111111111111', mallId: 'coupang', price: '16000', previousPrice: null }
 
 beforeEach(() => {
@@ -46,5 +46,38 @@ it('rejects a stale price without overwriting the other staff edit', async () =>
 it('does not save if menu access is denied', async () => {
   mocks.access.mockRejectedValue(new Error('접근 권한 없음'))
   expect(await saveMallPrice(input)).toEqual({ error: '접근 권한 없음' })
+  expect(mocks.write).not.toHaveBeenCalled()
+})
+
+
+it('updates only the chosen number while preserving other identifiers and prices', async () => {
+  mocks.row.mockResolvedValue([{ sourceSheetName: '상품등록', rawData: {
+    '퍼스트몰 상품번호 A': '167', '퍼스트몰 상품번호 B': '65', 'B2B 판매가': '12000',
+  } }])
+  const result = await saveManualRegistrationNumber({
+    rowId: input.rowId, mallId: 'firstmall', identifierKey: '퍼스트몰 상품번호 A', previousValue: '167', number: '999',
+  })
+  expect(result).toEqual({ saved: true })
+  const raw = mocks.write.mock.calls[0][0].rawData
+  expect(raw['B2B 판매가']).toBe('12000')
+  expect(raw['퍼스트몰 상품번호 A']).toBe('167')
+  expect(JSON.parse(raw[registrationIdentifiersKey('firstmall')])).toEqual([
+    { key: '__registrationEdit:number:firstmall:퍼스트몰 상품번호 A', value: '999' },
+    { key: '퍼스트몰 상품번호 B', value: '65' },
+  ])
+})
+
+it('rejects a stale product number and does not touch the row', async () => {
+  const result = await saveManualRegistrationNumber({
+    rowId: input.rowId, mallId: 'coupang', identifierKey: '쿠팡 상품번호', previousValue: 'outdated', number: '999',
+  })
+  expect(result).toEqual({ error: expect.stringContaining('다른 사용자') })
+  expect(mocks.write).not.toHaveBeenCalled()
+})
+
+it('requires a valid marketplace and product number', async () => {
+  expect(await saveManualRegistrationNumber({
+    rowId: input.rowId, mallId: 'coupang', identifierKey: null, previousValue: null, number: '확인필요',
+  })).toEqual({ error: expect.any(String) })
   expect(mocks.write).not.toHaveBeenCalled()
 })

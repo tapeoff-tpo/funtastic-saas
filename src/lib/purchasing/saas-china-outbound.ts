@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
+import { dimensionNumber } from './china-outbound-dimensions'
+import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-state'
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { nextAvailableBoxNumbers, planInspectionPacking, type InspectionPackingPiece } from './china-outbound-auto-packing'
@@ -2814,7 +2816,7 @@ export async function saveChinaOutboundItemBoxSplits(input: {
   shipmentItemId: string
   allocations: ChinaOutboundBoxSplitInput[]
   boxSplitStatus?: ChinaOutboundBoxSplitStatus
-}) {
+}): Promise<ChinaOutboundBoxSplitSavedState> {
   await ensureSaasChinaOutboundSchema()
   const allocations = normalizeChinaOutboundBoxSplitAllocations(input.allocations)
 
@@ -2840,7 +2842,8 @@ export async function saveChinaOutboundItemBoxSplits(input: {
         )),
     ])
 
-    await replaceChinaOutboundItemBoxSplitsInTransaction({
+    const previousBoxIds = new Set(boxItems.filter((row) => row.shipmentItemId === shipmentItem.id).map((row) => row.boxId))
+    const saved = await replaceChinaOutboundItemBoxSplitsInTransaction({
       tx,
       userId: input.userId,
       shipment,
@@ -2850,6 +2853,25 @@ export async function saveChinaOutboundItemBoxSplits(input: {
       boxes,
       boxItems,
     })
+    const savedBoxItems = saved.boxItems.filter((row) => row.shipmentItemId === shipmentItem.id)
+    const affectedBoxIds = new Set([...previousBoxIds, ...savedBoxItems.map((row) => row.boxId)])
+    const shipmentStatus = shipment.status === 'draft' && saved.packedQuantity === 0 ? 'draft' : 'packing'
+    return {
+      shipmentId: shipment.id,
+      shipmentItemId: shipmentItem.id,
+      shipmentStatus,
+      packedQuantity: saved.packedQuantity,
+      boxSplitStatus: saved.boxSplitStatus ?? (saved.packedQuantity === shipmentItem.reservedQuantity ? 'completed' : 'in_progress'),
+      boxes: saved.boxes.filter((box) => affectedBoxIds.has(box.id)).map((box) => ({
+        id: box.id, shipmentId: shipment.id, editable: shipmentStatus === 'draft' || shipmentStatus === 'packing',
+        palletId: box.palletId, boxNo: box.boxNo, status: box.status,
+        completionStatus: box.completionStatus === 'completed' || box.completionStatus === 'in_progress' ? box.completionStatus : null,
+        note: box.note, lengthCm: dimensionNumber(box.lengthCm), widthCm: dimensionNumber(box.widthCm),
+        heightCm: dimensionNumber(box.heightCm), grossWeightKg: dimensionNumber(box.grossWeightKg),
+      })),
+      boxItems: savedBoxItems.map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity })),
+      reopenedPalletIds: saved.reopenedPalletIds,
+    }
   })
 }
 
@@ -3775,13 +3797,15 @@ async function markChinaOutboundPalletsChanged(tx: DbTransaction, userId: string
 
 async function markChinaOutboundBoxesChanged(tx: DbTransaction, userId: string, shipmentId: string, boxIds: string[]) {
   const ids = [...new Set(boxIds)]
-  if (ids.length === 0) return
+  if (ids.length === 0) return []
   const updated = await tx.update(chinaOutboundBoxes).set({ completionStatus: 'in_progress', updatedAt: new Date() }).where(and(
     eq(chinaOutboundBoxes.userId, userId),
     eq(chinaOutboundBoxes.shipmentId, shipmentId),
     inArray(chinaOutboundBoxes.id, ids),
   )).returning({ palletId: chinaOutboundBoxes.palletId })
-  await markChinaOutboundPalletsChanged(tx, userId, shipmentId, updated.flatMap((box) => box.palletId ? [box.palletId] : []))
+  const palletIds = [...new Set(updated.flatMap((box) => box.palletId ? [box.palletId] : []))]
+  await markChinaOutboundPalletsChanged(tx, userId, shipmentId, palletIds)
+  return palletIds
 }
 
 type NormalizedSaasChinaInventoryWorkbookRow = Omit<SaasChinaInventoryExcelRow, 'warehouseCode' | 'sku' | 'productName' | 'optionName' | 'itemCategory' | 'optionKey' | 'note' | 'errors'> & {
@@ -4670,7 +4694,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     if (dimensionsChanged || weightChanged) {
       box = {
         ...box,
-        ...(dimensionsChanged ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
+        ...(dimensions && dimensionsChanged ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
         ...(weightChanged ? { grossWeightKg: allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg) } : {}),
         updatedAt: measurementUpdatedAt,
       }
@@ -4722,7 +4746,8 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     nextBoxItems.push(...saved)
   }
 
-  await markChinaOutboundBoxesChanged(input.tx, input.userId, input.shipment.id, [...changedBoxIds])
+  const reopenedPalletIds = await markChinaOutboundBoxesChanged(input.tx, input.userId, input.shipment.id, [...changedBoxIds])
+  for (const box of input.boxes) if (changedBoxIds.has(box.id)) box.completionStatus = 'in_progress'
 
   if (input.shipmentItem.packedQuantity !== totalQuantity || input.shipmentItem.boxSplitStatus !== nextBoxSplitStatus) {
     await input.tx
@@ -4738,7 +4763,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
       .where(eq(chinaOutboundShipments.id, input.shipment.id))
   }
 
-  return { boxes: input.boxes, boxItems: nextBoxItems }
+  return { boxes: input.boxes, boxItems: nextBoxItems, packedQuantity: totalQuantity, boxSplitStatus: nextBoxSplitStatus, reopenedPalletIds }
 }
 
 async function assignChinaOutboundBoxesToPalletsInTransaction(input: {

@@ -92,8 +92,8 @@ function parseShipmentId(value: string | undefined) {
 }
 
 function parseShipmentStage(value: string | undefined): ChinaShipmentStage {
-  if (value === 'items' || value === 'boxes' || value === 'pallets' || value === 'summary') return value
-  // Keep old bookmarks useful after replacing the former two-step screen.
-  if (value === 'setup' || value === 'packing') return 'boxes'
+  if (value === 'items' || value === 'pallets' || value === 'summary') return value
+  // Box splitting belongs to the first stage; old links keep their editing intent.
+  if (value === 'boxes' || value === 'setup' || value === 'packing') return 'items'
   return 'items'
 }

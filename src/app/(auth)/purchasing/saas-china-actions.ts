@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/auth/server'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
+import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import {
   mergeChinaOutboundBoxes,
   saveChinaOutboundPackageWeight,
@@ -36,7 +37,7 @@ import {
   updateChinaOutboundShipment,
 } from '@/lib/purchasing/saas-china-outbound'
 
-type ActionResult = { ok: true; shipmentId?: string } | { ok: false; error: string }
+type ActionResult = { ok: true; shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState } | { ok: false; error: string }
 
 const text = (label: string, max = 500) => z.string().trim().min(1, `${label}을(를) 입력해주세요.`).max(max)
 const optionalText = (max = 2_000) => z.string().trim().max(max).optional().nullable()
@@ -136,6 +137,7 @@ const splitDimension = z.coerce.number()
 const saveItemBoxSplitsSchema = z.object({
   shipmentId,
   shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
+  returnSavedState: z.boolean().optional(),
   boxSplitStatus: z.enum(['in_progress', 'completed']).optional(),
   allocations: z.array(z.object({
     boxNo: text('박스 번호', 100),
@@ -329,9 +331,12 @@ export async function saveChinaOutboundItemPackingAction(input: unknown): Promis
 export async function saveChinaOutboundItemBoxSplitsAction(input: unknown): Promise<ActionResult> {
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
-    const value = saveItemBoxSplitsSchema.parse(input)
+    const { returnSavedState, ...value } = saveItemBoxSplitsSchema.parse(input)
     const actor = await getActor()
-    await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
+    const savedState = await saveChinaOutboundItemBoxSplits({ ...value, userId: actor.userId })
+    // The packing board applies persisted rows directly. Avoid waiting for a
+    // second complete server render (photos, labels, catalog and layout reads).
+    if (returnSavedState) return { savedState }
     // Packing edits do not change inventory reservations or purchasing status.
     revalidatePath('/purchasing/china-shipments')
   })
@@ -502,7 +507,7 @@ function revalidateSaasChinaPaths() {
   revalidatePath('/purchasing/overdue')
 }
 
-async function runAction(action: () => Promise<{ shipmentId?: string } | void>): Promise<ActionResult> {
+async function runAction(action: () => Promise<{ shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState } | void>): Promise<ActionResult> {
   try {
     const result = await action()
     return result ? { ok: true, ...result } : { ok: true }

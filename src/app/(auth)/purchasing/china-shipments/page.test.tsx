@@ -59,7 +59,7 @@ it('does not reload the hidden list while displaying a selected shipment', async
   expect(mocks.detail).toHaveBeenCalledExactlyOnceWith('canonical-owner', selectedId)
   expect(mocks.shipments).not.toHaveBeenCalled()
   expect(mocks.stock).not.toHaveBeenCalled()
-  expect(props).toMatchObject({ shipments: [], selectedShipment: selectedDetail, selectedStep: 'boxes', showCreate: false, outboundWarehouses: warehouses })
+  expect(props).toMatchObject({ shipments: [], selectedShipment: selectedDetail, selectedStep: 'items', showCreate: false, outboundWarehouses: warehouses })
 })
 
 it('loads creation stock and warehouses without hidden list or detail queries', async () => {

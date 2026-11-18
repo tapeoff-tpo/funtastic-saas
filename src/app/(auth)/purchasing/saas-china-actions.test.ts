@@ -44,4 +44,20 @@ describe('China outbound item box split action weights', () => {
     expect(mocks.saveBoxSplits).not.toHaveBeenCalled()
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
+
+  it('returns committed packing state without triggering a complete page reload in fast mode', async () => {
+    const savedState = { shipmentId, shipmentItemId, shipmentStatus: 'packing', packedQuantity: 10, boxSplitStatus: 'completed', boxes: [], boxItems: [], reopenedPalletIds: [] }
+    mocks.saveBoxSplits.mockResolvedValue(savedState)
+    const allocation = { boxNo: '1', quantity: 10 }
+    expect(await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId, returnSavedState: true, allocations: [allocation] })).toEqual({ ok: true, savedState })
+    expect(mocks.assertMenuAccess).toHaveBeenCalledWith('/purchasing/china-shipments')
+    expect(mocks.saveBoxSplits).toHaveBeenCalledExactlyOnceWith({ shipmentId, shipmentItemId, allocations: [allocation], userId: 'canonical-owner' })
+    expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed fast save without returning state or refreshing the page', async () => {
+    mocks.saveBoxSplits.mockRejectedValue(new Error('저장 충돌'))
+    expect(await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId, returnSavedState: true, allocations: [{ boxNo: '1', quantity: 10 }] })).toEqual({ ok: false, error: '저장 충돌' })
+    expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
 })

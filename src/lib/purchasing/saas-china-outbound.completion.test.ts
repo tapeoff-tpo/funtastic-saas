@@ -568,6 +568,59 @@ describe('China outbound box and pallet completion', () => {
     expect(pallets.map((pallet) => pallet.completionStatus)).toEqual(['completed', 'completed'])
   })
 
+  it('returns only the saved item allocations and all affected physical boxes without extra reads', async () => {
+    shipments[0]!.status = 'draft'
+    boxes[0]!.grossWeightKg = '8.5'
+    boxes[0]!.note = 'keep source note'
+    boxItems.push({ id: 'mixed-other', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-2', quantity: 2 })
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+    const saved = await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', boxSplitStatus: 'completed',
+      allocations: [
+        { boxNo: '1', quantity: 4, lengthCm: 5, widthCm: 5, heightCm: 5 },
+        { boxNo: '4', quantity: 6, lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 12.345 },
+      ],
+    })
+    expect(tx.select).toHaveBeenCalledTimes(4)
+    expect(saved).toMatchObject({ shipmentId, shipmentItemId: 'item-1', shipmentStatus: 'packing', packedQuantity: 10, boxSplitStatus: 'completed' })
+    expect(saved.boxes.map((box) => box.boxNo)).toEqual(['1', '2', '4'])
+    expect(saved.boxes[0]).toMatchObject({ id: 'box-1', editable: true, completionStatus: 'in_progress', note: 'keep source note', lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 8.5 })
+    expect(saved.boxes[1]).toMatchObject({ id: 'box-2', completionStatus: 'in_progress', palletId: 'pallet-2' })
+    expect(saved.boxes[2]).toMatchObject({ boxNo: '4', lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 12.345 })
+    expect(saved.boxItems.map((row) => [row.boxId, row.shipmentItemId, row.quantity])).toEqual([
+      ['box-1', 'item-1', 4], [saved.boxes[2]!.id, 'item-1', 6],
+    ])
+    expect(saved.boxItems.every((row) => Boolean(row.id))).toBe(true)
+    expect(saved.reopenedPalletIds.sort()).toEqual(['pallet-1', 'pallet-2'])
+    expect(boxItems.find((row) => row.id === 'mixed-other')).toMatchObject({ boxId: 'box-1', quantity: 2 })
+    expect(JSON.stringify(saved)).not.toContain('workspace-a')
+  })
+
+  it('returns unchanged allocation IDs and completed packages for a weight-only save', async () => {
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+    const saved = await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 5, grossWeightKg: 7.125 }, { boxNo: '2', quantity: 5 }],
+    })
+    expect(tx.select).toHaveBeenCalledTimes(4)
+    expect(saved.boxItems.map((row) => row.id)).toEqual(['allocation-1', 'allocation-2'])
+    expect(saved.boxes[0]).toMatchObject({ grossWeightKg: 7.125, completionStatus: 'completed' })
+    expect(saved.reopenedPalletIds).toEqual([])
+    expect(tx.delete).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('normalizes a legacy null product status in the response without rewriting its stored flag', async () => {
+    items[0]!.boxSplitStatus = null
+    const saved = await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 5 }, { boxNo: '2', quantity: 5 }],
+    })
+    expect(saved.boxSplitStatus).toBe('completed')
+    expect(items[0]!.boxSplitStatus).toBeNull()
+    expect(saved.reopenedPalletIds).toEqual([])
+  })
+
   it('renumbers an exclusive box without losing its measurements or pallet', async () => {
     Object.assign(boxes[0]!, { grossWeightKg: '8.5', note: 'SF001' })
     await saveChinaOutboundItemBoxSplits({

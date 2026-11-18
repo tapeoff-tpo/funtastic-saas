@@ -1,9 +1,8 @@
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
-import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from './china-outbound-pallet-weight'
+import { addChinaOutboundReceivingSheets } from './china-outbound-receiving-sheets'
 import {
   calculateChinaOutboundBoxCbm,
-  dimensionNumber,
   formatChinaOutboundBoxDimensions,
 } from './china-outbound-dimensions'
 
@@ -23,6 +22,7 @@ export type ChinaOutboundPackingExportDetail = {
     productName: string
     chineseProductName?: string | null
     optionName: string | null
+    location?: string | null
     reservedQuantity: number
     packedQuantity: number
   }>
@@ -81,10 +81,8 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
 
-  const itemById = new Map(detail.items.map((item) => [item.id, item]))
   const boxById = new Map(detail.boxes.map((box) => [box.id, box]))
   const palletById = new Map(detail.pallets.map((pallet) => [pallet.id, pallet]))
-  const boxItemsByBox = new Map(detail.boxes.map((box) => [box.id, detail.boxItems.filter((item) => item.boxId === box.id)]))
   const boxItemsByShipmentItem = new Map(detail.items.map((item) => [item.id, detail.boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id)]))
   const totalOutboundQuantity = detail.items.reduce((total, item) => total + item.reservedQuantity, 0)
   const totalPackedQuantity = detail.boxItems.reduce((total, item) => total + item.quantity, 0)
@@ -136,143 +134,7 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     }
   }
 
-  const boxSheet = createListSheet(workbook, '박스별 적재', [
-    'No.',
-    '파렛트',
-    '박스',
-    '상태',
-    '상품코드',
-    '상품명',
-    '옵션명',
-    '가로 (cm)',
-    '세로 (cm)',
-    '높이 (cm)',
-    '박스 CBM',
-    '상품 전체 출고수량',
-    '박스 적재수량',
-  ], [6, 16, 14, 12, 18, 34, 22, 12, 12, 12, 14, 18, 16])
-
-  let boxRowNo = 1
-  for (const box of detail.boxes) {
-    const packedItems = boxItemsByBox.get(box.id) ?? []
-    const rows = packedItems.length === 0 ? [null] : packedItems
-    const pallet = box.palletId ? palletById.get(box.palletId) : null
-
-    for (const packedItem of rows) {
-      const item = packedItem ? itemById.get(packedItem.shipmentItemId) : null
-      addDataRow(boxSheet, [
-        boxRowNo++,
-        pallet?.palletNo ?? '미지정',
-        box.boxNo,
-        box.status,
-        item?.sku ?? '',
-        item?.productName ?? '',
-        item?.optionName ?? '',
-        dimensionNumber(box.lengthCm) ?? '',
-        dimensionNumber(box.widthCm) ?? '',
-        dimensionNumber(box.heightCm) ?? '',
-        cbmByBoxId.get(box.id) ?? '',
-        item?.reservedQuantity ?? 0,
-        packedItem?.quantity ?? 0,
-      ])
-    }
-  }
-
-  const palletSheet = createListSheet(workbook, '파렛트별 적재', [
-    'No.',
-    '파렛트',
-    '파렛트 박스 수',
-    '파렛트 총 적재수량',
-    '제품 적재 CBM',
-    '박스',
-    '박스 규격 (cm)',
-    '박스 CBM',
-    '상품코드',
-    '상품명',
-    '옵션명',
-    '박스 적재수량',
-    '최종 파렛트 CBM',
-    '파렛트 실측 규격 (cm)',
-    '파렛트 총중량(kg)',
-    '박스 총중량(kg)',
-    '상품명(중국어)',
-    '파렛트 무게(kg)',
-  ], [6, 16, 16, 20, 16, 14, 24, 14, 18, 34, 22, 16, 20, 26, 20, 20, 34, 20])
-
-  let palletRowNo = 1
-  for (const pallet of detail.pallets) {
-    const palletBoxes = detail.boxes.filter((box) => box.palletId === pallet.id)
-    const loadedBoxes = palletBoxes.filter((box) => (boxItemsByBox.get(box.id) ?? []).some((allocation) => allocation.quantity > 0))
-    const palletWeight = loadedBoxes.length ? calculateChinaOutboundPalletWeight(loadedBoxes, pallet.tareWeightKg).grossWeightKg : null
-    const palletPackedQuantity = palletBoxes.reduce((total, box) => total + (boxItemsByBox.get(box.id) ?? []).reduce((boxTotal, item) => boxTotal + item.quantity, 0), 0)
-    const palletCbms = palletBoxes.map((box) => cbmByBoxId.get(box.id)).filter((cbm): cbm is number => cbm != null)
-    const palletCbm = palletCbms.length > 0 ? palletCbms.reduce((total, cbm) => total + cbm, 0) : ''
-    const rows = palletBoxes.length === 0 ? [null] : palletBoxes
-
-    for (const box of rows) {
-      const packedItems = box ? boxItemsByBox.get(box.id) ?? [] : []
-      const itemRows = packedItems.length === 0 ? [null] : packedItems
-
-      for (const packedItem of itemRows) {
-        const item = packedItem ? itemById.get(packedItem.shipmentItemId) : null
-        addDataRow(palletSheet, [
-          palletRowNo++,
-          pallet.palletNo,
-          palletBoxes.length,
-          palletPackedQuantity,
-          palletCbm,
-          box?.boxNo ?? '',
-          box ? formatChinaOutboundBoxDimensions(box) ?? '' : '',
-          box ? cbmByBoxId.get(box.id) ?? '' : '',
-          item?.sku ?? '',
-          item?.productName ?? '',
-          item?.optionName ?? '',
-          packedItem?.quantity ?? 0,
-          calculateChinaOutboundBoxCbm(pallet) ?? '',
-          formatChinaOutboundBoxDimensions(pallet) ?? '',
-          palletWeight ?? '',
-          dimensionNumber(box?.grossWeightKg) ?? '',
-          item?.chineseProductName ?? '',
-          palletTareWeightKg(pallet.tareWeightKg),
-        ])
-      }
-    }
-  }
-
-  const unassignedBoxes = detail.boxes.filter((box) => !box.palletId)
-  if (unassignedBoxes.length > 0) {
-    const unassignedSheet = createListSheet(workbook, '파렛트 미지정', [
-      'No.',
-      '박스',
-      '상태',
-      '상품코드',
-      '상품명',
-      '옵션명',
-      '박스 규격 (cm)',
-      '박스 CBM',
-      '박스 적재수량',
-    ], [6, 14, 12, 18, 34, 22, 24, 14, 16])
-
-    let unassignedRowNo = 1
-    for (const box of unassignedBoxes) {
-      const packedItems = boxItemsByBox.get(box.id) ?? []
-      const rows = packedItems.length === 0 ? [null] : packedItems
-      for (const packedItem of rows) {
-        const item = packedItem ? itemById.get(packedItem.shipmentItemId) : null
-        addDataRow(unassignedSheet, [
-          unassignedRowNo++,
-          box.boxNo,
-          box.status,
-          item?.sku ?? '',
-          item?.productName ?? '',
-          item?.optionName ?? '',
-          formatChinaOutboundBoxDimensions(box) ?? '',
-          cbmByBoxId.get(box.id) ?? '',
-          packedItem?.quantity ?? 0,
-        ])
-      }
-    }
-  }
+  addChinaOutboundReceivingSheets(workbook, detail)
 
   clearBlankExcelCells(workbook)
   return Buffer.from(await workbook.xlsx.writeBuffer())
@@ -314,6 +176,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackin
     ['등록일', formatDateTime(detail.shipment.createdAt)],
     ['내보낸 시각', formatDateTime(new Date())],
     ['최종 파렛트 CBM 합계', detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? '미입력' : detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet) ?? 0), 0)],
+    ['무게·CBM 표시', '파렛트·박스의 첫 상품 행에 한 번 표시합니다.'],
   ]
 
   for (const [label, value] of rows) {

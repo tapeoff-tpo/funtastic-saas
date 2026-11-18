@@ -6,6 +6,7 @@ import {
   exportChinaOutboundPackingWorkbook,
 } from '@/lib/purchasing/china-outbound-packing-export'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
+import { getPurchasingItemLocationsBySku } from '@/lib/purchasing/items'
 
 export const runtime = 'nodejs'
 
@@ -24,13 +25,18 @@ export async function GET(
     const detail = await getChinaOutboundShipmentDetail({ userId: workspaceUserId, shipmentId })
     if (!detail) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
-    const buffer = await exportChinaOutboundPackingWorkbook(detail)
+    const locationsBySku = await getPurchasingItemLocationsBySku(workspaceUserId, detail.items.map((item) => item.sku))
+    const buffer = await exportChinaOutboundPackingWorkbook({
+      ...detail,
+      items: detail.items.map((item) => ({ ...item, location: locationsBySku.get(item.sku.trim()) ?? '' })),
+    })
     const filename = chinaOutboundPackingFilename(detail.shipment.shipmentNo)
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Cache-Control': 'private, no-store',
       },
     })
   } catch (error) {

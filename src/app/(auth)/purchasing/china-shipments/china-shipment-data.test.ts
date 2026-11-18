@@ -9,22 +9,37 @@ beforeEach(() => vi.resetAllMocks())
 it('starts Chinese names without waiting for photo lookup and preserves measurement snapshots', async () => {
   let release!: (value: object) => void
   mocks.images.mockReturnValue(new Promise((resolve) => { release = resolve }))
-  mocks.names.mockResolvedValue(new Map([['SKU1', { chineseProductName: '主数据名称' }]]))
+  mocks.names.mockResolvedValue(new Map([['SKU2', { chineseProductName: '主数据名称' }]]))
   mocks.detail.mockResolvedValue({
     shipment: { id: 'shipment', createdAt: new Date() },
-    items: [{ id: 'item', sku: 'SKU1', chineseProductName: '已确认名称', packedQuantity: 1, reservedQuantity: 1 }],
+    items: [
+      { id: 'item', sku: 'SKU1', chineseProductName: '已确认名称', packedQuantity: 1, reservedQuantity: 1 },
+      { id: 'missing-name', sku: 'SKU2', chineseProductName: '', packedQuantity: 0, reservedQuantity: 1 },
+    ],
     pallets: [{ id: 'pallet', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150' }],
     boxes: [{ id: 'box', grossWeightKg: '5.125' }], boxItems: [],
   })
   const pending = loadChinaShipmentDetailView('owner', 'shipment')
-  await vi.waitFor(() => expect(mocks.names).toHaveBeenCalledWith('owner', ['SKU1']))
+  await vi.waitFor(() => expect(mocks.names).toHaveBeenCalledWith('owner', ['SKU2']))
   expect(mocks.images).toHaveBeenCalledTimes(1)
   release({})
   const result = await pending
   expect(result?.items[0].chineseProductName).toBe('已确认名称')
+  expect(result?.items[1].chineseProductName).toBe('主数据名称')
   expect(result?.pallets[0]).toMatchObject({ grossWeightKg: 20.125, lengthCm: 120, widthCm: 100, heightCm: 150 })
   expect(result?.boxes[0].grossWeightKg).toBe(5.125)
   expect(mocks.stock).not.toHaveBeenCalled()
+})
+it('skips the item-master name lookup when every shipment item already has its confirmed name', async () => {
+  mocks.images.mockResolvedValue({})
+  mocks.detail.mockResolvedValue({
+    shipment: { id: 'shipment', createdAt: new Date() },
+    items: [{ id: 'item', sku: 'SKU1', chineseProductName: '已确认名称', packedQuantity: 1, reservedQuantity: 1 }],
+    pallets: [], boxes: [], boxItems: [],
+  })
+  const result = await loadChinaShipmentDetailView('owner', 'shipment')
+  expect(result?.items[0].chineseProductName).toBe('已确认名称')
+  expect(mocks.names).not.toHaveBeenCalled()
 })
 it('does no catalogue work for a missing or unauthorized shipment', async () => {
   mocks.detail.mockResolvedValue(null)

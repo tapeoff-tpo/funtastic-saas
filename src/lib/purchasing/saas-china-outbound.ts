@@ -4599,6 +4599,10 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
 
   const previousBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId === input.shipmentItem.id)
   const previousQuantitiesByBox = new Map(previousBoxItems.map((boxItem) => [boxItem.boxId, boxItem.quantity]))
+  const allocationContentChanged = previousBoxItems.length !== input.allocations.length || input.allocations.some((allocation) => {
+    const box = boxesByNo.get(allocation.boxNo)
+    return !box || previousQuantitiesByBox.get(box.id) !== allocation.quantity
+  })
   const allocationsByBoxNo = new Map(input.allocations.map((allocation) => [allocation.boxNo, allocation]))
   const boxesById = new Map(input.boxes.map((box) => [box.id, box]))
   const changedBoxIds = new Set<string>(renamedBoxIds)
@@ -4606,7 +4610,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     const box = boxesById.get(previous.boxId)
     if (!box || allocationsByBoxNo.get(box.boxNo)?.quantity !== previous.quantity) changedBoxIds.add(previous.boxId)
   }
-  if (previousBoxItems.length > 0) {
+  if (allocationContentChanged && previousBoxItems.length > 0) {
     await input.tx
       .delete(chinaOutboundBoxItems)
       .where(and(
@@ -4615,7 +4619,9 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         eq(chinaOutboundBoxItems.shipmentItemId, input.shipmentItem.id),
       ))
   }
-  const nextBoxItems = input.boxItems.filter((boxItem) => boxItem.shipmentItemId !== input.shipmentItem.id)
+  const nextBoxItems = allocationContentChanged
+    ? input.boxItems.filter((boxItem) => boxItem.shipmentItemId !== input.shipmentItem.id)
+    : [...input.boxItems]
   // Each statement crosses the database connection. Create boxes and their
   // allocations in bounded batches instead of two round trips per box.
   const newAllocations = input.allocations.filter((allocation) => !boxesByNo.has(allocation.boxNo))
@@ -4648,6 +4654,8 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     }
   }
   const boxItemValues: Array<typeof chinaOutboundBoxItems.$inferInsert> = []
+  const measurementUpdates = new Map<string, ChinaOutboundBoxRow>()
+  const measurementUpdatedAt = new Date()
 
   for (const allocation of input.allocations) {
     let box = boxesByNo.get(allocation.boxNo)
@@ -4656,46 +4664,56 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     if (box && dimensions && input.boxItems.some((row) => row.boxId === box!.id && row.shipmentItemId !== input.shipmentItem.id)) {
       dimensions = largestChinaOutboundBox([normalizeOptionalChinaOutboundBoxDimensions({ lengthCm: box.lengthCm == null ? null : Number(box.lengthCm), widthCm: box.widthCm == null ? null : Number(box.widthCm), heightCm: box.heightCm == null ? null : Number(box.heightCm) }), dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? dimensions
     }
-    if (dimensions && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)) {
-      changedBoxIds.add(box.id)
-      const [updated] = await input.tx
-        .update(chinaOutboundBoxes)
-        .set({
-          lengthCm: String(dimensions.lengthCm),
-          widthCm: String(dimensions.widthCm),
-          heightCm: String(dimensions.heightCm),
-          updatedAt: new Date(),
-        })
-        .where(eq(chinaOutboundBoxes.id, box.id))
-        .returning()
-      if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
-      const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
-      if (index >= 0) input.boxes[index] = updated
-      box = updated
-      boxesByNo.set(updated.boxNo, updated)
-    }
-
-    if (allocation.grossWeightKg !== undefined && (allocation.grossWeightKg === null ? box.grossWeightKg != null : box.grossWeightKg == null || Number(box.grossWeightKg) !== allocation.grossWeightKg)) {
-      const [updated] = await input.tx.update(chinaOutboundBoxes)
-        .set({ grossWeightKg: allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg), updatedAt: new Date() })
-        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipment.id), eq(chinaOutboundBoxes.id, box.id)))
-        .returning()
-      if (!updated) throw new Error('박스 총중량을 저장하지 못했습니다.')
-      const index = input.boxes.findIndex((candidate) => candidate.id === updated.id)
-      if (index >= 0) input.boxes[index] = updated
-      box = updated
-      boxesByNo.set(updated.boxNo, updated)
+    const dimensionsChanged = dimensions && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)
+    const weightChanged = allocation.grossWeightKg !== undefined && (allocation.grossWeightKg === null ? box.grossWeightKg != null : box.grossWeightKg == null || Number(box.grossWeightKg) !== allocation.grossWeightKg)
+    if (dimensionsChanged) changedBoxIds.add(box.id)
+    if (dimensionsChanged || weightChanged) {
+      box = {
+        ...box,
+        ...(dimensionsChanged ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
+        ...(weightChanged ? { grossWeightKg: allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg) } : {}),
+        updatedAt: measurementUpdatedAt,
+      }
+      measurementUpdates.set(box.id, box)
+      boxesByNo.set(box.boxNo, box)
     }
 
     if (previousQuantitiesByBox.get(box.id) !== allocation.quantity) changedBoxIds.add(box.id)
 
-    boxItemValues.push({
-      boxId: box.id,
-      shipmentId: input.shipment.id,
-      shipmentItemId: input.shipmentItem.id,
-      userId: input.userId,
-      quantity: allocation.quantity,
-    })
+    if (allocationContentChanged) {
+      boxItemValues.push({
+        boxId: box.id,
+        shipmentId: input.shipment.id,
+        shipmentItemId: input.shipmentItem.id,
+        userId: input.userId,
+        quantity: allocation.quantity,
+      })
+    }
+  }
+  const changedMeasurements = [...measurementUpdates.values()]
+  const boxIndexesById = new Map(input.boxes.map((box, index) => [box.id, index]))
+  for (let offset = 0; offset < changedMeasurements.length; offset += batchSize) {
+    const batch = changedMeasurements.slice(offset, offset + batchSize)
+    const measurement = (field: 'lengthCm' | 'widthCm' | 'heightCm' | 'grossWeightKg') => sql`CASE ${chinaOutboundBoxes.id} ${sql.join(batch.map((box) => sql`WHEN ${box.id} THEN ${box[field]}::numeric`), sql` `)} ELSE ${chinaOutboundBoxes[field]} END`
+    const updated = await input.tx.update(chinaOutboundBoxes).set({
+      lengthCm: measurement('lengthCm'),
+      widthCm: measurement('widthCm'),
+      heightCm: measurement('heightCm'),
+      grossWeightKg: measurement('grossWeightKg'),
+      updatedAt: measurementUpdatedAt,
+    }).where(and(
+      eq(chinaOutboundBoxes.userId, input.userId),
+      eq(chinaOutboundBoxes.shipmentId, input.shipment.id),
+      inArray(chinaOutboundBoxes.id, batch.map((box) => box.id)),
+    )).returning()
+    if (updated.length !== batch.length) throw new Error('박스 규격과 총중량을 저장하지 못했습니다.')
+    const updatedById = new Map(updated.map((box) => [box.id, box]))
+    for (const planned of batch) {
+      const box = updatedById.get(planned.id)
+      if (!box) throw new Error('박스 규격과 총중량을 저장하지 못했습니다.')
+      input.boxes[boxIndexesById.get(box.id)!] = box
+      boxesByNo.set(box.boxNo, box)
+    }
   }
   for (let offset = 0; offset < boxItemValues.length; offset += batchSize) {
     const batch = boxItemValues.slice(offset, offset + batchSize)
@@ -4706,10 +4724,12 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
 
   await markChinaOutboundBoxesChanged(input.tx, input.userId, input.shipment.id, [...changedBoxIds])
 
-  await input.tx
-    .update(chinaOutboundShipmentItems)
-    .set({ packedQuantity: totalQuantity, boxSplitStatus: nextBoxSplitStatus, updatedAt: new Date() })
-    .where(eq(chinaOutboundShipmentItems.id, input.shipmentItem.id))
+  if (input.shipmentItem.packedQuantity !== totalQuantity || input.shipmentItem.boxSplitStatus !== nextBoxSplitStatus) {
+    await input.tx
+      .update(chinaOutboundShipmentItems)
+      .set({ packedQuantity: totalQuantity, boxSplitStatus: nextBoxSplitStatus, updatedAt: new Date() })
+      .where(eq(chinaOutboundShipmentItems.id, input.shipmentItem.id))
+  }
 
   if (input.shipment.status === 'draft' && totalQuantity > 0) {
     await input.tx

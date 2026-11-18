@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SQL } from 'drizzle-orm'
+import { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import {
   chinaOutboundBoxItems,
@@ -42,6 +42,7 @@ let inventory: Row[]
 let movements: Row[]
 let insertedSequence: number
 let reverseInsertResults: boolean
+let reverseUpdateResults: boolean
 
 function matchingRows(rows: Row[], condition: SQL) {
   const query = dialect.sqlToQuery(condition)
@@ -54,6 +55,7 @@ function matchingRows(rows: Row[], condition: SQL) {
 }
 
 function makeTransaction() {
+  const updateStatements: Array<{ table: unknown; values: Record<string, unknown>; condition: SQL }> = []
   function rowsFor(table: unknown) {
     if (table === chinaOutboundShipments) return shipments
     if (table === chinaOutboundShipmentItems) return items
@@ -66,6 +68,7 @@ function makeTransaction() {
     throw new Error('Unexpected table')
   }
   return {
+    updateStatements,
     execute: vi.fn().mockResolvedValue(undefined),
     select: vi.fn().mockImplementation(() => ({
       from: (table: unknown) => ({
@@ -81,9 +84,27 @@ function makeTransaction() {
     update: vi.fn().mockImplementation((table: unknown) => ({
       set: (values: Record<string, unknown>) => ({
         where: (condition: SQL) => {
+          updateStatements.push({ table, values, condition })
           const matches = matchingRows(rowsFor(table), condition)
-          for (const row of matches) Object.assign(row, values)
-          const result = Promise.resolve(matches.map((row) => ({ ...row })))
+          const changes = Object.entries(values).map(([field, value]) => {
+            if (!(value instanceof SQL)) return [field, () => value] as const
+            const query = dialect.sqlToQuery(value)
+            const column = field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+            // Evaluate the actual CASE bindings for each row, including the
+            // ELSE branch, rather than assigning an opaque SQL object.
+            expect(query.sql).toMatch(new RegExp(`^CASE "china_outbound_boxes"\\."id" (?:WHEN \\$\\d+ THEN \\$\\d+::numeric ?)+ ELSE "china_outbound_boxes"\\."${column}" END$`))
+            expect(query.params.length % 2).toBe(0)
+            const cases = new Map<string, unknown>()
+            for (let index = 0; index < query.params.length; index += 2) {
+              expect(typeof query.params[index]).toBe('string')
+              expect(query.params[index + 1] === null || typeof query.params[index + 1] === 'string').toBe(true)
+              cases.set(query.params[index] as string, query.params[index + 1])
+            }
+            return [field, (row: Row) => cases.has(row.id) ? cases.get(row.id) : row[field]] as const
+          })
+          for (const row of matches) for (const [field, value] of changes) row[field] = value(row)
+          const saved = matches.map((row) => ({ ...row }))
+          const result = Promise.resolve(reverseUpdateResults ? saved.reverse() : saved)
           return Object.assign(result, { returning: async () => result })
         },
       }),
@@ -113,6 +134,7 @@ describe('China outbound box and pallet completion', () => {
     mocks.execute.mockResolvedValue(undefined)
     insertedSequence = 0
     reverseInsertResults = false
+    reverseUpdateResults = false
     mocks.transaction.mockImplementation((callback) => callback(makeTransaction()))
     shipments = [{ id: shipmentId, userId, status: 'packing' }]
     items = [{ id: 'item-1', userId, shipmentId, inventoryId: 'inventory-1', sku: 'SKU-1', reservedQuantity: 10, packedQuantity: 10, boxSplitStatus: 'completed' }]
@@ -415,6 +437,80 @@ describe('China outbound box and pallet completion', () => {
     expect(items[0]).toMatchObject({ packedQuantity: items[0]!.reservedQuantity, boxSplitStatus: 'completed' })
     expect(JSON.stringify(inventory)).toBe(balances)
     expect(movements).toHaveLength(0)
+  })
+
+  it.each([50, 1201, 1500])('batches mixed measurements for %i existing boxes without rewriting allocations', async (count) => {
+    boxes = Array.from({ length: count }, (_, index) => ({
+      id: `existing-${index}`, userId, shipmentId, boxNo: `BOX-${index}`, palletId: 'pallet-1', status: 'open', completionStatus: 'completed',
+      lengthCm: '10', widthCm: '20', heightCm: '30', grossWeightKg: '5', note: `tracking-${index}`, sortOrder: index,
+    }))
+    boxItems = boxes.flatMap((box, index) => [
+      { id: `allocation-${index}`, userId, shipmentId, boxId: box.id, shipmentItemId: 'item-1', quantity: 1 },
+      ...(index % 5 === 0 ? [{ id: `shared-${index}`, userId, shipmentId, boxId: box.id, shipmentItemId: 'item-2', quantity: 2 }] : []),
+    ])
+    Object.assign(items[0]!, { reservedQuantity: count, packedQuantity: count })
+    const originalAllocations = JSON.stringify(boxItems)
+    const originalInventory = JSON.stringify(inventory)
+    const foreign = { ...boxes[0]!, id: 'foreign', userId: 'another-owner', shipmentId: 'another-shipment' }
+    boxes.push(foreign)
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+    reverseUpdateResults = true
+    const allocations = Array.from({ length: count }, (_, index) => ({
+      boxNo: `BOX-${index}`, quantity: 1,
+      ...(index % 5 === 0 ? { lengthCm: 5, widthCm: 5, heightCm: 5, grossWeightKg: null }
+        : index % 5 === 1 ? { lengthCm: index + 20, widthCm: 25, heightCm: 35, grossWeightKg: index + 10 }
+          : index % 5 === 2 ? { grossWeightKg: index + 10 }
+            : index % 5 === 3 ? { lengthCm: index + 20, widthCm: 25, heightCm: 35 }
+              : { lengthCm: index + 20, widthCm: 25, heightCm: 35, grossWeightKg: null }),
+    }))
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations })
+
+    const batches = tx.updateStatements.filter(({ values }) => values.lengthCm instanceof SQL)
+    expect(batches).toHaveLength(Math.ceil(count / 500))
+    for (const batch of batches) {
+      const query = dialect.sqlToQuery(batch.condition)
+      expect(query.sql).toContain('"user_id" =')
+      expect(query.sql).toContain('"shipment_id" =')
+      expect(query.params.slice(0, 2)).toEqual([userId, shipmentId])
+      expect(query.params.length - 2).toBeLessThanOrEqual(500)
+    }
+    // One batch per 500 measurements, one completion update, one pallet update.
+    expect(tx.update).toHaveBeenCalledTimes(Math.ceil(count / 500) + 2)
+    expect(tx.delete).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+    expect(tx.update).not.toHaveBeenCalledWith(chinaOutboundShipmentItems)
+    expect(JSON.stringify(boxItems)).toBe(originalAllocations)
+    expect(JSON.stringify(inventory)).toBe(originalInventory)
+    expect(boxes.at(-1)).toEqual(foreign)
+    for (let index = 0; index < count; index += 1) {
+      const row = boxes[index]!
+      expect(row).toMatchObject({ id: `existing-${index}`, boxNo: `BOX-${index}`, palletId: 'pallet-1', note: `tracking-${index}`, sortOrder: index })
+      expect([row.lengthCm, row.widthCm, row.heightCm]).toEqual(index % 5 === 0 || index % 5 === 2 ? ['10', '20', '30'] : [String(index + 20), '25', '35'])
+      expect(row.grossWeightKg).toBe(index % 5 === 0 || index % 5 === 4 ? null : index % 5 === 3 ? '5' : String(index + 10))
+      expect(row.completionStatus).toBe(index % 5 === 0 || index % 5 === 2 ? 'completed' : 'in_progress')
+    }
+  })
+
+  it.each([undefined, 9, null])('keeps allocation IDs and item timestamps on no-op or weight-only saves (%s)', async (weight) => {
+    boxes[0]!.grossWeightKg = '8.5'
+    items[0]!.updatedAt = 'unchanged-item-time'
+    const originalAllocations = JSON.stringify(boxItems)
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((operation) => operation(tx))
+    await saveChinaOutboundItemBoxSplits({
+      userId, shipmentId, shipmentItemId: 'item-1', allocations: [
+        { boxNo: '1', quantity: 5, ...(weight !== undefined ? { grossWeightKg: weight } : {}) },
+        { boxNo: '2', quantity: 5 },
+      ],
+    })
+    expect(JSON.stringify(boxItems)).toBe(originalAllocations)
+    expect(items[0]!.updatedAt).toBe('unchanged-item-time')
+    expect(tx.delete).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
+    expect(tx.update).toHaveBeenCalledTimes(weight === undefined ? 0 : 1)
+    expect(boxes[0]).toMatchObject({ grossWeightKg: weight === undefined ? '8.5' : weight === null ? null : '9', completionStatus: 'completed' })
+    expect(pallets[0]!.completionStatus).toBe('completed')
   })
 
   it('skips identical dimension writes and preserves completion and other products in a shared box', async () => {

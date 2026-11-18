@@ -8,9 +8,10 @@ import type { ChinaShipmentDetailView, ChinaShipmentStockItem } from './china-sh
 export async function loadChinaShipmentDetailView(userId: string, shipmentId: string) {
   const detail = await getChinaOutboundShipmentDetail({ userId, shipmentId })
   if (!detail) return null
+  const missingNameSkus = detail.items.filter((item) => !item.chineseProductName).map((item) => item.sku)
   const [images, names] = await Promise.all([
     findSavedNewProductImagesBatch(userId, detail.items).catch((error) => { console.error('outbound image address preload failed', error); return {} }),
-    getPurchasingItemLabelDataBySku(userId, detail.items.map((item) => item.sku)),
+    missingNameSkus.length ? getPurchasingItemLabelDataBySku(userId, missingNameSkus) : Promise.resolve(new Map()),
   ])
   return toShipmentDetailView(detail, images, names)
 }

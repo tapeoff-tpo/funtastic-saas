@@ -31,10 +31,17 @@ export default async function ChinaShipmentsPage({
   const selectedShipmentId = showCreate ? undefined : parseShipmentId(stringParam(params.shipment))
   const selectedStep = parseShipmentStage(stringParam(params.step))
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const selectedShipmentPromise = selectedShipmentId ? loadChinaShipmentDetailView(workspaceUserId, selectedShipmentId) : Promise.resolve(null)
+  const loadShipmentList = () => listChinaOutboundShipments(workspaceUserId, { createdFrom: listPeriod.from, createdTo: listPeriod.to })
+  // The list is hidden during packing and creation. A missing/unauthorized detail
+  // still falls back to the normal list instead of showing an empty workspace.
+  const shipmentsPromise = showCreate || listPeriod.error ? Promise.resolve([])
+    : selectedShipmentId ? selectedShipmentPromise.then((detail) => detail ? [] : loadShipmentList())
+      : loadShipmentList()
   const [stockItems, shipments, selectedShipment, outboundWarehouses] = await Promise.all([
     showCreate ? loadChinaShipmentStockItems(workspaceUserId) : Promise.resolve([]),
-    listPeriod.error ? Promise.resolve([]) : listChinaOutboundShipments(workspaceUserId, { createdFrom: listPeriod.from, createdTo: listPeriod.to }),
-    selectedShipmentId ? loadChinaShipmentDetailView(workspaceUserId, selectedShipmentId) : Promise.resolve(null),
+    shipmentsPromise,
+    selectedShipmentPromise,
     listSaasChinaOutboundWarehouses(workspaceUserId),
   ])
   const shipmentItems: ChinaShipmentListItem[] = shipments.map((shipment) => ({

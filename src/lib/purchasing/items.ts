@@ -487,7 +487,7 @@ export async function updatePurchasingItem(input: {
 
 export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(fileBuffer)
+  await workbook.xlsx.load(Buffer.from(fileBuffer))
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new Error('엑셀 시트를 찾을 수 없습니다.')
   const headerRow = findHeaderRow(sheet)

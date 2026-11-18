@@ -10,6 +10,8 @@ import {
   previewPurchasingItemsImport,
 } from '@/lib/purchasing/items'
 
+export const maxDuration = 300
+
 const IMPORT_MODES = new Set<PurchasingItemImportMode>(['cost-url-and-new', 'new-only', 'selected', 'chinese-names'])
 
 export async function POST(request: NextRequest) {

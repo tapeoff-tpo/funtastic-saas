@@ -14,6 +14,21 @@ import {
 import type { Esa009mData } from './items'
 
 describe('parseEsa009mWorkbook', () => {
+  it('reads an Ecount export with a company heading from an ArrayBuffer', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('품목등록')
+    sheet.addRow(['회사명 : 테이포프'])
+    sheet.addRow(['품목코드', '품목명', 'works 신규 원가', '품목구분'])
+    sheet.addRow(['00001', '에어캡포장', 1608, '[부재료]'])
+    const bytes = await workbook.xlsx.writeBuffer()
+    const fileBuffer = Uint8Array.from(new Uint8Array(bytes)).buffer
+    const result = await parseEsa009mWorkbook(fileBuffer)
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0]['품목코드']).toBe('00001')
+    expect(result.rows[0]['works 신규 원가']).toBe('1608')
+    expect(result.headers).toEqual(['품목코드', '품목명', 'works 신규 원가', '품목구분'])
+  })
+
   it('includes product-information fields in the item schema', () => {
     expect(ESA009M_HEADERS).toEqual(expect.arrayContaining([
       '재질',

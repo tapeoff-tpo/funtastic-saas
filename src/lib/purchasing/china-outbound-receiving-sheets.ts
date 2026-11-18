@@ -133,7 +133,7 @@ function addReceivingRow(sheet: ExcelJS.Worksheet, values: Array<string | number
   let lines = 1
   row.eachCell({ includeEmpty: true }, (cell, column) => {
     cell.font = { name: '맑은 고딕', size: 10 }
-    cell.alignment = { vertical: 'middle', horizontal: typeof cell.value === 'number' ? 'right' : 'left', wrapText: true }
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
     cell.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } } }
     if (typeof cell.value === 'number') cell.numFmt = sheet.getColumn(column).numFmt ?? '#,##0'
     lines = Math.max(lines, textLines(String(cell.value ?? ''), sheet.getColumn(column).width ?? 16))

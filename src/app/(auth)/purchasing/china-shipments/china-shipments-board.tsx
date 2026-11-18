@@ -770,12 +770,12 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             <ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="상품이 담긴 박스를 파렛트에 배정한 뒤 다운로드할 수 있습니다." />
           </div>
           <WorkbookActions shipmentId={shipment.id} editable={editable} />
-          {(canOpenImportDocuments || stage === 'summary') && <div role="group" aria-label="출고 문서" className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
+          <div role="group" aria-label="출고 문서" className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
             <span className="mr-1 text-xs font-semibold text-violet-800">출고 문서</span>
             {canOpenImportDocuments && <button type="button" onClick={() => guard.requestNavigation(() => router.push(`/purchasing/import-documents?shipment=${encodeURIComponent(shipment.id)}`))}
               className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
-            {stage === 'summary' ? <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a> : null}
-          </div>}
+            <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a>
+          </div>
           {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>
       </div>

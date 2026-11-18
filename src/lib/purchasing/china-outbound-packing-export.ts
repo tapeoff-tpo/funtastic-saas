@@ -68,14 +68,6 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } },
 }
 
-const shipmentStatusLabels: Record<string, string> = {
-  draft: '작성중',
-  packing: '포장중',
-  ready: '포장완료',
-  dispatched: '출고완료',
-  cancelled: '취소',
-}
-
 export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPackingExportDetail): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
@@ -84,13 +76,7 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
   const boxById = new Map(detail.boxes.map((box) => [box.id, box]))
   const palletById = new Map(detail.pallets.map((pallet) => [pallet.id, pallet]))
   const boxItemsByShipmentItem = new Map(detail.items.map((item) => [item.id, detail.boxItems.filter((boxItem) => boxItem.shipmentItemId === item.id)]))
-  const totalOutboundQuantity = detail.items.reduce((total, item) => total + item.reservedQuantity, 0)
-  const totalPackedQuantity = detail.boxItems.reduce((total, item) => total + item.quantity, 0)
   const cbmByBoxId = new Map(detail.boxes.map((box) => [box.id, calculateChinaOutboundBoxCbm(box)]))
-  const boxesWithCbm = [...cbmByBoxId.values()].filter((cbm): cbm is number => cbm != null)
-  const totalCbm = boxesWithCbm.reduce((total, cbm) => total + cbm, 0)
-
-  addSummarySheet(workbook, detail, totalOutboundQuantity, totalPackedQuantity, boxesWithCbm.length, totalCbm)
 
   const productSheet = createListSheet(workbook, '상품별 분할', [
     'No.',
@@ -150,48 +136,6 @@ export function chinaOutboundPackingFilename(shipmentNo: string, now = new Date(
   return `${safeShipmentNo}_적재현황_${date}.xlsx`
 }
 
-function addSummarySheet(workbook: ExcelJS.Workbook, detail: ChinaOutboundPackingExportDetail, totalOutboundQuantity: number, totalPackedQuantity: number, boxesWithCbmCount: number, totalCbm: number) {
-  const sheet = workbook.addWorksheet('요약')
-  sheet.columns = [{ width: 22 }, { width: 42 }]
-  sheet.mergeCells('A1:B1')
-  sheet.getCell('A1').value = '중국출고 적재현황'
-  sheet.getCell('A1').font = { bold: true, size: 14 }
-  sheet.getCell('A1').alignment = { horizontal: 'left', vertical: 'middle' }
-  sheet.getRow(1).height = 26
-
-  const rows: Array<[string, string | number]> = [
-    ['출고번호', detail.shipment.shipmentNo],
-    ['상태', shipmentStatusLabels[detail.shipment.status] ?? detail.shipment.status],
-    ['출고 창고', detail.shipment.originWarehouseCode],
-    ['도착지', detail.shipment.destinationName ?? '미입력'],
-    ['출고예정일', detail.shipment.plannedOutboundDate ?? '미입력'],
-    ['상품 종류', detail.items.length],
-    ['전체 출고수량', totalOutboundQuantity],
-    ['포장수량', totalPackedQuantity],
-    ['미포장수량', Math.max(0, totalOutboundQuantity - totalPackedQuantity)],
-    ['파렛트 수', detail.pallets.length],
-    ['박스 수', detail.boxes.length],
-    ['CBM 입력 박스 수', boxesWithCbmCount],
-    ['총 CBM', totalCbm],
-    ['등록일', formatDateTime(detail.shipment.createdAt)],
-    ['내보낸 시각', formatDateTime(new Date())],
-    ['최종 파렛트 CBM 합계', detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? '미입력' : detail.pallets.filter((pallet) => detail.boxes.some((box) => box.palletId === pallet.id)).reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet) ?? 0), 0)],
-    ['무게·CBM 표시', '파렛트·박스의 첫 상품 행에 한 번 표시합니다.'],
-  ]
-
-  for (const [label, value] of rows) {
-    const row = sheet.addRow([label, value])
-    row.getCell(1).font = { bold: true, size: 10 }
-    row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } }
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { ...cell.font, size: 10 }
-      cell.alignment = { vertical: 'middle' }
-      cell.border = THIN_BORDER
-    })
-    if (typeof value === 'number') row.getCell(2).numFmt = label === '총 CBM' ? '#,##0.0000' : '#,##0'
-  }
-}
-
 function createListSheet(workbook: ExcelJS.Workbook, name: string, headers: string[], widths: number[]) {
   const sheet = workbook.addWorksheet(name)
   sheet.columns = widths.map((width) => ({ width }))
@@ -217,7 +161,7 @@ function addDataRow(sheet: ExcelJS.Worksheet, values: Array<string | number>) {
   const row = sheet.addRow(values)
   row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
     cell.font = { size: 10 }
-    cell.alignment = { vertical: 'middle', wrapText: columnNumber === 3 || columnNumber === 6 || columnNumber === 7 }
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: columnNumber === 3 || columnNumber === 6 || columnNumber === 7 }
     cell.border = THIN_BORDER
     if (typeof cell.value === 'number') cell.numFmt = sheet.getColumn(columnNumber).numFmt ?? '#,##0'
   })
@@ -233,18 +177,4 @@ function excelColumnName(columnNumber: number) {
     value = Math.floor((value - 1) / 26)
   }
   return result
-}
-
-function formatDateTime(value: Date | string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date)
 }

@@ -13,7 +13,9 @@ import { getPriceNumberDate, formatPriceNumberDate } from '@/lib/analytics/price
 import { priceRegistrationHref, priceTableHref, type PriceTableNavigation } from '../../analytics/price-table/price-table-navigation'
 import { LinkedPriceRegistrationForm } from './linked-price-registration-form'
 
-export async function LinkedPriceRegistration({ userId, rowId, mallId, search, view, malls }: {
+export async function LinkedPriceRegistration({ userId, rowId, mallId, search, view, malls, embedded = false, listPage }: {
+  embedded?: boolean
+  listPage?: number
   userId: string
   rowId: string
   mallId?: string
@@ -34,7 +36,7 @@ export async function LinkedPriceRegistration({ userId, rowId, mallId, search, v
   const selected = targets.find((target) => target.id === mallId) ?? registered[0]?.target ?? targets[0]
   if (!selected) notFound()
   const navigation: PriceTableNavigation = {
-    sheetName: row.sourceSheetName, search, view, malls, sortKey: 'importedAt', sortOrder: 'desc',
+    sheetName: row.sourceSheetName, search, view, malls, registrationPage: listPage, sortKey: 'createdAt', sortOrder: 'desc',
   }
   const [fees, sources] = await Promise.all([
     getPriceRegistrationFees(userId),
@@ -107,14 +109,14 @@ export async function LinkedPriceRegistration({ userId, rowId, mallId, search, v
 
   return (
     <div className="space-y-4">
-      <Link className="text-sm text-primary underline" href={priceTableHref(navigation)}>판매가 테이블로</Link>
+      {!embedded && <Link className="text-sm text-primary underline" href={priceTableHref(navigation)}>판매가 테이블로</Link>}
       <header>
-        <h1 className="text-xl font-semibold">상품등록</h1>
+        <h2 className="text-base font-semibold">{row.registeredProductName || row.productName || row.productCode}</h2>
         <p className="text-sm text-muted-foreground">{[row.productCode, row.optionName].filter(Boolean).join(' · ')}</p>
       </header>
       <div className="max-w-3xl space-y-3">
-        <Link className="text-sm text-primary underline" href="/operations/marketplace-registration">상품등록 목록</Link>
-        <p className="font-medium">{registeredName || row.productName || row.productCode}</p>
+        {!embedded && <Link className="text-sm text-primary underline" href="/operations/marketplace-registration">상품등록 목록</Link>}
+
         {form}
       </div>
     </div>

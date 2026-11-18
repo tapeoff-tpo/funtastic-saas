@@ -233,7 +233,7 @@ function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
       const nonEmptyCount = Object.values(rawData).filter(Boolean).length
       if (nonEmptyCount < 2) continue
 
-      rows.push({
+      const row = {
         sourceSheetName: sheetName,
         rowNumber: index + 1,
         productCode: pickValue(rawData, ['상품코드', '사방넷상품코드', '제품코드']),
@@ -241,7 +241,13 @@ function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
         optionName: pickValue(rawData, ['옵션상세명칭', '옵션']),
         registeredProductName: pickValue(rawData, ['등록해야 할 상품명', '등록상품명']),
         rawData,
-      })
+      }
+      const name = row.productName?.trim()
+      const registeredName = row.registeredProductName?.trim()
+      if ((!name && !registeredName && (!row.productCode || ['확인필요', '0'].includes(row.productCode)))
+        || /^(샘플데이터|테스트데이터|예시데이터)$/.test(name ?? '')
+        || ((row.productCode === '확인필요' || !row.productCode) && /^■.*\/.*■/.test(name ?? ''))) continue
+      rows.push(row)
       sheetRows += 1
     }
 
@@ -355,11 +361,11 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string, e
 function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
   const direction = sortOrder === 'desc' ? desc : asc
   if (sortKey === 'createdAt') {
-    const registeredAt = sql`COALESCE((SELECT ${products.createdAt} FROM ${products}
+    const registeredAt = sql`(SELECT ${products.createdAt} FROM ${products}
       WHERE ${products.userId} = ${analyticsPriceTableRows.userId}
         AND ${products.internalSku} = ${analyticsPriceTableRows.productCode}
-      ORDER BY ${products.createdAt} DESC, ${products.id} DESC LIMIT 1), ${analyticsPriceTableRows.importedAt})`
-    return [direction(registeredAt), asc(analyticsPriceTableRows.productCode), asc(analyticsPriceTableRows.rowNumber)]
+      ORDER BY ${products.createdAt} DESC, ${products.id} DESC LIMIT 1)`
+    return [sql`${direction(registeredAt)} NULLS LAST`, asc(analyticsPriceTableRows.productCode), asc(analyticsPriceTableRows.rowNumber)]
   }
   if (sortKey === 'registrationCount') {
     const registered = sql`(SELECT count(*) FROM jsonb_each_text(${analyticsPriceTableRows.rawData}) AS item(key, value)

@@ -7,6 +7,7 @@ export type PriceTableNavigation = {
   sortOrder: 'asc' | 'desc'
   view: PriceTableView
   malls?: string[]
+  registrationPage?: number
   showExcluded?: boolean
 }
 
@@ -27,5 +28,6 @@ export function priceTablePages(page: number, totalPages: number) {
 export function priceRegistrationHref(rowId: string, mallId: string, navigation: PriceTableNavigation) {
   const params = new URLSearchParams({ row: rowId, mall: mallId, view: navigation.view, q: navigation.search })
   if (navigation.malls?.length) params.set('malls', navigation.malls.join(','))
+  if (navigation.registrationPage && navigation.registrationPage > 1) params.set('page', String(navigation.registrationPage))
   return `/operations/marketplace-registration?${params}`
 }

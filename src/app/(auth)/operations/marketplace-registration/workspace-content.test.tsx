@@ -29,13 +29,27 @@ afterEach(cleanup)
 it('uses the price-table workspace data for the registration menu and links to the shared detail', async () => {
   render(await Page({ searchParams: Promise.resolve({ q: 'SKU-01' }) }))
   expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ userId: 'owner', search: 'SKU-01', sheetName: '상품등록', sortKey: 'createdAt' }))
-  const link = screen.getByRole('link', { name: '번호 관리' })
-  expect(link).toHaveAttribute('href', '/operations/marketplace-registration?row=row-1&q=SKU-01')
+  const link = screen.getByRole('link', { name: '상품' })
+  expect(link).toHaveAttribute('href', '/operations/marketplace-registration?q=SKU-01&row=row-1')
   expect(screen.queryByText('B2B 동기화')).not.toBeInTheDocument()
 })
 
 it('opens the same detail for row links from either entry point', async () => {
   render(await Page({ searchParams: Promise.resolve({ row: 'row-1', mall: 'coupang' }) }))
   expect(mocks.detail).toHaveBeenCalledWith(expect.objectContaining({ userId: 'owner', rowId: 'row-1', mallId: 'coupang' }))
-  expect(mocks.list).not.toHaveBeenCalled()
+  expect(mocks.list).toHaveBeenCalled()
+  expect(screen.getByRole('region', { name: '상품 목록' })).toBeVisible()
+  expect(screen.getByRole('complementary', { name: '상품 상세' })).toHaveClass('overflow-y-auto')
+  expect(screen.getByRole('link', { name: '상품' })).toHaveAttribute('aria-current', 'true')
+})
+
+
+it('keeps the current list page when selecting a product', async () => {
+  mocks.list.mockResolvedValue({ total: 300, pageSize: 100,
+    rows: [{ id: 'row-1', productCode: 'SKU-01', productName: '상품', optionName: '옵션', registeredProductName: null }] })
+  render(await Page({ searchParams: Promise.resolve({ page: '2', q: 'SKU' }) }))
+  const url = new URL(screen.getByRole('link', { name: '상품' }).getAttribute('href')!, 'https://example.com')
+  expect(url.searchParams.get('page')).toBe('2')
+  expect(url.searchParams.get('q')).toBe('SKU')
+  expect(url.searchParams.get('row')).toBe('row-1')
 })

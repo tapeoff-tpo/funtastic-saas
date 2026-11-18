@@ -8,6 +8,7 @@ import { getUserMenuAccess } from '@/lib/auth/menu-access'
 import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { PRODUCT_OPERATIONS_PATH, PRODUCT_OPERATIONS_TABS, productOperationsHref } from '@/lib/operations/product-operations'
+import { PurchasingItemUpload } from '@/components/purchasing-item-upload'
 import InventoryPage from '../../inventory/workspace-content'
 import CostsPage from '../../costs/workspace-content'
 import PriceTablePage from '../../analytics/price-table/workspace-content'
@@ -32,6 +33,7 @@ export default async function ProductOperationsPage({ searchParams }: {
   const tab = tabs.find((candidate) => candidate.id === params.tab) ?? tabs[0]
   if (!tab) redirect('/access-denied')
 
+  const pricingView = params.pricing === 'costs' || !canUseMenu(access, '/analytics/price-table') ? 'costs' : 'prices'
   const sku = readParam(params.sku)
   const search = readParam(params.product)
   const workspaceId = await getWorkspaceUserId(user.id)
@@ -89,8 +91,32 @@ export default async function ProductOperationsPage({ searchParams }: {
       </div>
       {tab.id === 'inventory' && <InventoryPage exactSku={selected?.sku} searchParams={Promise.resolve({ searched: '1', search: selected ? undefined : readParam(params.search) })} />}
       {tab.id === 'pricing' && <>
-        {canUseMenu(access, '/costs') && <CostsPage exactSku={selected?.sku} searchParams={Promise.resolve({})} />}
-        {canUseMenu(access, '/analytics/price-table') && <PriceTablePage exactProductCode={selected?.sku} searchParams={Promise.resolve({})} />}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-2">
+          <nav aria-label="원가·판매가 보기" className="flex gap-1">
+            {[
+              { id: 'prices', label: '판매가 테이블', menu: '/analytics/price-table' },
+              { id: 'costs', label: '품목·원가', menu: '/costs' },
+            ].filter((view) => canUseMenu(access, view.menu)).map((view) => <Link
+              key={view.id} prefetch={false}
+              href={`${productOperationsHref('pricing', selected?.sku)}&pricing=${view.id}`}
+              aria-current={pricingView === view.id ? 'page' : undefined}
+              className="rounded-md px-3 py-2 text-sm aria-[current=page]:bg-background aria-[current=page]:font-semibold aria-[current=page]:shadow-sm">
+              {view.label}
+            </Link>)}
+          </nav>
+          {pricingView === 'prices' && canUseMenu(access, '/costs') && <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted-foreground">품목·원가 엑셀 등록</span>
+            <PurchasingItemUpload />
+          </div>}
+        </div>
+        {pricingView === 'costs' && canUseMenu(access, '/costs') &&
+          <CostsPage exactSku={selected?.sku} searchParams={Promise.resolve(params)} />}
+        {pricingView === 'prices' && canUseMenu(access, '/analytics/price-table') &&
+          <PriceTablePage exactProductCode={selected?.sku} searchParams={Promise.resolve({
+            page: readParam(params.page), q: readParam(params.q), sheet: readParam(params.sheet),
+            sort: readParam(params.sort), order: readParam(params.order), view: readParam(params.view),
+            malls: readParam(params.malls), excluded: readParam(params.excluded),
+          })} />}
       </>}
       {tab.id === 'detail' && <DetailPagesPage searchParams={Promise.resolve({
         itemId: selected?.id, sku: selected?.sku, name: selected?.name, purchaseUrl: field('구매 URL'), option: field('규격정보'),

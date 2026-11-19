@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attachCatalog, calculatePrice, createRegistrationRow, detailHtml, matchCatalog, resolveItemCost, type CatalogProduct } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, attachCatalog, calculatePrice, createRegistrationRow, detailHtml, matchCatalog, packedSizeFromNoticeSize, packedWeightFromNoticeWeight, resolveItemCost, type CatalogProduct } from '@/lib/coupang-registration/model'
 import { itemNewCost } from '@/lib/coupang-registration/item-cost'
 import { rowSchema } from '@/lib/coupang-registration/schema'
 
@@ -91,5 +91,46 @@ describe('Coupang pricing and matching', () => {
     expect(html).not.toContain('javascript:')
     expect(html.match(/<img /g)).toHaveLength(1)
     expect(html).toContain('&lt;script&gt;')
+  })
+  it('uses a Product Management size with +2cm clearance as Coupang packed-unit defaults', () => {
+    const product: CatalogProduct = {
+      ...source,
+      productMaster: {
+        itemId: 'product-management-item', match: 'sku', noticeSize: '25*12*41 (cm)', noticeWeight: '400g',
+        noticeMaterial: '폴리에스터', noticeManufacturer: 'Baigou New City Enyi Luggage Factory', noticeCountry: '중국',
+      },
+    }
+    const row = createRegistrationRow(product, '베이지')
+    expect(row.fields).toMatchObject({
+      '한 개 단품 포장 사이즈': '270*140*430',
+      '한 개 단품 포장 무게': '400',
+      제조국: '중국',
+      재질: '폴리에스터',
+    })
+    expect(row.defaultedFields).toMatchObject({ '한 개 단품 포장 사이즈': '270*140*430', '한 개 단품 포장 무게': '400' })
+    expect(packedSizeFromNoticeSize('25 × 12 x 41cm')).toBe('270*140*430')
+    expect(packedWeightFromNoticeWeight('0.4kg')).toBe('400')
+    expect(packedSizeFromNoticeSize('25*12*41')).toBe('')
+    expect(packedWeightFromNoticeWeight('무게 미정')).toBe('')
+  })
+  it('does not overwrite a Product Management default that a user changed or cleared', () => {
+    const row = createRegistrationRow({
+      ...source,
+      productMaster: {
+        itemId: 'product-management-item', match: 'sku', noticeSize: '25*12*41cm', noticeWeight: '400g',
+        noticeMaterial: '', noticeManufacturer: '', noticeCountry: '',
+      },
+    })
+    const edited = {
+      ...row,
+      fields: { ...row.fields, '한 개 단품 포장 사이즈': '280*150*440', '한 개 단품 포장 무게': '' },
+    }
+    const refreshed = applyProductMasterDefaults({
+      ...edited,
+      productMaster: { ...edited.productMaster!, noticeSize: '26*13*42cm', noticeWeight: '500g' },
+    })
+    expect(refreshed.fields['한 개 단품 포장 사이즈']).toBe('280*150*440')
+    expect(refreshed.fields['한 개 단품 포장 무게']).toBe('')
+    expect(rowSchema.parse(refreshed).productMaster?.noticeSize).toBe('26*13*42cm')
   })
 })

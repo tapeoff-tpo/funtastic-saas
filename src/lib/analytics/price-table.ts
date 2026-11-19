@@ -1,16 +1,16 @@
-import { consolidatePriceRows, CONSOLIDATED_PRICE_SHEET, PRICE_ARCHIVE_KEY } from './price-table-consolidation'
+import { CONSOLIDATED_PRICE_SHEET, PRICE_ARCHIVE_KEY } from './price-table-consolidation'
 import { commonPriceSql, numericPriceField } from './price-registration-values-sql'
 import { COMMON_PRICE_KEY, REGISTRATION_EDIT_PREFIX, registrationPriceKey } from './price-registration-values'
 import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne, getTableColumns, type SQLWrapper } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { analyticsPriceTableRows, products, inventory } from '@/lib/db/schema'
+import { analyticsPriceTableRows, products } from '@/lib/db/schema'
 import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, getRegistrationTargets, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
 import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
 
 import { listPriceRegistrationExclusions, priceRegistrationProductKey } from './price-registration-exclusions'
 
-const TARGET_SHEETS = ['상품등록', '메인', '뉴도매', CONSOLIDATED_PRICE_SHEET]
+const TARGET_SHEETS = ['상품등록']
 const PAGE_SIZE = 100
 
 export type PriceTableRow = typeof analyticsPriceTableRows.$inferSelect
@@ -60,6 +60,7 @@ export async function importPriceTableRows(data: {
     const enteredDate = formatPriceNumberDate(importedAt)
     const replacedRows = and(
       eq(analyticsPriceTableRows.userId, data.userId),
+      eq(analyticsPriceTableRows.sourceSheetName, '상품등록'),
       or(
         sql`${analyticsPriceTableRows.sourceFileName} IS NULL`,
         and(ne(analyticsPriceTableRows.sourceFileName, '직접 등록'), ne(analyticsPriceTableRows.sourceFileName, '상품업무 연계')),
@@ -90,23 +91,6 @@ export async function importPriceTableRows(data: {
         const previous = previousDates.get(identifier.identity)
         previousDates.set(identifier.identity, previous && (!date || previous < date) ? previous : date)
       }
-    }
-
-    // Keep the consolidated view when the old workbook is uploaded again.
-    if (previousRows.some((row) => row.sourceSheetName === CONSOLIDATED_PRICE_SHEET || row.rawData[PRICE_ARCHIVE_KEY])) {
-      const stocks = await tx.select({ sku: inventory.sku,
-        quantity: sql<number>`SUM(${inventory.availableStock})::int`, optionName: sql<string>`MAX(${inventory.optionName})`,
-      }).from(inventory).where(and(eq(inventory.userId, data.userId),
-        sql`${inventory.warehouseZone} IN ('1창고', '2창고', '쿠팡', '쿠팡창고')`)).groupBy(inventory.sku)
-      const archiveKey = `재고통합 업로드 원본: ${data.sourceFileName} / ${importedAt.toISOString()}`
-      const result = consolidatePriceRows({ rows: parsed.rows,
-        referenceRows: parsed.rows.filter((row) => row.sourceSheetName === '상품등록'), stocks, archiveKey })
-      parsed.rows = [...parsed.rows.filter((row) => !['메인', '뉴도매'].includes(row.sourceSheetName)), ...result.active,
-        ...result.archived.map(({ row, reason }) => ({ ...row, rawData: { ...row.rawData,
-          [PRICE_ARCHIVE_KEY]: archiveKey, __priceArchiveReason: reason } }))]
-      const counts = new Map<string, number>()
-      for (const row of parsed.rows) if (!row.rawData[PRICE_ARCHIVE_KEY]) counts.set(row.sourceSheetName, (counts.get(row.sourceSheetName) ?? 0) + 1)
-      parsed.sheets = [...counts].map(([name, rows]) => ({ name, rows }))
     }
 
     for (const chunk of chunks(parsed.rows, 500)) {
@@ -247,6 +231,7 @@ function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
   sheets: Array<{ name: string; rows: number }>
 } {
   const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: false })
+  if (!workbook.Sheets['상품등록']) throw new Error('엑셀에 상품등록 시트가 없습니다. 상품등록 시트만 업로드에 반영됩니다.')
   const rows: ParsedPriceTableRow[] = []
   const sheets: Array<{ name: string; rows: number }> = []
 
@@ -290,7 +275,7 @@ function parsePriceTableWorkbook(fileBuffer: ArrayBuffer): {
   }
 
   if (rows.length === 0) {
-    throw new Error('판매가 테이블에서 가져올 수 있는 상품 행을 찾지 못했습니다.')
+    throw new Error('상품등록 시트에서 가져올 수 있는 상품 행을 찾지 못했습니다.')
   }
 
   return { rows, sheets }

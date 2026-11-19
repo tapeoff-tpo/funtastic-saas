@@ -69,12 +69,12 @@ async function main() {
     const archiveRows = result.archived.map(({ row, reason }) => ({ id: row.id, reason }))
     const archived = await query`UPDATE analytics_price_table_rows AS target
       SET raw_data=target.raw_data || jsonb_build_object(${PRICE_ARCHIVE_KEY}::text,${backupKey}::text,'__priceArchiveReason',source.reason),updated_at=now()
-      FROM jsonb_to_recordset(${JSON.stringify(archiveRows)}::jsonb) AS source(id uuid,reason text)
+      FROM jsonb_to_recordset(${query.json(archiveRows)}::jsonb) AS source(id uuid,reason text)
       WHERE target.id=source.id AND target.user_id=${before.owner}::uuid AND target.source_sheet_name IN ('메인','뉴도매')`
     const active = result.active.map((row) => ({ id: row.id, code: row.productCode, raw: row.rawData }))
     const updated = await query`UPDATE analytics_price_table_rows AS target
       SET source_sheet_name=${CONSOLIDATED_PRICE_SHEET},product_code=source.code,raw_data=source.raw,updated_at=now()
-      FROM jsonb_to_recordset(${JSON.stringify(active)}::jsonb) AS source(id uuid,code text,raw jsonb)
+      FROM jsonb_to_recordset(${query.json(active as unknown as postgres.JSONValue)}::jsonb) AS source(id uuid,code text,raw jsonb)
       WHERE target.id=source.id AND target.user_id=${before.owner}::uuid AND target.source_sheet_name IN ('메인','뉴도매')`
     if (archived.count !== result.archived.length || updated.count !== result.active.length) throw new Error('변경 행 수가 다릅니다. 트랜잭션을 취소합니다.')
     const after = await snapshot(tx)

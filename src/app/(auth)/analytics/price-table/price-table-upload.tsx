@@ -40,7 +40,7 @@ export function PriceTableUpload({ compact = false }: { compact?: boolean }) {
       }
 
       setResult(body)
-      toast.success(`판매가 테이블 ${body.imported.toLocaleString('ko-KR')}건을 반영했습니다.`)
+      toast.success(`상품등록 시트 ${body.imported.toLocaleString('ko-KR')}건을 반영했습니다.`)
       if (fileRef.current) fileRef.current.value = ''
       router.refresh()
     })
@@ -52,10 +52,10 @@ export function PriceTableUpload({ compact = false }: { compact?: boolean }) {
         <div className="flex flex-col gap-1">
           <h2 className="text-base font-semibold">판매가 테이블 업로드</h2>
           <p className="text-sm text-muted-foreground">
-            상품등록, 메인, 뉴도매 시트의 상품코드와 플랫폼별 판매가 원본 데이터를 분석 화면에 반영합니다.
+            엑셀의 상품등록 시트만 반영합니다. 재고통합 목록은 유지됩니다.
           </p>
         </div>
-      ) : <p className="text-xs text-muted-foreground">상품등록, 메인, 뉴도매 원본 파일을 교체합니다.</p>}
+      ) : <p className="text-xs text-muted-foreground">엑셀의 상품등록 시트만 반영합니다. 재고통합 목록은 유지됩니다.</p>}
 
       <div className="grid gap-2 md:grid-cols-[1fr_auto]">
         <input

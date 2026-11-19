@@ -44,7 +44,9 @@ describe('saved box list', () => {
   it('shows every box immediately and preserves labels, counts and item editing', () => {
     const onEditItem = vi.fn()
     renderPanel([box('1'), box('2')], { onEditItem })
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link')).toHaveLength(4)
+    expect(screen.getByRole('link', { name: '1 박스 쉽먼트 바로 인쇄' })).toBeVisible()
+    expect(screen.getByRole('link', { name: '2 박스 부착용 쉽먼트 다운로드' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '전체 펼치기' }))
     expect(screen.getByRole('link', { name: '1 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/shipment/labels?boxId=1&format=print')
     expect(screen.getByRole('link', { name: '2 박스 부착용 쉽먼트 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/shipment/labels?boxId=2')

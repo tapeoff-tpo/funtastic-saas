@@ -12,6 +12,16 @@ export type BundleComponent = {
   unitCost: number | null
   unitWholesale: number | null
 }
+export type RegistrationProductMaster = {
+  itemId: string
+  match: 'sku' | 'name'
+  noticeSize: string
+  noticeWeight: string
+  noticeMaterial: string
+  noticeManufacturer: string
+  noticeCountry: string
+  qualityPdf?: { id: string; fileName: string; contentType: string }
+}
 export type RegistrationRow = {
   id: string
   templateId: string
@@ -38,6 +48,9 @@ export type RegistrationRow = {
   detailImages: string[]
   label: string
   fields: Record<string, string>
+  /** Values automatically proposed from Product Management, kept for safe refreshes. */
+  defaultedFields?: Record<string, string>
+  productMaster?: RegistrationProductMaster
 }
 export type RegistrationDraft = {
   name: string
@@ -56,11 +69,15 @@ export type CatalogProduct = {
   options: Array<{ name: string; addPrice: number }>
   notice: Array<{ label: string; value: string }>
   costCandidates: CostCandidate[]
+  productMaster?: RegistrationProductMaster
 }
 export type CostCandidate = { sku: string; name: string; optionName: string; costPrice: number | null; aliases?: string[] }
 export type CostLookup = Pick<RegistrationRow, 'id' | 'internalSku' | 'name' | 'sourceName' | 'optionName'>
 
 export const LABEL_FIELD = '제품 필수 표시사항 (라벨 또는 도안 이미지)'
+export const PACKAGING_WEIGHT_FIELD = '한 개 단품 포장 무게'
+export const PACKAGING_SIZE_FIELD = '한 개 단품 포장 사이즈'
+export const PACKAGING_CLEARANCE_CM = 2
 export const MONEY_LIMIT = 1_000_000_000
 export const BUNDLE_COMPONENT_LIMIT = 50
 export const BUNDLE_QUANTITY_LIMIT = 9999
@@ -127,6 +144,70 @@ export function imageStem(name: string) {
   return name.normalize('NFC').trim().split(/[/\\]/).pop()!.replace(/\.(jpg|jpeg|png)$/i, '')
 }
 
+/** Converts a Product Management size such as `25*12*41 (cm)` to the integer
+ * millimetres required by Coupang's packed-unit field. Unclear unit strings
+ * deliberately stay blank rather than guessing a logistics measurement. */
+export function packedSizeFromNoticeSize(value: string, clearanceCm = PACKAGING_CLEARANCE_CM): string {
+  const text = value.normalize('NFKC').toLowerCase().replaceAll(',', '.')
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(?:\*|x|×)\s*(\d+(?:\.\d+)?)\s*(?:\*|x|×)\s*(\d+(?:\.\d+)?)/)
+  if (!match || !Number.isFinite(clearanceCm) || clearanceCm < 0 || clearanceCm > 10) return ''
+  const unit = /(?:mm|밀리)/.test(text) ? 1 : /(?:cm|센티)/.test(text) ? 10 : 0
+  if (!unit) return ''
+  const clearance = clearanceCm * 10
+  const dimensions = match.slice(1).map(Number)
+  if (dimensions.some((dimension) => !Number.isFinite(dimension) || dimension <= 0 || dimension > 10_000)) return ''
+  return dimensions.map((dimension) => Math.round(dimension * unit + clearance)).join('*')
+}
+
+/** Returns the unitless integer gram value required by Coupang's packed-unit field. */
+export function packedWeightFromNoticeWeight(value: string): string {
+  const text = value.normalize('NFKC').toLowerCase().replaceAll(',', '')
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(kg|킬로그램|g|그램)?/)
+  if (!match) return ''
+  const number = Number(match[1])
+  if (!Number.isFinite(number) || number <= 0 || number > 1_000_000) return ''
+  const grams = /(kg|킬로그램)/.test(match[2] ?? '') ? number * 1000 : number
+  return Number.isInteger(grams) ? String(grams) : String(Math.ceil(grams))
+}
+
+function shouldApplyDefault(current: string | undefined, previousDefault: string | undefined) {
+  if (!current?.trim()) return previousDefault === undefined
+  return current === previousDefault
+}
+
+/**
+ * Adds safe Product Management defaults without overwriting a value the user
+ * imported or edited. Only a value still equal to a prior automatic default is
+ * refreshed when the source record changes.
+ */
+export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRow {
+  const master = row.productMaster
+  if (!master) return row
+  const defaults: Record<string, string> = {
+    [PACKAGING_SIZE_FIELD]: packedSizeFromNoticeSize(master.noticeSize),
+    [PACKAGING_WEIGHT_FIELD]: packedWeightFromNoticeWeight(master.noticeWeight),
+    제조국: master.noticeCountry,
+    제조자: master.noticeManufacturer,
+    제조사: master.noticeManufacturer,
+    재질: master.noticeMaterial,
+    소재: master.noticeMaterial,
+    '개당 중량': master.noticeWeight,
+  }
+  const fields = { ...row.fields }
+  const defaultedFields = { ...(row.defaultedFields ?? {}) }
+  let changed = false
+  for (const [label, suggested] of Object.entries(defaults)) {
+    if (!suggested) continue
+    const current = fields[label]
+    if (!shouldApplyDefault(current, defaultedFields[label])) continue
+    if (current === suggested && defaultedFields[label] === suggested) continue
+    fields[label] = suggested
+    defaultedFields[label] = suggested
+    changed = true
+  }
+  return changed ? { ...row, fields, defaultedFields } : row
+}
+
 export function rowFields(row: RegistrationRow, rounding: number, labels: SavedFile[] = []): Record<string, string> {
   const prices = calculatePrice(row, rounding)
   const fields: Record<string, string> = { ...row.fields, '상품명': row.name, '공급가': prices.supply === null ? '' : String(prices.supply), '쿠팡 판매가': prices.sale === null ? '' : String(prices.sale) }
@@ -180,13 +261,15 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
 export function createRegistrationRow(product?: CatalogProduct, optionName = ''): RegistrationRow {
   const option = product?.options.find((item) => item.name === optionName)
   const cost = product && resolveItemCost({ name: product.name, sourceName: product.name, optionName, internalSku: '' }, product.costCandidates)
-  return {
+  const row: RegistrationRow = {
     id: crypto.randomUUID(), templateId: '', sheetName: '', name: [product?.name ?? '', optionName].filter(Boolean).join(' '), optionName,
     internalSku: cost?.sku ?? '', costPrice: cost?.costPrice ?? null, wholesalePrice: product?.price === null || product?.price === undefined ? null : product.price + (option?.addPrice ?? 0),
     priceMode: 'wholesale', markupPercent: 20, manualSupplyPrice: null, saleMode: 'auto', manualSalePrice: null,
     sourceCode: product?.code ?? '', sourceName: product?.name ?? '', sourceStatus: product?.status ?? '', bundleReviewed: false,
     primaryImage: product?.thumbnails[0] ?? '', thumbnails: product?.thumbnails ?? [], detailImages: product?.detailImages ?? [], label: '', fields: {},
+    productMaster: product?.productMaster,
   }
+  return applyProductMasterDefaults(row)
 }
 
 export function normalizeOption(value: string) {
@@ -231,7 +314,7 @@ export function attachCatalog(row: RegistrationRow, product: CatalogProduct): Re
   const options = product.options.filter((option) => normalizeOption(option.name) === normalizeOption(row.optionName || suffix))
   const optionName = options.length === 1 ? options[0].name : row.optionName || suffix
   const cost = resolveItemCost({ ...row, sourceName: product.name, optionName }, product.costCandidates)
-  return {
+  return applyProductMasterDefaults({
     ...row, sourceCode: product.code, sourceName: product.name, sourceStatus: product.status, optionName,
     // Imported supply prices and manually entered cost/wholesale prices are authoritative.
     costPrice: row.costPrice ?? cost?.costPrice ?? null,
@@ -239,5 +322,6 @@ export function attachCatalog(row: RegistrationRow, product: CatalogProduct): Re
     wholesalePrice: row.wholesalePrice ?? (options.length === 1 && product.price !== null ? product.price + options[0].addPrice : null),
     primaryImage: isImageUrl(row.primaryImage) ? row.primaryImage : product.thumbnails[0] ?? '',
     thumbnails: product.thumbnails, detailImages: product.detailImages,
-  }
+    productMaster: product.productMaster ?? row.productMaster,
+  })
 }

@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { inventory, products } from '@/lib/db/schema'
 import { candidateNames, isImageUrl, money, normalizeCostName, resolveItemCost, type CatalogProduct, type CostLookup } from './model'
 import { itemNewCost } from './item-cost'
+import { findRegistrationProductMasters } from './product-master'
 
 type SourceProduct = {
   code: string; name: string; price?: number; status?: string; imageUrl?: string; thumbnailImages?: string[]; detailImages?: string[]; description?: string;
@@ -61,6 +62,12 @@ export async function lookupRegistrationCosts(userId: string, rows: CostLookup[]
 async function normalizeCatalog(userId: string, sources: SourceProduct[], includeCosts = true): Promise<CatalogProduct[]> {
   const unique = [...new Map(sources.map((product) => [product.code, product])).values()]
   const candidates = includeCosts && unique.length ? await findCostCandidates(userId, '', unique.map((product) => product.name)) : []
+  const costsByProduct = new Map(unique.map((product) => [String(product.code), candidates.filter((item) => candidateNames(item).includes(normalizeCostName(product.name)))]))
+  const masters = includeCosts && unique.length
+    ? await findRegistrationProductMasters(userId, unique.map((product) => ({
+      id: String(product.code), name: product.name, skus: costsByProduct.get(String(product.code))?.map((item) => item.sku) ?? [],
+    })))
+    : new Map()
   return unique.map((product) => {
     const htmlUrls = Array.from((product.description ?? '').matchAll(/<img[^>]+src=["']([^"']+)["']/gi), (match) => match[1].replaceAll('&amp;', '&'))
     const remote = htmlUrls.filter(isImageUrl)
@@ -71,7 +78,8 @@ async function normalizeCatalog(userId: string, sources: SourceProduct[], includ
       detailImages: [...new Set(remote.length ? remote : details)],
       options: (product.options ?? []).map((option) => ({ name: option.optionName || '기본', addPrice: money(option.addPrice) ?? 0 })),
       notice: (product.productInfoNotice ?? []).filter((item) => item.label),
-      costCandidates: candidates.filter((item) => candidateNames(item).includes(normalizeCostName(product.name))),
+      costCandidates: costsByProduct.get(String(product.code)) ?? [],
+      productMaster: masters.get(String(product.code)),
     }
   })
 }

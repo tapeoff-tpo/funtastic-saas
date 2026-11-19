@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react'
+import { Dialog } from '@base-ui/react/dialog'
+import { ArrowDown, ArrowUp, ArrowUpDown, Maximize2, Search, X } from 'lucide-react'
 import type { ShortMeetingRow } from '@/lib/analytics/short-meeting'
 
 type SortKey = 'sku' | 'productName' | 'todayOutbound' | 'currentStock' | 'stockAfterOutbound' | 'averageDailyOutbound' | 'monthOutbound' | 'outOfStock' | 'chinaStock' | 'chinaShipmentDate' | 'chinaOrderStatus' | 'chinaOrderDate'
@@ -60,7 +61,33 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
     </th>
   }
 
+  function productTable(expanded = false) {
+    return (
+      <table className={expanded ? 'w-full min-w-[1050px] table-fixed border-separate border-spacing-0 text-sm [&_tbody_td]:border-b' : 'w-full table-fixed text-xs'}>
+        <colgroup>
+          <col className="w-[8%]" /><col className="w-[17%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[10%]" /><col className="w-[6%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[8%]" />
+        </colgroup>
+        <thead className={expanded ? 'sticky top-0 z-10 bg-muted text-muted-foreground shadow-sm' : 'bg-muted/50 text-muted-foreground'}><tr>
+          {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '당일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}
+        </tr></thead>
+        <tbody>
+          {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={12}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
+            <tr className="border-t" key={row.sku}>
+              <td data-no-translate className={`break-words px-0.5 py-2 font-mono font-medium [overflow-wrap:anywhere] sm:px-1 ${expanded ? 'text-sm' : 'text-xs'}`}>{row.sku}</td>
+              <td className="break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1"><div data-no-translate className="font-medium">{row.productName}</div><div data-no-translate className={`${expanded ? 'text-sm' : 'text-xs'} text-muted-foreground`}>{row.optionName}</div></td>
+              <Td>{formatQuantity(row.todayOutbound)}</Td><Td>{formatQuantity(row.currentStock)}</Td><Td className={row.stockAfterOutbound <= 0 ? 'font-semibold text-red-600' : ''}>{formatQuantity(row.stockAfterOutbound)}</Td><Td>{formatQuantity(row.averageDailyOutbound)}</Td><Td>{formatQuantity(row.monthOutbound)}</Td>
+              <td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{sheetStatus === 'unavailable' ? <span className="text-amber-700">확인 불가</span> : row.outOfStock ? <span className="font-medium text-red-700">{row.outOfStock}</span> : null}</td>
+              <Td>{row.chinaStock == null ? '자료 없음' : formatQuantity(row.chinaStock)}</Td>
+              <td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaShipmentDate || '-'}</td><td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaOrderStatus || '-'}</td><td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaOrderDate || '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+
   return (
+    <Dialog.Root>
     <section className="w-full min-w-0 rounded-lg border bg-card">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b px-4 py-3">
         <div>
@@ -68,6 +95,7 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
           <p className="mt-0.5 text-xs text-muted-foreground">반영한 주문서 전체를 품목별로 합산합니다. 평균 출고수량은 발주 화면과 같은 최근 3개월 월평균 기준입니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <Dialog.Trigger render={(props) => <button {...props} type="button" className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"><Maximize2 aria-hidden="true" className="size-4" />크게 보기</button>} />
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={riskOnly} onChange={(event) => setRiskOnly(event.target.checked)} /> 재고 위험만 보기</label>
           <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"><Search className="size-4 text-muted-foreground" /><span className="sr-only">상품 검색</span><input className="w-48 bg-transparent outline-none" placeholder="품목코드, 상품명, 옵션 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         </div>
@@ -103,28 +131,24 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
         ))}
       </div>
       <div className="hidden w-full min-w-0 xl:block">
-        <table className="w-full table-fixed text-xs">
-          <colgroup>
-            <col className="w-[8%]" /><col className="w-[17%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[10%]" /><col className="w-[6%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[8%]" />
-          </colgroup>
-          <thead className="bg-muted/50 text-muted-foreground"><tr>
-            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '당일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}
-          </tr></thead>
-          <tbody>
-            {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={12}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
-              <tr className="border-t" key={row.sku}>
-                <td data-no-translate className="break-words px-0.5 py-2 font-mono text-xs font-medium [overflow-wrap:anywhere] sm:px-1">{row.sku}</td>
-                <td className="break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1"><div data-no-translate className="font-medium">{row.productName}</div><div data-no-translate className="text-xs text-muted-foreground">{row.optionName}</div></td>
-                <Td>{formatQuantity(row.todayOutbound)}</Td><Td>{formatQuantity(row.currentStock)}</Td><Td className={row.stockAfterOutbound <= 0 ? 'font-semibold text-red-600' : ''}>{formatQuantity(row.stockAfterOutbound)}</Td><Td>{formatQuantity(row.averageDailyOutbound)}</Td><Td>{formatQuantity(row.monthOutbound)}</Td>
-                <td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{sheetStatus === 'unavailable' ? <span className="text-amber-700">확인 불가</span> : row.outOfStock ? <span className="font-medium text-red-700">{row.outOfStock}</span> : null}</td>
-                <Td>{row.chinaStock == null ? '자료 없음' : formatQuantity(row.chinaStock)}</Td>
-                <td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaShipmentDate || '-'}</td><td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaOrderStatus || '-'}</td><td className="whitespace-pre-line break-words px-0.5 py-2 [overflow-wrap:anywhere] sm:px-1">{row.chinaOrderDate || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {productTable()}
       </div>
     </section>
+    <Dialog.Portal>
+      <Dialog.Backdrop className="fixed inset-0 z-[100] bg-black/40" />
+      <Dialog.Popup className="fixed inset-0 z-[101] flex h-[100dvh] w-screen flex-col bg-background text-foreground shadow-xl focus:outline-none">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div><Dialog.Title className="text-xl font-semibold">상품별 출고 현황 · 크게 보기</Dialog.Title><Dialog.Description className="mt-1 text-sm text-muted-foreground">{filtered.length.toLocaleString('ko-KR')}개 상품 · 열 제목을 눌러 정렬할 수 있습니다.</Dialog.Description></div>
+          <Dialog.Close render={(props) => <button {...props} type="button" className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"><X aria-hidden="true" className="size-4" />닫기</button>} />
+        </div>
+        <div className="flex flex-wrap items-center gap-4 border-b px-4 py-3">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={riskOnly} onChange={(event) => setRiskOnly(event.target.checked)} /> 재고 위험만 보기</label>
+          <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"><Search className="size-4 text-muted-foreground" /><span className="sr-only">상품 검색</span><input className="w-48 bg-transparent outline-none" placeholder="품목코드, 상품명, 옵션 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">{productTable(true)}</div>
+      </Dialog.Popup>
+    </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShortMeetingRow } from '@/lib/analytics/short-meeting'
 import { ShortMeetingTable } from './short-meeting-table'
@@ -9,6 +9,37 @@ const rows: ShortMeetingRow[] = [
 ]
 
 describe('ShortMeetingTable', () => {
+  it('opens a fullscreen sortable table with a sticky header, shared filters and an accessible close control', async () => {
+    render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
+    fireEvent.click(screen.getByRole('button', { name: '크게 보기' }))
+    const dialog = await screen.findByRole('dialog', { name: /상품별 출고 현황 · 크게 보기/ })
+    const table = within(dialog).getByRole('table')
+    expect(table).toHaveClass('text-sm', '[&_tbody_td]:border-b')
+    expect(table.parentElement).toHaveClass('overflow-auto')
+    expect(table.querySelector('thead')).toHaveClass('sticky', 'top-0')
+    const order = () => within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell')[0].textContent)
+    fireEvent.click(within(dialog).getByRole('button', { name: '품목코드' }))
+    expect(order()).toEqual(['A-01', 'B-02'])
+    fireEvent.click(within(dialog).getByRole('button', { name: '품목코드' }))
+    expect(order()).toEqual(['B-02', 'A-01'])
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '재고 위험만 보기' }))
+    expect(order()).toEqual(['B-02'])
+    fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: '재고 위험만 보기' })).toBeChecked()
+  })
+
+  it('closes the enlarged view using Escape', async () => {
+    render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
+    const trigger = screen.getByRole('button', { name: '크게 보기' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('shows twelve columns without the location and spans the empty state correctly', () => {
     const { rerender } = render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
     expect(screen.getAllByRole('columnheader')).toHaveLength(12)

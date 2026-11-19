@@ -1932,9 +1932,11 @@ describe('ChinaShipmentsBoard', () => {
     expect(savePalletAssignments).toHaveBeenNthCalledWith(2, { shipmentId: 'a', assignments: [{ boxNo: 'BOX-02', palletNo: 'P4' }] })
   })
 
-  it('keeps a failed selected pallet assignment and selection for retry', async () => {
-    savePalletAssignments.mockResolvedValue({ ok: false, error: '파렛트 배정 저장 실패' })
-    renderShipment(makeShipmentWithUnassignedBoxes(), 'pallets')
+  it('keeps a failed saved-assignment edit and selection for retry', async () => {
+    savePalletAssignments.mockResolvedValueOnce({ ok: false, error: '파렛트 배정 저장 실패' }).mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toHaveValue('P1')
+    fireEvent.click(screen.getByRole('button', { name: '저장된 배정 수정' }))
     fireEvent.change(palletAssignmentRow('BOX-01').getByPlaceholderText('예: 1'), { target: { value: 'P3' } })
     fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
 
@@ -1944,6 +1946,11 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeChecked()
     expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeEnabled()
     expect(navigate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledTimes(2))
+    expect(savePalletAssignments).toHaveBeenLastCalledWith({ shipmentId: 'a', assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }] })
+    await waitFor(() => expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).not.toBeChecked())
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('P2')
   })
 
   it('saves all changed pallet assignments together', async () => {
@@ -2035,6 +2042,78 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeDisabled()
     expect(screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')).toBeDisabled()
     expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toBeEnabled()
+  })
+
+  it('reassigns saved boxes together only in edit mode and protects unfinished edits', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
+    const first = screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')
+    const second = screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')
+    expect(first).toBeDisabled()
+    expect(second).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '저장된 배정 수정' }))
+    expect(first).toBeEnabled()
+    expect(second).toBeEnabled()
+    fireEvent.click(screen.getByLabelText('표시된 파렛트 배정 전체 선택'))
+    fireEvent.change(screen.getByLabelText('선택 박스 일괄 파렛트 번호'), { target: { value: 'P3' } })
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스에 번호 적용' }))
+    fireEvent.click(screen.getByRole('button', { name: '배정 수정 마치기' }))
+    expect(screen.getByRole('dialog', { name: '저장하지 않은 내용이 있습니다' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '계속 작업' }))
+    expect(screen.getByRole('button', { name: '배정 수정 마치기' })).toBeVisible()
+    expect(first).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledExactlyOnceWith({
+      shipmentId: 'a', assignments: [{ boxNo: 'BOX-01', palletNo: 'P3' }, { boxNo: 'BOX-02', palletNo: 'P3' }],
+    }))
+    await waitFor(() => expect(first).not.toBeChecked())
+    expect(first).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '배정 수정 마치기' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '저장된 배정 수정' })).toBeVisible()
+    expect(first).toBeDisabled()
+    expect(second).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toHaveValue('P3')
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('P3')
+  })
+
+  it('opens saved assignments from final review with current numbers and allows removing one assignment', async () => {
+    savePalletAssignments.mockResolvedValue({ ok: true })
+    renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'summary')
+    expect(screen.queryByLabelText('박스 BOX-01 파렛트 번호')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 수정' }))
+    expect(screen.getByRole('heading', { name: '3단계 · 파렛트 배정' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '배정 수정 마치기' })).toBeVisible()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toHaveValue('P1')
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('P2')
+    fireEvent.click(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택'))
+    fireEvent.change(screen.getByLabelText('박스 BOX-01 파렛트 번호'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '파렛트 배정 선택 저장' }))
+    await waitFor(() => expect(savePalletAssignments).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'a', assignments: [{ boxNo: 'BOX-01', palletNo: null }] }))
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toHaveValue('P2')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('keeps sealed boxes and dispatched shipments closed for saved-assignment editing', () => {
+    const detail = makeShipmentWithBoxAndPalletStatuses()
+    detail.boxes[0] = { ...detail.boxes[0], status: 'sealed' }
+    const { unmount } = renderShipment(detail, 'pallets')
+    fireEvent.click(screen.getByRole('button', { name: '저장된 배정 수정' }))
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 번호')).toBeDisabled()
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')).toBeEnabled()
+    fireEvent.click(screen.getByLabelText('표시된 파렛트 배정 전체 선택'))
+    expect(screen.getByLabelText('박스 BOX-01 파렛트 배정 선택')).not.toBeChecked()
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 배정 선택')).toBeChecked()
+    unmount()
+    const closed = { ...detail, shipment: { ...detail.shipment, status: 'dispatched' } }
+    const { unmount: unmountClosedSummary } = renderShipment(closed, 'summary')
+    expect(screen.queryByRole('button', { name: '파렛트 배정 수정' })).not.toBeInTheDocument()
+    unmountClosedSummary()
+    renderShipment(closed, 'pallets')
+    expect(screen.queryByRole('button', { name: '저장된 배정 수정' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('박스 BOX-02 파렛트 번호')).toBeDisabled()
+    expect(savePalletAssignments).not.toHaveBeenCalled()
   })
 
   it('allows bulk selection again only after an existing pallet assignment is cleared and saved', async () => {

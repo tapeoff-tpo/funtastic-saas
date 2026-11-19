@@ -21,7 +21,7 @@ export async function addManualPriceProduct(form: FormData): Promise<{ error?: s
     const productName = text('productName')
     const sheetName = text('sheetName')
     if (!productCode || !productName) return { error: '상품코드와 상품명을 입력해주세요.' }
-    if (!['상품등록', '메인', '뉴도매'].includes(sheetName)) return { error: '시트가 올바르지 않습니다.' }
+    if (!['상품등록', '메인', '뉴도매', '재고통합'].includes(sheetName)) return { error: '시트가 올바르지 않습니다.' }
     const enteredAt = new Date()
     const enteredDate = formatPriceNumberDate(enteredAt)
     const rawData: Record<string, string> = { 상품코드: productCode, 상품명: productName }

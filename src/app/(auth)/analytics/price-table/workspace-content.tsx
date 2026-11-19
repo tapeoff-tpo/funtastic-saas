@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   title: '판매가 테이블',
 }
 
-const SHEET_ORDER = ['상품등록', '메인', '뉴도매']
+const SHEET_ORDER = ['상품등록', '재고통합', '메인', '뉴도매']
 
 export default async function PriceTablePage({
   searchParams, exactProductCode,
@@ -79,6 +79,8 @@ export default async function PriceTablePage({
         rows: [],
         total: 0,
         overallTotal: 0,
+        archivedRows: 0,
+        unmatchedRows: 0,
         page,
         pageSize: 100,
         sheets: [],
@@ -88,6 +90,9 @@ export default async function PriceTablePage({
       }
     }),
   ])
+  if (['메인', '뉴도매'].includes(activeSheet) && data.sheetCounts.some((sheet) => sheet.name === '재고통합')) {
+    redirect(priceTableHref({ ...navigation, sheetName: '재고통합' }))
+  }
   const canRegister = Boolean(access && canUseMenu(access, '/operations/marketplace-registration'))
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize))
@@ -150,6 +155,11 @@ export default async function PriceTablePage({
         </div>
       </div>
 
+      {activeSheet === '재고통합' && <p className="text-xs text-muted-foreground">
+        메인·뉴도매를 SKU별로 통합한 목록입니다. 1·2·쿠팡창고에 가용재고가 있는 상품만 표시합니다.
+        {Boolean(data.archivedRows) && ` 원본 ${data.archivedRows!.toLocaleString('ko-KR')}행은 보관했습니다.`}
+        {Boolean(data.unmatchedRows) && ` 그중 ${data.unmatchedRows!.toLocaleString('ko-KR')}행은 재고·옵션 연결 확인이 필요합니다.`}
+      </p>}
       <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-2 py-1.5">
         <div className="flex items-center gap-1" aria-label="원본 시트">
           {sheetCounts.map(sheet => <Link key={sheet.name} href={priceTableHref({ ...navigation, sheetName: sheet.name })} className={`rounded px-2 py-1 text-xs font-medium ${activeSheet === sheet.name ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{sheet.name} <span className="tabular-nums opacity-75">{sheet.count.toLocaleString('ko-KR')}</span></Link>)}

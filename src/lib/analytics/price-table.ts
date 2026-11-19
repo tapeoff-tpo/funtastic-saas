@@ -1,15 +1,16 @@
+import { consolidatePriceRows, CONSOLIDATED_PRICE_SHEET, PRICE_ARCHIVE_KEY } from './price-table-consolidation'
 import { commonPriceSql, numericPriceField } from './price-registration-values-sql'
 import { COMMON_PRICE_KEY, REGISTRATION_EDIT_PREFIX, registrationPriceKey } from './price-registration-values'
 import * as XLSX from 'xlsx'
 import { and, asc, count, desc, eq, ilike, or, sql, ne, getTableColumns, type SQLWrapper } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { analyticsPriceTableRows, products } from '@/lib/db/schema'
+import { analyticsPriceTableRows, products, inventory } from '@/lib/db/schema'
 import { CORE_PRODUCT_ID_KEYS, findMarketplaceProductIds, getPriceTableDisplayColumns, getRegistrationTargets, PRICE_TABLE_SOURCE_NUMBER_KEYS, PRODUCT_ID_FIELD_PATTERN } from '@/app/(auth)/analytics/price-table/price-table-columns'
 import { formatPriceNumberDate, getPriceNumberDate, isPriceNumberDateKey, PRICE_NUMBER_DATE_PREFIX, priceNumberDateKey } from './price-number-date'
 
 import { listPriceRegistrationExclusions, priceRegistrationProductKey } from './price-registration-exclusions'
 
-const TARGET_SHEETS = ['상품등록', '메인', '뉴도매']
+const TARGET_SHEETS = ['상품등록', '메인', '뉴도매', CONSOLIDATED_PRICE_SHEET]
 const PAGE_SIZE = 100
 
 export type PriceTableRow = typeof analyticsPriceTableRows.$inferSelect
@@ -28,6 +29,8 @@ export interface PriceTableListResult {
   pageSize: number
   sheets: string[]
   sheetCounts: Array<{ name: string; count: number }>
+  archivedRows?: number
+  unmatchedRows?: number
   latestImport: Date | null
   sourceFileName: string | null
 }
@@ -73,6 +76,7 @@ export async function importPriceTableRows(data: {
     const previousDates = new Map<string, string | null>()
     for (const row of previousRows) {
       const rawData = row.rawData as Record<string, string>
+      if (rawData[PRICE_ARCHIVE_KEY]) continue
       const identity = priceRowIdentity(row)
       if (identity) {
         const edits = Object.fromEntries(Object.entries(rawData).filter(([key]) =>
@@ -86,6 +90,23 @@ export async function importPriceTableRows(data: {
         const previous = previousDates.get(identifier.identity)
         previousDates.set(identifier.identity, previous && (!date || previous < date) ? previous : date)
       }
+    }
+
+    // Keep the consolidated view when the old workbook is uploaded again.
+    if (previousRows.some((row) => row.sourceSheetName === CONSOLIDATED_PRICE_SHEET || row.rawData[PRICE_ARCHIVE_KEY])) {
+      const stocks = await tx.select({ sku: inventory.sku,
+        quantity: sql<number>`SUM(${inventory.availableStock})::int`, optionName: sql<string>`MAX(${inventory.optionName})`,
+      }).from(inventory).where(and(eq(inventory.userId, data.userId),
+        sql`${inventory.warehouseZone} IN ('1창고', '2창고', '쿠팡', '쿠팡창고')`)).groupBy(inventory.sku)
+      const archiveKey = `재고통합 업로드 원본: ${data.sourceFileName} / ${importedAt.toISOString()}`
+      const result = consolidatePriceRows({ rows: parsed.rows,
+        referenceRows: parsed.rows.filter((row) => row.sourceSheetName === '상품등록'), stocks, archiveKey })
+      parsed.rows = [...parsed.rows.filter((row) => !['메인', '뉴도매'].includes(row.sourceSheetName)), ...result.active,
+        ...result.archived.map(({ row, reason }) => ({ ...row, rawData: { ...row.rawData,
+          [PRICE_ARCHIVE_KEY]: archiveKey, __priceArchiveReason: reason } }))]
+      const counts = new Map<string, number>()
+      for (const row of parsed.rows) if (!row.rawData[PRICE_ARCHIVE_KEY]) counts.set(row.sourceSheetName, (counts.get(row.sourceSheetName) ?? 0) + 1)
+      parsed.sheets = [...counts].map(([name, rows]) => ({ name, rows }))
     }
 
     for (const chunk of chunks(parsed.rows, 500)) {
@@ -104,7 +125,7 @@ export async function importPriceTableRows(data: {
   })
 
   return {
-    imported: parsed.rows.length,
+    imported: parsed.rows.filter((row) => !row.rawData[PRICE_ARCHIVE_KEY]).length,
     sheets: parsed.sheets,
     sourceFileName: data.sourceFileName,
   }
@@ -144,7 +165,12 @@ export async function listPriceTableRows(data: {
           rowQuery.limit(PAGE_SIZE).offset(offset),
         ]).then(([totalRows, rows]) => ({ total: totalRows[0]?.value ?? 0, rows })),
     db
-      .select({ name: analyticsPriceTableRows.sourceSheetName, value: count() })
+      .select({ name: analyticsPriceTableRows.sourceSheetName,
+        value: sql<number>`COUNT(*) FILTER (WHERE ${activePriceRows()})::int`,
+        archived: sql<number>`COUNT(*) FILTER (WHERE ${analyticsPriceTableRows.rawData} ? ${PRICE_ARCHIVE_KEY})::int`,
+        unmatched: sql<number>`COUNT(*) FILTER (WHERE ${analyticsPriceTableRows.rawData} ? ${PRICE_ARCHIVE_KEY}
+          AND ${analyticsPriceTableRows.rawData}->>'__priceArchiveReason' LIKE '%미확인%')::int`,
+      })
       .from(analyticsPriceTableRows)
       .where(eq(analyticsPriceTableRows.userId, data.userId))
       .groupBy(analyticsPriceTableRows.sourceSheetName)
@@ -155,16 +181,18 @@ export async function listPriceTableRows(data: {
         sourceFileName: analyticsPriceTableRows.sourceFileName,
       })
       .from(analyticsPriceTableRows)
-      .where(eq(analyticsPriceTableRows.userId, data.userId))
+      .where(and(eq(analyticsPriceTableRows.userId, data.userId), activePriceRows()))
       .orderBy(desc(analyticsPriceTableRows.importedAt))
       .limit(1),
   ])
 
   const latest = latestRows[0]
-  const sheetCounts = sheetRows.map((row) => ({ name: row.name, count: row.value }))
+  const sheetCounts = sheetRows.filter((row) => Number(row.value) > 0).map((row) => ({ name: row.name, count: row.value }))
 
   return {
     ...result,
+    archivedRows: sheetRows.reduce((sum, row) => sum + Number(row.archived ?? 0), 0),
+    unmatchedRows: sheetRows.reduce((sum, row) => sum + Number(row.unmatched ?? 0), 0),
     overallTotal: sheetCounts.reduce((sum, sheet) => sum + sheet.count, 0),
     page,
     pageSize: PAGE_SIZE,
@@ -344,8 +372,18 @@ function cellText(value: unknown) {
   return String(value).replace(/\s+/g, ' ').trim()
 }
 
+function activePriceRows() {
+  return sql`NOT (${analyticsPriceTableRows.rawData} ? ${PRICE_ARCHIVE_KEY})
+    AND (${analyticsPriceTableRows.sourceSheetName} <> ${CONSOLIDATED_PRICE_SHEET} OR EXISTS (
+      SELECT 1 FROM inventory stock WHERE stock.user_id = ${analyticsPriceTableRows.userId}
+        AND stock.sku = ${analyticsPriceTableRows.productCode}
+        AND stock.warehouse_zone IN ('1창고', '2창고', '쿠팡', '쿠팡창고')
+      GROUP BY stock.sku HAVING SUM(stock.available_stock) > 0
+    ))`
+}
+
 function buildWhereClause(userId: string, search?: string, sheetName?: string, exactProductCode?: string) {
-  const conditions = [eq(analyticsPriceTableRows.userId, userId)]
+  const conditions = [eq(analyticsPriceTableRows.userId, userId), activePriceRows()]
   if (exactProductCode) conditions.push(eq(analyticsPriceTableRows.productCode, exactProductCode))
   const cleanSheet = sheetName?.trim()
   if (cleanSheet) conditions.push(eq(analyticsPriceTableRows.sourceSheetName, cleanSheet))
@@ -412,7 +450,7 @@ function buildOrderBy(sortKey: string | undefined, sortOrder: 'asc' | 'desc' | u
   }
 
   const rawValue = sortKey === 'sourceNumber'
-    ? sql<string>`CASE WHEN ${analyticsPriceTableRows.sourceSheetName} IN ('상품등록', '뉴도매')
+    ? sql<string>`CASE WHEN ${analyticsPriceTableRows.sourceSheetName} IN ('상품등록', '뉴도매', '재고통합')
         THEN COALESCE(${sql.join(PRICE_TABLE_SOURCE_NUMBER_KEYS.map((key) => sql`NULLIF(btrim(${analyticsPriceTableRows.rawData} ->> ${key}), '')`), sql`, `)})
       END`
     : rawKey && rawKey.length <= 180

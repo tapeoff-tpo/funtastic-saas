@@ -157,7 +157,7 @@ const wholesaleColumns: PriceTableDisplayColumn[] = [
 export const PRICE_TABLE_SOURCE_NUMBER_KEYS = ['no', 'NO', 'No', 'no.', 'NO.', 'No.'] as const
 
 export function getPriceTableSourceNumber(sheetName: string, rawData: Record<string, unknown>) {
-  if (sheetName !== '상품등록' && sheetName !== '뉴도매') return null
+  if (sheetName !== '상품등록' && sheetName !== '뉴도매' && sheetName !== '재고통합') return null
   for (const key of PRICE_TABLE_SOURCE_NUMBER_KEYS) {
     const value = rawData[key]
     if (typeof value === 'number' && Number.isFinite(value)) return String(value)

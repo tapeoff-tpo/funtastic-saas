@@ -29,7 +29,7 @@ export interface ShortMeetingData {
   rows: ShortMeetingRow[]
   sheetStatus: 'available' | 'unavailable'
   meetingDate: string
-  upload: { fileName: string; appliedAt: string; rowCount: number } | null
+  upload: { fileName: string; appliedAt: string; rowCount: number; rawAvailable: boolean } | null
   summary: {
     productCount: number
     todayOutbound: number
@@ -101,7 +101,7 @@ export async function getShortMeetingData(userId: string, meetingDate = todayInS
   const skus = queryRows.map((row) => row.sku)
   if (skus.length === 0) {
     const stockList = await stockListPromise
-    return { ...emptyShortMeetingData(meetingDate), upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount }, sheetStatus: stockList ? 'available' : 'unavailable' }
+    return { ...emptyShortMeetingData(meetingDate), upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount, rawAvailable: upload.rawAvailable ?? false }, sheetStatus: stockList ? 'available' : 'unavailable' }
   }
 
   const [outgoingBySku, chinaInventory, purchases, stockList] = await Promise.all([
@@ -143,7 +143,7 @@ export async function getShortMeetingData(userId: string, meetingDate = todayInS
     rows,
     sheetStatus: stockList ? 'available' : 'unavailable',
     meetingDate,
-    upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount },
+    upload: { fileName: upload.fileName, appliedAt: upload.appliedAt, rowCount: upload.rowCount, rawAvailable: upload.rawAvailable ?? false },
     summary: {
       productCount: rows.length,
       todayOutbound: rows.reduce((sum, row) => sum + row.todayOutbound, 0),

@@ -43,13 +43,14 @@ export async function POST(request: NextRequest) {
     }
     if (action === 'apply') {
       const userId = await getWorkspaceUserId(user.id)
-      await saveShortMeetingUpload({ userId, actorId: user.id, meetingDate, fileName: file.name, buffer, rowCount: parsed.rowCount, items: parsed.items })
+      await saveShortMeetingUpload({ userId, actorId: user.id, meetingDate, fileName: file.name, buffer, rowCount: parsed.rowCount, items: parsed.items, rawData: parsed.rawData })
       revalidatePath('/analytics/short-meeting')
     }
     return NextResponse.json({ success: true, fileName: file.name, meetingDate, rowCount: parsed.rowCount,
       productCount: parsed.productCount, totalQuantity: parsed.totalQuantity, warnings: parsed.warnings, preview: parsed.items })
   } catch (caught) {
-    console.error('short meeting upload error:', caught)
+    // Database errors can contain SQL parameters, including private order rows.
+    console.error('short meeting upload error:', caught instanceof Error ? caught.name : 'unknown error')
     return NextResponse.json({ error: '주문서를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.' }, { status: 500 })
   }
 }

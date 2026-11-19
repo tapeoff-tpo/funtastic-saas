@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import * as XLSX from 'xlsx'
 import { normalizePasswordProtectedExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
 
 export type ShortMeetingUploadItem = {
@@ -8,6 +9,11 @@ export type ShortMeetingUploadItem = {
   quantity: number
 }
 
+export type ShortMeetingRawData = {
+  headers: string[]
+  rows: Array<{ rowNumber: number; cells: string[]; excludedReason: string | null }>
+}
+
 export type ShortMeetingUpload = {
   /** Number of source rows included in the SKU totals. */
   rowCount: number
@@ -15,6 +21,7 @@ export type ShortMeetingUpload = {
   totalQuantity: number
   warnings: string[]
   items: ShortMeetingUploadItem[]
+  rawData: ShortMeetingRawData
 }
 
 const HEADERS = {
@@ -50,6 +57,19 @@ export async function parseShortMeetingWorkbook(buffer: Buffer, password?: strin
   await workbook.xlsx.load(normalized as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new Error('엑셀에 워크시트가 없습니다.')
+
+  // ExcelJS is used for the established aggregation below. SheetJS retains
+  // Excel's formatted display text (dates, leading zeroes, cached formulas)
+  // for the separate, read-only source view.
+  const displayWorkbook = XLSX.read(normalized, { type: 'buffer', cellDates: true, cellText: true })
+  const displaySheet = displayWorkbook.Sheets[displayWorkbook.SheetNames[0]]
+  let lastColumn = 0
+  sheet.eachRow((row) => row.eachCell((_cell, columnNumber) => { lastColumn = Math.max(lastColumn, columnNumber) }))
+  const displayCells = (rowNumber: number): string[] => Array.from({ length: lastColumn }, (_, column) => {
+    const cell = displaySheet?.[XLSX.utils.encode_cell({ r: rowNumber - 1, c: column })] as XLSX.CellObject | undefined
+    return cell ? String(cell.w ?? XLSX.utils.format_cell(cell)) : ''
+  })
+  const rawData: ShortMeetingRawData = { headers: displayCells(1), rows: [] }
   const header = sheet.getRow(1)
   const columns = new Map<string, number>()
   header.eachCell((cell, column) => {
@@ -70,40 +90,57 @@ export async function parseShortMeetingWorkbook(buffer: Buffer, password?: strin
 
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return
-    const sku = cellText(row.getCell(skuColumn))
-    const productName = cellText(row.getCell(productColumn))
-    const optionName = cellText(row.getCell(optionColumn))
-    const quantityText = cellText(row.getCell(quantityColumn))
-    // Ignore a completely blank relevant row, including Excel formatting-only rows.
-    if (!sku && !productName && !optionName && !quantityText) return
-    if (!sku) {
-      warnings.push(`${rowNumber}행: 사방넷 상품코드가 없어 제외했습니다.`)
-      return
+    // Exclude formatting-only rows, but keep every row with an actual source
+    // value, even when it cannot be used in the product aggregation.
+    let hasValue = false
+    row.eachCell(() => { hasValue = true })
+    if (!hasValue) return
+    const sourceRow = { rowNumber, cells: displayCells(rowNumber), excludedReason: null as string | null }
+    const aggregateRow = () => {
+      const sku = cellText(row.getCell(skuColumn))
+      const productName = cellText(row.getCell(productColumn))
+      const optionName = cellText(row.getCell(optionColumn))
+      const quantityText = cellText(row.getCell(quantityColumn))
+      // Ignore a completely blank relevant row, including Excel formatting-only rows.
+      if (!sku && !productName && !optionName && !quantityText) {
+        sourceRow.excludedReason = '상품별 집계 대상 정보 없음'
+        return
+      }
+      if (!sku) {
+        sourceRow.excludedReason = '사방넷 상품코드가 없어 제외했습니다.'
+        warnings.push(`${rowNumber}행: 사방넷 상품코드가 없어 제외했습니다.`)
+        return
+      }
+      const quantity = quantityValue(row.getCell(quantityColumn))
+      if (quantity === null) {
+        sourceRow.excludedReason = '실 출고수량이 비어 있거나 올바른 정수가 아니어서 제외했습니다.'
+        warnings.push(`${rowNumber}행: 실 출고수량이 비어 있거나 올바른 정수가 아니어서 제외했습니다.`)
+        return
+      }
+      const existing = items.get(sku)
+      if (existing && !Number.isSafeInteger(existing.quantity + quantity)) {
+        sourceRow.excludedReason = '상품의 출고수량 합계가 너무 커서 제외했습니다.'
+        warnings.push(`${rowNumber}행: 상품의 출고수량 합계가 너무 커서 제외했습니다.`)
+        return
+      }
+      if (!Number.isSafeInteger(totalQuantity + quantity)) {
+        sourceRow.excludedReason = '전체 출고수량 합계가 너무 커서 제외했습니다.'
+        warnings.push(`${rowNumber}행: 전체 출고수량 합계가 너무 커서 제외했습니다.`)
+        return
+      }
+      if (existing) {
+        existing.quantity += quantity
+        if (!existing.productName && productName) existing.productName = productName
+        if (!existing.optionName && optionName) existing.optionName = optionName
+      } else {
+        items.set(sku, { sku, productName, optionName, quantity })
+      }
+      rowCount += 1
+      totalQuantity += quantity
     }
-    const quantity = quantityValue(row.getCell(quantityColumn))
-    if (quantity === null) {
-      warnings.push(`${rowNumber}행: 실 출고수량이 비어 있거나 올바른 정수가 아니어서 제외했습니다.`)
-      return
-    }
-    const existing = items.get(sku)
-    if (existing && !Number.isSafeInteger(existing.quantity + quantity)) {
-      warnings.push(`${rowNumber}행: 상품의 출고수량 합계가 너무 커서 제외했습니다.`)
-      return
-    }
-    if (!Number.isSafeInteger(totalQuantity + quantity)) {
-      warnings.push(`${rowNumber}행: 전체 출고수량 합계가 너무 커서 제외했습니다.`)
-      return
-    }
-    if (existing) {
-      existing.quantity += quantity
-      if (!existing.productName && productName) existing.productName = productName
-      if (!existing.optionName && optionName) existing.optionName = optionName
-    } else {
-      items.set(sku, { sku, productName, optionName, quantity })
-    }
-    rowCount += 1
-    totalQuantity += quantity
+    aggregateRow()
+    rawData.rows.push(sourceRow)
   })
   if (!rowCount) throw new Error('반영할 수 있는 주문 행이 없습니다. 상품코드와 실 출고수량을 확인해 주세요.')
-  return { rowCount, productCount: items.size, totalQuantity, warnings, items: [...items.values()] }
+  return { rowCount, productCount: items.size, totalQuantity, warnings, items: [...items.values()], rawData }
 }

@@ -21,7 +21,7 @@ describe('short meeting data assembly', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-11T03:00:00Z'))
-    mocks.latestUpload.mockResolvedValue({ fileName: 'orders.xlsx', meetingDate: '2026-11-11', appliedAt: '2026-11-11T03:00:00Z', rowCount: 3, items: [
+    mocks.latestUpload.mockResolvedValue({ fileName: 'orders.xlsx', meetingDate: '2026-11-11', appliedAt: '2026-11-11T03:00:00Z', rowCount: 3, rawAvailable: true, items: [
       { sku: 'A', productName: '상품 A', optionName: '빨강', quantity: 4 },
       { sku: 'B', productName: '상품 B', optionName: '파랑', quantity: 3 },
       { sku: 'C', productName: '상품 C', optionName: '단품', quantity: 1 },
@@ -61,6 +61,7 @@ describe('short meeting data assembly', () => {
 
     expect(mocks.outgoing).toHaveBeenCalledWith('workspace-owner', ['A', 'B', 'C'], new Date('2026-11-11T03:00:00Z'))
     expect(mocks.chinaInventory).toHaveBeenCalledWith('workspace-owner')
+    expect(data.upload?.rawAvailable).toBe(true)
     expect(data.sheetStatus).toBe('available')
     expect(data.summary).toEqual({ productCount: 3, todayOutbound: 8, outOfStockCount: 1, riskCount: 1 })
     expect(data.rows.map((row) => row.sku)).toEqual(['B', 'A', 'C'])

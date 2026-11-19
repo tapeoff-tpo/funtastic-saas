@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import type { ShortMeetingUploadItem } from './short-meeting-upload-parser'
+import type { ShortMeetingRawData, ShortMeetingUploadItem } from './short-meeting-upload-parser'
 
 export type ShortMeetingUpload = {
   fileName: string
@@ -9,6 +9,8 @@ export type ShortMeetingUpload = {
   appliedAt: string
   rowCount: number
   items: ShortMeetingUploadItem[]
+  rawData: ShortMeetingRawData | null
+  rawAvailable: boolean
 }
 
 let schemaPromise: Promise<void> | null = null
@@ -26,17 +28,19 @@ export function ensureShortMeetingUploadSchema() {
       items jsonb NOT NULL,
       applied_at timestamptz NOT NULL DEFAULT now()
     )`)
+    await tx.execute(sql`ALTER TABLE short_meeting_uploads ADD COLUMN IF NOT EXISTS raw_data jsonb`)
     await tx.execute(sql`CREATE INDEX IF NOT EXISTS short_meeting_uploads_user_date_idx ON short_meeting_uploads (user_id, meeting_date, applied_at DESC)`)
     await tx.execute(sql`ALTER TABLE short_meeting_uploads ENABLE ROW LEVEL SECURITY`)
   }).catch((error) => { schemaPromise = null; throw error })
   return schemaPromise
 }
 
-export async function getLatestShortMeetingUpload(userId: string, meetingDate: string): Promise<ShortMeetingUpload | null> {
+export async function getLatestShortMeetingUpload(userId: string, meetingDate: string, options?: { includeRaw?: boolean }): Promise<ShortMeetingUpload | null> {
   await ensureShortMeetingUploadSchema()
+  const rawData = options?.includeRaw ? sql`raw_data` : sql`NULL::jsonb`
   const result = await db.execute<ShortMeetingUpload>(sql`
     SELECT file_name AS "fileName", meeting_date::text AS "meetingDate", applied_at::text AS "appliedAt",
-           row_count AS "rowCount", items
+           row_count AS "rowCount", items, ${rawData} AS "rawData", (raw_data IS NOT NULL) AS "rawAvailable"
     FROM short_meeting_uploads
     WHERE user_id = ${userId}::uuid AND meeting_date = ${meetingDate}::date
     ORDER BY applied_at DESC, id DESC LIMIT 1
@@ -46,14 +50,14 @@ export async function getLatestShortMeetingUpload(userId: string, meetingDate: s
 
 export async function saveShortMeetingUpload(input: {
   userId: string; actorId: string; meetingDate: string; fileName: string; buffer: Buffer;
-  rowCount: number; items: ShortMeetingUploadItem[]
+  rowCount: number; items: ShortMeetingUploadItem[]; rawData: ShortMeetingRawData
 }) {
   await ensureShortMeetingUploadSchema()
   const hash = createHash('sha256').update(input.buffer).digest('hex')
   await db.execute(sql`INSERT INTO short_meeting_uploads
-    (user_id, applied_by, meeting_date, file_name, file_hash, row_count, items)
+    (user_id, applied_by, meeting_date, file_name, file_hash, row_count, items, raw_data)
     VALUES (${input.userId}::uuid, ${input.actorId}::uuid, ${input.meetingDate}::date,
-      ${input.fileName.slice(0, 255)}, ${hash}, ${input.rowCount}, ${JSON.stringify(input.items)}::jsonb)`)
+      ${input.fileName.slice(0, 255)}, ${hash}, ${input.rowCount}, ${JSON.stringify(input.items)}::jsonb, ${JSON.stringify(input.rawData)}::jsonb)`)
 }
 
 export function isMeetingDate(value: string): boolean {

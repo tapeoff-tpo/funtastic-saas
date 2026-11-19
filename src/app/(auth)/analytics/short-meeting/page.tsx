@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getCachedShortMeetingData } from '@/lib/analytics/short-meeting'
-import { ShortMeetingTable } from './short-meeting-table'
+import { ShortMeetingTabs } from './short-meeting-tabs'
 import { ShortMeetingUpload } from './short-meeting-upload'
 import { isMeetingDate, todayInSeoul } from '@/lib/analytics/short-meeting-uploads'
 
@@ -40,7 +40,7 @@ export default async function ShortMeetingPage({ searchParams }: { searchParams:
           품절 구글시트를 불러오지 못해 품절 목록 여부를 확인할 수 없습니다. 시트 공유 설정과 연결 상태를 확인해 주세요.
         </p>
       )}
-      <ShortMeetingTable rows={data.rows} sheetStatus={data.sheetStatus} />
+      <ShortMeetingTabs rows={data.rows} sheetStatus={data.sheetStatus} rawAvailable={data.upload?.rawAvailable ?? false} uploadFileName={data.upload?.fileName ?? null} uploadVersion={data.upload?.appliedAt ?? null} meetingDate={meetingDate} />
     </div>
   )
 }

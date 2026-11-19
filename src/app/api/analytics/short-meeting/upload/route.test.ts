@@ -26,6 +26,7 @@ import { ExcelWorkbookPasswordInvalidError, ExcelWorkbookPasswordRequiredError }
 const parsed = {
   rowCount: 2, productCount: 1, totalQuantity: 5, warnings: ['3행: 제외'],
   items: [{ sku: '123-0001', productName: '상품', optionName: '옵션', quantity: 5 }],
+  rawData: { headers: ['주문자명', '상품코드'], rows: [{ rowNumber: 2, cells: ['가상 주문자', '123-0001'], excludedReason: null }] },
 }
 
 function request(action = 'preview', meetingDate = '2026-11-12', filePassword?: string) {
@@ -67,7 +68,10 @@ describe('POST /api/analytics/short-meeting/upload', () => {
   it('previews parsed totals and warnings without saving or changing the workspace', async () => {
     const response = await POST(request('preview'))
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ success: true, meetingDate: '2026-11-12', rowCount: 2, totalQuantity: 5, warnings: parsed.warnings, preview: parsed.items })
+    const body = await response.json()
+    expect(body).toMatchObject({ success: true, meetingDate: '2026-11-12', rowCount: 2, totalQuantity: 5, warnings: parsed.warnings, preview: parsed.items })
+    expect(body).not.toHaveProperty('rawData')
+    expect(JSON.stringify(body)).not.toContain('가상 주문자')
     expect(mocks.parse).toHaveBeenCalledWith(Buffer.from([1, 2, 3]), undefined)
     expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.getWorkspaceUserId).not.toHaveBeenCalled()
@@ -80,7 +84,7 @@ describe('POST /api/analytics/short-meeting/upload', () => {
     expect(mocks.getWorkspaceUserId).toHaveBeenCalledWith('actor')
     expect(mocks.save).toHaveBeenCalledWith({
       userId: 'workspace', actorId: 'actor', meetingDate: '2026-11-12', fileName: '주문서.xlsx',
-      buffer: Buffer.from([1, 2, 3]), rowCount: 2, items: parsed.items,
+      buffer: Buffer.from([1, 2, 3]), rowCount: 2, items: parsed.items, rawData: parsed.rawData,
     })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/analytics/short-meeting')
   })

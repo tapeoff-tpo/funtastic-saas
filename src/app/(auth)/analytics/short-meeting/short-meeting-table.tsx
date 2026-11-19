@@ -9,7 +9,7 @@ type SortDirection = 'ascending' | 'descending'
 const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
 const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'sku', label: '품목코드' }, { key: 'productName', label: '상품명 / 옵션' },
-  { key: 'todayOutbound', label: '기준일 출고수량' }, { key: 'currentStock', label: '국내 현재고' },
+  { key: 'todayOutbound', label: '당일 출고수량' }, { key: 'currentStock', label: '국내 현재고' },
   { key: 'stockAfterOutbound', label: '출고 후 재고' }, { key: 'averageDailyOutbound', label: '평균 출고수량' },
   { key: 'monthOutbound', label: '당월 출고수량' }, { key: 'outOfStock', label: '품절리스트' },
   { key: 'chinaStock', label: '중국재고' }, { key: 'chinaShipmentDate', label: '중국출고날짜' },
@@ -88,7 +88,7 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
             <div data-no-translate className="break-words text-sm font-semibold [overflow-wrap:anywhere]">{row.productName}</div>
             <div data-no-translate className="mt-0.5 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{row.optionName} · {row.sku}</div>
             <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-              <MobileField label="기준일 출고수량">{formatQuantity(row.todayOutbound)}</MobileField>
+              <MobileField label="당일 출고수량">{formatQuantity(row.todayOutbound)}</MobileField>
               <MobileField label="국내 현재고">{formatQuantity(row.currentStock)}</MobileField>
               <MobileField label="출고 후 재고" className={row.stockAfterOutbound <= 0 ? 'font-semibold text-red-600' : ''}>{formatQuantity(row.stockAfterOutbound)}</MobileField>
               <MobileField label="평균 출고수량 (월평균)">{formatQuantity(row.averageDailyOutbound)}</MobileField>
@@ -108,7 +108,7 @@ export function ShortMeetingTable({ rows, sheetStatus }: { rows: ShortMeetingRow
             <col className="w-[8%]" /><col className="w-[17%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[10%]" /><col className="w-[6%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[8%]" />
           </colgroup>
           <thead className="bg-muted/50 text-muted-foreground"><tr>
-            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '기준일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}
+            {sortable('sku', '품목코드')}{sortable('productName', '상품명 / 옵션')}{sortable('todayOutbound', '당일 출고수량', 'right')}{sortable('currentStock', '국내 현재고', 'right')}{sortable('stockAfterOutbound', '출고 후 재고', 'right')}{sortable('averageDailyOutbound', <>평균 출고수량<br />(월평균)</>, 'right')}{sortable('monthOutbound', '당월 출고수량', 'right')}{sortable('outOfStock', '품절리스트')}{sortable('chinaStock', '중국재고', 'right')}{sortable('chinaShipmentDate', '중국출고날짜')}{sortable('chinaOrderStatus', '발주 상태')}{sortable('chinaOrderDate', '발주날짜')}
           </tr></thead>
           <tbody>
             {filtered.length === 0 ? <tr><td className="px-3 py-12 text-center text-muted-foreground" colSpan={12}>{rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '반영된 주문서에 표시할 상품이 없습니다.'}</td></tr> : filtered.map((row) => (
@@ -138,5 +138,5 @@ function MobileField({ label, children, className = '' }: { label: string; child
 
 function formatQuantity(value: number): string {
   const rounded = value < 0 ? -Math.round(-value) : Math.round(value)
-  return `${(rounded === 0 ? 0 : rounded).toLocaleString('ko-KR')}개`
+  return (rounded === 0 ? 0 : rounded).toLocaleString('ko-KR')
 }

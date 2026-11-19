@@ -23,6 +23,7 @@ describe('ShortMeetingUpload', () => {
     fireEvent.click(screen.getByRole('button', { name: '미리보기' }))
     expect(await screen.findByText('A-1')).toBeInTheDocument()
     expect(screen.getByText('확인이 필요한 행이 있습니다.')).toBeInTheDocument()
+    expect(screen.getByText(/출고수량 3$/)).toHaveTextContent('1개 품목 · 출고수량 3')
     const previewForm = fetchMock.mock.calls[0][1].body as FormData
     expect(previewForm.get('file')).toBe(file)
     expect(previewForm.get('meetingDate')).toBe('2026-11-12')

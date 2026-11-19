@@ -10,13 +10,13 @@ import { PackageWeightEditor } from './outbound-package-editors'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaShipmentDetailView, PalletSummary } from './china-shipments-board'
 
-export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, editable, isPending, assignmentEditor, unassignedBoxes = [] }: {
+export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, editable, isPending, assignmentEditor, unassignedBoxes = [], initiallyExpanded = false }: {
   shipmentId: string; summaries: PalletSummary[]; boxItems: ChinaShipmentDetailView['boxItems']; items: ChinaShipmentDetailView['items']
-  editable: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']
+  editable: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const guard = useChinaWorkGuard()
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initiallyExpanded ? summaries.map((summary) => summary.pallet.id) : []))
   const itemById = new Map(items.map((item) => [item.id, item]))
   function toggle(id: string, setter: typeof setExpanded) {
     setter((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
@@ -49,7 +49,7 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
       {expanded.has(summary.pallet.id) && boxList(summary.boxes)}
     </article>)}
-    {!!unassignedBoxes.length && <details className="rounded-lg border"><summary className="cursor-pointer p-3 text-sm">낱박스 {unassignedBoxes.length}개</summary>{boxList(unassignedBoxes)}</details>}
+    {!!unassignedBoxes.length && <details open={initiallyExpanded} className="rounded-lg border"><summary className="cursor-pointer p-3 text-sm">낱박스 {unassignedBoxes.length}개</summary>{boxList(unassignedBoxes)}</details>}
     {!!summaries.length && <div className="overflow-x-auto rounded-lg bg-muted/30 p-3 text-sm"><p className="whitespace-nowrap">제품 적재 CBM 합계: {formatChinaOutboundCbm(summaries.reduce((sum, row) => sum + row.cbm, 0))} CBM</p><p className="whitespace-nowrap font-semibold">최종 파렛트 CBM 합계: {finalCbms.some((value) => value == null) ? '미입력' : `${formatChinaOutboundCbm(finalCbms.reduce<number>((sum, value) => sum + (value ?? 0), 0))} CBM`}</p></div>}
     {assignmentEditor && <dialog ref={dialog} data-purchasing-translate aria-label="파렛트 배정 수정" onCancel={(event) => { if (isPending || guard.busy) event.preventDefault() }} className="m-auto max-h-[90dvh] w-[min(72rem,96vw)] overflow-auto rounded-xl border bg-background p-4 text-foreground backdrop:bg-black/40"><div className="mb-3 flex items-center justify-between"><h3 className="font-semibold">파렛트 배정 수정</h3><button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.close()} className="rounded border px-3 py-1">닫기</button></div>{assignmentEditor}</dialog>}
   </section>

@@ -54,7 +54,7 @@ it('loads the visible shipment list concurrently with the configured warehouse c
   expect(mocks.stock).not.toHaveBeenCalled()
 })
 
-it.each([['boxes', 'boxes'], ['pallets', 'pallets'], ['summary', 'pallets']])('does not reload the hidden list while displaying a selected shipment at %s', async (step, selectedStep) => {
+it.each([['boxes', 'boxes'], ['pallets', 'pallets'], ['summary', 'summary']])('does not reload the hidden list while displaying a selected shipment at %s', async (step, selectedStep) => {
   const props = await renderPage({ ...period, shipment: selectedId, step })
   expect(mocks.detail).toHaveBeenCalledExactlyOnceWith('canonical-owner', selectedId)
   expect(mocks.shipments).not.toHaveBeenCalled()

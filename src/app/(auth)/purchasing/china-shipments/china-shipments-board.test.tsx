@@ -891,7 +891,7 @@ describe('ChinaShipmentsBoard', () => {
 
     rerender(<><PurchasingLanguageSwitcher /><ChinaShipmentsBoard inventoryItems={[inventoryItem]} shipments={shipments} selectedShipment={detail} selectedStep="summary" showCreate={false} /></>)
 
-    await waitFor(() => expect(screen.getByText('托盘分配')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '第4步 · 托盘最终清单' })).toBeInTheDocument())
     const summaryRoot = document.querySelector('[data-purchasing-translate]')
     expect(summaryRoot).not.toBeNull()
     expect(visibleKoreanUi(summaryRoot!)).toEqual([])
@@ -1324,21 +1324,23 @@ describe('ChinaShipmentsBoard', () => {
     expect(within(boxRow).getAllByRole('button', { name: '중량 저장' })).toHaveLength(1)
   })
 
-  it('shows pallet dimensions and calculated weight without opening read-only pallet contents', () => {
+  it('shows the final pallet list with dimensions, calculated weight and loaded products already open and read-only', () => {
     const detail = makeShipmentWithBoxAndPalletStatuses()
     detail.pallets[0] = { ...detail.pallets[0], lengthCm: 120, widthCm: 100, heightCm: 150 }
     detail.boxes[0].grossWeightKg = 10
-    detail.shipment = { ...detail.shipment, status: 'dispatched' }
-    renderShipment(detail, 'pallets')
+    renderShipment(detail, 'summary')
+    expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
     expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
-    const card = screen.getByRole('button', { name: '파렛트 P1 펼치기' }).closest('article')!
+    const card = screen.getByRole('button', { name: '파렛트 P1 접기' }).closest('article')!
     expect(within(card).getByText('파렛트 실측 규격: 120 × 100 × 150 cm')).toBeVisible()
     expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
     expect(within(card).getByText('최종 파렛트 CBM: 1.8000 CBM')).toBeVisible()
     expect(within(card).queryByRole('spinbutton')).not.toBeInTheDocument()
-    expect(within(card).queryByRole('group', { name: /적재 상품·중량/ })).not.toBeInTheDocument()
-    fireEvent.click(within(card).getByRole('button', { name: '파렛트 P1 펼치기' }))
     expect(within(card).getByRole('group', { name: '박스 BOX-01 적재 상품·중량' })).toBeVisible()
+    expect(within(card).getByText(/DONE-01 · 완료 상품/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: '파렛트 배정 전체 저장' })).not.toBeInTheDocument()
+    fireEvent.click(within(card).getByRole('button', { name: '파렛트 P1 접기' }))
+    expect(within(card).queryByRole('group', { name: /적재 상품·중량/ })).not.toBeInTheDocument()
   })
 
   it('calculates final CBM from measured pallet dimensions independently of product CBM', async () => {
@@ -1431,6 +1433,7 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment(detail, 'summary')
     expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
     expect(screen.getByText('낱박스 1개')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '박스 1 적재 상품·중량' })).toBeVisible()
     expect(screen.getAllByText('0 PLT + 1 BOX').length).toBeGreaterThan(0)
   })
 
@@ -2054,10 +2057,10 @@ describe('ChinaShipmentsBoard', () => {
     expect(checkbox).toBeChecked()
   })
 
-  it('uses item splitting, saved box review, and pallet assignment as three client-side stages', () => {
+  it('uses item splitting, saved box review, pallet assignment, and final pallet review as four client-side stages', () => {
     renderShipment(makeShipmentWithBox(), 'items')
     const nav = screen.getByRole('navigation', { name: '중국출고 작업 단계' })
-    expect(within(nav).getAllByRole('button')).toHaveLength(3)
+    expect(within(nav).getAllByRole('button')).toHaveLength(4)
     expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '적재현황 엑셀' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
@@ -2067,10 +2070,13 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('heading', { name: '1단계 · 출고품목·박스분할' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 배정' }))
     expect(screen.getByRole('heading', { name: '3단계 · 파렛트 배정' })).toBeVisible()
-    expect(screen.getByRole('heading', { name: '최종 적재리스트' })).toBeVisible()
+    expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '출고완료' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 최종 리스트' }))
+    expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
     expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
-    for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['items', '1단계.*출고품목·박스분할']]) {
+    for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['summary', '4단계.*파렛트 최종 리스트'], ['items', '1단계.*출고품목·박스분할']]) {
       const button = within(nav).getByRole('button', { name: new RegExp(title) })
       fireEvent.click(button)
       expect(button).toHaveAttribute('aria-current', 'step')
@@ -2093,11 +2099,12 @@ describe('ChinaShipmentsBoard', () => {
       ['items', /1단계.*출고품목/],
       ['boxes', /2단계.*저장된 박스현황/],
       ['pallets', /3단계.*파렛트 배정/],
+      ['summary', /4단계.*파렛트 최종 리스트/],
     ] as const
 
     for (const [, title] of stages.slice(1)) fireEvent.click(screen.getByRole('button', { name: title }))
     const historyLength = window.history.length
-    fireEvent.click(screen.getByRole('button', { name: stages[2][1] }))
+    fireEvent.click(screen.getByRole('button', { name: stages[3][1] }))
     expect(window.history.length).toBe(historyLength)
 
     async function travel(direction: 'back' | 'forward', index: number) {
@@ -2113,8 +2120,8 @@ describe('ChinaShipmentsBoard', () => {
       expect(window.location.search).toContain(period)
     }
 
-    for (const index of [1, 0]) await travel('back', index)
-    for (const index of [1, 2]) await travel('forward', index)
+    for (const index of [2, 1, 0]) await travel('back', index)
+    for (const index of [1, 2, 3]) await travel('forward', index)
     expect(navigate).not.toHaveBeenCalled()
   })
 

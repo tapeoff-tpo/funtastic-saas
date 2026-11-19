@@ -92,8 +92,7 @@ function parseShipmentId(value: string | undefined) {
 }
 
 function parseShipmentStage(value: string | undefined): ChinaShipmentStage {
-  if (value === 'items' || value === 'boxes' || value === 'pallets') return value
-  if (value === 'summary') return 'pallets'
+  if (value === 'items' || value === 'boxes' || value === 'pallets' || value === 'summary') return value
   if (value === 'setup' || value === 'packing') return 'items'
   return 'items'
 }

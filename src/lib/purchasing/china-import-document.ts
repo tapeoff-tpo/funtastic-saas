@@ -29,6 +29,32 @@ export function importUnitPriceCny(data: Record<string, string | null>) {
   return null
 }
 
+/** Compress a consecutive sequence of numeric carton numbers for the invoice. */
+export function formatBoxMarks(marks: readonly string[]) {
+  const normalized = marks.map((mark) => mark.trim()).filter(Boolean)
+  const numbers = normalized.map((mark) => /^\d+$/.test(mark) ? Number(mark) : null)
+  const numericMarks = numbers.filter((number): number is number => number !== null)
+  if (numericMarks.length !== normalized.length) return normalized.join(', ')
+
+  const sorted = [...new Set(numericMarks)].sort((left, right) => left - right)
+  if (!sorted.length) return ''
+
+  const ranges: string[] = []
+  let start = sorted[0]!
+  let end = start
+  for (const number of sorted.slice(1)) {
+    if (number === end + 1) {
+      end = number
+      continue
+    }
+    ranges.push(start === end ? String(start) : `${start}~${end}`)
+    start = number
+    end = number
+  }
+  ranges.push(start === end ? String(start) : `${start}~${end}`)
+  return ranges.join(', ')
+}
+
 export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Map<string, ImportItemMetadata>) {
   if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 인보이스·패킹리스트를 만들 수 없습니다.')
   if (!detail.items.length) throw new Error('출고상품을 먼저 등록해주세요.')
@@ -201,7 +227,7 @@ export async function exportChinaImportDocument(
       const row = nextRow++
       const item = itemById.get(trade.itemId)!
       const marks = [...new Set(trade.marks)]
-      const markText = marks.join(', ')
+      const markText = formatBoxMarks(marks)
       for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
       sheet.getRow(row).height = 21
       sheet.getCell(`K${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
@@ -222,7 +248,7 @@ export async function exportChinaImportDocument(
     const item = itemById.get(invoice.itemId)!
     const source = options.items[item.id]
     const marks = [...new Set(invoice.marks)]
-    const markText = marks.join(', ')
+    const markText = formatBoxMarks(marks)
     sheet.getCell(`A${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
     sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
     sheet.getCell(`C${row}`).value = source.englishName

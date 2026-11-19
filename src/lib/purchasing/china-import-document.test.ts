@@ -3,7 +3,7 @@ import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { exportChinaImportDocument, importUnitPriceCny, prepareImportDocument, type ImportDocumentDetail, type ImportDocumentOptions, type ImportItemMetadata } from './china-import-document'
+import { exportChinaImportDocument, formatBoxMarks, importUnitPriceCny, prepareImportDocument, type ImportDocumentDetail, type ImportDocumentOptions, type ImportItemMetadata } from './china-import-document'
 
 const detail: ImportDocumentDetail = {
   shipment: { shipmentNo: 'CN-TEST', status: 'ready', originWarehouseCode: '중국창고', destinationName: '인천', plannedOutboundDate: '2026-10-30', createdAt: '2026-10-30' },
@@ -57,6 +57,12 @@ async function exportedSheet(shipment: ImportDocumentDetail, overrides: ImportDo
 }
 
 describe('China import documents', () => {
+  it('compresses consecutive numeric carton marks into ranges', () => {
+    expect(formatBoxMarks(['1', '2', '3', '4', '5', '20'])).toBe('1~5, 20')
+    expect(formatBoxMarks(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'])).toBe('1~20')
+    expect(formatBoxMarks(['1', '3', '5'])).toBe('1, 3, 5')
+    expect(formatBoxMarks(['BOX-1', 'BOX-2'])).toBe('BOX-1, BOX-2')
+  })
   it.each([
     [[60, 20, 10], 'P1'],
     [[10, 60, 20], 'P2'],
@@ -79,6 +85,26 @@ describe('China import documents', () => {
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
     expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)', result: 3 })
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
+  })
+  it('writes one numeric carton range for an item packed across consecutive boxes', async () => {
+    const boxCount = 20
+    const shipment: ImportDocumentDetail = {
+      ...detail,
+      items: [{ ...detail.items[0], reservedQuantity: boxCount, packedQuantity: boxCount }],
+      pallets: [],
+      boxes: Array.from({ length: boxCount }, (_, index) => ({ id: `box-${index + 1}`, boxNo: String(index + 1), palletId: null, status: 'open' })),
+      boxItems: Array.from({ length: boxCount }, (_, index) => ({ id: `allocation-${index + 1}`, boxId: `box-${index + 1}`, shipmentItemId: 'item-a', quantity: 1 })),
+    }
+    const overrides: ImportDocumentOptions = {
+      ...options,
+      items: { 'item-a': { englishName: 'Glass', unitPriceCny: 2 } },
+      boxes: Object.fromEntries(shipment.boxes.map((box) => [box.id, { grossWeightKg: 1, cbm: 0.01 }])),
+    }
+
+    const sheet = await exportedSheet(shipment, overrides)
+    expect(sheet.getCell('A20').value).toBe('1~20')
+    expect(sheet.getCell('K20').value).toBe('1~20')
+    expect(sheet.getCell('L20').value).toBe(boxCount)
   })
   it('chooses the largest per-SKU pallet total even when the SKU has multiple shipment item IDs', async () => {
     const shipment: ImportDocumentDetail = {

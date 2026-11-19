@@ -15,26 +15,69 @@ describe('ShortMeetingTable', () => {
     expect(screen.queryByRole('columnheader', { name: '로케이션' })).not.toBeInTheDocument()
     expect(screen.queryByText('A1')).not.toBeInTheDocument()
     rerender(<ShortMeetingTable rows={[]} sheetStatus="available" />)
-    expect(screen.getByText('반영된 주문서에 표시할 상품이 없습니다.')).toHaveAttribute('colspan', '12')
+    expect(within(screen.getByRole('table')).getByText('반영된 주문서에 표시할 상품이 없습니다.')).toHaveAttribute('colspan', '12')
   })
 
   it('shows source status and filters the meeting list by code and risk', () => {
     render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
-    expect(screen.getByText('11/11 품절')).toBeInTheDocument()
-    expect(screen.getByText('미등록')).toBeInTheDocument()
-    expect(screen.getByText('구매완료')).toBeInTheDocument()
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('11/11 품절')).toBeInTheDocument()
+    const unlistedRow = within(table).getByText('B-02').closest('tr')!
+    expect(within(unlistedRow).getAllByRole('cell')[7]).toBeEmptyDOMElement()
+    expect(screen.queryByText('미등록')).not.toBeInTheDocument()
+    expect(within(table).getByText('구매완료')).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '상품 검색' }), { target: { value: 'B-02' } })
     expect(screen.queryByText('테이블')).not.toBeInTheDocument()
-    expect(screen.getByText('조명')).toBeInTheDocument()
+    expect(within(table).getByText('조명')).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '상품 검색' }), { target: { value: '' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '재고 위험만 보기' }))
     expect(screen.queryByText('테이블')).not.toBeInTheDocument()
-    expect(screen.getByText('조명')).toBeInTheDocument()
+    expect(within(table).getByText('조명')).toBeInTheDocument()
+  })
+
+  it('rounds displayed quantities to whole units, including negative values, without changing source values', () => {
+    const data = [{ ...rows[0], todayOutbound: 2.49, currentStock: 13.5, stockAfterOutbound: -1.5, averageDailyOutbound: 45.5, monthOutbound: 12.4, chinaStock: -0.2 }]
+    render(<ShortMeetingTable rows={data} sheetStatus="available" />)
+    const row = within(screen.getByRole('table')).getByText('A-01').closest('tr')!
+    const cells = within(row).getAllByRole('cell')
+    expect(cells[2]).toHaveTextContent('2개')
+    expect(cells[3]).toHaveTextContent('14개')
+    expect(cells[4]).toHaveTextContent('-2개')
+    expect(cells[5]).toHaveTextContent('46개')
+    expect(cells[6]).toHaveTextContent('12개')
+    expect(cells[8]).toHaveTextContent('0개')
+    expect(cells[8]).not.toHaveTextContent('-0개')
+    expect(data[0].averageDailyOutbound).toBe(45.5)
+  })
+
+  it('uses a fixed-width table without a horizontal scroll wrapper', () => {
+    render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
+    const table = screen.getByRole('table')
+    expect(table).toHaveClass('w-full', 'table-fixed')
+    expect(table).not.toHaveClass('min-w-[1800px]')
+    expect(table.parentElement).not.toHaveClass('overflow-x-auto')
+    expect(table.parentElement).toHaveClass('hidden', 'xl:block')
+  })
+
+  it('shows a compact card layout with the full data and working sort controls on narrower screens', () => {
+    render(<ShortMeetingTable rows={rows} sheetStatus="available" />)
+    const cardOrder = () => screen.getAllByRole('article').map((card) => card.textContent)
+    expect(screen.getAllByRole('article')[0].parentElement).toHaveClass('xl:hidden')
+    expect(within(screen.getAllByRole('article')[0]).getByText('기준일 출고수량')).toBeInTheDocument()
+    expect(within(screen.getAllByRole('article')[0]).getByText('평균 출고수량 (월평균)')).toBeInTheDocument()
+    expect(within(screen.getAllByRole('article')[0]).getByText('발주 상태')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: '정렬 기준' }), { target: { value: 'todayOutbound' } })
+    expect(cardOrder()[0]).toContain('B-02')
+    fireEvent.click(screen.getByRole('button', { name: '정렬 방향' }))
+    expect(cardOrder()[0]).toContain('A-01')
+    fireEvent.click(screen.getByRole('checkbox', { name: '재고 위험만 보기' }))
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(cardOrder()[0]).toContain('B-02')
   })
 
   it('does not treat a failed sheet connection as an absent product', () => {
     render(<ShortMeetingTable rows={rows} sheetStatus="unavailable" />)
-    expect(screen.getAllByText('확인 불가')).toHaveLength(2)
+    expect(within(screen.getByRole('table')).getAllByText('확인 불가')).toHaveLength(2)
     expect(screen.queryByText('미등록')).not.toBeInTheDocument()
   })
 

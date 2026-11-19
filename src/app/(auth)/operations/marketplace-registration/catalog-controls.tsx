@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { ensureManualRegistrationGroup } from './group-actions'
+import { useRegistrationSelection } from './selection-panel'
 
 type Status = 'all' | 'missing' | 'complete'
 export function RegistrationFilters({ query, status, missingMalls, targets, match = 'any' }: {
@@ -70,26 +71,46 @@ export function RegistrationFilters({ query, status, missingMalls, targets, matc
   </div>
 }
 
-export function RegistrationProductLink({ rowId, sku, label, href, selected }: {
-  rowId: string | null; sku: string; label: string; href: string; selected: boolean
+export function RegistrationProductLink({ rowId, sku, label, href, selected, groupKey, optionCount }: {
+  rowId: string | null; sku: string; label: string; href: string; selected: boolean; groupKey?: string; optionCount?: number
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const selection = useRegistrationSelection()
+  const code = sku.replace(/-[0-9]{4}$/, '')
+  function select() { return selection?.begin({ key: groupKey ?? code, code, name: label, optionCount }) }
   const [createdRowId, setCreatedRowId] = useState<string | null>(null)
   const linkedRowId = rowId ?? createdRowId
   const style = 'block w-full truncate text-left text-primary hover:underline'
   const linkedUrl = linkedRowId ? new URL(href, 'https://registration.local') : null
   if (linkedUrl && linkedRowId) linkedUrl.searchParams.set('row', linkedRowId)
-  if (linkedUrl) return <Link href={linkedUrl.pathname + linkedUrl.search} scroll={false} prefetch={false} aria-current={selected ? 'true' : undefined} title={label} className={style}>{label}</Link>
-  return <button type="button" title={label} disabled={pending} className={style} onClick={() => startTransition(async () => {
-    try {
-      const result = await ensureManualRegistrationGroup(sku)
-      if (result.error || !result.rowId) { toast.error(result.error || '상품을 연결하지 못했습니다.'); return }
-      const url = new URL(href, window.location.origin)
-      setCreatedRowId(result.rowId)
-      url.searchParams.set('row', result.rowId)
-      url.searchParams.set('group', sku.replace(/-[0-9]{4}$/, ''))
-      router.push(url.pathname + url.search, { scroll: false })
-    } catch { toast.error('상품을 연결하지 못했습니다. 다시 시도해주세요.') }
-  })}>{pending ? '상품 여는 중…' : label}</button>
+  if (linkedUrl) return <Link onClick={(event) => {
+    if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) select()
+  }} href={linkedUrl.pathname + linkedUrl.search} scroll={false} prefetch={false}
+    aria-current={selected ? 'true' : undefined} title={label} className={style}>{label}</Link>
+  return <button type="button" title={label} disabled={pending} className={style} onClick={() => {
+    const token = select()
+    startTransition(async () => {
+      try {
+        const result = await ensureManualRegistrationGroup(sku)
+        if (token !== undefined && !selection?.isCurrent(token)) return
+        if (result.error || !result.rowId) {
+          if (token !== undefined) selection?.cancel(token)
+          toast.error(result.error || '상품을 연결하지 못했습니다.')
+          return
+        }
+        const url = new URL(href, window.location.origin)
+        setCreatedRowId(result.rowId)
+        url.searchParams.set('row', result.rowId)
+        url.searchParams.set('group', code)
+        router.push(url.pathname + url.search, { scroll: false })
+      } catch {
+        if (token !== undefined) {
+          if (!selection?.isCurrent(token)) return
+          selection.cancel(token)
+        }
+        toast.error('상품을 연결하지 못했습니다. 다시 시도해주세요.')
+      }
+    })
+  }} aria-busy={pending}>{label}</button>
 }

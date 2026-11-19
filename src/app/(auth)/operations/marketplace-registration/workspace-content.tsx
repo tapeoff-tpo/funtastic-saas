@@ -1,4 +1,6 @@
+import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
+import { RegistrationSelectionProvider, RegistrationSelectionPanel, RegistrationDetailPreview } from './selection-panel'
 import Link from 'next/link'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -56,7 +58,8 @@ export default async function MarketplaceRegistrationPage({
     return search.size ? `/operations/marketplace-registration?${search}` : '/operations/marketplace-registration'
   }
   if (page > pageCount) redirect(href(pageCount, params.row))
-  return <div className="space-y-3">
+  const selectedProduct = catalog.find((group) => group.key === selectedGroup)
+  return <RegistrationSelectionProvider><div className="space-y-3">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-xl font-semibold">상품등록</h1>
       <Link href="/analytics/price-table" className="text-sm text-primary underline">판매가 테이블</Link>
@@ -74,7 +77,7 @@ export default async function MarketplaceRegistrationPage({
               className={`border-t ${selectedGroup === group.key ? 'bg-primary/10' : 'hover:bg-muted/30'}`}>
               <td className="truncate p-2 font-mono text-xs" title={group.code}>{group.code}</td>
               <td className="p-2"><RegistrationProductLink rowId={group.rowId} sku={group.sku} label={group.name}
-                href={href(page, group.rowId ?? undefined)} selected={selectedGroup === group.key} /></td>
+                href={href(page, group.rowId ?? undefined)} selected={selectedGroup === group.key} groupKey={group.key} optionCount={group.optionCount} /></td>
               <td className="p-2 text-center text-xs tabular-nums text-muted-foreground">{group.optionCount}개</td>
               <td className="p-2 text-center text-xs tabular-nums">{group.missingMalls.length ? `${group.missingMalls.length}개 몰` : '등록완료'}</td>
             </tr>)}{visible.length === 0 && <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">조회된 상품이 없습니다.</td></tr>}</tbody>
@@ -87,12 +90,14 @@ export default async function MarketplaceRegistrationPage({
         </div>
       </section>
       <aside aria-label="상품 상세" className="min-h-0 min-w-0 overflow-y-auto rounded-md border bg-card p-3">
-        {params.row ? <>
+        <RegistrationSelectionPanel currentGroup={params.row ? selectedGroup : undefined}>{params.row ? <>
           <div className="mb-3 flex justify-end"><Link href={href(page)} scroll={false} className="text-xs text-muted-foreground underline">상세 닫기</Link></div>
+          <Suspense key={params.row} fallback={<RegistrationDetailPreview name={selectedProduct?.name ?? '선택한 상품'} code={selectedProduct?.code ?? ''} optionCount={selectedProduct?.optionCount} />}>
           <LinkedPriceRegistration embedded listPage={page} userId={workspaceId} rowId={params.row} mallId={params.mall}
             search={query} view={params.view === 'products' ? 'products' : 'compare'} malls={(params.malls ?? '').split(',').filter(Boolean)} />
-        </> : <p className="p-6 text-center text-sm text-muted-foreground">왼쪽 목록에서 상품을 선택하세요.</p>}
+          </Suspense>
+        </> : <p className="p-6 text-center text-sm text-muted-foreground">왼쪽 목록에서 상품을 선택하세요.</p>}</RegistrationSelectionPanel>
       </aside>
     </div>
-  </div>
+  </div></RegistrationSelectionProvider>
 }

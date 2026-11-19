@@ -45,16 +45,19 @@ export async function LinkedPriceRegistration({ userId, rowId, mallId, search, v
     ? uniqueRows.filter((option) => option.productCode !== baseCode) : uniqueRows
   const row = optionRows.find((option) => option.id === rowId) ?? optionRows[0] ?? foundRow
   const codes = [...new Set(rows.flatMap((option) => option.productCode ? [option.productCode] : []).concat(baseCode ? [baseCode] : []))]
-  const [workflowPrices, itemCosts] = codes.length ? await Promise.all([
+  const [workflowPrices, itemCosts, fees, sources] = await Promise.all([
+    codes.length ?
     db.execute<{ sku: string; b2b: number | null; b2c: number | null }>(sql`
       SELECT DISTINCT ON (sabangnet_code) sabangnet_code AS sku, b2b_price AS b2b, b2c_price AS b2c
       FROM new_product_workflow_items WHERE user_id = ${userId}::uuid
         AND sabangnet_code IN (${sql.join(codes.map((code) => sql`${code}`), sql`, `)})
       ORDER BY sabangnet_code, created_at DESC, id DESC
-    `),
-    db.select({ sku: products.internalSku, cost: products.costPrice }).from(products)
-      .where(and(eq(products.userId, userId), inArray(products.internalSku, codes))),
-  ]) : [[], []]
+    `) : Promise.resolve([]),
+    codes.length ? db.select({ sku: products.internalSku, cost: products.costPrice }).from(products)
+      .where(and(eq(products.userId, userId), inArray(products.internalSku, codes))) : Promise.resolve([]),
+    getPriceRegistrationFees(userId),
+    row.productCode ? getRegistrationSourceData(userId, row.productCode) : Promise.resolve(null),
+  ])
   const pricesBySku = new Map(workflowPrices.map((value) => [value.sku, value]))
   const costsBySku = new Map(itemCosts.map((value) => [value.sku, value.cost]))
   const options = optionRows.map((option) => {
@@ -73,10 +76,6 @@ export async function LinkedPriceRegistration({ userId, rowId, mallId, search, v
   const navigation: PriceTableNavigation = {
     sheetName: row.sourceSheetName, search, view, malls, registrationPage: listPage, sortKey: 'createdAt', sortOrder: 'desc',
   }
-  const [fees, sources] = await Promise.all([
-    getPriceRegistrationFees(userId),
-    row.productCode ? getRegistrationSourceData(userId, row.productCode) : null,
-  ])
   const item = sources?.item
   const workflow = sources?.workflow
   const purchase = sources?.purchase

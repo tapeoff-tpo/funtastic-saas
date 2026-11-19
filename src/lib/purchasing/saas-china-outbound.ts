@@ -2748,6 +2748,55 @@ export async function saveChinaOutboundBoxDimensions(input: {
   })
 }
 
+/** Apply physical measurements to selected boxes atomically, preserving omitted fields. */
+export async function saveChinaOutboundBoxesMeasurements(input: {
+  userId: string
+  shipmentId: string
+  boxIds: string[]
+  lengthCm?: number
+  widthCm?: number
+  heightCm?: number
+  grossWeightKg?: number
+}) {
+  const ids = [...new Set(input.boxIds)]
+  if (!ids.length || ids.length > 5_000 || ids.some((id) => typeof id !== 'string' || !id.trim())) throw new Error('수정할 박스를 1개 이상, 5,000개 이하로 선택해주세요.')
+  const hasDimensions = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value !== undefined)
+  if (!hasDimensions && input.grossWeightKg === undefined) throw new Error('일괄 적용할 박스 규격 또는 총중량을 입력해주세요.')
+  const dimensions = hasDimensions ? normalizeChinaOutboundBoxDimensions({ lengthCm: input.lengthCm ?? null, widthCm: input.widthCm ?? null, heightCm: input.heightCm ?? null }) : null
+  if (dimensions && [dimensions.lengthCm, dimensions.widthCm, dimensions.heightCm].some((value) => value == null)) throw new Error('가로·세로·높이는 모두 입력해주세요.')
+  const grossWeightKg = normalizeOptionalChinaOutboundBoxWeight(input.grossWeightKg)
+  if (grossWeightKg === null) throw new Error('총중량은 0.001kg 이상인 숫자로 입력해주세요.')
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const boxes = await tx.select().from(chinaOutboundBoxes).where(and(
+      eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id), inArray(chinaOutboundBoxes.id, ids),
+    ))
+    // Validate the complete selection before the first operational write.
+    if (boxes.length !== ids.length) throw new Error('선택한 박스를 현재 출고작업에서 찾을 수 없습니다. 새로고침 후 다시 선택해주세요.')
+    const sealed = boxes.find((box) => box.status !== 'open')
+    if (sealed) throw new Error(`${sealed.boxNo}은(는) 봉인되어 규격과 총중량을 수정할 수 없습니다.`)
+    const dimensionChanged = (box: ChinaOutboundBoxRow) => dimensions != null && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)
+    const changedBoxes = boxes.filter((box) => dimensionChanged(box) || (grossWeightKg !== undefined && dimensionNumber(box.grossWeightKg) !== grossWeightKg))
+    const values = {
+      ...(dimensions ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
+      ...(grossWeightKg !== undefined ? { grossWeightKg: String(grossWeightKg) } : {}),
+      updatedAt: new Date(),
+    }
+    const batchSize = 500
+    for (let offset = 0; offset < changedBoxes.length; offset += batchSize) {
+      const batch = changedBoxes.slice(offset, offset + batchSize)
+      const saved = await tx.update(chinaOutboundBoxes).set(values).where(and(
+        eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id), inArray(chinaOutboundBoxes.id, batch.map((box) => box.id)),
+      )).returning({ id: chinaOutboundBoxes.id })
+      if (saved.length !== batch.length) throw new Error('선택한 박스의 규격과 총중량을 저장하지 못했습니다.')
+    }
+    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, changedBoxes.filter(dimensionChanged).map((box) => box.id))
+    return { updatedBoxCount: changedBoxes.length }
+  })
+}
+
 /** Save a batch atomically, without treating the separate seal state as progress. */
 export async function saveChinaOutboundBoxCompletionStatuses(input: {
   userId: string

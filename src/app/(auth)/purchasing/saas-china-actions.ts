@@ -31,6 +31,7 @@ import {
   renameSaasChinaOutboundWarehouse,
   removeChinaOutboundBoxItem,
   saveChinaOutboundBoxDimensions,
+  saveChinaOutboundBoxesMeasurements,
   saveChinaOutboundBoxCompletionStatuses,
   saveChinaOutboundItemBoxSplits,
   saveChinaOutboundItemPacking,
@@ -203,6 +204,19 @@ const saveBoxDimensionsSchema = z.object({
   }
 })
 
+const saveBoxesMeasurementsSchema = z.object({
+  shipmentId,
+  boxIds: z.array(z.string().uuid('박스를 확인해주세요.')).min(1, '수정할 박스를 선택해주세요.').max(5_000, '박스는 5,000개 이하로 선택해주세요.'),
+  lengthCm: z.number().finite().positive().max(9_999_999.99).optional(),
+  widthCm: z.number().finite().positive().max(9_999_999.99).optional(),
+  heightCm: z.number().finite().positive().max(9_999_999.99).optional(),
+  grossWeightKg: z.number().finite().min(0.001).max(999_999_999).optional(),
+}).superRefine((value, context) => {
+  const count = [value.lengthCm, value.widthCm, value.heightCm].filter((dimension) => dimension !== undefined).length
+  if (count > 0 && count < 3) context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력해주세요.' })
+  if (count === 0 && value.grossWeightKg === undefined) context.addIssue({ code: 'custom', message: '일괄 적용할 박스 규격 또는 총중량을 입력해주세요.' })
+})
+
 const removeBoxItemSchema = z.object({
   shipmentId,
   boxItemId: z.string().uuid('박스 적재 항목을 확인해주세요.'),
@@ -306,6 +320,17 @@ export async function saveChinaOutboundBoxDimensionsAction(input: unknown): Prom
     const actor = await getActor()
     await saveChinaOutboundBoxDimensions({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()
+  })
+}
+
+export async function saveChinaOutboundBoxesMeasurementsAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = saveBoxesMeasurementsSchema.parse(input)
+    const actor = await getActor()
+    await saveChinaOutboundBoxesMeasurements({ ...value, userId: actor.userId })
+    revalidateSaasChinaPaths()
+    revalidatePath('/purchasing/import-documents')
   })
 }
 

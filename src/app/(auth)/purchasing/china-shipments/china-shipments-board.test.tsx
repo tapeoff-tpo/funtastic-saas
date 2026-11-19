@@ -5,10 +5,11 @@ import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-swi
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
-const { mergeBoxes, saveWeight, saveBoxDimensions, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
+const { mergeBoxes, saveWeight, saveBoxDimensions, saveBoxMeasurements, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
   mergeBoxes: vi.fn(),
   saveWeight: vi.fn(),
   saveBoxDimensions: vi.fn(),
+  saveBoxMeasurements: vi.fn(),
   savePalletTare: vi.fn(),
   saveChineseName: vi.fn(),
   addSample: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('../saas-china-actions', () => ({
   mergeChinaOutboundBoxesAction: mergeBoxes,
   saveChinaOutboundPackageWeightAction: saveWeight,
   saveChinaOutboundBoxDimensionsAction: saveBoxDimensions,
+  saveChinaOutboundBoxesMeasurementsAction: saveBoxMeasurements,
   saveChinaOutboundItemChineseNameAction: saveChineseName,
   addChinaOutboundSampleAction: addSample,
   saveChinaOutboundPalletDimensionsAction: savePalletDimensions,
@@ -309,6 +311,7 @@ describe('ChinaShipmentsBoard', () => {
     addShipmentItems.mockReset()
     mergeBoxes.mockReset(); saveWeight.mockReset(); saveChineseName.mockReset()
     saveBoxDimensions.mockReset()
+    saveBoxMeasurements.mockReset()
     addSample.mockReset()
     savePalletDimensions.mockReset()
     savePalletTare.mockReset()
@@ -710,6 +713,7 @@ describe('ChinaShipmentsBoard', () => {
   it('opens the selected mixed-box product and does not save or select another product', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithSharedBoxDimensions(), 'boxes')
+    fireEvent.click(screen.getByRole('button', { name: '박스 COMMON-1 펼치기' }))
     fireEvent.click(screen.getByRole('button', { name: 'COMMON-1 박스 SHARED-02 내용 수정' }))
     const popup = within(screen.getByRole('dialog', { name: 'SHARED-02 박스분할' }))
     fireEvent.change(popup.getByPlaceholderText('0'), { target: { value: '4' } })
@@ -842,6 +846,7 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(screen.getByText('已保存箱子情况')).toBeInTheDocument())
     expect(screen.getByText('第2步')).toBeInTheDocument()
     expect(screen.getAllByRole('columnheader', { name: '箱号' }).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: /BOX-01/, expanded: false }))
     fireEvent.click(screen.getByRole('button', { name: '编辑箱 BOX-01 内容' }))
     await waitFor(() => expect(screen.getAllByRole('columnheader', { name: '装载数量' }).length).toBeGreaterThan(0))
     expect(screen.getAllByRole('button', { name: '添加箱子' }).length).toBeGreaterThan(0)
@@ -1267,6 +1272,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('button', { name: '파렛트 쉽먼트' })).toBeEnabled()
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
+    fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '전체 펼치기' }))
     expect(within(savedBoxPanel).getByText('BOX-01')).toBeInTheDocument()
     expect(within(savedBoxPanel).getByRole('link', { name: 'BOX-01 박스 부착용 쉽먼트 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-saved')
     const sharedBoxRow = within(savedBoxPanel).getByText('BOX-02').closest('tr')
@@ -1281,7 +1287,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: /전체 박스/ }))
     const emptyBoxRow = within(savedBoxPanel).getByText('BOX-03').closest('tr')
     if (!emptyBoxRow) throw new Error('빈 박스 행을 찾을 수 없습니다.')
-    expect(within(emptyBoxRow).getByText('내용 없음')).toBeInTheDocument()
+    expect(within(emptyBoxRow).getAllByText('내용 없음').find((element) => !element.closest('[hidden]'))).toBeVisible()
     expect(within(emptyBoxRow).queryByRole('link', { name: /부착용 쉽먼트 다운로드/ })).not.toBeInTheDocument()
   })
 
@@ -1324,6 +1330,7 @@ describe('ChinaShipmentsBoard', () => {
     detail.boxes[0].grossWeightKg = 10
     detail.shipment = { ...detail.shipment, status: 'dispatched' }
     renderShipment(detail, 'pallets')
+    expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     const card = screen.getByRole('button', { name: '파렛트 P1 펼치기' }).closest('article')!
     expect(within(card).getByText('파렛트 실측 규격: 120 × 100 × 150 cm')).toBeVisible()
     expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
@@ -1689,6 +1696,7 @@ describe('ChinaShipmentsBoard', () => {
 
     const savedBoxPanel = screen.getByRole('heading', { name: '저장된 박스 현황' }).closest('section')
     if (!savedBoxPanel) throw new Error('저장된 박스 현황을 찾을 수 없습니다.')
+    fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '박스 11 펼치기' }))
     fireEvent.click(within(savedBoxPanel).getByRole('button', { name: '11 박스 내용 수정' }))
 
     expect(screen.getByRole('dialog', { name: 'SKU-11 박스분할' })).toBeInTheDocument()
@@ -1728,6 +1736,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(link).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes&format=print')
     expect(link).toHaveAttribute('target', '_blank')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: '박스 A-01 펼치기' }))
     expect(screen.getByRole('link', { name: 'A-01 박스 쉽먼트 바로 인쇄' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?boxId=box-1&format=print')
   })
 
@@ -2049,12 +2058,17 @@ describe('ChinaShipmentsBoard', () => {
     renderShipment(makeShipmentWithBox(), 'items')
     const nav = screen.getByRole('navigation', { name: '중국출고 작업 단계' })
     expect(within(nav).getAllByRole('button')).toHaveLength(3)
+    expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '적재현황 엑셀' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 저장된 박스현황' }))
     expect(screen.getByRole('heading', { name: '저장된 박스 현황' })).toBeVisible()
+    expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '1단계 · 출고품목·박스분할' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 배정' }))
     expect(screen.getByRole('heading', { name: '3단계 · 파렛트 배정' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: '최종 적재리스트' })).toBeVisible()
+    expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
     for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['items', '1단계.*출고품목·박스분할']]) {
       const button = within(nav).getByRole('button', { name: new RegExp(title) })

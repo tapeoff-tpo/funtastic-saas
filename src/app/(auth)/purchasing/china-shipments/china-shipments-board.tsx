@@ -809,6 +809,10 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
           <PalletAssignmentPanel shipmentId={shipment.id} boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} />
           <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} boxItems={detail.boxItems} items={items} editable={editable} isPending={isPending} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} />
         </>}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 p-4">
+          <div><h3 className="font-semibold">최종 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별·박스별 적재 상품과 창고별 입고수량을 엑셀로 다운로드합니다.</p></div>
+          <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 hover:bg-violet-200"><Download className="size-4" />최종 적재리스트 엑셀 다운로드</a>
+        </div>
       </section> : null}
 
     </section>

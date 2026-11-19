@@ -7,15 +7,16 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   saveBoxSplits: vi.fn(),
   savePalletTare: vi.fn(),
+  saveBoxesMeasurements: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/menu-access', () => ({ assertMenuAccess: mocks.assertMenuAccess }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.getWorkspaceUserId }))
 vi.mock('@/lib/auth/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
-vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare }))
+vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare, saveChinaOutboundBoxesMeasurements: mocks.saveBoxesMeasurements }))
 
-import { saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction } from './saas-china-actions'
+import { saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction, saveChinaOutboundBoxesMeasurementsAction } from './saas-china-actions'
 
 const shipmentId = '11111111-1111-4111-8111-111111111111'
 const shipmentItemId = '22222222-2222-4222-8222-222222222222'
@@ -73,5 +74,29 @@ describe('China outbound item box split action weights', () => {
     expect((await saveChinaOutboundPalletTareWeightAction({ shipmentId, palletId: shipmentItemId, tareWeightKg })).ok).toBe(false)
     expect(mocks.savePalletTare).not.toHaveBeenCalled()
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it.each([{ lengthCm: 50, widthCm: 40, heightCm: 30 }, { grossWeightKg: 7.125 }, { lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 12 }])('applies selected box measurements under the canonical workspace (%j)', async (measurements) => {
+    const input = { shipmentId, boxIds: [shipmentItemId], ...measurements }
+    expect(await saveChinaOutboundBoxesMeasurementsAction(input)).toEqual({ ok: true })
+    expect(mocks.assertMenuAccess).toHaveBeenCalledWith('/purchasing/china-shipments')
+    expect(mocks.getWorkspaceUserId).toHaveBeenCalledWith('admin-login')
+    expect(mocks.saveBoxesMeasurements).toHaveBeenCalledExactlyOnceWith({ ...input, userId: 'canonical-owner' })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/purchasing/china-shipments')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/purchasing/import-documents')
+  })
+
+  it.each([
+    {}, { lengthCm: 10 }, { lengthCm: 10, widthCm: 20 }, { lengthCm: null, widthCm: 20, heightCm: 30 },
+    { grossWeightKg: null }, { grossWeightKg: 0 }, { grossWeightKg: 0.0001 }, { grossWeightKg: '5' }, { grossWeightKg: Number.POSITIVE_INFINITY },
+  ])('rejects invalid bulk measurements without reaching the service (%j)', async (measurements) => {
+    expect((await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [shipmentItemId], ...measurements })).ok).toBe(false)
+    expect(mocks.saveBoxesMeasurements).not.toHaveBeenCalled()
+    expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty bulk selection', async () => {
+    expect((await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [], grossWeightKg: 5 })).ok).toBe(false)
+    expect(mocks.saveBoxesMeasurements).not.toHaveBeenCalled()
   })
 })

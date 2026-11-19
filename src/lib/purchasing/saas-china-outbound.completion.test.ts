@@ -25,6 +25,7 @@ import {
   markChinaOutboundShipmentReady,
   saveChinaOutboundBoxCompletionStatuses,
   saveChinaOutboundBoxDimensions,
+  saveChinaOutboundBoxesMeasurements,
   saveChinaOutboundItemBoxSplits,
   saveChinaOutboundPalletCompletionStatuses,
   saveChinaOutboundPalletTareWeight,
@@ -334,6 +335,67 @@ describe('China outbound box and pallet completion', () => {
     expect(items[0]!.chineseProductName).toBe('水杯')
     await expect(saveChinaOutboundItemChineseName({ userId: 'foreign', shipmentId, shipmentItemId: 'item-1', chineseProductName: '别的' })).rejects.toThrow('찾을 수 없습니다')
     expect(items[0]!.chineseProductName).toBe('水杯')
+  })
+
+  it('applies selected physical measurements together without changing product measurements or quantities', async () => {
+    Object.assign(boxItems[0]!, { grossWeightKg: '3', lengthCm: '10', widthCm: '20', heightCm: '30' })
+    const originalAllocations = JSON.stringify(boxItems)
+    const originalInventory = JSON.stringify(inventory)
+    const result = await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', 'box-2', 'box-1'], lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 12.345 })
+    expect(result).toEqual({ updatedBoxCount: 2 })
+    expect(boxes.slice(0, 2).map(({ lengthCm, widthCm, heightCm, grossWeightKg, completionStatus }) => ({ lengthCm, widthCm, heightCm, grossWeightKg, completionStatus }))).toEqual([
+      { lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: '12.345', completionStatus: 'in_progress' },
+      { lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: '12.345', completionStatus: 'in_progress' },
+    ])
+    expect(pallets.map((row) => row.completionStatus)).toEqual(['in_progress', 'in_progress'])
+    expect(JSON.stringify(boxItems)).toBe(originalAllocations)
+    expect(JSON.stringify(inventory)).toBe(originalInventory)
+    expect(boxes[2]).not.toHaveProperty('grossWeightKg')
+  })
+
+  it('preserves weight on dimension-only application and dimensions on weight-only application', async () => {
+    boxes[0]!.grossWeightKg = '9'
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], lengthCm: 60, widthCm: 50, heightCm: 40 })
+    expect(boxes[0]).toMatchObject({ lengthCm: '60', widthCm: '50', heightCm: '40', grossWeightKg: '9' })
+    boxes[0]!.completionStatus = 'completed'; pallets[0]!.completionStatus = 'completed'
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], grossWeightKg: 7.125 })
+    expect(boxes[0]).toMatchObject({ lengthCm: '60', widthCm: '50', heightCm: '40', grossWeightKg: '7.125', completionStatus: 'completed' })
+    expect(pallets[0]!.completionStatus).toBe('completed')
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((operation) => operation(tx))
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], grossWeightKg: 7.125 })
+    expect(tx.update).not.toHaveBeenCalled()
+  })
+
+  it.each(['sealed', 'foreign', 'missing', 'closed'])('validates the complete bulk selection before writes (%s)', async (invalid) => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((operation) => operation(tx))
+    if (invalid === 'sealed') boxes[1]!.status = 'sealed'
+    if (invalid === 'foreign') boxes[1]!.userId = 'another-workspace'
+    if (invalid === 'closed') shipments[0]!.status = 'dispatched'
+    const before = JSON.stringify({ boxes, boxItems, pallets })
+    await expect(saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', invalid === 'missing' ? 'missing' : 'box-2'], lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 10 })).rejects.toThrow()
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(JSON.stringify({ boxes, boxItems, pallets })).toBe(before)
+  })
+
+  it.each([
+    {}, { lengthCm: 10 }, { lengthCm: 10, widthCm: 20 }, { lengthCm: 0, widthCm: 20, heightCm: 30 },
+    { grossWeightKg: 0 }, { grossWeightKg: 0.0001 }, { grossWeightKg: Number.NaN }, { grossWeightKg: 1_000_000_000 },
+  ])('rejects invalid bulk measurements before opening a transaction (%j)', async (measurements) => {
+    await expect(saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], ...measurements })).rejects.toThrow()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('uses bounded writes for a large bulk selection', async () => {
+    boxes = Array.from({ length: 1201 }, (_, index) => ({ id: `bulk-${index}`, userId, shipmentId, boxNo: String(index + 1), status: 'open', completionStatus: 'completed', grossWeightKg: '3', lengthCm: '10', widthCm: '20', heightCm: '30' }))
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((operation) => operation(tx))
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: boxes.map((box) => box.id), grossWeightKg: 5 })
+    expect(tx.update).toHaveBeenCalledTimes(3)
+    expect(boxes.every((box) => box.grossWeightKg === '5' && box.completionStatus === 'completed')).toBe(true)
+    for (const statement of tx.updateStatements) {
+      const query = dialect.sqlToQuery(statement.condition)
+      expect(query.params.slice(0, 2)).toEqual([userId, shipmentId])
+      expect(query.params.length).toBeLessThanOrEqual(502)
+    }
   })
 
   it('recomputes a mixed box from saved product measurements across retries, edits, shrinking, and moves', async () => {

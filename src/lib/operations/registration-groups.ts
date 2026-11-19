@@ -1,3 +1,5 @@
+import { gzipSync, gunzipSync } from 'node:zlib'
+import { unstable_cache } from 'next/cache'
 import { createHash } from 'node:crypto'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
@@ -91,7 +93,9 @@ export function buildRegistrationGroups(rows: RegistrationCatalogRow[], items: R
   }).sort((a, b) => b.registeredAt - a.registeredAt || a.code.localeCompare(b.code, 'ko-KR', { numeric: true }) || a.key.localeCompare(b.key))
 }
 
-export async function getRegistrationCatalog(userId: string) {
+export const REGISTRATION_CATALOG_TAG = 'manual-registration-catalog'
+
+async function loadRegistrationCatalog(userId: string) {
   const table = analyticsPriceTableRows
   const [rows, items] = await Promise.all([
     db.select({
@@ -104,4 +108,18 @@ export async function getRegistrationCatalog(userId: string) {
       .from(products).where(eq(products.userId, userId)).orderBy(asc(products.internalSku)),
   ])
   return buildRegistrationGroups(rows, items)
+}
+
+
+export async function getRegistrationCatalog(userId: string) {
+  const read = unstable_cache(async (owner: string) => {
+    const groups = await loadRegistrationCatalog(owner)
+    const serializable = groups.map((group) => ({ ...group, skus: [...group.skus] }))
+    // The compressed value keeps the shared catalogue below the data-cache entry limit.
+    return gzipSync(JSON.stringify(serializable)).toString('base64')
+  }, ['manual-registration-catalog-v2'], { revalidate: 60, tags: [REGISTRATION_CATALOG_TAG] })
+  const packed = await read(userId)
+  type Group = ReturnType<typeof buildRegistrationGroups>[number]
+  const groups = JSON.parse(gunzipSync(Buffer.from(packed, 'base64')).toString()) as Array<Omit<Group, 'skus'> & { skus: string[] }>
+  return groups.map((group) => ({ ...group, skus: new Set(group.skus) }))
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { REGISTRATION_CATALOG_TAG } from '@/lib/operations/registration-groups'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/auth/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
@@ -45,6 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await importPurchasingItems(input)
+    revalidateTag(REGISTRATION_CATALOG_TAG, { expire: 0 })
     revalidatePath('/products')
     revalidatePath('/costs')
     revalidatePath('/purchasing/items')

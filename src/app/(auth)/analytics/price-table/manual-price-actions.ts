@@ -1,6 +1,7 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { REGISTRATION_CATALOG_TAG } from '@/lib/operations/registration-groups'
+import { revalidatePath, updateTag } from 'next/cache'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -46,6 +47,7 @@ export async function addManualPriceProduct(form: FormData): Promise<{ error?: s
       sourceSheetName: sheetName, rowNumber: 0, productCode, productName,
       optionName: text('optionName') || null, rawData, importedAt: enteredAt, updatedAt: enteredAt,
     })
+    updateTag(REGISTRATION_CATALOG_TAG)
     revalidatePath('/analytics/price-table')
     return {}
   } catch (error) {

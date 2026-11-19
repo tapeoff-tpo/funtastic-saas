@@ -1,3 +1,5 @@
+import { revalidateTag } from 'next/cache'
+import { REGISTRATION_CATALOG_TAG } from '@/lib/operations/registration-groups'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -34,5 +36,6 @@ export async function PATCH(
   })
 
   if (!row) return NextResponse.json({ error: '수정할 품목을 찾을 수 없습니다.' }, { status: 404 })
+  revalidateTag(REGISTRATION_CATALOG_TAG, { expire: 0 })
   return NextResponse.json({ id: row.id, updatedAt: row.updatedAt })
 }

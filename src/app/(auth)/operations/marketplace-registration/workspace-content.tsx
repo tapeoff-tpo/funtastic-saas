@@ -14,7 +14,7 @@ export default async function MarketplaceRegistrationPage({
   searchParams, exactSku,
 }: {
   exactSku?: string
-  searchParams: Promise<{ q?: string; row?: string; mall?: string; view?: string; malls?: string; page?: string; status?: string; missingMalls?: string }>
+  searchParams: Promise<{ q?: string; row?: string; mall?: string; view?: string; malls?: string; page?: string; status?: string; missingMalls?: string; missingMatch?: string; group?: string }>
 }) {
   await assertMenuAccess('/operations/marketplace-registration')
   const user = await getCurrentUser()
@@ -28,6 +28,7 @@ export default async function MarketplaceRegistrationPage({
   const targets = getManualRegistrationTargets('상품등록')
   const selectedMalls = (params.missingMalls ?? '').split(',').filter((id) => targets.some((target) => target.id === id))
   const status = params.status === 'missing' || params.status === 'complete' ? params.status : 'all'
+  const missingMatch = params.missingMatch === 'all' ? 'all' : 'any'
   const term = query.toLocaleLowerCase('ko-KR')
   const matching = catalog.filter((group) => {
     if (exactSku && !group.skus.has(exactSku)) return false
@@ -36,18 +37,22 @@ export default async function MarketplaceRegistrationPage({
       .some((value) => value.toLocaleLowerCase('ko-KR').includes(term))) return false
     if (status === 'missing' && !group.missingMalls.length) return false
     if (status === 'complete' && group.missingMalls.length) return false
-    return !selectedMalls.length || selectedMalls.some((id) => group.missingMalls.includes(id))
+    if (!selectedMalls.length) return true
+    return missingMatch === 'all' ? selectedMalls.every((id) => group.missingMalls.includes(id))
+      : selectedMalls.some((id) => group.missingMalls.includes(id))
   })
   const pageCount = Math.max(1, Math.ceil(matching.length / 50))
   const visible = matching.slice((page - 1) * 50, page * 50)
-  const selectedGroup = catalog.find((group) => group.rows.some((row) => row.id === params.row))?.key
+  const selectedGroup = catalog.find((group) => group.rows.some((row) => row.id === params.row))?.key ?? params.group
   function href(targetPage: number, row?: string) {
     const search = new URLSearchParams()
     if (targetPage > 1) search.set('page', String(targetPage))
     if (query) search.set('q', query)
     if (status !== 'all') search.set('status', status)
     if (selectedMalls.length) search.set('missingMalls', selectedMalls.join(','))
+    if (selectedMalls.length > 1) search.set('missingMatch', missingMatch)
     if (row) search.set('row', row)
+    if (params.group) search.set('group', params.group)
     return search.size ? `/operations/marketplace-registration?${search}` : '/operations/marketplace-registration'
   }
   if (page > pageCount) redirect(href(pageCount, params.row))
@@ -56,8 +61,8 @@ export default async function MarketplaceRegistrationPage({
       <h1 className="text-xl font-semibold">상품등록</h1>
       <Link href="/analytics/price-table" className="text-sm text-primary underline">판매가 테이블</Link>
     </header>
-    <RegistrationFilters key={`${query}:${status}:${selectedMalls.join(',')}`} query={query} status={status}
-      missingMalls={selectedMalls} targets={targets.map(({ id, label }) => ({ id, label }))} />
+    <RegistrationFilters key={`${query}:${status}:${missingMatch}:${selectedMalls.join(',')}`} query={query} status={status}
+      missingMalls={selectedMalls} match={missingMatch} targets={targets.map(({ id, label }) => ({ id, label }))} />
     <div className="grid gap-3 lg:h-[calc(100dvh-18rem)] lg:min-h-96 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <section aria-label="상품 목록" className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border">
         <div className="border-b px-3 py-2 text-xs text-muted-foreground">총 {matching.length.toLocaleString('ko-KR')}개 상품 · 최근 품목 등록순</div>

@@ -1,4 +1,5 @@
-import { revalidatePath } from 'next/cache'
+import { REGISTRATION_CATALOG_TAG } from '@/lib/operations/registration-groups'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { importPriceTableRows } from '@/lib/analytics/price-table'
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
       sourceFileName: file.name,
     })
 
+    revalidateTag(REGISTRATION_CATALOG_TAG, { expire: 0 })
     revalidatePath('/analytics/price-table')
     return NextResponse.json(result)
   } catch (error) {

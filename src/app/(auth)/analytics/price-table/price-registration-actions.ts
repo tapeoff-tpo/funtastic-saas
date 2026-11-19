@@ -4,14 +4,14 @@ import { and, eq, sql } from 'drizzle-orm'
 import { getRegistrationTargets, getInactiveRegistrationMarketplaceColumns, getManualRegistrationTargets, isProductIdentifier, findMarketplaceProductIds } from './price-table-columns'
 import { formatPriceNumberDate, priceNumberDateKey } from '@/lib/analytics/price-number-date'
 import { REGISTRATION_EDIT_PREFIX, priceAmount, registrationNumberKey, registrationPriceKey, registrationIdentifiersKey, registrationNumberActorKey } from '@/lib/analytics/price-registration-values'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { assertMenuAccess } from '@/lib/auth/menu-access'
 import { priceRegistrationProductKey, savePriceRegistrationExclusion } from '@/lib/analytics/price-registration-exclusions'
 import { db } from '@/lib/db'
-import { registrationBaseCode, groupRegistrationNumbers, registrationGroupSnapshot } from '@/lib/operations/registration-groups'
+import { REGISTRATION_CATALOG_TAG, registrationBaseCode, groupRegistrationNumbers, registrationGroupSnapshot } from '@/lib/operations/registration-groups'
 import { analyticsPriceTableRows } from '@/lib/db/schema'
 
 export async function setPriceRegistrationExcluded(rowId: string, excluded: boolean) {
@@ -146,6 +146,7 @@ export async function saveManualRegistrationNumber(input: {
           .where(and(eq(table.id, option.id), eq(table.userId, workspaceId)))
       }
     })
+    updateTag(REGISTRATION_CATALOG_TAG)
     revalidatePath('/operations/marketplace-registration')
     revalidatePath('/analytics/price-table')
     return { saved: true }

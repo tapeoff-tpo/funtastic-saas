@@ -63,3 +63,13 @@ it('keeps the current list page when selecting a product', async () => {
   expect(url.searchParams.get('q')).toBe('SKU')
   expect(url.searchParams.get('row')).toBe('row-1')
 })
+
+
+it('shows only groups missing all selected marketplaces when requested', async () => {
+  const first = catalogRow()
+  const second = { ...catalogRow(2), name: '두 몰 미등록', missingMalls: ['coupang', 'onchannel'] }
+  mocks.list.mockResolvedValue([first, second])
+  render(await Page({ searchParams: Promise.resolve({ missingMalls: 'coupang,onchannel', missingMatch: 'all' }) }))
+  expect(screen.queryByRole('link', { name: '상품' })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '두 몰 미등록' })).toBeVisible()
+})

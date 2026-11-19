@@ -44,7 +44,6 @@ export async function ensureManualRegistrationGroup(sku: string) {
       return rows[0].id
     })
     revalidatePath('/analytics/price-table')
-    revalidatePath('/operations/marketplace-registration')
     return { rowId }
   } catch (error) {
     return { error: error instanceof Error ? error.message : '상품을 연결하지 못했습니다.' }

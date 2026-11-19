@@ -1,3 +1,5 @@
+import { revalidateTag } from 'next/cache'
+import { REGISTRATION_CATALOG_TAG } from '@/lib/operations/registration-groups'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -32,5 +34,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 400 })
   }
 
+  revalidateTag(REGISTRATION_CATALOG_TAG, { expire: 0 })
   return NextResponse.json({ id: result.row?.id, updatedAt: result.row?.updatedAt }, { status: 201 })
 }

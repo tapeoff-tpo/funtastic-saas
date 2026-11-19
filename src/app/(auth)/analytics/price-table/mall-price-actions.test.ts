@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/menu-access', () => ({ assertMenuAccess: mocks.access }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.owner }))
-vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate, updateTag: vi.fn() }))
 vi.mock('@/lib/db', () => ({
   db: {
     transaction: async (fn: (tx: unknown) => unknown) => fn({

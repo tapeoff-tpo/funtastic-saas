@@ -7,6 +7,8 @@ const allowedServerActionOrigins = process.env.NEXT_SERVER_ACTIONS_ALLOWED_ORIGI
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
+  // The quality-PDF renderer loads a platform-specific native canvas binary at runtime.
+  serverExternalPackages: ['@napi-rs/canvas'],
   turbopack: {
     root: process.cwd(),
   },

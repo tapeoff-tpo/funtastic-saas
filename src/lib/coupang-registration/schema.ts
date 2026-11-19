@@ -27,6 +27,8 @@ export const rowSchema = z.object({
     unitCost: amount, unitWholesale: amount,
   })).max(BUNDLE_COMPONENT_LIMIT).optional(),
   thumbnails: z.array(z.string().max(4000)).max(30), detailImages: z.array(z.string().max(4000)).max(100), label: z.string().max(4000), fields: z.record(z.string().max(200), text),
+  autoQualityLabel: z.object({ sourcePdfId: z.uuid(), value: z.string().max(4000) }).optional(),
+  qualityLabelIssue: z.string().max(500).optional(),
   defaultedFields: z.record(z.string().max(200), text).optional(),
   productMaster: productMaster.optional(),
 })

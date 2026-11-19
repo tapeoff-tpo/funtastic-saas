@@ -22,6 +22,7 @@ export type RegistrationProductMaster = {
   noticeCountry: string
   qualityPdf?: { id: string; fileName: string; contentType: string }
 }
+export type AutoQualityLabel = { sourcePdfId: string; value: string }
 export type RegistrationRow = {
   id: string
   templateId: string
@@ -47,6 +48,10 @@ export type RegistrationRow = {
   thumbnails: string[]
   detailImages: string[]
   label: string
+  /** A generated JPG value can refresh only while it remains unedited. */
+  autoQualityLabel?: AutoQualityLabel
+  /** A non-blocking conversion failure displayed in the row's confirmation list. */
+  qualityLabelIssue?: string
   fields: Record<string, string>
   /** Values automatically proposed from Product Management, kept for safe refreshes. */
   defaultedFields?: Record<string, string>
@@ -226,6 +231,7 @@ export function rowFields(row: RegistrationRow, rounding: number, labels: SavedF
 
 export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): string[] {
   const issues: string[] = []
+  if (row.qualityLabelIssue) issues.push(`품질표시 PDF: ${row.qualityLabelIssue}`)
   const prices = calculatePrice(row, draft.rounding)
   if (row.bundleComponents) {
     if (!row.bundleComponents.length) issues.push('세트 구성품을 추가해주세요.')

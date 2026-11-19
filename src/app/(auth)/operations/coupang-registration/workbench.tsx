@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { applyProductMasterDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, createRegistrationRow, detailHtml, imageStem, isImageUrl, LABEL_FIELD, matchCatalog, money, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile } from '@/lib/coupang-registration/model'
+import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -159,7 +160,7 @@ export function CoupangRegistrationWorkbench() {
   async function syncImages() {
     const targets = draft.rows.filter((row) => !row.bundleComponents && (!selected.size || selected.has(row.id)))
     if (!targets.length) return
-    await run('상품·이미지 매칭 중', async () => {
+    await run('상품·이미지·품질표시 연결 중', async () => {
       const matched: CatalogProduct[] = []
       for (let start = 0; start < targets.length; start += 30) {
         const chunk = targets.slice(start, start + 30)
@@ -168,14 +169,49 @@ export function CoupangRegistrationWorkbench() {
       }
       const products = [...new Map(matched.map((product) => [product.code, product])).values()]
       const targetIds = new Set(targets.map((row) => row.id))
-      update((value) => ({ ...value, rows: value.rows.map((row) => {
+      const linkedRows = draft.rows.map((row) => {
         if (!targetIds.has(row.id)) return row
         const match = matchCatalog(row, products)
         if (!match) return row
         return applyProductMasterDefaults(attachCatalog(row, match))
-      }) }))
+      })
+      const conversionRows = linkedRows.filter((row) => {
+        const qualityPdf = row.productMaster?.qualityPdf
+        return targetIds.has(row.id) && !!qualityPdf && qualityPdfNeedsConversion(row, qualityPdf.id, draft.labels)
+      })
+      const pdfs = [...new Map(conversionRows.flatMap((row) => row.productMaster?.qualityPdf ? [[row.productMaster.qualityPdf.id, row.productMaster.qualityPdf] as const] : [])).values()]
+      const convertedByPdf = new Map<string, SavedFile[]>()
+      const conversionErrors = new Map<string, string>()
+      for (const qualityPdf of pdfs) {
+        try {
+          const response = await jsonRequest('/quality-label', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attachmentId: qualityPdf.id }),
+          })
+          const labels = response.labels as SavedFile[]
+          if (!Array.isArray(labels) || !labels.length || labels.some((label) => !label || typeof label.name !== 'string' || typeof label.data !== 'string')) {
+            throw new Error('변환된 품질표시 이미지를 확인하지 못했습니다.')
+          }
+          convertedByPdf.set(qualityPdf.id, labels)
+        } catch (error) {
+          conversionErrors.set(qualityPdf.id, error instanceof Error ? error.message : '품질표시 PDF를 JPG로 변환하지 못했습니다.')
+        }
+      }
+      const generatedLabels = [...convertedByPdf.values()].flat()
+      const labels = [...new Map([...draft.labels, ...generatedLabels].map((file) => [file.name.normalize('NFC'), file])).values()]
+      const rows = linkedRows.map((row) => {
+        if (!targetIds.has(row.id)) return row
+        const qualityPdf = row.productMaster?.qualityPdf
+        if (!qualityPdf) return row
+        const converted = convertedByPdf.get(qualityPdf.id)
+        if (converted) return applyConvertedQualityLabels(row, qualityPdf.id, converted)
+        const issue = conversionErrors.get(qualityPdf.id)
+        return issue ? applyQualityLabelIssue(row, issue) : row
+      })
+      setDraft({ ...draft, rows, labels }); setDirty(true)
       const count = targets.filter((row) => matchCatalog(row, products)).length
-      toast.success(`${targets.length}개 중 ${count}개를 연결했습니다. 기존에 직접 입력한 값은 유지했습니다.`)
+      const success = `${targets.length}개 중 ${count}개를 연결했습니다. 품질표시 JPG ${generatedLabels.length}장을 자동 변환했습니다.`
+      toast.success(success)
+      if (conversionErrors.size) toast.error(`품질표시 PDF ${conversionErrors.size}개는 자동 변환하지 못했습니다. 해당 상품의 확인 항목을 봐주세요.`)
     })
   }
 
@@ -279,7 +315,7 @@ export function CoupangRegistrationWorkbench() {
 
     <section className="rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><input aria-label="작업 이름" className={`${inputClass} w-52 font-medium`} value={draft.name} onChange={(event) => update((value) => ({ ...value, name: event.target.value }))} /><select aria-label="저장된 작업 불러오기" className={`${inputClass} max-w-64`} value={currentId ?? ''} onChange={(event) => void load(event.target.value)}><option value="">저장된 작업 불러오기</option>{saved.map((item) => <option key={item.id} value={item.id}>{item.name} · {new Date(item.updatedAt).toLocaleDateString('ko-KR')}</option>)}</select>{currentId && <button className={buttonClass} disabled={!!busy} onClick={() => void save(true)}>새 작업으로 저장</button>}</div><a className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline" href="https://supplier.coupang.com/qvt/registration" target="_blank" rel="noreferrer">쿠팡 최신 양식 받기<ExternalLink className="size-3" /></a></div>
-      <div className="mt-3 flex flex-wrap items-center gap-2"><button className={buttonClass} disabled={!!busy} onClick={() => templateInput.current?.click()}><FileSpreadsheet className="size-3.5" />쿠팡 견적서 불러오기</button><button className={buttonClass} disabled={!!busy} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button><input ref={templateInput} type="file" multiple accept=".xlsx" hidden onChange={(event) => void importTemplates(event.target.files)} /><input ref={labelInput} type="file" multiple accept="image/jpeg,image/png" hidden onChange={(event) => void importLabels(event.target.files)} /><span className="text-xs text-muted-foreground">작성한 견적서는 기존 상품도 함께 불러옵니다. 라벨은 파일명으로 연결합니다.</span></div>
+      <div className="mt-3 flex flex-wrap items-center gap-2"><button className={buttonClass} disabled={!!busy} onClick={() => templateInput.current?.click()}><FileSpreadsheet className="size-3.5" />쿠팡 견적서 불러오기</button><button className={buttonClass} disabled={!!busy} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button><input ref={templateInput} type="file" multiple accept=".xlsx" hidden onChange={(event) => void importTemplates(event.target.files)} /><input ref={labelInput} type="file" multiple accept="image/jpeg,image/png" hidden onChange={(event) => void importLabels(event.target.files)} /><span className="text-xs text-muted-foreground">상품관리 PDF 품질표시는 정보 연결 시 JPG로 자동 변환합니다. 수동 라벨은 그대로 유지합니다.</span></div>
       {draft.templates.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{draft.templates.map((template) => <span key={template.id} className="max-w-full truncate rounded bg-muted px-2 py-1 text-[11px]" title={template.name}>{template.name} · {template.sheets.length}개 카테고리</span>)}</div>}
     </section>
 
@@ -419,7 +455,8 @@ function RowEditor({ row, draft, issues, onPatch, onClose, onAddComponent }: { r
   const prices = calculatePrice(row, draft.rounding)
   const automatic = new Set(['상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD])
   const fieldValue = (label: string, value: string) => onPatch({ fields: { ...row.fields, [label]: value } })
-  const file = draft.labels.find((label) => imageStem(label.name) === imageStem(row.label))
+  const labelFiles = row.label.split(',').map((name) => name.trim()).filter(Boolean).map((name) => draft.labels.find((label) => imageStem(label.name) === imageStem(name))).filter((file): file is SavedFile => !!file)
+  const autoPdfLinked = !!row.productMaster?.qualityPdf && row.autoQualityLabel?.sourcePdfId === row.productMaster.qualityPdf.id && row.autoQualityLabel.value === row.label
   return <section className="rounded-lg border bg-card">
     <header className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">상품 정보 확인</h2><p className="mt-1 text-xs text-muted-foreground">{row.name}</p></div><button aria-label="상품 상세 닫기" onClick={onClose} className="rounded p-2 hover:bg-muted"><X className="size-4" /></button></header>
     {issues.length > 0 && <div className="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-900">입력 확인 {issues.length}건</p><ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-amber-800">{issues.map((issue) => <li key={issue}>· {issue}</li>)}</ul></div>}
@@ -428,8 +465,8 @@ function RowEditor({ row, draft, issues, onPatch, onClose, onAddComponent }: { r
       {row.bundleComponents ? <BundleEditor components={row.bundleComponents} prices={prices} onAdd={onAddComponent} onChange={(bundleComponents) => onPatch({ bundleComponents, bundleReviewed: false })} /> : <div className="rounded-md border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">원가 SKU 연결 · {row.internalSku || '미연결'}</span><form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); setFinding(true); void jsonRequest(`/catalog?cost=1&q=${encodeURIComponent(costQuery)}`).then((response) => setCosts(response.costs)).catch((error) => toast.error(error.message)).finally(() => setFinding(false)) }}><input aria-label="원가 SKU 검색" className={`${inputClass} w-40`} placeholder="품목코드·상품명" value={costQuery} onChange={(event) => setCostQuery(event.target.value)} /><button className={buttonClass} disabled={finding || !costQuery.trim()}>{finding ? <Loader2 className="size-3 animate-spin" /> : '조회'}</button></form></div>{costs.length > 0 && <div className="mt-2 max-h-36 overflow-y-auto">{costs.map((cost) => <button key={cost.sku} className="flex w-full justify-between gap-2 border-t p-2 text-left text-xs hover:bg-muted" onClick={() => { onPatch({ internalSku: cost.sku, costPrice: cost.costPrice }); setCosts([]) }}><span>{cost.sku} · {cost.name} {cost.optionName}</span><span>{won(cost.costPrice)}</span></button>)}</div>}<p className="mt-2 text-[11px] text-muted-foreground">원가는 품목의 works 신규 원가(원화)에서 가져옵니다. 신규원가가 없으면 비워둡니다. </p></div>}
       {(row.bundleComponents?.length || /[2-9]\d*개입/.test(row.name)) ? <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs"><input type="checkbox" checked={row.bundleReviewed} onChange={(event) => onPatch({ bundleReviewed: event.target.checked })} />묶음 구성, 세트 원가·도매가·공급가 및 라벨을 확인했습니다.</label> : null}
       <div className="grid gap-3 sm:grid-cols-2"><Field label="품질표시 파일명 또는 공개 URL" hint="추가한 라벨 파일명과 일치해야 합니다. 여러 장은 쉼표로 구분합니다."><input className={inputClass} list="coupang-label-files" value={row.label} onChange={(event) => onPatch({ label: event.target.value })} /><datalist id="coupang-label-files">{draft.labels.map((label) => <option key={label.name} value={label.name} />)}</datalist></Field><div className="flex items-end gap-2"><button className={buttonClass} onClick={() => setPreview((value) => !value)}>상세 HTML {preview ? '닫기' : '미리보기'}</button>{row.sourceCode && <a className={buttonClass} href={`https://funtasticb2b.com/goods/view?no=${encodeURIComponent(row.sourceCode)}`} target="_blank" rel="noreferrer">원본 상세페이지<ExternalLink className="size-3" /></a>}</div></div>
-      {row.productMaster && <div className="rounded-md border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-950"><p className="font-medium">상품관리 정보 연결됨 · {row.productMaster.match === 'sku' ? 'SKU 일치' : '상품명 일치'}</p><p className="mt-1">포장 기본값: {row.fields['한 개 단품 포장 사이즈'] || '크기 확인 필요'} mm · {row.fields['한 개 단품 포장 무게'] || '무게 확인 필요'} g <span className="text-blue-700">(상품 크기 각 변 +2cm 기준)</span></p>{row.productMaster.qualityPdf && <p className="mt-1">품질표시 PDF: <a className="underline" href={`/api/new-products/attachments/${encodeURIComponent(row.productMaster.qualityPdf.id)}`} target="_blank" rel="noreferrer">{row.productMaster.qualityPdf.fileName}</a> <span className="text-blue-700">· 쿠팡 등록용 라벨은 JPG/PNG가 필요합니다.</span></p>}</div>}
-      {file && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">품질표시 미리보기</summary><img className="mt-2 max-h-96 max-w-full border" src={`data:image/${/\.png$/i.test(file.name) ? 'png' : 'jpeg'};base64,${file.data}`} alt="연결한 품질표시 스티커" /></details>}
+      {row.productMaster && <div className="rounded-md border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-950"><p className="font-medium">상품관리 정보 연결됨 · {row.productMaster.match === 'sku' ? 'SKU 일치' : '상품명 일치'}</p><p className="mt-1">포장 기본값: {row.fields['한 개 단품 포장 사이즈'] || '크기 확인 필요'} mm · {row.fields['한 개 단품 포장 무게'] || '무게 확인 필요'} g <span className="text-blue-700">(상품 크기 각 변 +2cm 기준)</span></p>{row.productMaster.qualityPdf && <p className="mt-1">품질표시 PDF: <a className="underline" href={`/api/new-products/attachments/${encodeURIComponent(row.productMaster.qualityPdf.id)}`} target="_blank" rel="noreferrer">{row.productMaster.qualityPdf.fileName}</a> <span className="text-blue-700">· {autoPdfLinked ? `JPG ${labelFiles.length}장 자동 변환·연결됨` : '정보 연결 시 JPG로 자동 변환됩니다.'}</span></p>}</div>}
+      {labelFiles.length > 0 && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">품질표시 미리보기 {labelFiles.length}장</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">{labelFiles.map((file) => <img key={file.name} className="max-h-96 max-w-full border" src={`data:image/${/\.png$/i.test(file.name) ? 'png' : 'jpeg'};base64,${file.data}`} alt={`${file.name} 품질표시 스티커`} />)}</div></details>}
       <Field label="추가이미지 URL" hint="대표이미지를 포함한 후보 목록입니다. JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다."><textarea className={`${inputClass} h-16 py-2 font-mono text-[11px]`} value={row.thumbnails.join('\n')} onChange={(event) => onPatch({ thumbnails: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></Field>
       <Field label="상세이미지 URL" hint="JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다. HTML은 자동 생성됩니다."><textarea className={`${inputClass} h-20 py-2 font-mono text-[11px]`} value={row.detailImages.join('\n')} onChange={(event) => onPatch({ detailImages: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) })} /></Field>
       {preview && <iframe title="쿠팡 상세 HTML 미리보기" sandbox="" className="h-[560px] w-full rounded border bg-white" srcDoc={`<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>${detailHtml(row.detailImages, row.name)}</body></html>`} />}

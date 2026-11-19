@@ -74,6 +74,22 @@ describe('official Coupang template round trip', () => {
     draft.rows[0].bundleReviewed = true
     expect(rowIssues(draft.rows[0], draft)).toEqual([])
   })
+  it('puts converted Product Management quality-label JPGs into the Coupang ZIP and worksheet', async () => {
+    const { draft } = await fixture()
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64')
+    const labels = [
+      { name: '품질표시-abc-p1of2.jpg', data: jpeg },
+      { name: '품질표시-abc-p2of2.jpg', data: jpeg },
+    ]
+    draft.labels = labels
+    draft.rows[0].label = labels.map((label) => label.name).join(',')
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
+    expect(zip.file(`품질표시/${labels[0].name}`)).not.toBeNull()
+    expect(zip.file(`품질표시/${labels[1].name}`)).not.toBeNull()
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('QF_100_test')!.getCell('H9').value).toBe(labels.map((label) => label.name).join(','))
+  })
   it('exports the quantity-weighted set prices as one row after saving and reopening', async () => {
     const { draft } = await fixture()
     Object.assign(draft.rows[0], {

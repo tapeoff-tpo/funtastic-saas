@@ -18,4 +18,11 @@ describe('outbound packaging and receipt periods', () => {
     expect(matchesChinaStockPeriod(null, '2026-11-03', '')).toBe(false)
     expect(matchesChinaStockPeriod('invalid', '', '2026-11-03')).toBe(false)
   })
+  it('chooses measured dimensions independently of manual CBM values', () => {
+    const measured = { id: 'measured', lengthCm: 50, widthCm: 40, heightCm: 30, manualCbm: 0.01 }
+    const smaller = { id: 'smaller', lengthCm: 10, widthCm: 10, heightCm: 10, manualCbm: 2 }
+    const unmeasured = { id: 'unmeasured', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 9 }
+    expect(largestChinaOutboundBox([unmeasured, smaller, measured])).toBe(measured)
+    expect(largestChinaOutboundBox([measured, smaller, unmeasured])).toBe(measured)
+  })
 })

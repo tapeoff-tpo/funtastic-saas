@@ -164,6 +164,26 @@ describe('China import documents', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     expect(workbook.getWorksheet('sheet')!.getCell('X112').value).toBeCloseTo(1.82)
   })
+  it('prefills and exports direct CBM without requiring or synthesising centimeter measurements', async () => {
+    const shipment: ImportDocumentDetail = {
+      ...detail,
+      boxes: detail.boxes.map((box, index) => ({ ...box, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: index === 0 ? 10 : 3, manualCbm: index === 0 ? 0.125 : 0.025 })),
+      pallets: [{ ...detail.pallets[0], manualCbm: 0.75 }],
+    }
+    const original = JSON.stringify(shipment)
+    const prepared = prepareImportDocument(shipment, metadata)
+    expect(prepared.boxes.map(({ cbm, grossWeightKg }) => ({ cbm, grossWeightKg }))).toEqual([
+      { cbm: 0.125, grossWeightKg: 10 }, { cbm: 0.025, grossWeightKg: 3 },
+    ])
+    const sheet = await exportedSheet(shipment, {
+      ...options,
+      boxes: Object.fromEntries(prepared.boxes.map((box) => [box.id, { grossWeightKg: box.grossWeightKg!, cbm: box.cbm! }])),
+    })
+    expect(sheet.getCell('X112').value).toBeCloseTo(0.775)
+    expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
+    expect(JSON.stringify(shipment)).toBe(original)
+    expect(shipment.boxes.every((box) => box.lengthCm === null && box.widthCm === null && box.heightCm === null)).toBe(true)
+  })
   it('calculates pallet weight from box overrides plus default tare instead of legacy gross and preserves Chinese names', async () => {
     const measured = { ...detail, items: detail.items.map((item) => ({ ...item, chineseProductName: '出库名称' })), pallets: [{ ...detail.pallets[0]!, grossWeightKg: 25 }] }
     expect(prepareImportDocument(measured, metadata).items[0]!.chineseName).toBe('出库名称')

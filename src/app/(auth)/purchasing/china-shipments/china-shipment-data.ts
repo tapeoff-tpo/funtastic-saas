@@ -64,7 +64,7 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       receiptPacking: item.receiptPacking,
       productImage: productImages[item.id],
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), tareWeightKg: palletTareWeightKg(pallet.tareWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
+    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), manualCbm: dimensionNumber(pallet.manualCbm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), tareWeightKg: palletTareWeightKg(pallet.tareWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
     boxes: detail.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,
@@ -78,9 +78,10 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       lengthCm: dimensionNumber(box.lengthCm),
       widthCm: dimensionNumber(box.widthCm),
       heightCm: dimensionNumber(box.heightCm),
+      manualCbm: dimensionNumber(box.manualCbm),
     })),
     boxItems: detail.boxItems.map((item) => ({ id: item.id, boxId: item.boxId, shipmentItemId: item.shipmentItemId, quantity: item.quantity,
-      lengthCm: dimensionNumber(item.lengthCm), widthCm: dimensionNumber(item.widthCm), heightCm: dimensionNumber(item.heightCm), grossWeightKg: dimensionNumber(item.grossWeightKg) })),
+      lengthCm: dimensionNumber(item.lengthCm), widthCm: dimensionNumber(item.widthCm), heightCm: dimensionNumber(item.heightCm), manualCbm: dimensionNumber(item.manualCbm), grossWeightKg: dimensionNumber(item.grossWeightKg) })),
   }
 }
 

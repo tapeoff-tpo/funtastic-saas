@@ -29,6 +29,7 @@ import {
   saveChinaOutboundItemBoxSplits,
   saveChinaOutboundPalletCompletionStatuses,
   saveChinaOutboundPalletTareWeight,
+  saveChinaOutboundPalletDimensions,
 } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
@@ -396,6 +397,77 @@ describe('China outbound box and pallet completion', () => {
       expect(query.params.slice(0, 2)).toEqual([userId, shipmentId])
       expect(query.params.length).toBeLessThanOrEqual(502)
     }
+  })
+
+  it.each([false, true])('merges duplicate box rows using the largest effective CBM regardless of manual-row order (%s)', async (reverse) => {
+    boxes = []; boxItems = []
+    const allocations = [
+      { boxNo: '1', quantity: 4, manualCbm: 0.1 },
+      { boxNo: '1', quantity: 6, lengthCm: 100, widthCm: 100, heightCm: 100 },
+    ]
+    if (reverse) allocations.reverse()
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations })
+    expect(boxes[0]).toMatchObject({ manualCbm: '1', lengthCm: '100', widthCm: '100', heightCm: '100' })
+    expect(boxItems[0]).toMatchObject({ quantity: 10, manualCbm: '1' })
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: allocations.map((allocation) => ({ ...allocation, manualCbm: null })) })
+    expect(boxes[0]).toMatchObject({ manualCbm: null, lengthCm: '100', widthCm: '100', heightCm: '100' })
+    expect(boxItems[0]!.manualCbm).toBeNull()
+  })
+
+  it('persists CBM without dimensions and uses the largest component CBM across mixed-box edits and moves', async () => {
+    boxes = []; boxItems = []
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-2', reservedQuantity: 2, packedQuantity: 0 })
+    const first = { userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 10, manualCbm: 0.1234567 }] }
+    const second = { userId, shipmentId, shipmentItemId: 'item-2', allocations: [{ boxNo: '1', quantity: 2, manualCbm: 0.2 }] }
+    const saved = await saveChinaOutboundItemBoxSplits(first)
+    expect(saved.boxes[0]).toMatchObject({ manualCbm: 0.123457, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null })
+    expect(saved.boxItems[0]).toMatchObject({ manualCbm: 0.123457 })
+    await saveChinaOutboundItemBoxSplits(second)
+    expect(boxes[0]).toMatchObject({ manualCbm: '0.2', lengthCm: null, widthCm: null, heightCm: null })
+    await saveChinaOutboundItemBoxSplits(second)
+    expect(boxes[0]!.manualCbm).toBe('0.2')
+    boxes[0]!.status = 'open'
+    await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: boxes[0]!.id, lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.9 })
+    await saveChinaOutboundItemBoxSplits(second)
+    expect(boxes[0]!.manualCbm).toBe('0.9')
+    second.allocations[0]!.manualCbm = 0.4
+    await saveChinaOutboundItemBoxSplits(second)
+    expect(boxes[0]!.manualCbm).toBe('0.4')
+    second.allocations[0]!.boxNo = '2'
+    await saveChinaOutboundItemBoxSplits(second)
+    expect(boxes.map((box) => box.manualCbm)).toEqual(['0.123457', '0.4'])
+    expect(boxes.every((box) => box.lengthCm === null && box.widthCm === null && box.heightCm === null)).toBe(true)
+  })
+
+  it('saves and clears independent box and pallet CBM while preserving unknown dimensions and measured weight', async () => {
+    boxes[1]!.grossWeightKg = '7'
+    await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: 'box-2', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.3212346 })
+    expect(boxes[1]).toMatchObject({ manualCbm: '0.321235', grossWeightKg: '7', lengthCm: null, widthCm: null, heightCm: null })
+    await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: 'box-2', lengthCm: null, widthCm: null, heightCm: null, manualCbm: null })
+    expect(boxes[1]!.manualCbm).toBeNull()
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.2 })
+    expect(pallets[0]).toMatchObject({ manualCbm: '1.2', lengthCm: null, widthCm: null, heightCm: null })
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', lengthCm: null, widthCm: null, heightCm: null })
+    expect(pallets[0]!.manualCbm).toBe('1.2')
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: null })
+    expect(pallets[0]).toMatchObject({ manualCbm: null, lengthCm: null, widthCm: null, heightCm: null })
+  })
+
+  it('bulk applies and clears only CBM, preserving box dimensions, weights and component measurements', async () => {
+    const before = JSON.stringify(boxItems)
+    boxes[0]!.grossWeightKg = '7'
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', 'box-2'], manualCbm: 0.4567894 })
+    expect(boxes[0]).toMatchObject({ manualCbm: '0.456789', grossWeightKg: '7', lengthCm: '10', widthCm: '20', heightCm: '30' })
+    expect(boxes[1]).toMatchObject({ manualCbm: '0.456789', lengthCm: null, widthCm: null, heightCm: null })
+    expect(JSON.stringify(boxItems)).toBe(before)
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], manualCbm: null })
+    expect(boxes[0]!.manualCbm).toBeNull()
+    expect(boxes[1]!.manualCbm).toBe('0.456789')
+  })
+
+  it.each([0, -1, 0.0000001, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000_000])('rejects invalid manual CBM before writes (%s)', async (manualCbm) => {
+    await expect(saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 10, manualCbm }] })).rejects.toThrow('CBM')
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
   it('recomputes a mixed box from saved product measurements across retries, edits, shrinking, and moves', async () => {

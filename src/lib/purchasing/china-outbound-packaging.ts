@@ -2,9 +2,10 @@ import { calculateChinaOutboundBoxCbm, type ChinaOutboundBoxDimensions } from '.
 
 /** Keep the dimensions of a real box, rather than synthesising per-axis maxima. */
 export function largestChinaOutboundBox<T extends ChinaOutboundBoxDimensions>(boxes: T[]): T | undefined {
+  const measuredVolume = (value: T) => calculateChinaOutboundBoxCbm({ lengthCm: value.lengthCm, widthCm: value.widthCm, heightCm: value.heightCm })
   return boxes.reduce<T | undefined>((largest, box) => {
-    const volume = calculateChinaOutboundBoxCbm(box)
-    const previous = largest ? calculateChinaOutboundBoxCbm(largest) : null
+    const volume = measuredVolume(box)
+    const previous = largest ? measuredVolume(largest) : null
     return !largest || (volume != null && (previous == null || volume > previous)) ? box : largest
   }, undefined)
 }

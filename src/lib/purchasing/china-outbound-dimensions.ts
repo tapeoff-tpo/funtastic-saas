@@ -1,4 +1,5 @@
 export type ChinaOutboundBoxDimensions = {
+  manualCbm?: number | string | null
   lengthCm?: number | string | null
   widthCm?: number | string | null
   heightCm?: number | string | null
@@ -11,6 +12,8 @@ export function dimensionNumber(value: number | string | null | undefined) {
 }
 
 export function calculateChinaOutboundBoxCbm(dimensions: ChinaOutboundBoxDimensions) {
+  const manualCbm = dimensionNumber(dimensions.manualCbm)
+  if (manualCbm != null) return manualCbm
   const lengthCm = dimensionNumber(dimensions.lengthCm)
   const widthCm = dimensionNumber(dimensions.widthCm)
   const heightCm = dimensionNumber(dimensions.heightCm)

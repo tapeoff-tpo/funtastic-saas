@@ -31,6 +31,7 @@ export type ChinaOutboundPackingExportDetail = {
     palletNo: string
     grossWeightKg?: number | string | null
     tareWeightKg?: number | string | null
+    manualCbm?: number | string | null
     lengthCm?: number | string | null
     widthCm?: number | string | null
     heightCm?: number | string | null
@@ -41,6 +42,7 @@ export type ChinaOutboundPackingExportDetail = {
     boxNo: string
     status: string
     grossWeightKg?: number | string | null
+    manualCbm?: number | string | null
     lengthCm?: number | string | null
     widthCm?: number | string | null
     heightCm?: number | string | null

@@ -254,6 +254,7 @@ export type ChinaOutboundBoxSplitInput = {
   heightCm?: number | null
   /** Omitted preserves the saved measurement; null explicitly clears it. */
   grossWeightKg?: number | null
+  manualCbm?: number | null
 }
 
 export type ChinaOutboundPalletAssignmentInput = {
@@ -758,6 +759,9 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS length_cm numeric(12, 2);
   ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS width_cm numeric(12, 2);
   ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2);
+  ALTER TABLE china_outbound_pallets ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
+  ALTER TABLE china_outbound_boxes ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
+  ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_box_items_box_shipment_item
     ON china_outbound_box_items(box_id, shipment_item_id);
@@ -2413,19 +2417,22 @@ export async function addChinaOutboundSample(input: {
 
 export async function saveChinaOutboundPalletDimensions(input: {
   userId: string; shipmentId: string; palletId: string
-  lengthCm: number; widthCm: number; heightCm: number
+  lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null
 }) {
+  const manualCbm = normalizeOptionalChinaOutboundManualCbm(input.manualCbm)
+  const hasDimensions = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value !== undefined)
+  const dimensions = hasDimensions ? normalizeChinaOutboundBoxDimensions({ lengthCm: input.lengthCm ?? null, widthCm: input.widthCm ?? null, heightCm: input.heightCm ?? null }) : null
+  if (!dimensions && manualCbm === undefined) throw new Error('파렛트 규격 또는 CBM을 입력해주세요.')
   await ensureSaasChinaOutboundSchema()
-  const dimensions = { lengthCm: input.lengthCm, widthCm: input.widthCm, heightCm: input.heightCm }
-  for (const value of Object.values(dimensions)) {
-    if (!Number.isFinite(value) || value <= 0 || value > 9_999_999.99) throw new Error('파렛트 가로·세로·높이는 0보다 큰 숫자로 모두 입력해주세요.')
-  }
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
     await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
-    await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    const current = await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    if (dimensions && dimensions.lengthCm == null && manualCbm === undefined && dimensionNumber(current.manualCbm) == null) throw new Error('파렛트 가로·세로·높이는 0보다 큰 숫자로 모두 입력해주세요.')
     const [pallet] = await tx.update(chinaOutboundPallets).set({
-      lengthCm: String(input.lengthCm), widthCm: String(input.widthCm), heightCm: String(input.heightCm), updatedAt: new Date(),
+      ...(dimensions ? { lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm), widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm), heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm) } : {}),
+      ...(manualCbm !== undefined ? { manualCbm: manualCbm === null ? null : String(manualCbm) } : {}),
+      updatedAt: new Date(),
     }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
     return pallet
   })
@@ -2500,7 +2507,7 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     for (const row of allocations) {
       const box = boxes.find((candidate) => candidate.id === row.boxId)!
       const source = allocations.filter((candidate) => candidate.boxId === box.id)
-      const fields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg'] as const
+      const fields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
       const measured = source.length === 1 && fields.every((field) => row[field] == null)
         ? { ...row, ...Object.fromEntries(fields.map((field) => [field, box[field] ?? null])) } : row
       products.set(row.shipmentItemId, [...(products.get(row.shipmentItemId) ?? []), measured])
@@ -2509,19 +2516,23 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     for (const [shipmentItemId, rows] of products) {
       const dimensions = largestChinaOutboundBox(rows)
       const weights = rows.map((row) => dimensionNumber(row.grossWeightKg))
+      const cbms = rows.map((row) => calculateChinaOutboundBoxCbm(row)).filter((value): value is number => value != null)
       await tx.insert(chinaOutboundBoxItems).values({ userId: input.userId, shipmentId: input.shipmentId, boxId: target.id, shipmentItemId,
         quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
         lengthCm: dimensions?.lengthCm ?? null, widthCm: dimensions?.widthCm ?? null, heightCm: dimensions?.heightCm ?? null,
         grossWeightKg: weights.every((weight) => weight != null) ? String(Math.round(weights.reduce((sum, weight) => sum + weight!, 0) * 1000) / 1000) : null,
+        manualCbm: rows.some((row) => dimensionNumber(row.manualCbm) != null) && cbms.length ? String(Math.max(...cbms)) : null,
       })
     }
     const weights = boxes.filter((box) => allocations.some((row) => row.boxId === box.id)).map((box) => dimensionNumber(box.grossWeightKg))
     const weight = weights.every((value) => value != null) ? Math.round(weights.reduce((sum, value) => sum + value!, 0) * 1000) / 1000 : null
     if (weight != null && weight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
     const grossWeightKg = weight == null ? null : String(weight)
-    await tx.update(chinaOutboundBoxes).set({ grossWeightKg, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
+    const cbms = boxes.map((box) => calculateChinaOutboundBoxCbm(box)).filter((value): value is number => value != null)
+    const manualCbm = boxes.some((box) => dimensionNumber(box.manualCbm) != null) && cbms.length ? String(Math.max(...cbms)) : null
+    await tx.update(chinaOutboundBoxes).set({ grossWeightKg, manualCbm, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
     // Retain emptied box records for references, but exclude their former weight and pallet.
-    await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))
+    await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, manualCbm: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))
     await markChinaOutboundBoxesChanged(tx, input.userId, input.shipmentId, ids)
     await markChinaOutboundPalletsChanged(tx, input.userId, input.shipmentId, boxes.flatMap((box) => box.palletId ? [box.palletId] : []))
     return target
@@ -2712,16 +2723,17 @@ export async function configureChinaOutboundPackaging(input: ConfigureChinaOutbo
 }
 
 /**
- * Stores the physical outer dimensions for one box. CBM remains derived from
- * these three measurements so it cannot become stale when a dimension changes.
+ * Stores physical dimensions and an optional independently measured CBM.
  */
 export async function saveChinaOutboundBoxDimensions(input: {
   userId: string
   shipmentId: string
   boxId: string
+  manualCbm?: number | null
 } & ChinaOutboundBoxDimensionsInput) {
   await ensureSaasChinaOutboundSchema()
   const dimensions = normalizeChinaOutboundBoxDimensions(input)
+  const manualCbm = normalizeOptionalChinaOutboundManualCbm(input.manualCbm)
 
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
@@ -2735,13 +2747,14 @@ export async function saveChinaOutboundBoxDimensions(input: {
         lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm),
         widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm),
         heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm),
+        ...(manualCbm !== undefined ? { manualCbm: manualCbm === null ? null : String(manualCbm) } : {}),
         updatedAt: new Date(),
       })
       .where(eq(chinaOutboundBoxes.id, box.id))
       .returning()
     if (!updated) throw new Error('박스 규격을 저장하지 못했습니다.')
     const current = [box.lengthCm, box.widthCm, box.heightCm].map((value) => value == null ? null : Number(value))
-    if (current[0] !== dimensions.lengthCm || current[1] !== dimensions.widthCm || current[2] !== dimensions.heightCm) {
+    if (current[0] !== dimensions.lengthCm || current[1] !== dimensions.widthCm || current[2] !== dimensions.heightCm || (manualCbm !== undefined && dimensionNumber(box.manualCbm) !== manualCbm)) {
       await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, [box.id])
     }
     return updated
@@ -2757,14 +2770,16 @@ export async function saveChinaOutboundBoxesMeasurements(input: {
   widthCm?: number
   heightCm?: number
   grossWeightKg?: number
+  manualCbm?: number | null
 }) {
   const ids = [...new Set(input.boxIds)]
   if (!ids.length || ids.length > 5_000 || ids.some((id) => typeof id !== 'string' || !id.trim())) throw new Error('수정할 박스를 1개 이상, 5,000개 이하로 선택해주세요.')
   const hasDimensions = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value !== undefined)
-  if (!hasDimensions && input.grossWeightKg === undefined) throw new Error('일괄 적용할 박스 규격 또는 총중량을 입력해주세요.')
+  if (!hasDimensions && input.grossWeightKg === undefined && input.manualCbm === undefined) throw new Error('일괄 적용할 박스 규격, 총중량 또는 CBM을 입력해주세요.')
   const dimensions = hasDimensions ? normalizeChinaOutboundBoxDimensions({ lengthCm: input.lengthCm ?? null, widthCm: input.widthCm ?? null, heightCm: input.heightCm ?? null }) : null
   if (dimensions && [dimensions.lengthCm, dimensions.widthCm, dimensions.heightCm].some((value) => value == null)) throw new Error('가로·세로·높이는 모두 입력해주세요.')
   const grossWeightKg = normalizeOptionalChinaOutboundBoxWeight(input.grossWeightKg)
+  const manualCbm = normalizeOptionalChinaOutboundManualCbm(input.manualCbm)
   if (grossWeightKg === null) throw new Error('총중량은 0.001kg 이상인 숫자로 입력해주세요.')
   await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
@@ -2778,10 +2793,12 @@ export async function saveChinaOutboundBoxesMeasurements(input: {
     const sealed = boxes.find((box) => box.status !== 'open')
     if (sealed) throw new Error(`${sealed.boxNo}은(는) 봉인되어 규격과 총중량을 수정할 수 없습니다.`)
     const dimensionChanged = (box: ChinaOutboundBoxRow) => dimensions != null && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)
-    const changedBoxes = boxes.filter((box) => dimensionChanged(box) || (grossWeightKg !== undefined && dimensionNumber(box.grossWeightKg) !== grossWeightKg))
+    const cbmChanged = (box: ChinaOutboundBoxRow) => manualCbm !== undefined && dimensionNumber(box.manualCbm) !== manualCbm
+    const changedBoxes = boxes.filter((box) => dimensionChanged(box) || cbmChanged(box) || (grossWeightKg !== undefined && dimensionNumber(box.grossWeightKg) !== grossWeightKg))
     const values = {
       ...(dimensions ? { lengthCm: String(dimensions.lengthCm), widthCm: String(dimensions.widthCm), heightCm: String(dimensions.heightCm) } : {}),
       ...(grossWeightKg !== undefined ? { grossWeightKg: String(grossWeightKg) } : {}),
+      ...(manualCbm !== undefined ? { manualCbm: manualCbm === null ? null : String(manualCbm) } : {}),
       updatedAt: new Date(),
     }
     const batchSize = 500
@@ -2792,7 +2809,7 @@ export async function saveChinaOutboundBoxesMeasurements(input: {
       )).returning({ id: chinaOutboundBoxes.id })
       if (saved.length !== batch.length) throw new Error('선택한 박스의 규격과 총중량을 저장하지 못했습니다.')
     }
-    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, changedBoxes.filter(dimensionChanged).map((box) => box.id))
+    await markChinaOutboundBoxesChanged(tx, input.userId, shipment.id, changedBoxes.filter((box) => dimensionChanged(box) || cbmChanged(box)).map((box) => box.id))
     return { updatedBoxCount: changedBoxes.length }
   })
 }
@@ -2974,12 +2991,15 @@ export async function saveChinaOutboundItemBoxSplits(input: {
         completionStatus: box.completionStatus === 'completed' || box.completionStatus === 'in_progress' ? box.completionStatus : null,
         note: box.note, lengthCm: dimensionNumber(box.lengthCm), widthCm: dimensionNumber(box.widthCm),
         heightCm: dimensionNumber(box.heightCm), grossWeightKg: dimensionNumber(box.grossWeightKg),
+        manualCbm: dimensionNumber(box.manualCbm),
       })),
       boxItems: savedBoxItems.map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity,
         lengthCm: dimensionNumber(row.lengthCm), widthCm: dimensionNumber(row.widthCm), heightCm: dimensionNumber(row.heightCm), grossWeightKg: dimensionNumber(row.grossWeightKg),
+        manualCbm: dimensionNumber(row.manualCbm),
       })),
       updatedOtherBoxItems: saved.boxItems.filter((row) => row.shipmentItemId !== shipmentItem.id && affectedBoxIds.has(row.boxId)).map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity,
         lengthCm: dimensionNumber(row.lengthCm), widthCm: dimensionNumber(row.widthCm), heightCm: dimensionNumber(row.heightCm), grossWeightKg: dimensionNumber(row.grossWeightKg),
+        manualCbm: dimensionNumber(row.manualCbm),
       })),
       reopenedPalletIds: saved.reopenedPalletIds,
     }
@@ -4614,11 +4634,15 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
     const quantity = positiveInteger(allocation.quantity, '박스 적재 수량')
     const dimensions = normalizeOptionalChinaOutboundBoxDimensions(allocation)
     const grossWeightKg = normalizeOptionalChinaOutboundBoxWeight(allocation.grossWeightKg)
+    const manualCbm = normalizeOptionalChinaOutboundManualCbm(allocation.manualCbm)
     const current = allocationsByBoxNo.get(boxNo)
     if (current) {
       if (current.existingBoxId && allocation.existingBoxId && current.existingBoxId !== allocation.existingBoxId) throw new Error('서로 다른 박스를 같은 번호로 변경할 수 없습니다.')
       if (current.grossWeightKg !== undefined && grossWeightKg !== undefined && current.grossWeightKg !== grossWeightKg) throw new Error(`${boxNo} 박스에 서로 다른 총중량이 입력되었습니다.`)
       const currentDimensions = normalizeOptionalChinaOutboundBoxDimensions(current)
+      const mergedManualCbm = current.manualCbm != null || manualCbm != null
+        ? normalizeOptionalChinaOutboundManualCbm(Math.max(calculateChinaOutboundBoxCbm(current) ?? 0, calculateChinaOutboundBoxCbm({ ...allocation, manualCbm }) ?? 0))
+        : current.manualCbm !== undefined || manualCbm !== undefined ? null : undefined
 
       allocationsByBoxNo.set(boxNo, {
         boxNo,
@@ -4626,15 +4650,22 @@ function normalizeChinaOutboundBoxSplitAllocations(allocations: ChinaOutboundBox
         ...(current.autoNumber || allocation.autoNumber ? { autoNumber: true } : {}),
         quantity: current.quantity + quantity,
         ...(current.grossWeightKg !== undefined || grossWeightKg !== undefined ? { grossWeightKg: current.grossWeightKg !== undefined ? current.grossWeightKg : grossWeightKg } : {}),
+        ...(mergedManualCbm !== undefined ? { manualCbm: mergedManualCbm } : {}),
         ...(largestChinaOutboundBox([currentDimensions, dimensions].filter((value): value is ChinaOutboundBoxDimensionsInput => value != null)) ?? {}),
       })
       continue
     }
-    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(allocation.existingBoxId ? { existingBoxId: allocation.existingBoxId } : {}), ...(allocation.autoNumber ? { autoNumber: true } : {}), ...(grossWeightKg !== undefined ? { grossWeightKg } : {}), ...(dimensions ?? {}) })
+    allocationsByBoxNo.set(boxNo, { boxNo, quantity, ...(allocation.existingBoxId ? { existingBoxId: allocation.existingBoxId } : {}), ...(allocation.autoNumber ? { autoNumber: true } : {}), ...(grossWeightKg !== undefined ? { grossWeightKg } : {}), ...(manualCbm !== undefined ? { manualCbm } : {}), ...(dimensions ?? {}) })
   }
   const normalized = [...allocationsByBoxNo.values()]
   assertChinaOutboundBoxSplitWeightConsistency(normalized)
   return normalized
+}
+
+function normalizeOptionalChinaOutboundManualCbm(value: number | null | undefined) {
+  if (value === undefined || value === null) return value
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.000001 || value > 999_999_999) throw new Error('CBM은 0.000001 이상, 999,999,999 이하인 숫자로 입력해주세요.')
+  return Math.round(value * 1_000_000) / 1_000_000
 }
 
 function normalizeOptionalChinaOutboundBoxWeight(value: number | null | undefined) {
@@ -4698,7 +4729,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   boxes: ChinaOutboundBoxRow[]
   boxItems: ChinaOutboundBoxItemRow[]
 }) {
-  const measurementFields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg'] as const
+  const measurementFields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
   const originalBoxItemsById = new Map(input.boxItems.map((row) => [row.id, row]))
   const originalItemsByBox = new Map<string, ChinaOutboundBoxItemRow[]>()
   for (const row of input.boxItems) originalItemsByBox.set(row.boxId, [...(originalItemsByBox.get(row.boxId) ?? []), row])
@@ -4787,6 +4818,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
         widthCm: dimensions ? String(dimensions.widthCm) : null,
         heightCm: dimensions ? String(dimensions.heightCm) : null,
         grossWeightKg: allocation.grossWeightKg == null ? null : String(allocation.grossWeightKg),
+        manualCbm: allocation.manualCbm == null ? null : String(allocation.manualCbm),
       }
     })).returning()
     if (created.length !== batch.length) throw new Error('박스를 저장하지 못했습니다.')
@@ -4806,6 +4838,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   const affectedBoxIds = new Set([...previousBoxItems.map((row) => row.boxId)])
   const recalculateBoxIds = new Set<string>()
   const recalculateWeightBoxIds = new Set<string>()
+  const recalculateCbmBoxIds = new Set<string>()
 
   for (const allocation of input.allocations) {
     const box = boxesByNo.get(allocation.boxNo)
@@ -4817,8 +4850,13 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
       widthCm: dimensions ? String(dimensions.widthCm) : previous?.widthCm ?? null,
       heightCm: dimensions ? String(dimensions.heightCm) : previous?.heightCm ?? null,
       grossWeightKg: allocation.grossWeightKg !== undefined ? allocation.grossWeightKg === null ? null : String(allocation.grossWeightKg) : previous?.grossWeightKg ?? null,
+      manualCbm: allocation.manualCbm !== undefined ? allocation.manualCbm === null ? null : String(allocation.manualCbm) : previous?.manualCbm ?? null,
     }
     affectedBoxIds.add(box.id)
+    if (!previous || previous.quantity !== allocation.quantity || (['lengthCm', 'widthCm', 'heightCm', 'manualCbm'] as const).some((field) => dimensionNumber(previous[field]) !== dimensionNumber(component[field])) || (allocation.manualCbm === null && box.manualCbm != null)) {
+      recalculateCbmBoxIds.add(box.id)
+      recalculateBoxIds.add(box.id)
+    }
     if (!previous || previous.quantity !== allocation.quantity || measurementFields.some((field) => dimensionNumber(previous[field]) !== dimensionNumber(component[field]))) recalculateBoxIds.add(box.id)
     if (!previous || (allocation.grossWeightKg !== undefined && (dimensionNumber(previous.grossWeightKg) !== dimensionNumber(component.grossWeightKg) || (allocation.grossWeightKg === null && box.grossWeightKg != null)))) {
       recalculateWeightBoxIds.add(box.id)
@@ -4842,7 +4880,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
       })
     }
   }
-  for (const old of previousBoxItems) if (!input.allocations.some((allocation) => boxesByNo.get(allocation.boxNo)?.id === old.boxId)) { recalculateBoxIds.add(old.boxId); recalculateWeightBoxIds.add(old.boxId) }
+  for (const old of previousBoxItems) if (!input.allocations.some((allocation) => boxesByNo.get(allocation.boxNo)?.id === old.boxId)) { recalculateBoxIds.add(old.boxId); recalculateWeightBoxIds.add(old.boxId); recalculateCbmBoxIds.add(old.boxId) }
   for (const row of nextBoxItems) {
     const original = originalBoxItemsById.get(row.id)
     if (affectedBoxIds.has(row.boxId) && original && measurementFields.some((field) => dimensionNumber(original[field]) !== dimensionNumber(row[field]))) componentUpdates.set(row.id, row)
@@ -4859,27 +4897,31 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     if (totalWeight != null && totalWeight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
     const grossWeightKg = !recalculateWeightBoxIds.has(boxId) ? current.grossWeightKg : totalWeight == null ? null : String(totalWeight)
     const nextDimensions = dimensions && calculateChinaOutboundBoxCbm(dimensions) != null ? dimensions : current
-    const box = { ...current, lengthCm: nextDimensions.lengthCm ?? null, widthCm: nextDimensions.widthCm ?? null, heightCm: nextDimensions.heightCm ?? null, grossWeightKg, updatedAt: measurementUpdatedAt }
+    const effectiveCbms = rows.map((row) => calculateChinaOutboundBoxCbm(row)).filter((value): value is number => value != null)
+    const manualCbm = !recalculateCbmBoxIds.has(boxId) ? current.manualCbm ?? null : rows.some((row) => dimensionNumber(row.manualCbm) != null) && effectiveCbms.length ? String(Math.max(...effectiveCbms)) : null
+    const box = { ...current, lengthCm: nextDimensions.lengthCm ?? null, widthCm: nextDimensions.widthCm ?? null, heightCm: nextDimensions.heightCm ?? null, grossWeightKg, manualCbm, updatedAt: measurementUpdatedAt }
     const dimensionsChanged = ['lengthCm', 'widthCm', 'heightCm'].some((field) => dimensionNumber(current[field as 'lengthCm']) !== dimensionNumber(box[field as 'lengthCm']))
-    if (dimensionsChanged) changedBoxIds.add(box.id)
-    if (dimensionsChanged || dimensionNumber(current.grossWeightKg) !== dimensionNumber(grossWeightKg)) measurementUpdates.set(box.id, box)
+    const cbmChanged = dimensionNumber(current.manualCbm) !== dimensionNumber(manualCbm)
+    if (dimensionsChanged || cbmChanged) changedBoxIds.add(box.id)
+    if (dimensionsChanged || cbmChanged || dimensionNumber(current.grossWeightKg) !== dimensionNumber(grossWeightKg)) measurementUpdates.set(box.id, box)
   }
   for (let offset = 0; offset < componentUpdates.size; offset += batchSize) {
     const batch = [...componentUpdates.values()].slice(offset, offset + batchSize)
     const measurement = (field: typeof measurementFields[number]) => sql`CASE ${chinaOutboundBoxItems.id} ${sql.join(batch.map((row) => sql`WHEN ${row.id} THEN ${row[field]}::numeric`), sql` `)} ELSE ${chinaOutboundBoxItems[field]} END`
-    await input.tx.update(chinaOutboundBoxItems).set({ lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), grossWeightKg: measurement('grossWeightKg'), updatedAt: measurementUpdatedAt })
+    await input.tx.update(chinaOutboundBoxItems).set({ lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), grossWeightKg: measurement('grossWeightKg'), manualCbm: measurement('manualCbm'), updatedAt: measurementUpdatedAt })
       .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipment.id), inArray(chinaOutboundBoxItems.id, batch.map((row) => row.id))))
   }
   const changedMeasurements = [...measurementUpdates.values()]
   const boxIndexesById = new Map(input.boxes.map((box, index) => [box.id, index]))
   for (let offset = 0; offset < changedMeasurements.length; offset += batchSize) {
     const batch = changedMeasurements.slice(offset, offset + batchSize)
-    const measurement = (field: 'lengthCm' | 'widthCm' | 'heightCm' | 'grossWeightKg') => sql`CASE ${chinaOutboundBoxes.id} ${sql.join(batch.map((box) => sql`WHEN ${box.id} THEN ${box[field]}::numeric`), sql` `)} ELSE ${chinaOutboundBoxes[field]} END`
+    const measurement = (field: 'lengthCm' | 'widthCm' | 'heightCm' | 'grossWeightKg' | 'manualCbm') => sql`CASE ${chinaOutboundBoxes.id} ${sql.join(batch.map((box) => sql`WHEN ${box.id} THEN ${box[field]}::numeric`), sql` `)} ELSE ${chinaOutboundBoxes[field]} END`
     const updated = await input.tx.update(chinaOutboundBoxes).set({
       lengthCm: measurement('lengthCm'),
       widthCm: measurement('widthCm'),
       heightCm: measurement('heightCm'),
       grossWeightKg: measurement('grossWeightKg'),
+      manualCbm: measurement('manualCbm'),
       updatedAt: measurementUpdatedAt,
     }).where(and(
       eq(chinaOutboundBoxes.userId, input.userId),

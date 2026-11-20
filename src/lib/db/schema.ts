@@ -1298,6 +1298,7 @@ export const chinaOutboundPallets = pgTable(
     completionStatus: varchar('completion_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    manualCbm: numeric('manual_cbm', { precision: 18, scale: 6 }),
     tareWeightKg: numeric('tare_weight_kg', { precision: 12, scale: 3 }).default('5'),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
     widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
@@ -1346,6 +1347,7 @@ export const chinaOutboundBoxes = pgTable(
     completionStatus: varchar('completion_status', { length: 20 }),
     sortOrder: integer('sort_order').notNull().default(0),
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    manualCbm: numeric('manual_cbm', { precision: 18, scale: 6 }),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
     widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
     heightCm: numeric('height_cm', { precision: 12, scale: 2 }),
@@ -1400,6 +1402,7 @@ export const chinaOutboundBoxItems = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
     // Per-product measurements allow a mixed physical box to be recomputed on edits.
     grossWeightKg: numeric('gross_weight_kg', { precision: 12, scale: 3 }),
+    manualCbm: numeric('manual_cbm', { precision: 18, scale: 6 }),
     lengthCm: numeric('length_cm', { precision: 12, scale: 2 }),
     widthCm: numeric('width_cm', { precision: 12, scale: 2 }),
     heightCm: numeric('height_cm', { precision: 12, scale: 2 }),

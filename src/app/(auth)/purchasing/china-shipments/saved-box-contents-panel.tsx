@@ -13,10 +13,10 @@ import type { SavedBoxSummary } from './china-shipments-board'
 
 const boxNumberCollator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
 const productKey = (item: SavedBoxSummary['items'][number]['item']) => JSON.stringify([item.sku, item.optionName ?? ''])
-const measurementFields = [['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)'], ['grossWeightKg', '총중량(kg)']] as const
+const measurementFields = [['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)'], ['grossWeightKg', '총중량(kg)'], ['manualCbm', 'CBM(직접 입력)']] as const
 type Measurements = Record<typeof measurementFields[number][0], string>
 type BulkSnapshot = { selected: string[]; measurements: Measurements }
-const blankMeasurements: Measurements = { lengthCm: '', widthCm: '', heightCm: '', grossWeightKg: '' }
+const blankMeasurements: Measurements = { lengthCm: '', widthCm: '', heightCm: '', grossWeightKg: '', manualCbm: '' }
 
 export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPending, onFilterChange, onEditItem }: {
   shipmentId: string; summaries: SavedBoxSummary[]; filter: 'all' | 'saved'; editable: boolean; isPending: boolean
@@ -27,7 +27,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
   const [pending, start] = useTransition()
   const draftId = `bulk-box-measurements:${shipmentId}`
   const [selected, setSelected] = useState<Set<string>>(() => new Set((guard.getDraft(draftId)?.snapshot as BulkSnapshot | undefined)?.selected ?? []))
-  const [measurements, setMeasurements] = useState<Measurements>(() => (guard.getDraft(draftId)?.snapshot as BulkSnapshot | undefined)?.measurements ?? { ...blankMeasurements })
+  const [measurements, setMeasurements] = useState<Measurements>(() => ({ ...blankMeasurements, ...(guard.getDraft(draftId)?.snapshot as BulkSnapshot | undefined)?.measurements }))
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const savedBoxes = summaries.filter((box) => box.quantity > 0)
   const visibleBoxes = [...(filter === 'all' ? summaries : savedBoxes)].sort((left, right) => boxNumberCollator.compare(left.box.boxNo, right.box.boxNo))
@@ -59,11 +59,17 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
       toast.error('일괄 적용할 총중량은 0보다 큰 숫자로 입력해주세요.')
       return false
     }
-    if (!hasDimensions && !hasWeight) { toast.error('일괄 적용할 규격이나 무게를 입력해주세요.'); return false }
+    const hasCbm = !!measurements.manualCbm.trim()
+    if (hasCbm && (!Number.isFinite(Number(measurements.manualCbm)) || Number(measurements.manualCbm) < 0.000001 || Number(measurements.manualCbm) > 999_999_999)) {
+      toast.error('CBM은 0.000001 이상, 999,999,999 이하인 숫자로 입력해주세요.')
+      return false
+    }
+    if (!hasDimensions && !hasWeight && !hasCbm) { toast.error('일괄 적용할 규격이나 무게 또는 CBM을 입력해주세요.'); return false }
     const result = await saveChinaOutboundBoxesMeasurementsAction({
       shipmentId, boxIds: selectedIds,
       ...(hasDimensions ? { lengthCm: Number(measurements.lengthCm), widthCm: Number(measurements.widthCm), heightCm: Number(measurements.heightCm) } : {}),
       ...(hasWeight ? { grossWeightKg: Number(measurements.grossWeightKg) } : {}),
+      ...(hasCbm ? { manualCbm: Number(measurements.manualCbm) } : {}),
     })
     if (!result.ok) { toast.error(result.error); return false }
     setSelected(new Set()); setMeasurements({ ...blankMeasurements }); guard.setDraft(draftId, null)
@@ -84,7 +90,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
       </div>
     </div>
     {editable && <div className="space-y-2 border-b bg-muted/10 px-4 py-3" role="group" aria-label="선택한 박스 일괄 수정">
-      <div className="flex flex-wrap items-end gap-2"><p className="self-center text-xs font-semibold">선택 {selectedIds.length.toLocaleString('ko-KR')}개</p>{measurementFields.map(([key, label]) => <label key={key} className="text-xs">{label}<input type="number" aria-label={`일괄 ${label}`} value={measurements[key]} onChange={(event) => setMeasurements((current) => ({ ...current, [key]: event.target.value }))} disabled={disabled} min={key === 'grossWeightKg' ? '0.001' : '0.01'} max={key === 'grossWeightKg' ? '999999999' : '9999999.99'} step={key === 'grossWeightKg' ? '0.001' : '0.01'} className="mt-1 block h-8 w-24 rounded-md border bg-background px-2" /></label>)}<button type="button" disabled={disabled || !selectedIds.length} onClick={() => start(async () => { await guard.runTask(saveBulk) })} className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50">선택 박스 일괄 저장</button></div>
+      <div className="flex flex-wrap items-end gap-2"><p className="self-center text-xs font-semibold">선택 {selectedIds.length.toLocaleString('ko-KR')}개</p>{measurementFields.map(([key, label]) => <label key={key} className="text-xs">{label}<input type="number" aria-label={`일괄 ${label}`} value={measurements[key]} onChange={(event) => setMeasurements((current) => ({ ...current, [key]: event.target.value }))} disabled={disabled} min={key === 'manualCbm' ? '0.000001' : key === 'grossWeightKg' ? '0.001' : '0.01'} max={key === 'grossWeightKg' || key === 'manualCbm' ? '999999999' : '9999999.99'} step={key === 'manualCbm' ? '0.000001' : key === 'grossWeightKg' ? '0.001' : '0.01'} className="mt-1 block h-8 w-24 rounded-md border bg-background px-2" /></label>)}<button type="button" disabled={disabled || !selectedIds.length} onClick={() => start(async () => { await guard.runTask(saveBulk) })} className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50">선택 박스 일괄 저장</button></div>
       <p className="text-xs text-muted-foreground">빈칸은 기존 값을 유지합니다. 규격은 가로·세로·높이를 모두 입력해주세요.</p>
     </div>}
     {!visibleBoxes.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[1400px] border-separate border-spacing-y-2 px-3 pb-3 text-sm">
@@ -101,7 +107,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
           <td className="px-3 py-3 text-xs leading-5"><p hidden={open} className="font-medium text-slate-600">{summary.items.length ? `상품 ${new Set(summary.items.map(({ item }) => productKey(item))).size}종` : '내용 없음'}</p><div hidden={!open} className="rounded-md border border-blue-100 border-l-4 border-l-blue-400 bg-background px-3 py-1 shadow-sm">{summary.items.length ? <ul className="divide-y divide-slate-100">{summary.items.map(({ item, quantity }) => <li key={item.id} className="flex items-start justify-between gap-3 py-2"><span data-no-translate className="min-w-0 break-words text-[13px] leading-6 text-slate-900">{item.sku} · {item.productName}{item.optionName ? ` · ${item.optionName}` : ''}{item.chineseProductName ? ` / ${item.chineseProductName}` : ''}</span>{' '}<span className="mt-0.5 shrink-0 rounded bg-blue-50 px-2 py-0.5 font-semibold tabular-nums text-blue-900">{quantity.toLocaleString('ko-KR')}개</span></li>)}</ul> : <span className="text-muted-foreground">{summary.quantity ? '품목 정보를 찾지 못했습니다.' : '내용 없음'}</span>}</div></td>
           <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-slate-900">{summary.quantity.toLocaleString('ko-KR')}개</td>
           <td className="min-w-[350px] px-3 py-3"><div hidden={open} className="space-y-1 text-xs"><p className="font-medium text-slate-900">{formatChinaOutboundBoxDimensions(summary.box) ?? '미입력'}</p><p className="text-slate-600">총중량(kg): {summary.box.grossWeightKg ?? '미입력'} · CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(summary.box)) ?? '미입력'}</p></div><div hidden={!open} className="space-y-3 rounded-lg border border-blue-100 bg-background p-3">
-            <BoxDimensionsEditor key={`${summary.box.id}:${summary.box.lengthCm}:${summary.box.widthCm}:${summary.box.heightCm}`} shipmentId={shipmentId} box={summary.box} editable={boxEditable} isPending={isPending} />
+            <BoxDimensionsEditor key={`${summary.box.id}:${summary.box.lengthCm}:${summary.box.widthCm}:${summary.box.heightCm}:${summary.box.manualCbm}`} shipmentId={shipmentId} box={summary.box} editable={boxEditable} isPending={isPending} />
             <PackageWeightEditor key={`${summary.box.id}:${summary.box.grossWeightKg}`} shipmentId={shipmentId} packageId={summary.box.id} packageNo={summary.box.boxNo} kind="box" initialWeight={summary.box.grossWeightKg} editable={boxEditable} isPending={isPending} compact />
           </div></td>
           <td className="whitespace-nowrap px-3 py-3 text-xs">{summary.palletNo ? <>파렛트 <span data-no-translate>{summary.palletNo}</span></> : <span className="text-muted-foreground">미배정</span>}</td>

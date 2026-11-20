@@ -121,6 +121,38 @@ describe('saved box list', () => {
     expect(saveDimensions).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 45, widthCm: 20, heightCm: 30 })
   })
 
+  it('saves CBM without inventing dimensions or weight and keeps a failed manual entry for retry', async () => {
+    const unmeasured = box('1')
+    Object.assign(unmeasured.box, { lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null })
+    saveDimensions.mockResolvedValueOnce({ ok: false, error: '저장 실패' })
+    renderPanel([unmeasured])
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 펼치기' }))
+    const cbmInput = screen.getByRole('spinbutton', { name: '박스 1 CBM(직접 입력)' })
+    fireEvent.change(cbmInput, { target: { value: '0.123456' } })
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('저장 실패'))
+    expect(cbmInput).toHaveValue(0.123456)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 가로(cm)' })).toHaveValue(null)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 총중량(kg)' })).toHaveValue(null)
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
+    await waitFor(() => expect(saveDimensions).toHaveBeenCalledTimes(2))
+    expect(saveDimensions).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxId: '1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.123456 })
+    expect(saveWeight).not.toHaveBeenCalled()
+  })
+
+  it('clears a saved manual CBM override to return to the measured dimensions', async () => {
+    const measured = box('1')
+    measured.box.manualCbm = 0.04
+    renderPanel([measured])
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 펼치기' }))
+    const cbmInput = screen.getByRole('spinbutton', { name: '박스 1 CBM(직접 입력)' })
+    expect(cbmInput).toHaveValue(0.04)
+    expect(cbmInput).toHaveAttribute('placeholder', '0.0060')
+    fireEvent.change(cbmInput, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
+    await waitFor(() => expect(saveDimensions).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 10, widthCm: 20, heightCm: 30, manualCbm: null }))
+  })
+
   it('applies dimensions to selected editable boxes in one request and omits a blank weight', async () => {
     const sealed = box('3'); sealed.box.status = 'sealed'
     const locked = box('4'); locked.box.editable = false
@@ -151,6 +183,16 @@ describe('saved box list', () => {
     fireEvent.click(screen.getByRole('button', { name: '선택 박스 일괄 저장' }))
     await waitFor(() => expect(saveBulk).toHaveBeenCalledTimes(2))
     expect(saveBulk).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxIds: ['2'], grossWeightKg: 7.5 })
+  })
+
+  it('applies manual CBM alone to selected boxes and leaves omitted measurements unchanged', async () => {
+    renderPanel([box('1'), box('2')])
+    fireEvent.click(screen.getByRole('checkbox', { name: '박스 2 선택' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: '일괄 CBM(직접 입력)' }), { target: { value: '0.02' } })
+    fireEvent.click(screen.getByRole('button', { name: '선택 박스 일괄 저장' }))
+    await waitFor(() => expect(saveBulk).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'shipment', boxIds: ['2'], manualCbm: 0.02 }))
+    expect(saveDimensions).not.toHaveBeenCalled()
+    expect(saveWeight).not.toHaveBeenCalled()
   })
 
   it('rejects partial bulk dimensions and protects unsaved individual measurements from bulk overwrite', async () => {

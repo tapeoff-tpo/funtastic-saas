@@ -16,8 +16,8 @@ it('starts Chinese names without waiting for photo lookup and preserves measurem
       { id: 'item', sku: 'SKU1', chineseProductName: '已确认名称', packedQuantity: 1, reservedQuantity: 1 },
       { id: 'missing-name', sku: 'SKU2', chineseProductName: '', packedQuantity: 0, reservedQuantity: 1 },
     ],
-    pallets: [{ id: 'pallet', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150' }],
-    boxes: [{ id: 'box', grossWeightKg: '5.125' }], boxItems: [],
+    pallets: [{ id: 'pallet', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150', manualCbm: '1.25' }],
+    boxes: [{ id: 'box', grossWeightKg: '5.125', manualCbm: '0.125' }], boxItems: [{ id: 'allocation', boxId: 'box', shipmentItemId: 'item', quantity: 1, manualCbm: '0.125' }],
   })
   const pending = loadChinaShipmentDetailView('owner', 'shipment')
   await vi.waitFor(() => expect(mocks.names).toHaveBeenCalledWith('owner', ['SKU2']))
@@ -26,8 +26,10 @@ it('starts Chinese names without waiting for photo lookup and preserves measurem
   const result = await pending
   expect(result?.items[0].chineseProductName).toBe('已确认名称')
   expect(result?.items[1].chineseProductName).toBe('主数据名称')
-  expect(result?.pallets[0]).toMatchObject({ grossWeightKg: 20.125, lengthCm: 120, widthCm: 100, heightCm: 150 })
+  expect(result?.pallets[0]).toMatchObject({ grossWeightKg: 20.125, lengthCm: 120, widthCm: 100, heightCm: 150, manualCbm: 1.25 })
   expect(result?.boxes[0].grossWeightKg).toBe(5.125)
+  expect(result?.boxes[0].manualCbm).toBe(0.125)
+  expect(result?.boxItems[0].manualCbm).toBe(0.125)
   expect(mocks.stock).not.toHaveBeenCalled()
 })
 it('skips the item-master name lookup when every shipment item already has its confirmed name', async () => {

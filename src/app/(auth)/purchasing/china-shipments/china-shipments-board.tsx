@@ -100,7 +100,7 @@ export type ChinaShipmentDetailView = {
     receiptPacking?: InspectionPackingPiece[]
     productImage?: ProductImageResult
   }>
-  pallets: Array<{ id: string; palletNo: string; note: string | null; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null; tareWeightKg?: number | null; completionStatus?: 'in_progress' | 'completed' | null }>
+  pallets: Array<{ id: string; palletNo: string; note: string | null; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null; grossWeightKg?: number | null; tareWeightKg?: number | null; completionStatus?: 'in_progress' | 'completed' | null }>
   boxes: Array<{
     id: string
     shipmentId: string
@@ -113,12 +113,13 @@ export type ChinaShipmentDetailView = {
     lengthCm: number | null
     widthCm: number | null
     heightCm: number | null
+    manualCbm?: number | null
     grossWeightKg?: number | null
   }>
-  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; grossWeightKg?: number | null }>
+  boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null; grossWeightKg?: number | null }>
 }
 
-type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string; grossWeightKg: string; boxId?: string; autoNumber?: boolean }
+type BoxSplitDraft = { key: string; boxNo: string; quantity: string; lengthCm: string; widthCm: string; heightCm: string; manualCbm: string; grossWeightKg: string; boxId?: string; autoNumber?: boolean }
 type BoxSplitStatus = 'in_progress' | 'completed'
 type BoxSplitDraftSnapshot = {
   drafts: BoxSplitDraft[]
@@ -1065,7 +1066,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
       return value == null ? '' : String(value)
     }
     return { key: allocation.id, boxId: box.id, boxNo: box.boxNo, quantity: String(allocation.quantity),
-      lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), grossWeightKg: measurement('grossWeightKg') }
+      lengthCm: measurement('lengthCm'), widthCm: measurement('widthCm'), heightCm: measurement('heightCm'), manualCbm: allocation.manualCbm == null ? exclusive && box.manualCbm != null ? String(box.manualCbm) : '' : String(allocation.manualCbm), grossWeightKg: measurement('grossWeightKg') }
   }
   const [initialDrafts, setInitialDrafts] = useState<BoxSplitDraft[]>(() => cloneBoxSplitDrafts(retainedSnapshot?.baseline ?? (allocations.length > 0
     ? allocations.map(({ allocation, box }) => allocationDraft(allocation, box))
@@ -1084,8 +1085,11 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     return count ? String(count) : ''
   })
   const firstBox = drafts[0]
-  const canApplyFirstBoxDimensions = firstBox && [firstBox.lengthCm, firstBox.widthCm, firstBox.heightCm]
-    .every((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+  const firstDimensions = firstBox ? [firstBox.lengthCm, firstBox.widthCm, firstBox.heightCm] : []
+  const firstManualCbmValid = !!firstBox?.manualCbm.trim() && Number.isFinite(Number(firstBox.manualCbm)) && Number(firstBox.manualCbm) >= 0.000001 && Number(firstBox.manualCbm) <= 999_999_999
+  const canApplyFirstBoxDimensions = firstBox && (firstDimensions.every((value) => !value.trim()) || firstDimensions.every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
+    && (firstManualCbmValid || firstDimensions.every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
+    && (!firstBox.manualCbm.trim() || firstManualCbmValid)
     && (!firstBox.grossWeightKg.trim() || (Number.isFinite(Number(firstBox.grossWeightKg)) && Number(firstBox.grossWeightKg) >= 0.001 && Number(firstBox.grossWeightKg) <= 999_999_999))
 
   function applyFirstBoxDimensions() {
@@ -1095,6 +1099,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
       lengthCm: firstBox.lengthCm,
       widthCm: firstBox.widthCm,
       heightCm: firstBox.heightCm,
+      manualCbm: firstBox.manualCbm,
       ...(firstBox.grossWeightKg.trim() ? { grossWeightKg: firstBox.grossWeightKg } : {}),
     })))
   }
@@ -1105,7 +1110,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
       const existingDrafts = drafts.filter((draft) => draft.boxNo.trim())
       const plan = planAutomaticBoxSplit(item.reservedQuantity, quantityPerBox.trim() ? { quantityPerBox: Number(quantityPerBox), ...(boxCount.trim() ? { boxCount: Number(boxCount) } : {}) } : { boxCount: Number(boxCount) }, occupiedNumbers(), existingDrafts.map((draft) => draft.boxNo))
       setDrafts(plan.map((entry, index) => ({
-        ...(existingDrafts[index] ?? { ...createBoxSplitDraft(), lengthCm: firstBox?.lengthCm ?? '', widthCm: firstBox?.widthCm ?? '', heightCm: firstBox?.heightCm ?? '', autoNumber: true }),
+        ...(existingDrafts[index] ?? { ...createBoxSplitDraft(), lengthCm: firstBox?.lengthCm ?? '', widthCm: firstBox?.widthCm ?? '', heightCm: firstBox?.heightCm ?? '', manualCbm: firstBox?.manualCbm ?? '', autoNumber: true }),
         boxNo: entry.boxNo,
         quantity: String(entry.quantity),
       })))
@@ -1125,8 +1130,12 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
   }
 
   async function saveDraft(options: { quiet?: boolean } = {}) {
+    if (drafts.some((draft) => draft.manualCbm.trim() && (!Number.isFinite(Number(draft.manualCbm)) || Number(draft.manualCbm) < 0.000001 || Number(draft.manualCbm) > 999_999_999))) {
+      toast.error('CBM은 0.000001 이상, 999,999,999 이하로 입력해주세요.')
+      return false
+    }
     const nextAllocations = drafts
-      .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm, draft.grossWeightKg].some((value) => value.trim()))
+      .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm, draft.manualCbm, draft.grossWeightKg].some((value) => value.trim()))
       .map((draft) => {
         const previous = initialDrafts.find((candidate) => candidate.key === draft.key)
         const moved = draft.boxNo.trim() !== previous?.boxNo.trim()
@@ -1143,6 +1152,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
           lengthCm: dimensionsChanged ? optionalNumber(draft.lengthCm) : null,
           widthCm: dimensionsChanged ? optionalNumber(draft.widthCm) : null,
           heightCm: dimensionsChanged ? optionalNumber(draft.heightCm) : null,
+          ...(draft.manualCbm !== (previous?.manualCbm ?? '') || (moved && draft.manualCbm.trim()) ? { manualCbm: optionalNumber(draft.manualCbm) } : {}),
           ...(moved || draft.grossWeightKg !== (previous?.grossWeightKg ?? '') ? { grossWeightKg: optionalNumber(draft.grossWeightKg) } : {}),
         }
       })
@@ -1203,7 +1213,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p data-no-translate className="font-semibold">{item.sku}</p>
-            <TitleHelp title="박스분할">규격은 가로·세로·높이를 모두 입력하면 CBM이 자동 계산됩니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</TitleHelp><ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
+            <TitleHelp title="박스분할">CBM은 직접 입력하거나 규격으로 자동 계산할 수 있습니다. 한 박스에 여러 품목을 담으려면 같은 박스번호를 입력하세요.</TitleHelp><ProgressBadge completed={currentBoxSplitStatus === 'completed'} detail={`${item.packedQuantity.toLocaleString('ko-KR')} / ${item.reservedQuantity.toLocaleString('ko-KR')}개`} />
           </div>
           <p className="mt-1 truncate text-sm"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /><span data-no-translate>{item.optionName ? ` · ${item.optionName}` : ''}</span></p>{item.chineseProductName && <p data-no-translate className="mt-1 text-sm text-muted-foreground">{item.chineseProductName}</p>}
         </div>
@@ -1229,6 +1239,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         </button>}
       </div>
       <p className="border-b px-3 py-2 text-xs text-muted-foreground">혼합박스는 품목별 중량을 합산하고 가장 큰 부피의 규격을 적용합니다. 품목별 중량을 모두 입력해주세요. 박스 전체 실측값은 2단계에서 수정할 수 있습니다.</p>
+      <p className="border-b px-3 py-2 text-xs text-muted-foreground">CBM을 직접 입력하면 그 값을 우선 사용합니다. 비워두면 규격으로 자동 계산하며, 실제 치수는 임의로 채우지 않습니다.</p>
       <div className="overflow-x-auto">
         <table className="min-w-[1000px] w-full text-sm">
           <thead className="bg-muted/10 text-xs text-muted-foreground">
@@ -1324,7 +1335,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
                       placeholder="미입력"
                     />
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatChinaOutboundCbm(cbm) ?? '-'}</td>
+                  <td className="px-3 py-2"><input aria-label={`박스 ${draft.boxNo} CBM(직접 입력)`} type="number" min="0.000001" max="999999999" step="0.000001" value={draft.manualCbm} onChange={(event) => patchDraft(draft.key, { manualCbm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder={formatChinaOutboundCbm(cbm) ?? '직접 입력'} /></td>
                   <td className="px-3 py-2 text-center">
                     <button
                       type="button"
@@ -1699,7 +1710,7 @@ function today() {
 }
 
 function createBoxSplitDraft(): BoxSplitDraft {
-  return { key: `box-${Date.now()}-${Math.random()}`, boxNo: '', quantity: '', lengthCm: '', widthCm: '', heightCm: '', grossWeightKg: '' }
+  return { key: `box-${Date.now()}-${Math.random()}`, boxNo: '', quantity: '', lengthCm: '', widthCm: '', heightCm: '', manualCbm: '', grossWeightKg: '' }
 }
 
 function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
@@ -1715,11 +1726,11 @@ function asBoxSplitDraftSnapshot(value: unknown): BoxSplitDraftSnapshot | null {
 }
 
 function cloneBoxSplitDrafts(drafts: BoxSplitDraft[]) {
-  return drafts.map((draft) => ({ ...draft, grossWeightKg: draft.grossWeightKg ?? '' }))
+  return drafts.map((draft) => ({ ...draft, manualCbm: draft.manualCbm ?? '', grossWeightKg: draft.grossWeightKg ?? '' }))
 }
 
 function boxDraftValues(drafts: BoxSplitDraft[]) {
-  return JSON.stringify(drafts.map(({ boxNo, quantity, lengthCm, widthCm, heightCm, grossWeightKg }) => ({ boxNo, quantity, lengthCm, widthCm, heightCm, grossWeightKg })))
+  return JSON.stringify(drafts.map(({ boxNo, quantity, lengthCm, widthCm, heightCm, manualCbm, grossWeightKg }) => ({ boxNo, quantity, lengthCm, widthCm, heightCm, manualCbm, grossWeightKg })))
 }
 
 function optionalNumber(value: string) {

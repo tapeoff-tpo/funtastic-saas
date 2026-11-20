@@ -136,6 +136,8 @@ const splitDimension = z.coerce.number()
   .nullable()
   .optional()
 
+const manualCbm = z.number().finite('CBM은 숫자로 입력해주세요.').min(0.000001, 'CBM은 0.000001 이상으로 입력해주세요.').max(999_999_999, 'CBM이 너무 큽니다.').nullable().optional()
+
 const saveItemBoxSplitsSchema = z.object({
   shipmentId,
   shipmentItemId: z.string().uuid('출고 상품을 확인해주세요.'),
@@ -150,6 +152,7 @@ const saveItemBoxSplitsSchema = z.object({
     widthCm: splitDimension,
     heightCm: splitDimension,
     grossWeightKg: z.number().finite('총중량은 숫자로 입력해주세요.').min(0.001, '총중량은 0.001kg 이상으로 입력해주세요.').max(999_999_999, '총중량이 너무 큽니다.').nullable().optional(),
+    manualCbm,
   }).superRefine((value, context) => {
     const dimensions = [value.lengthCm, value.widthCm, value.heightCm]
     const filledCount = dimensions.filter((dimension) => dimension != null).length
@@ -196,6 +199,7 @@ const saveBoxDimensionsSchema = z.object({
   lengthCm: boxDimension,
   widthCm: boxDimension,
   heightCm: boxDimension,
+  manualCbm,
 }).superRefine((value, context) => {
   const dimensions = [value.lengthCm, value.widthCm, value.heightCm]
   const filledCount = dimensions.filter((dimension) => dimension != null).length
@@ -211,10 +215,11 @@ const saveBoxesMeasurementsSchema = z.object({
   widthCm: z.number().finite().positive().max(9_999_999.99).optional(),
   heightCm: z.number().finite().positive().max(9_999_999.99).optional(),
   grossWeightKg: z.number().finite().min(0.001).max(999_999_999).optional(),
+  manualCbm,
 }).superRefine((value, context) => {
   const count = [value.lengthCm, value.widthCm, value.heightCm].filter((dimension) => dimension !== undefined).length
   if (count > 0 && count < 3) context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력해주세요.' })
-  if (count === 0 && value.grossWeightKg === undefined) context.addIssue({ code: 'custom', message: '일괄 적용할 박스 규격 또는 총중량을 입력해주세요.' })
+  if (count === 0 && value.grossWeightKg === undefined && value.manualCbm === undefined) context.addIssue({ code: 'custom', message: '일괄 적용할 박스 규격, 총중량 또는 CBM을 입력해주세요.' })
 })
 
 const removeBoxItemSchema = z.object({
@@ -456,8 +461,11 @@ export async function saveChinaOutboundItemChineseNameAction(input: unknown): Pr
 export async function saveChinaOutboundPalletDimensionsAction(input: unknown): Promise<ActionResult> {
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
-    const dimension = z.coerce.number().finite().positive().max(9_999_999.99)
-    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: dimension, widthCm: dimension, heightCm: dimension }).parse(input)
+    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: splitDimension, widthCm: splitDimension, heightCm: splitDimension, manualCbm }).superRefine((value, context) => {
+      const count = [value.lengthCm, value.widthCm, value.heightCm].filter((dimension) => dimension != null).length
+      if (count > 0 && count < 3) context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력하거나 모두 비워주세요.' })
+      if ([value.lengthCm, value.widthCm, value.heightCm, value.manualCbm].every((value) => value === undefined)) context.addIssue({ code: 'custom', message: '파렛트 규격 또는 CBM을 입력해주세요.' })
+    }).parse(input)
     const actor = await getActor()
     await saveChinaOutboundPalletDimensions({ ...value, userId: actor.userId })
     revalidateSaasChinaPaths()

@@ -8,15 +8,17 @@ const mocks = vi.hoisted(() => ({
   saveBoxSplits: vi.fn(),
   savePalletTare: vi.fn(),
   saveBoxesMeasurements: vi.fn(),
+  saveBoxDimensions: vi.fn(),
+  savePalletDimensions: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/menu-access', () => ({ assertMenuAccess: mocks.assertMenuAccess }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.getWorkspaceUserId }))
 vi.mock('@/lib/auth/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
-vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare, saveChinaOutboundBoxesMeasurements: mocks.saveBoxesMeasurements }))
+vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare, saveChinaOutboundBoxesMeasurements: mocks.saveBoxesMeasurements, saveChinaOutboundBoxDimensions: mocks.saveBoxDimensions, saveChinaOutboundPalletDimensions: mocks.savePalletDimensions }))
 
-import { saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction, saveChinaOutboundBoxesMeasurementsAction } from './saas-china-actions'
+import { saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction, saveChinaOutboundBoxesMeasurementsAction, saveChinaOutboundBoxDimensionsAction, saveChinaOutboundPalletDimensionsAction } from './saas-china-actions'
 
 const shipmentId = '11111111-1111-4111-8111-111111111111'
 const shipmentItemId = '22222222-2222-4222-8222-222222222222'
@@ -97,6 +99,30 @@ describe('China outbound item box split action weights', () => {
 
   it('rejects an empty bulk selection', async () => {
     expect((await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [], grossWeightKg: 5 })).ok).toBe(false)
+    expect(mocks.saveBoxesMeasurements).not.toHaveBeenCalled()
+  })
+
+  it.each([0.000001, 0.123456, null])('forwards independent manual CBM %s without requiring dimensions or weight', async (manualCbm) => {
+    const allocation = { boxNo: '1', quantity: 10, manualCbm }
+    expect(await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId, allocations: [allocation] })).toEqual({ ok: true })
+    expect(mocks.saveBoxSplits).toHaveBeenCalledWith({ shipmentId, shipmentItemId, allocations: [allocation], userId: 'canonical-owner' })
+    const dimensions = { lengthCm: null, widthCm: null, heightCm: null, manualCbm }
+    expect(await saveChinaOutboundBoxDimensionsAction({ shipmentId, boxId: shipmentItemId, ...dimensions })).toEqual({ ok: true })
+    expect(mocks.saveBoxDimensions).toHaveBeenCalledWith({ shipmentId, boxId: shipmentItemId, ...dimensions, userId: 'canonical-owner' })
+    expect(await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: shipmentItemId, ...dimensions })).toEqual({ ok: true })
+    expect(mocks.savePalletDimensions).toHaveBeenCalledWith({ shipmentId, palletId: shipmentItemId, ...dimensions, userId: 'canonical-owner' })
+    expect(await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [shipmentItemId], manualCbm })).toEqual({ ok: true })
+    expect(mocks.saveBoxesMeasurements).toHaveBeenCalledWith({ shipmentId, boxIds: [shipmentItemId], manualCbm, userId: 'canonical-owner' })
+  })
+
+  it.each([0, -1, 0.0000001, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000_000, '0.1'])('rejects invalid manual CBM %s at every action boundary', async (manualCbm) => {
+    expect((await saveChinaOutboundItemBoxSplitsAction({ shipmentId, shipmentItemId, allocations: [{ boxNo: '1', quantity: 10, manualCbm }] })).ok).toBe(false)
+    expect((await saveChinaOutboundBoxDimensionsAction({ shipmentId, boxId: shipmentItemId, lengthCm: null, widthCm: null, heightCm: null, manualCbm })).ok).toBe(false)
+    expect((await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: shipmentItemId, lengthCm: null, widthCm: null, heightCm: null, manualCbm })).ok).toBe(false)
+    expect((await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [shipmentItemId], manualCbm })).ok).toBe(false)
+    expect(mocks.saveBoxSplits).not.toHaveBeenCalled()
+    expect(mocks.saveBoxDimensions).not.toHaveBeenCalled()
+    expect(mocks.savePalletDimensions).not.toHaveBeenCalled()
     expect(mocks.saveBoxesMeasurements).not.toHaveBeenCalled()
   })
 })

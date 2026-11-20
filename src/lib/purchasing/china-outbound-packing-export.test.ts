@@ -75,6 +75,28 @@ describe('exportChinaOutboundPackingWorkbook', () => {
     expect(cell(sheet, b, '로케이션').value).toBeNull()
   })
 
+  it('exports manual box and pallet CBM while leaving unmeasured centimeter dimensions blank', async () => {
+    const detail = packingDetail()
+    detail.boxes[0] = { ...detail.boxes[0], lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.125 }
+    detail.boxes[1] = { ...detail.boxes[1], manualCbm: 0.3 }
+    detail.boxes[2] = { ...detail.boxes[2], lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.007 }
+    detail.pallets[0] = { ...detail.pallets[0], lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.75 }
+    const original = JSON.stringify(detail)
+    const workbook = await exportWorkbook(detail)
+    const products = workbook.getWorksheet('상품별 분할')!
+    expect(products.getCell('K2').value).toBeNull()
+    expect(products.getCell('L2').value).toBe(0.125)
+    expect(products.getCell('K3').value).toBe('10 × 20 × 30 cm')
+    expect(products.getCell('L3').value).toBe(0.3)
+    const boxSheet = workbook.getWorksheet('박스별 적재')!
+    expect(dataRows(boxSheet).map((row) => cell(boxSheet, row, 'CBM').value)).toEqual([0.125, 0.3, null, 0.007])
+    const palletSheet = workbook.getWorksheet('파렛트별 적재')!
+    expect(dataRows(palletSheet).map((row) => cell(palletSheet, row, 'CBM').value)).toEqual([0.75, null])
+    const looseSheet = workbook.getWorksheet('파렛트 미지정')!
+    expect(cell(looseSheet, dataRows(looseSheet)[0], 'CBM').value).toBe(0.007)
+    expect(JSON.stringify(detail)).toBe(original)
+  })
+
   it('combines same-product reservations across warehouses and counts their shared box only once', async () => {
     const detail = packingDetail()
     detail.items = [

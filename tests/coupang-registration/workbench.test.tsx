@@ -5,6 +5,10 @@ import { blankDraft, createRegistrationRow } from '@/lib/coupang-registration/mo
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const source = { code: '1471', name: '마미백 플러스', price: 15000, status: 'SELLING', thumbnails: ['https://cdn.tapeoff.kr/front.jpg'], detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ name: '베이지', addPrice: 0 }], notice: [], costCandidates: [{ sku: '112361-0001', name: '마미백 플러스', optionName: '베이지', costPrice: 10000 }] }
+const second = {
+  code: '1472', name: '루멘 철제 사이드 테이블', price: 20000, status: 'SELLING', thumbnails: [], detailImages: [],
+  options: [{ name: '블랙', addPrice: 1000 }], notice: [], costCandidates: [{ sku: '112362-0001', name: '루멘 철제 사이드 테이블', optionName: '블랙', costPrice: 12000 }],
+}
 
 describe('registration pricing workbench', () => {
   beforeEach(() => {
@@ -12,7 +16,7 @@ describe('registration pricing workbench', () => {
   })
   it('builds one registration row from searched components and saves their quantities', async () => {
     render(<CoupangRegistrationWorkbench />)
-    fireEvent.click(screen.getByRole('button', { name: '세트 만들기' }))
+    fireEvent.click(screen.getByRole('button', { name: '새 빈 세트 만들기' }))
     const dialog = screen.getByRole('dialog', { name: '세트 구성품 검색' })
     fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '마미백' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
@@ -112,10 +116,6 @@ describe('registration pricing workbench', () => {
   })
 
   it('adds multiple selected products and options together without duplicating registered options', async () => {
-    const second = {
-      code: '1472', name: '루멘 철제 사이드 테이블', price: 20000, status: 'SELLING', thumbnails: [], detailImages: [],
-      options: [{ name: '블랙', addPrice: 1000 }], notice: [], costCandidates: [{ sku: '112362-0001', name: '루멘 철제 사이드 테이블', optionName: '블랙', costPrice: 12000 }],
-    }
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({
       ok: true,
       json: async () => {
@@ -145,5 +145,54 @@ describe('registration pricing workbench', () => {
     fireEvent.click(within(reopened).getByRole('button', { name: '검색' }))
     expect(await within(reopened).findByLabelText('마미백 플러스 베이지 선택')).toBeDisabled()
     expect(within(reopened).getByLabelText('루멘 철제 사이드 테이블 블랙 선택')).toBeDisabled()
+  })
+
+  it('replaces selected added products with one set and snapshots their component prices', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({
+      ok: true,
+      json: async () => {
+        if (String(url).endsWith('/drafts')) return init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] }
+        if (init?.method === 'POST' && String(url).endsWith('/catalog')) return { products: [source, second] }
+        return { products: [{ ...source, costCandidates: [] }, { ...second, costCandidates: [] }] }
+      },
+    })))
+
+    render(<CoupangRegistrationWorkbench />)
+    fireEvent.click(screen.getByRole('button', { name: '상품 추가' }))
+    const dialog = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
+    fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '테이블' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
+    fireEvent.click(await within(dialog).findByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(within(dialog).getByLabelText('루멘 철제 사이드 테이블 블랙 선택'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 2개 추가' }))
+    await screen.findByLabelText('마미백 플러스 베이지 원가')
+    fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
+
+    fireEvent.click(screen.getByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 선택'))
+    fireEvent.click(screen.getByRole('button', { name: '선택 2개를 세트로 변환' }))
+
+    expect(await screen.findByRole('spinbutton', { name: '마미백 플러스 베이지 구성 수량' })).toHaveValue(1)
+    expect(screen.getByRole('spinbutton', { name: '루멘 철제 사이드 테이블 블랙 구성 수량' })).toHaveValue(1)
+    expect(screen.queryByLabelText('마미백 플러스 베이지 원가')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('루멘 철제 사이드 테이블 블랙 원가')).not.toBeInTheDocument()
+    expect(screen.getByText('선택 0개')).toBeInTheDocument()
+    expect(screen.getByLabelText('등록 상품명')).toHaveValue('')
+
+    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(call).toBeDefined()
+      const { draft } = JSON.parse(String(call![1]!.body))
+      expect(draft.rows).toHaveLength(1)
+      expect(draft.rows[0]).toMatchObject({
+        name: '',
+        sourceCode: '',
+        bundleComponents: [
+          { sourceCode: '1471', optionName: '베이지', quantity: 1, unitCost: 10000, unitWholesale: 15000 },
+          { sourceCode: '1472', optionName: '블랙', quantity: 1, unitCost: 12000, unitWholesale: 21000 },
+        ],
+      })
+    })
   })
 })

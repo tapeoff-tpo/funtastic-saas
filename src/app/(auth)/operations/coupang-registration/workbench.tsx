@@ -89,6 +89,15 @@ export function CoupangRegistrationWorkbench() {
   const needsInfo = draft.rows.filter((row) => issueMap.get(row.id)!.length)
   const visible = draft.rows.filter((row) => (!onlyIssues || issueMap.get(row.id)!.length) && [row.name, row.internalSku, row.sourceCode].some((value) => value.toLowerCase().includes(rowSearch.toLowerCase())))
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
+  const selectedRows = draft.rows.filter((row) => selected.has(row.id))
+  const selectedSingleRows = selectedRows.filter((row) => !row.bundleComponents)
+  const bundleSelectionIssue = selectedRows.length < 2
+    ? '세트는 단품 2개 이상을 선택해주세요.'
+    : selectedRows.length !== selectedSingleRows.length
+      ? '이미 만든 세트 행은 세트 구성으로 다시 묶을 수 없습니다.'
+      : selectedSingleRows.some((row) => !row.sourceCode || !(row.sourceName || row.name))
+        ? 'B2B 상품 코드가 연결된 단품만 세트로 구성할 수 있습니다.'
+        : ''
   const selectedCatalogOptionKeys = new Set(catalogSelections.map((item) => catalogOptionKey(item.product.code, item.optionName)))
 
   function update(change: (value: RegistrationDraft) => RegistrationDraft) { setDraft(change); setDirty(true) }
@@ -277,6 +286,59 @@ export function CoupangRegistrationWorkbench() {
     setCatalogTarget({ bundleId: row.id })
   }
 
+  function createBundleFromSelectedRows() {
+    if (selectedRows.length < 2) { toast.error('세트는 단품 2개 이상을 선택해주세요.'); return }
+    if (selectedRows.length !== selectedSingleRows.length) { toast.error('이미 만든 세트 행은 세트 구성으로 다시 묶을 수 없습니다.'); return }
+    if (selectedSingleRows.some((row) => !row.sourceCode || !(row.sourceName || row.name))) { toast.error('B2B 상품 코드가 연결된 단품만 세트로 구성할 수 있습니다.'); return }
+
+    const components = new Map<string, BundleComponent>()
+    for (const row of selectedSingleRows) {
+      const component: BundleComponent = {
+        sourceCode: row.sourceCode,
+        name: row.sourceName ? [row.sourceName, row.optionName].filter(Boolean).join(' ') : row.name,
+        optionName: row.optionName,
+        internalSku: row.internalSku,
+        quantity: 1,
+        unitCost: row.costPrice,
+        unitWholesale: row.wholesalePrice,
+      }
+      const key = bundleKey(component)
+      const existing = components.get(key)
+      if (existing) {
+        if (existing.name !== component.name || existing.internalSku !== component.internalSku || existing.unitCost !== component.unitCost || existing.unitWholesale !== component.unitWholesale) {
+          toast.error('같은 상품 옵션의 원가·도매가 또는 SKU가 다릅니다. 원본 행을 맞춘 뒤 다시 구성해주세요.')
+          return
+        }
+        if (existing.quantity >= BUNDLE_QUANTITY_LIMIT) { toast.error('구성품 수량 한도에 도달했습니다.'); return }
+        components.set(key, { ...existing, quantity: existing.quantity + 1 })
+      } else {
+        if (components.size >= BUNDLE_COMPONENT_LIMIT) { toast.error('한 세트에는 구성품을 50종까지 추가할 수 있습니다.'); return }
+        components.set(key, component)
+      }
+    }
+
+    const bundle: RegistrationRow = {
+      ...createRegistrationRow(),
+      bundleComponents: [...components.values()],
+      bundleReviewed: false,
+    }
+    const selectedIds = new Set(selectedSingleRows.map((row) => row.id))
+    update((value) => {
+      let inserted = false
+      const rows = value.rows.flatMap((row) => {
+        if (!selectedIds.has(row.id)) return [row]
+        if (inserted) return []
+        inserted = true
+        return [bundle]
+      })
+      return { ...value, rows }
+    })
+    setSelected(new Set())
+    setActiveId(bundle.id)
+    setCatalogTarget(null)
+    toast.success(`선택한 ${selectedSingleRows.length}개 상품을 세트로 구성했습니다. 세트명·이미지·품질표시를 확인해주세요.`)
+  }
+
   async function addProduct(product: CatalogProduct, optionName: string) {
     const bundle = draft.rows.find((row) => row.id === catalogTarget?.bundleId)
     const components = bundle?.bundleComponents
@@ -364,8 +426,8 @@ export function CoupangRegistrationWorkbench() {
     </section>
 
     <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" /><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-48 pl-7`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} /></div><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label></div><div className="flex gap-2"><button className={buttonClass} disabled={!!busy || !draft.rows.some((row) => !row.bundleComponents && (!selected.size || selected.has(row.id)))} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />{selected.size ? '선택 상품' : '전체 상품'} 정보 연결</button><button className={buttonClass} disabled={!!busy} onClick={() => setCatalogTarget({})}><Plus className="size-3.5" />상품 추가</button><button className={buttonClass} onClick={createBundle}><Plus className="size-3.5" />세트 만들기</button></div></div>
-      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2"><span className="mr-1 text-xs font-medium">선택 {selected.size}개</span><select className={`${inputClass} max-w-52`} aria-label="일괄 카테고리" value={templateChoice} onChange={(event) => setTemplateChoice(event.target.value)}><option value="">쿠팡 견적서 카테고리</option>{draft.templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')}</option>))}</select><button className={buttonClass} disabled={!!busy || !selected.size || !templateChoice} onClick={() => { const [templateId, sheetName] = templateChoice.split(':'); update((value) => ({ ...value, rows: value.rows.map((row) => selected.has(row.id) ? applyProductMasterDefaults({ ...row, templateId, sheetName }) : row) })) }}>카테고리 적용</button><label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">판매가 올림<select aria-label="판매가 올림 단위" className={inputClass} value={draft.rounding} onChange={(event) => update((value) => ({ ...value, rounding: Number(event.target.value) }))}>{[1, 10, 100, 1000].map((unit) => <option key={unit} value={unit}>{unit.toLocaleString()}원</option>)}</select></label></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" /><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-48 pl-7`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} /></div><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label></div><div className="flex gap-2"><button className={buttonClass} disabled={!!busy || !draft.rows.some((row) => !row.bundleComponents && (!selected.size || selected.has(row.id)))} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />{selected.size ? '선택 상품' : '전체 상품'} 정보 연결</button><button className={buttonClass} disabled={!!busy} onClick={() => setCatalogTarget({})}><Plus className="size-3.5" />상품 추가</button><button className={buttonClass} onClick={createBundle}><Plus className="size-3.5" />새 빈 세트 만들기</button></div></div>
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-2"><span className="mr-1 text-xs font-medium">선택 {selected.size}개</span><button className={buttonClass} title={bundleSelectionIssue || '원본 단품 행은 새 세트 행으로 교체됩니다.'} disabled={!!busy || !!bundleSelectionIssue} onClick={createBundleFromSelectedRows}><Plus className="size-3.5" />선택 {selectedRows.length}개를 세트로 변환</button><span className="text-[11px] text-muted-foreground">{bundleSelectionIssue || '원본 단품 행은 새 세트 행으로 교체됩니다.'}</span><select className={`${inputClass} max-w-52`} aria-label="일괄 카테고리" value={templateChoice} onChange={(event) => setTemplateChoice(event.target.value)}><option value="">쿠팡 견적서 카테고리</option>{draft.templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')}</option>))}</select><button className={buttonClass} disabled={!!busy || !selected.size || !templateChoice} onClick={() => { const [templateId, sheetName] = templateChoice.split(':'); update((value) => ({ ...value, rows: value.rows.map((row) => selected.has(row.id) ? applyProductMasterDefaults({ ...row, templateId, sheetName }) : row) })) }}>카테고리 적용</button><label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">판매가 올림<select aria-label="판매가 올림 단위" className={inputClass} value={draft.rounding} onChange={(event) => update((value) => ({ ...value, rounding: Number(event.target.value) }))}>{[1, 10, 100, 1000].map((unit) => <option key={unit} value={unit}>{unit.toLocaleString()}원</option>)}</select></label></div>
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <button className={buttonClass} disabled={!!busy || !draft.rows.some((row) => !row.bundleComponents && row.costPrice == null && (!selected.size || selected.has(row.id)))} onClick={() => void reloadCosts()}>
           <RefreshCw className="size-3.5" />빈 원가 채우기

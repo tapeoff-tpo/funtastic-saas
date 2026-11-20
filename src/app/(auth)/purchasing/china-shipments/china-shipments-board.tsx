@@ -415,6 +415,7 @@ function ChinaShipmentsBoardContent({
                 <>
                   <input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm sm:max-w-sm" placeholder="상품명, 상품코드, 옵션 검색" />
                   <div className="mt-3">
+                    <p className="mb-2 text-xs text-muted-foreground">중국재고의 박스수량으로 박스를 자동 생성하고, 무게·CBM 합계를 박스 수로 나눠 채웁니다. 생성된 박스는 수정할 수 있습니다.</p>
                     <ChinaShipmentStockTable items={shownInventory} quantities={quantities}
                       onQuantityChange={(inventoryId, value) => setQuantities((current) => ({ ...current, [inventoryId]: value }))}
                       quantityLabel="이번 출고" tableLabel="신규 출고 상품 목록" emptyMessage="조건에 맞는 작업 가능 재고가 없습니다."
@@ -1034,6 +1035,7 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes,
 {selectedWarehouseCodes.length > 0 ? <>
 <div className="flex flex-wrap gap-3"><label className="text-xs">최근 입고·재고등록일 시작<input type="date" aria-label="입고일 시작" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={inputClass} /></label><label className="text-xs">최근 입고·재고등록일 종료<input type="date" aria-label="입고일 종료" value={toDate} onChange={(event) => setToDate(event.target.value)} className={inputClass} /></label><button type="button" onClick={() => { setFromDate(''); setToDate('') }} className="self-end rounded border px-3 py-2 text-xs">기간 초기화</button></div>{fromDate && toDate && fromDate > toDate && <p role="alert">조회 시작일과 종료일을 확인해주세요.</p>}
 <input value={search} onChange={(event) => setSearch(event.target.value)} className={inputClass} placeholder="상품명, 상품코드, 옵션, 창고 검색" disabled={disabled} />
+<p className="text-xs text-muted-foreground">중국재고의 박스수량으로 박스를 자동 생성하고, 무게·CBM 합계를 박스 수로 나눠 채웁니다. 생성된 박스는 수정할 수 있습니다.</p>
 <ChinaShipmentStockTable items={availableItems} quantities={quantities}
   onQuantityChange={(inventoryId, value) => setQuantities((current) => ({ ...current, [inventoryId]: value }))}
   quantityLabel="추가 출고" tableLabel="추가 출고 상품 목록" emptyMessage="조건에 맞는 추가 가능 재고가 없습니다."

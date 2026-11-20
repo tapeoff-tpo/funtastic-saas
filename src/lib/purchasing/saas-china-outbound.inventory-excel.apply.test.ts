@@ -190,6 +190,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
         reservedQuantity: 0,
         availableQuantity: 12,
         totalBoxCount: 4,
+        packagingReferenceQuantity: 12,
         lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '18.5', manualCbm: '0.024',
       }),
       expect.objectContaining({
@@ -201,6 +202,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
         reservedQuantity: 0,
         availableQuantity: 4,
         totalBoxCount: null,
+        packagingReferenceQuantity: null,
         lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null,
       }),
     ])
@@ -241,7 +243,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
   })
 
   it('keeps a partial workbook update as an in-place adjustment', async () => {
-    const existing = { ...inventory(), reservedQuantity: 0, availableQuantity: 10, totalBoxCount: 3, lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '9.5', manualCbm: '0.018' }
+    const existing = { ...inventory(), reservedQuantity: 0, availableQuantity: 10, totalBoxCount: 3, packagingReferenceQuantity: 30, lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '9.5', manualCbm: '0.018' }
     const tx = transaction([existing])
     const updateValues: Array<Record<string, unknown>> = []
     const movementValues = vi.fn().mockResolvedValue(undefined)
@@ -273,6 +275,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
       availableQuantity: 12,
       archivedAt: null,
       totalBoxCount: 3,
+      packagingReferenceQuantity: 30,
       lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '9.5', manualCbm: '0.018',
     })])
     expect(movementValues).toHaveBeenCalledWith(expect.objectContaining({
@@ -283,7 +286,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
     }))
   })
 
-  it('saves a measurement-only update with blank dimensions and no inventory movement', async () => {
+  it.each([undefined, 100])('saves measurement updates with a captured or round-tripped reference quantity (%s)', async (packagingReferenceQuantity) => {
     const existing = inventory({ reservedQuantity: 0, availableQuantity: 10 })
     const tx = transaction([existing])
     const updateValues: Array<Record<string, unknown>> = []
@@ -294,9 +297,9 @@ describe('applySaasChinaInventoryWorkbook', () => {
     mocks.transaction.mockImplementation((callback) => callback(tx))
     await expect(applySaasChinaInventoryWorkbook({
       userId: workspaceUserId, createdBy: 'operator-a',
-      rows: [excelRow({ onHandQuantity: 10, totalBoxCount: 2, grossWeightKg: 6.1234567, manualCbm: 0.125 })],
+      rows: [excelRow({ onHandQuantity: 10, totalBoxCount: 2, grossWeightKg: 6.1234567, manualCbm: 0.125, packagingReferenceQuantity })],
     })).resolves.toMatchObject({ updatedCount: 1, createdCount: 0 })
-    expect(updateValues[0]).toMatchObject({ totalBoxCount: 2, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: '6.123457', manualCbm: '0.125', onHandQuantity: 10 })
+    expect(updateValues[0]).toMatchObject({ totalBoxCount: 2, packagingReferenceQuantity: packagingReferenceQuantity ?? 10, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: '6.123457', manualCbm: '0.125', onHandQuantity: 10 })
     expect(tx.insert).not.toHaveBeenCalled()
   })
 
@@ -309,5 +312,14 @@ describe('applySaasChinaInventoryWorkbook', () => {
     })).rejects.toThrow('CBM')
     expect(tx.update).not.toHaveBeenCalled()
     expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid packaging capacity reference before any inventory write', async () => {
+    const tx = transaction([inventory({ reservedQuantity: 0, availableQuantity: 10 })])
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await expect(applySaasChinaInventoryWorkbook({ userId: workspaceUserId, createdBy: 'operator-a', fullSnapshot: true,
+      rows: [excelRow({ productName: '상품 A', totalBoxCount: 2, packagingReferenceQuantity: 0 })],
+    })).rejects.toThrow('포장 기준 수량')
+    expect(tx.update).not.toHaveBeenCalled(); expect(tx.insert).not.toHaveBeenCalled()
   })
 })

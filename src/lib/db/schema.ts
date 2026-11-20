@@ -931,6 +931,7 @@ export const saasChinaInventory = pgTable(
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
     totalBoxCount: integer('total_box_count'),
+    packagingReferenceQuantity: integer('packaging_reference_quantity'),
     lengthCm: numeric('length_cm', { precision: 18, scale: 6 }),
     widthCm: numeric('width_cm', { precision: 18, scale: 6 }),
     heightCm: numeric('height_cm', { precision: 18, scale: 6 }),

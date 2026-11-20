@@ -69,6 +69,21 @@ describe('SaaS China inventory Excel workbook', () => {
     expect(parsed.rows[0]).toMatchObject({ warehouseCode: '중국창고', onHandQuantity: 10 })
   })
 
+  it('preserves the original packaging capacity when remaining stock is exported and uploaded again', async () => {
+    const current = await exportSaasChinaInventoryWorkbook([
+      { id: 'stock', warehouseCode: '중국창고', sku: 'SKU-1', productName: '상품', optionName: null, itemCategory: '[상품]', onHandQuantity: 80, totalBoxCount: 10, packagingReferenceQuantity: 100, grossWeightKg: 5, manualCbm: 0.1 },
+    ])
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(current as unknown as ExcelJS.Buffer)
+    expect(wb.getWorksheet('포장정보')!.getColumn(13).hidden).toBe(true)
+    const parsed = await parseSaasChinaInventoryWorkbook(current)
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows[0]).toMatchObject({ onHandQuantity: 80, totalBoxCount: 10, packagingReferenceQuantity: 100 })
+    wb.getWorksheet('포장정보')!.getCell('M2').value = -1
+    const invalid = await parseSaasChinaInventoryWorkbook(await wb.xlsx.writeBuffer())
+    expect(invalid.errors.some((error) => error.message.includes('포장기준수량'))).toBe(true)
+  })
+
   it('omits blank and zero generic-template quantities as no inventory while defaulting the warehouse', async () => {
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
       ['', 'SKU-1', '상품 A', '', '', '이름만 수정'],

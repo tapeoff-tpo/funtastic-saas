@@ -79,7 +79,7 @@ function makeTransaction() {
       }),
     })),
     insert: vi.fn().mockImplementation((table: unknown) => ({
-      values: (values: Omit<Row, 'id'>) => {
+      values: (values: Omit<Row, 'id'> | Array<Omit<Row, 'id'>>) => {
         const rows = table === saasChinaInventory ? inventories : table === chinaOutboundShipments ? shipments
           : table === chinaOutboundShipmentItems ? shipmentItems
             : table === saasChinaInventoryMovements ? movements
@@ -88,10 +88,11 @@ function makeTransaction() {
         if (!rows) throw new Error('Unexpected insert table')
         const defaults = table === saasChinaShipmentPurchaseAllocations
           ? { dispatchedQuantity: 0, releasedQuantity: 0 }
-          : table === chinaOutboundShipmentItems ? { packedQuantity: 0, dispatchedQuantity: 0, boxSplitStatus: 'in_progress' } : {}
-        const row = { ...defaults, ...values, id: `created-${++sequence}` } as Row
-        rows.push(row)
-        return { returning: async () => [row] }
+          : table === chinaOutboundShipmentItems ? { packedQuantity: 0, dispatchedQuantity: 0, boxSplitStatus: 'in_progress' }
+            : table === chinaOutboundBoxes ? { status: 'open', palletId: null, sortOrder: 0, completionStatus: null } : {}
+        const created = (Array.isArray(values) ? values : [values]).map((value) => ({ ...defaults, ...value, id: value.id ?? `created-${++sequence}` } as Row))
+        rows.push(...created)
+        return { returning: async () => created }
       },
     })),
     update: vi.fn().mockImplementation((table: unknown) => ({
@@ -253,6 +254,161 @@ describe('createChinaOutboundShipment', () => {
     } }]
     mocks.transaction.mockImplementation((callback) => callback(makeTransaction()))
   }
+
+  function measuredInventory(quantity = 100, totalBoxCount = 3) {
+    Object.assign(inventories[0]!, { onHandQuantity: quantity, reservedQuantity: 0, availableQuantity: quantity, totalBoxCount,
+      lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: String(totalBoxCount * 2.5), manualCbm: String(totalBoxCount * 0.125) })
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    return tx
+  }
+
+  it('automatically creates numbered inventory boxes and preserves their measurement fields on both records', async () => {
+    const tx = measuredInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 100 }] })
+    expect(boxes.map((box) => box.boxNo)).toEqual(['1', '2', '3'])
+    expect(boxItems.map((row) => row.quantity)).toEqual([34, 33, 33])
+    for (const row of [...boxes, ...boxItems]) expect(row).toMatchObject({ userId: workspaceUserId, shipmentId: shipment.id, lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: '2.5', manualCbm: '0.125' })
+    expect(boxes.every((box) => box.status === 'open' && box.completionStatus == null && box.palletId == null)).toBe(true)
+    expect(shipmentItems[0]).toMatchObject({ packedQuantity: 100, reservedQuantity: 100, boxSplitStatus: 'completed' })
+    expect(inventories[0]).toMatchObject({ onHandQuantity: 100, reservedQuantity: 100, availableQuantity: 0, packagingReferenceQuantity: 100, totalBoxCount: 3 })
+    expect(tx.insert.mock.calls.filter(([table]) => table === chinaOutboundBoxes)).toHaveLength(1)
+    expect(tx.insert.mock.calls.filter(([table]) => table === chinaOutboundBoxItems)).toHaveLength(1)
+  })
+
+  it('keeps original carton capacity when subsequent stock has already been dispatched', async () => {
+    measuredInventory(80, 10)
+    inventories[0]!.packagingReferenceQuantity = 100
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 80 }] })
+    expect(boxes).toHaveLength(8)
+    expect(boxItems.map((row) => row.quantity)).toEqual(Array(8).fill(10))
+    expect(inventories[0]).toMatchObject({ packagingReferenceQuantity: 100, totalBoxCount: 10 })
+  })
+
+  it('preserves source carton offsets and total precision when 34 units are followed by 66 additional units', async () => {
+    measuredInventory(100, 3)
+    Object.assign(inventories[0]!, { grossWeightKg: '29', manualCbm: '0.25' })
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 34 }] })
+    const initial = structuredClone(boxes[0])
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 66 }] })
+    expect(boxes).toHaveLength(3)
+    expect(boxes[0]).toEqual(initial)
+    expect(boxItems.map((row) => row.quantity)).toEqual([34, 33, 33])
+    expect(boxes.map((box) => box.grossWeightKg)).toEqual(['9.666', '9.666', '9.668'])
+    expect(boxes.map((box) => box.manualCbm)).toEqual(['0.083333', '0.083333', '0.083334'])
+    expect(boxes.reduce((sum, box) => sum + Number(box.grossWeightKg), 0)).toBe(29)
+    expect(boxes.reduce((sum, box) => sum + Number(box.manualCbm), 0)).toBe(0.25)
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 100, packedQuantity: 100, boxSplitStatus: 'completed' })
+  })
+
+  it('starts after already dispatched source cartons and retains the last carton precision remainder', async () => {
+    measuredInventory(66, 3)
+    Object.assign(inventories[0]!, { packagingReferenceQuantity: 100, grossWeightKg: '29', manualCbm: '0.25' })
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 66 }] })
+    expect(boxItems.map((row) => row.quantity)).toEqual([33, 33])
+    expect(boxes.map((box) => box.grossWeightKg)).toEqual(['9.666', '9.668'])
+    expect(boxes.map((box) => box.manualCbm)).toEqual(['0.083333', '0.083334'])
+  })
+
+  it('prorates a source carton total across partial reservations without counting its weight twice', async () => {
+    measuredInventory(100, 4)
+    Object.assign(inventories[0]!, { grossWeightKg: '29', manualCbm: '0.25' })
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 20 }] })
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 5 }] })
+    expect(boxItems.map((row) => row.quantity)).toEqual([20, 5])
+    expect(boxes.map((box) => box.grossWeightKg)).toEqual(['5.8', '1.45'])
+    expect(boxes.map((box) => box.manualCbm)).toEqual(['0.05', '0.0125'])
+    expect(boxes.reduce((sum, box) => sum + Number(box.grossWeightKg), 0)).toBe(7.25)
+    expect(boxes.reduce((sum, box) => sum + Number(box.manualCbm), 0)).toBe(0.0625)
+  })
+
+  it.each([100, 50])('divides an uploaded four-box total of 29kg and 0.25CBM starting with %s outbound units', async (initialQuantity) => {
+    measuredInventory(100, 4)
+    Object.assign(inventories[0]!, { grossWeightKg: '29', manualCbm: '0.25', lengthCm: null, widthCm: null, heightCm: null })
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: initialQuantity }] })
+    const firstIds = boxes.map((box) => box.id)
+    expect(boxes).toHaveLength(initialQuantity / 25)
+    expect(boxes[0]).toMatchObject({ grossWeightKg: '7.25', manualCbm: '0.0625', lengthCm: '39.69', widthCm: '39.69', heightCm: '39.69' })
+    if (initialQuantity < 100) await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 100 - initialQuantity }] })
+    expect(boxes).toHaveLength(4)
+    expect(boxes.slice(0, firstIds.length).map((box) => box.id)).toEqual(firstIds)
+    expect(boxItems.map((row) => row.quantity)).toEqual([25, 25, 25, 25])
+    expect(boxes.reduce((sum, box) => sum + Number(box.grossWeightKg), 0)).toBe(29)
+    expect(boxes.reduce((sum, box) => sum + Number(box.manualCbm), 0)).toBe(0.25)
+    expect(boxItems.every((row) => row.grossWeightKg === '7.25' && row.manualCbm === '0.0625')).toBe(true)
+  })
+
+  it('appends only the added inventory quantity without altering existing carton IDs, edits, or pallet assignments', async () => {
+    measuredInventory(100, 10)
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 60 }] })
+    Object.assign(boxes[0]!, { boxNo: 'CUSTOM-7', palletId: 'pallet-1', lengthCm: '77', grossWeightKg: '9' })
+    const originalBoxes = structuredClone(boxes)
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 20 }] })
+    expect(boxes.slice(0, 6)).toEqual(originalBoxes)
+    expect(boxes.slice(6).map((box) => box.boxNo)).toEqual(['1', '7'])
+    expect(boxItems.map((row) => row.quantity)).toEqual(Array(8).fill(10))
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 80, packedQuantity: 80, boxSplitStatus: 'completed' })
+  })
+
+  it('adds a new warehouse identity with its own measurements and numbers after existing boxes', async () => {
+    measuredInventory(10, 2)
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 10 }] })
+    inventories.push({ ...inventories[0]!, id: 'inventory-b', warehouseCode: '대량창고', onHandQuantity: 6, reservedQuantity: 0, availableQuantity: 6, totalBoxCount: 1, packagingReferenceQuantity: null, lengthCm: '20', manualCbm: '0.2' })
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-b', quantity: 6 }] })
+    expect(boxes.map((box) => box.boxNo)).toEqual(['1', '2', '3'])
+    expect(boxes[2]).toMatchObject({ lengthCm: '20', manualCbm: '0.2' })
+    expect(shipmentItems).toEqual(expect.arrayContaining([expect.objectContaining({ inventoryId: 'inventory-a', originWarehouseCode: '중국창고', packedQuantity: 10 }), expect.objectContaining({ inventoryId: 'inventory-b', originWarehouseCode: '대량창고', packedQuantity: 6 })]))
+  })
+
+  it('does not repack older manually unpacked stock when only newly added quantity has inventory metadata', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 4 }] })
+    Object.assign(inventories[0]!, { totalBoxCount: 2, grossWeightKg: '3' })
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'inventory-a', quantity: 2 }] })
+    expect(boxItems.map((row) => row.quantity)).toEqual([2])
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 6, packedQuantity: 2, boxSplitStatus: 'in_progress' })
+  })
+
+  it('retains manual packing when inventory packaging fields are all absent', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 3 }] })
+    expect(boxes).toEqual([]); expect(boxItems).toEqual([])
+    expect(inventories[0]!.packagingReferenceQuantity).toBeUndefined()
+    expect(shipmentItems[0]).toMatchObject({ packedQuantity: 0, boxSplitStatus: 'in_progress' })
+  })
+
+  it('creates count-only boxes with blank measurements and fills missing dimensions from CBM-only metadata', async () => {
+    measuredInventory(10, 2)
+    Object.assign(inventories[0]!, { lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null })
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 5 }] })
+    expect(boxes[0]).toMatchObject({ lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null })
+    inventories[0]!.manualCbm = '0.25'
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 5 }] })
+    expect(boxes[1]).toMatchObject({ lengthCm: '50', widthCm: '50', heightCm: '50', grossWeightKg: null, manualCbm: '0.125' })
+  })
+
+  it('keeps exact inspection boxes ahead of generic inventory packaging and uses fallback only for uninspected remainder', async () => {
+    inspectedLot()
+    Object.assign(inventories[0]!, { totalBoxCount: 2, lengthCm: '60', widthCm: '50', heightCm: '40', grossWeightKg: '9', manualCbm: '0.12' })
+    purchaseLinks[0]!.receivedQuantity = 6
+    const inspection = purchaseItems[0]!.purchaseInspection as { parcels: unknown[] }
+    inspection.parcels = [inspection.parcels[0]]
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 10 }] })
+    expect(boxItems.map((row) => row.quantity)).toEqual([6, 4])
+    expect(boxes[0]).toMatchObject({ lengthCm: '50', grossWeightKg: '3' })
+    expect(boxes[1]).toMatchObject({ lengthCm: '60', grossWeightKg: '3.6', manualCbm: '0.048' })
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 10, packedQuantity: 10 })
+  })
+
+  it('skips inventory fallback and inspection boxes when an explicit registration workbook supplies its own packing', async () => {
+    inspectedLot()
+    Object.assign(inventories[0]!, { totalBoxCount: 2, manualCbm: '0.125' })
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'inventory-a', quantity: 10 }] }, { initializeInspectionPacking: false })
+    expect(boxes).toEqual([]); expect(boxItems).toEqual([])
+    expect(inventories[0]!.packagingReferenceQuantity).toBeUndefined()
+    expect(shipmentItems[0]).toMatchObject({ packedQuantity: 0 })
+    expect(allocations[0]!.inspectionBoxes).toHaveLength(2)
+  })
 
   it('creates initial boxes from the exact reserved receipt and leaves physical stock unchanged', async () => {
     inspectedLot()

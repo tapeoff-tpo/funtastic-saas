@@ -179,6 +179,7 @@ export function SaasChinaInventoryExcelDialog() {
               <p className="mt-1 text-xs text-muted-foreground">현재 목록 다운로드 파일을 기준으로 수정하면 창고별 수량과 품목구분을 그대로 유지할 수 있습니다.</p>
               <p className="mt-1 text-xs text-muted-foreground">새 파일을 반영하면 기존 활성 재고 전체가 삭제되고, 파일에 적힌 재고 행만 새로 생성됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리합니다.</p>
               <p className="mt-1 text-xs text-muted-foreground">총 박스수량·가로·세로·높이·무게·CBM은 선택 입력이며, 빈칸이어도 저장할 수 있습니다. 치수는 cm, 무게는 kg으로 입력하세요.</p>
+              <p className="mt-1 text-xs text-muted-foreground">무게와 CBM은 전체 박스 합계입니다. 중국출고 등록 시 박스 수로 나눠 각 박스에 자동 입력합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />

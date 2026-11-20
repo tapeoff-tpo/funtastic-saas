@@ -6,7 +6,7 @@ import { palletTareWeightKg } from './china-outbound-pallet-weight'
 import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-state'
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { nextAvailableBoxNumbers, planInspectionPacking, type InspectionPackingPiece } from './china-outbound-auto-packing'
+import { nextAvailableBoxNumbers, planInspectionPacking, planInventoryPacking, type InspectionPackingPiece, type InventoryPackingPiece } from './china-outbound-auto-packing'
 import {
   isSaasChinaInventoryExcludedWarehouseCode,
   SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR,
@@ -377,6 +377,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ADD COLUMN IF NOT EXISTS item_category varchar(100);
   ALTER TABLE saas_china_inventory
     ADD COLUMN IF NOT EXISTS total_box_count integer,
+    ADD COLUMN IF NOT EXISTS packaging_reference_quantity integer,
     ADD COLUMN IF NOT EXISTS length_cm numeric(18, 6),
     ADD COLUMN IF NOT EXISTS width_cm numeric(18, 6),
     ADD COLUMN IF NOT EXISTS height_cm numeric(18, 6),
@@ -1928,6 +1929,7 @@ export async function createChinaOutboundShipment(
         shipmentId: shipment.id,
         shipmentItemId: shipmentItem.id,
         inventoryId: inventory.id,
+        inventory,
         quantity: line.quantity,
         initializeInspectionPacking: options.initializeInspectionPacking !== false,
       })
@@ -2239,8 +2241,8 @@ function chinaOutboundRegistrationSourceKey(warehouseCode: string, sku: string, 
 
 /**
  * Adds more stock to an in-progress shipment. Existing box allocations stay
- * untouched; any added quantity remains unpacked until the operator splits it
- * into boxes in the next step.
+ * untouched; newly added quantity inherits known inspection or inventory
+ * packaging, with any quantity lacking packaging left for manual splitting.
  */
 export async function addChinaOutboundShipmentItems(input: {
   userId: string
@@ -2332,6 +2334,7 @@ export async function addChinaOutboundShipmentItems(input: {
         shipmentId: shipment.id,
         shipmentItemId: shipmentItem.id,
         inventoryId: inventory.id,
+        inventory,
         quantity: line.quantity,
       })
       allocatedPurchaseLinkIds.forEach((id) => affectedPurchaseLinkIds.add(id))
@@ -3628,6 +3631,7 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
     shipmentId: string
     shipmentItemId: string
     inventoryId: string
+    inventory?: typeof saasChinaInventory.$inferSelect
     quantity: number
     initializeInspectionPacking?: boolean
   },
@@ -3644,6 +3648,7 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
   const { allocations } = allocateSaasChinaPurchaseLots(links, input.quantity)
   const linksById = new Map(links.map((link) => [link.id, link]))
   const affectedLinkIds: string[] = []
+  let inspectionPackedQuantity = 0
   for (const allocation of allocations) {
     const link = linksById.get(allocation.purchaseLinkId)
     if (!link) throw new Error('발주 연동 SaaS 중국재고를 찾을 수 없습니다.')
@@ -3671,6 +3676,9 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
     const inspectionBoxes = planned.length && input.initializeInspectionPacking !== false
       ? await appendInspectionPackingInTransaction(tx, input, planned)
       : planned
+    if (input.initializeInspectionPacking !== false) {
+      inspectionPackedQuantity += inspectionBoxes.reduce((sum, piece) => sum + piece.quantity, 0)
+    }
     if (existingAllocation) {
       await tx
         .update(saasChinaShipmentPurchaseAllocations)
@@ -3695,7 +3703,54 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
 
   // Any remaining quantity comes from a manually received/opening SaaS stock
   // balance, which intentionally has no purchase-request link.
+  const inventoryPackingQuantity = input.quantity - inspectionPackedQuantity
+  if (input.initializeInspectionPacking !== false && input.inventory && inventoryPackingQuantity > 0) {
+    const referenceQuantity = input.inventory.packagingReferenceQuantity ?? input.inventory.onHandQuantity
+    const consumedQuantity = Math.max(0, referenceQuantity - input.inventory.onHandQuantity) + input.inventory.reservedQuantity + inspectionPackedQuantity
+    const pieces = planInventoryPacking({ ...input.inventory, onHandQuantity: referenceQuantity, quantity: inventoryPackingQuantity, consumedQuantity, measurementBasis: 'total' })
+    if (pieces.length) {
+      // Preserve the source carton capacity after future stock dispatches.
+      if (input.inventory.packagingReferenceQuantity == null) {
+        await tx.update(saasChinaInventory).set({ packagingReferenceQuantity: referenceQuantity }).where(and(eq(saasChinaInventory.userId, input.userId), eq(saasChinaInventory.id, input.inventory.id)))
+      }
+      await appendInventoryPackingInTransaction(tx, input, pieces)
+    }
+  }
   return affectedLinkIds
+}
+
+async function appendInventoryPackingInTransaction(
+  tx: DbTransaction,
+  input: { userId: string; shipmentId: string; shipmentItemId: string },
+  pieces: InventoryPackingPiece[],
+) {
+  const boxes = await tx.select().from(chinaOutboundBoxes).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId)))
+  const numbers = nextAvailableBoxNumbers(pieces.length, boxes.map((box) => box.boxNo))
+  const item = await getChinaOutboundShipmentItem(tx, input.userId, input.shipmentId, input.shipmentItemId)
+  const packedQuantity = item.packedQuantity + pieces.reduce((sum, piece) => sum + piece.quantity, 0)
+  if (packedQuantity > item.reservedQuantity) throw new Error('자동 박스분할 수량이 실제 출고수량을 초과합니다.')
+  const nextSort = boxes.reduce((maximum, box) => Math.max(maximum, box.sortOrder), -1) + 1
+  const numberValue = (value: number | null) => value == null ? null : String(value)
+  const boxRows = pieces.map((piece, index) => ({
+    id: randomUUID(), userId: input.userId, shipmentId: input.shipmentId,
+    boxNo: numbers[index], sortOrder: nextSort + index,
+    lengthCm: numberValue(piece.lengthCm), widthCm: numberValue(piece.widthCm), heightCm: numberValue(piece.heightCm),
+    grossWeightKg: numberValue(piece.grossWeightKg), manualCbm: numberValue(piece.manualCbm),
+    note: '중국재고 포장정보 자동 적용',
+  }))
+  const batchSize = 500
+  for (let offset = 0; offset < boxRows.length; offset += batchSize) {
+    const batch = boxRows.slice(offset, offset + batchSize)
+    await tx.insert(chinaOutboundBoxes).values(batch)
+    await tx.insert(chinaOutboundBoxItems).values(batch.map((box, index) => ({
+      userId: input.userId, shipmentId: input.shipmentId, shipmentItemId: input.shipmentItemId,
+      boxId: box.id, quantity: pieces[offset + index].quantity,
+      lengthCm: box.lengthCm, widthCm: box.widthCm, heightCm: box.heightCm,
+      grossWeightKg: box.grossWeightKg, manualCbm: box.manualCbm,
+    })))
+  }
+  await tx.update(chinaOutboundShipmentItems).set({ packedQuantity, boxSplitStatus: packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress', updatedAt: new Date() }).where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.id, item.id)))
+  await tx.update(chinaOutboundShipments).set({ status: 'packing', updatedAt: new Date() }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, input.shipmentId), eq(chinaOutboundShipments.status, 'draft')))
 }
 
 async function appendInspectionPackingInTransaction(
@@ -4225,6 +4280,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
     const measurementsChanged = SAAS_CHINA_INVENTORY_MEASUREMENT_FIELDS.some((field) => (
       measurements[field] !== inventoryMeasurementNumber(existing[field])
     ))
+    const packagingReferenceChanged = saasChinaInventoryWorkbookMeasurementValues(row, existing).packagingReferenceQuantity !== (existing.packagingReferenceQuantity ?? null)
     const restoresArchivedInventory = existing.archivedAt != null
     const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
       ? afterQuantity === existing.onHandQuantity
@@ -4244,6 +4300,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
         && productName === existing.productName
         && itemCategory === existing.itemCategory
         && !measurementsChanged
+        && !packagingReferenceChanged
         && !restoresArchivedInventory
         ? 'unchanged'
         : 'changed',
@@ -4355,8 +4412,14 @@ function saasChinaInventoryWorkbookMeasurementValues(
 ) {
   const values = saasChinaInventoryWorkbookMeasurements(row, existing)
   const decimalValue = (value: number | null) => value == null ? null : String(Math.round(value * 1_000_000) / 1_000_000)
+  const hasPackaging = SAAS_CHINA_INVENTORY_MEASUREMENT_FIELDS.some((field) => row[field] != null)
+  const referenceQuantity = row.packagingReferenceQuantity
+    ?? (hasPackaging ? row.onHandQuantity ?? existing?.onHandQuantity : existing?.packagingReferenceQuantity)
+    ?? null
+  const packagingReferenceQuantity = referenceQuantity != null && Number.isSafeInteger(referenceQuantity) && referenceQuantity > 0 ? referenceQuantity : null
   return {
     totalBoxCount: values.totalBoxCount,
+    packagingReferenceQuantity,
     lengthCm: decimalValue(values.lengthCm),
     widthCm: decimalValue(values.widthCm),
     heightCm: decimalValue(values.heightCm),
@@ -4411,6 +4474,9 @@ function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventory
   }
   if (row.totalBoxCount != null && (!Number.isSafeInteger(row.totalBoxCount) || row.totalBoxCount < 0 || row.totalBoxCount > 2_147_483_647)) {
     errors.push('총 박스수량은 0 이상 2,147,483,647 이하의 정수로 입력해주세요.')
+  }
+  if (row.packagingReferenceQuantity != null && (!Number.isSafeInteger(row.packagingReferenceQuantity) || row.packagingReferenceQuantity < 1 || row.packagingReferenceQuantity > 2_147_483_647)) {
+    errors.push('포장 기준 수량은 1 이상 2,147,483,647 이하의 정수로 입력해주세요.')
   }
   const measurementLabels = { lengthCm: '가로', widthCm: '세로', heightCm: '높이', grossWeightKg: '무게', manualCbm: 'CBM' } as const
   for (const field of ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const) {

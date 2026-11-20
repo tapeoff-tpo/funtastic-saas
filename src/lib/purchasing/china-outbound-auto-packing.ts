@@ -1,4 +1,5 @@
 import type { PurchaseInspection } from './purchase-inspection'
+import { dimensionNumber, estimateChinaOutboundBoxDimensions } from './china-outbound-dimensions'
 
 export type InspectionPackingPiece = {
   receiptBoxId: string; trackingNumber: string; receivedQuantity: number; quantity: number
@@ -38,6 +39,90 @@ export function planAutomaticBoxSplit(quantity: number, input: { quantityPerBox?
   const additionalCount = Math.max(0, quantities.length - existing.length)
   const numbers = [...existing, ...(additionalCount ? nextAvailableBoxNumbers(additionalCount, [...occupied, ...existing]) : [])]
   return quantities.map((quantity, index) => ({ boxNo: numbers[index], quantity }))
+}
+
+export type InventoryPackingPiece = {
+  quantity: number
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  grossWeightKg: number | null
+  manualCbm: number | null
+}
+
+/** Copy optional inventory packaging into a new reservation only. Box capacity
+ * is based on the whole inventory balance, so a partial shipment does not reuse
+ * the entire source box count or manufacture any extra product units. Weight
+ * and CBM are inventory totals by default; rounding stays in the last source box. */
+export function planInventoryPacking(input: {
+  onHandQuantity: number
+  totalBoxCount?: number | null
+  quantity: number
+  consumedQuantity?: number
+  lengthCm?: number | string | null
+  widthCm?: number | string | null
+  heightCm?: number | string | null
+  grossWeightKg?: number | string | null
+  manualCbm?: number | string | null
+  measurementBasis?: 'per_box' | 'total'
+}): InventoryPackingPiece[] {
+  if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) throw new Error('실제 출고수량을 확인해주세요.')
+  const consumedQuantity = input.consumedQuantity ?? 0
+  if (!Number.isSafeInteger(consumedQuantity) || consumedQuantity < 0) throw new Error('기존 출고 예약수량을 확인해주세요.')
+  if (!Number.isSafeInteger(input.onHandQuantity) || input.onHandQuantity < 1) return []
+  const measurement = (value: number | string | null | undefined, min: number, max: number, precision: number) => {
+    const numeric = dimensionNumber(value)
+    if (numeric == null || numeric < min || numeric > max) return null
+    return Math.round(numeric * precision) / precision
+  }
+  const measurements = {
+    lengthCm: measurement(input.lengthCm, 0.01, 9_999_999.99, 100), widthCm: measurement(input.widthCm, 0.01, 9_999_999.99, 100), heightCm: measurement(input.heightCm, 0.01, 9_999_999.99, 100),
+    grossWeightKg: measurement(input.grossWeightKg, 0.001, 999_999_999, 1_000), manualCbm: measurement(input.manualCbm, 0.000001, 999_999_999, 1_000_000),
+  }
+  const hasMeasurements = Object.values(measurements).some((value) => value != null)
+  const sourceCount = input.totalBoxCount == null || input.totalBoxCount === 0
+    ? hasMeasurements ? 1 : null
+    : input.totalBoxCount
+  // Inventory spreadsheets allow large stock counts. Unsupported automatic
+  // plans stay in the existing manual split workflow instead of blocking stock.
+  if (sourceCount == null || !Number.isSafeInteger(sourceCount) || sourceCount < 1 || sourceCount > 5_000) return []
+  const boxCount = Math.min(sourceCount, input.onHandQuantity)
+  if (Math.floor(input.quantity / input.onHandQuantity) * boxCount > 5_000) return []
+  const boxMeasurement = (total: number | null, precision: number, index: number, sourceQuantity: number, start: number, quantity: number) => {
+    if (total == null || input.measurementBasis === 'per_box') return total
+    const units = Math.round(total * precision)
+    const base = Math.floor(units / boxCount)
+    const sourceUnits = base + (index === boxCount - 1 ? units % boxCount : 0)
+    // Adjacent reservations share the same rounded boundary, so adding pieces
+    // later cannot multiply a partial carton's aggregate weight or volume.
+    const value = (Math.round(sourceUnits * (start + quantity) / sourceQuantity) - Math.round(sourceUnits * start / sourceQuantity)) / precision
+    return value > 0 ? value : null
+  }
+  const pieces: InventoryPackingPiece[] = []
+  let remaining = input.quantity
+  const sourceBoxes = planAutomaticBoxSplit(input.onHandQuantity, { boxCount }, [])
+  let offset = consumedQuantity % input.onHandQuantity
+  let sourceIndex = 0
+  while (offset >= sourceBoxes[sourceIndex].quantity) {
+    offset -= sourceBoxes[sourceIndex].quantity
+    sourceIndex += 1
+  }
+  while (remaining > 0) {
+    if (pieces.length === 5_000) return []
+    const source = sourceBoxes[sourceIndex]
+    const quantity = Math.min(source.quantity - offset, remaining)
+    if (quantity <= 0) break
+    const packaging = {
+      ...measurements,
+      grossWeightKg: boxMeasurement(measurements.grossWeightKg, 1_000, sourceIndex, source.quantity, offset, quantity),
+      manualCbm: boxMeasurement(measurements.manualCbm, 1_000_000, sourceIndex, source.quantity, offset, quantity),
+    }
+    pieces.push({ quantity, ...packaging, ...estimateChinaOutboundBoxDimensions(packaging) })
+    remaining -= quantity
+    offset = 0
+    sourceIndex = (sourceIndex + 1) % sourceBoxes.length
+  }
+  return pieces
 }
 
 /** Use exact lot reservations. Never infer which physical box an old untracked

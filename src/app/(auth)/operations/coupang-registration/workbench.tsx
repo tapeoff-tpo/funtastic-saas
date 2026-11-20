@@ -14,6 +14,9 @@ const inputWon = (value: number) => `${value.toLocaleString('ko-KR', { maximumFr
 const bundleKey = (component: BundleComponent) => JSON.stringify([component.sourceCode, component.optionName])
 const marginText = (value: number | null, digits: number) => value === null ? '—' : `${value.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
 type DraftSummary = { id: string; name: string; revision: number; updatedAt: string }
+type CatalogSelection = { product: CatalogProduct; optionName: string }
+
+const catalogOptionKey = (productCode: string, optionName: string) => JSON.stringify([productCode, optionName])
 
 async function jsonRequest(path: string, init?: RequestInit) {
   const response = await fetch(`${API}${path}`, init)
@@ -73,6 +76,7 @@ export function CoupangRegistrationWorkbench() {
   const [catalogTarget, setCatalogTarget] = useState<{ bundleId?: string } | null>(null)
   const [query, setQuery] = useState('')
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
+  const [catalogSelections, setCatalogSelections] = useState<CatalogSelection[]>([])
   const [searched, setSearched] = useState(false)
   const [rowSearch, setRowSearch] = useState('')
   const [templateChoice, setTemplateChoice] = useState('')
@@ -85,6 +89,7 @@ export function CoupangRegistrationWorkbench() {
   const needsInfo = draft.rows.filter((row) => issueMap.get(row.id)!.length)
   const visible = draft.rows.filter((row) => (!onlyIssues || issueMap.get(row.id)!.length) && [row.name, row.internalSku, row.sourceCode].some((value) => value.toLowerCase().includes(rowSearch.toLowerCase())))
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
+  const selectedCatalogOptionKeys = new Set(catalogSelections.map((item) => catalogOptionKey(item.product.code, item.optionName)))
 
   function update(change: (value: RegistrationDraft) => RegistrationDraft) { setDraft(change); setDirty(true) }
   function patchRow(id: string, patch: Partial<RegistrationRow>) {
@@ -253,7 +258,15 @@ export function CoupangRegistrationWorkbench() {
   function closeCatalog() {
     if (busy) return
     setCatalogTarget(null)
+    setCatalogSelections([])
     if (catalogTarget?.bundleId) bundleEditor.current?.scrollIntoView?.({ block: 'start' })
+  }
+
+  function toggleCatalogSelection(product: CatalogProduct, optionName: string) {
+    const key = catalogOptionKey(product.code, optionName)
+    setCatalogSelections((value) => value.some((item) => catalogOptionKey(item.product.code, item.optionName) === key)
+      ? value.filter((item) => catalogOptionKey(item.product.code, item.optionName) !== key)
+      : [...value, { product, optionName }])
   }
 
   function createBundle() {
@@ -302,6 +315,37 @@ export function CoupangRegistrationWorkbench() {
       }
       update((value) => ({ ...value, rows: [...value.rows, row] })); setActiveId(row.id)
       toast.success(`${row.name} 추가`)
+    })
+  }
+
+  async function addSelectedProducts() {
+    if (catalogTarget?.bundleId || !catalogSelections.length) return
+    const existing = new Set(draft.rows.filter((row) => !row.bundleComponents).map((row) => catalogOptionKey(row.sourceCode, row.optionName)))
+    const additions = catalogSelections.filter((item) => !existing.has(catalogOptionKey(item.product.code, item.optionName)))
+    if (!additions.length) { toast.error('선택한 상품 옵션은 이미 등록 목록에 있습니다.'); return }
+    if (draft.rows.length + additions.length > 500) { toast.error(`등록행은 500개까지 추가할 수 있습니다. ${500 - draft.rows.length}개만 더 추가해주세요.`); return }
+
+    await run('선택 상품의 가격·원가 확인 중', async () => {
+      const fullProducts = new Map<string, CatalogProduct>()
+      const codes = [...new Set(additions.map((item) => item.product.code))]
+      for (let start = 0; start < codes.length; start += 100) {
+        const response = await postJson('/catalog', { names: [], codes: codes.slice(start, start + 100) })
+        const products = response.products as CatalogProduct[]
+        if (!Array.isArray(products)) throw new Error('선택한 B2B 상품 정보를 확인하지 못했습니다.')
+        for (const product of products) fullProducts.set(product.code, product)
+      }
+      const invalid = additions.filter(({ product, optionName }) => {
+        const full = fullProducts.get(product.code)
+        return !full || (full.options.length ? !full.options.some((option) => option.name === optionName) : !!optionName)
+      })
+      if (invalid.length) throw new Error('일부 상품 옵션이 변경되었습니다. 검색 결과를 새로 확인해주세요.')
+
+      const rows = additions.map(({ product, optionName }) => createRegistrationRow(fullProducts.get(product.code)!, optionName))
+      setCatalog((value) => value.map((product) => fullProducts.get(product.code) ?? product))
+      update((value) => ({ ...value, rows: [...value.rows, ...rows] }))
+      setCatalogSelections([])
+      setActiveId(rows[0].id)
+      toast.success(`${rows.length}개 상품 옵션을 등록 목록에 추가했습니다.`)
     })
   }
 
@@ -386,7 +430,7 @@ export function CoupangRegistrationWorkbench() {
     <p className="text-xs text-muted-foreground">견적서 다운로드 후 서플라이어 허브에서 파일 검증을 진행하세요. 현재 화면의 검사는 쿠팡의 등록 승인 결과와 다릅니다.</p>
     {busy && <div role="status" className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"><Loader2 className="size-4 animate-spin" />{busy}</div>}
 
-    {catalogTarget && <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/35 p-4 pt-16" onClick={closeCatalog}><section role="dialog" aria-modal="true" aria-label={catalogTarget.bundleId ? '세트 구성품 검색' : 'B2B 상품 검색'} className="w-full max-w-3xl rounded-xl bg-background shadow-xl" onClick={(event) => event.stopPropagation()}><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">{catalogTarget.bundleId ? '세트 구성품 추가' : 'B2B 상품 추가'}</h2><p className="mt-1 text-xs text-muted-foreground">상품 목록을 먼저 표시합니다. 옵션 추가금과 신규원가는 상품 선택 시 확인합니다.</p></div><button aria-label="상품 검색 닫기" className="rounded p-2 hover:bg-muted" onClick={closeCatalog}><X className="size-4" /></button></header><form className="flex gap-2 p-4" onSubmit={(event) => { event.preventDefault(); void run('상품 검색 중', async () => { const response = await jsonRequest(`/catalog?q=${encodeURIComponent(query)}`); setCatalog(response.products); setSearched(true) }) }}><input autoFocus aria-label="B2B 상품명 또는 코드" className={`${inputClass} h-9 flex-1`} placeholder="상품명 또는 B2B 상품코드" value={query} onChange={(event) => setQuery(event.target.value)} /><button className={`${buttonClass} h-9`} disabled={!!busy || !query.trim()}><Search className="size-4" />검색</button></form><div className="max-h-[60vh] overflow-y-auto px-4 pb-4">{catalog.map((product) => <div key={product.code} className="flex gap-3 border-t py-3"><div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">{product.thumbnails[0] && <img className="size-full object-contain" src={product.thumbnails[0]} alt="" />}</div><div className="min-w-0 flex-1"><div className="font-medium">{product.name}</div><div className="mt-1 text-xs text-muted-foreground">코드 {product.code} · 도매가 {won(product.price)} · 상세 {product.detailImages.length}장</div><div className="mt-2 flex flex-wrap gap-1.5">{(product.options.length ? product.options : [{ name: '', addPrice: 0 }]).map((option) => <button key={option.name} className={buttonClass} onClick={() => void addProduct(product, option.name)}><Plus className="size-3" />{option.name || '기본 상품'}{option.addPrice > 0 ? ` (+${option.addPrice.toLocaleString()}원)` : ''}</button>)}</div></div></div>)}{searched && !catalog.length && <p className="py-10 text-center text-sm text-muted-foreground">검색된 공개 상품이 없습니다.</p>}</div>{catalogTarget.bundleId && <footer className="flex items-center justify-between gap-2 border-t px-4 py-3 text-xs"><span>구성품 {active?.bundleComponents?.length ?? 0}종 추가</span><button className={buttonClass} onClick={closeCatalog}>구성 확인</button></footer>}</section></div>}
+    {catalogTarget && <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/35 p-4 pt-16" onClick={closeCatalog}><section role="dialog" aria-modal="true" aria-label={catalogTarget.bundleId ? '세트 구성품 검색' : 'B2B 상품 검색'} className="w-full max-w-3xl rounded-xl bg-background shadow-xl" onClick={(event) => event.stopPropagation()}><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">{catalogTarget.bundleId ? '세트 구성품 추가' : 'B2B 상품 추가'}</h2><p className="mt-1 text-xs text-muted-foreground">{catalogTarget.bundleId ? '옵션을 누르면 세트 구성품으로 바로 추가됩니다.' : '상품·옵션을 여러 개 체크한 뒤 한 번에 추가할 수 있습니다.'}</p></div><button aria-label="상품 검색 닫기" className="rounded p-2 hover:bg-muted" onClick={closeCatalog}><X className="size-4" /></button></header><form className="flex gap-2 p-4" onSubmit={(event) => { event.preventDefault(); void run('상품 검색 중', async () => { const response = await jsonRequest(`/catalog?q=${encodeURIComponent(query)}`); setCatalog(response.products); setSearched(true) }) }}><input autoFocus aria-label="B2B 상품명 또는 코드" className={`${inputClass} h-9 flex-1`} placeholder="상품명 또는 B2B 상품코드" value={query} onChange={(event) => setQuery(event.target.value)} /><button className={`${buttonClass} h-9`} disabled={!!busy || !query.trim()}><Search className="size-4" />검색</button></form><div className="max-h-[60vh] overflow-y-auto px-4 pb-4">{catalog.map((product) => <div key={product.code} className="flex gap-3 border-t py-3"><div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">{product.thumbnails[0] && <img className="size-full object-contain" src={product.thumbnails[0]} alt="" />}</div><div className="min-w-0 flex-1"><div className="font-medium">{product.name}</div><div className="mt-1 text-xs text-muted-foreground">코드 {product.code} · 도매가 {won(product.price)} · 상세 {product.detailImages.length}장</div><div className="mt-2 flex flex-wrap gap-1.5">{(product.options.length ? product.options : [{ name: '', addPrice: 0 }]).map((option) => { const optionLabel = option.name || '기본 상품'; const key = catalogOptionKey(product.code, option.name); const alreadyAdded = !catalogTarget.bundleId && draft.rows.some((row) => !row.bundleComponents && row.sourceCode === product.code && row.optionName === option.name); return catalogTarget.bundleId ? <button key={key} className={buttonClass} onClick={() => void addProduct(product, option.name)}><Plus className="size-3" />{optionLabel}{option.addPrice > 0 ? ` (+${option.addPrice.toLocaleString()}원)` : ''}</button> : <label key={key} className={`flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs ${alreadyAdded ? 'cursor-not-allowed bg-muted text-muted-foreground' : 'cursor-pointer hover:bg-muted'}`}><input aria-label={`${product.name} ${optionLabel} 선택`} type="checkbox" checked={selectedCatalogOptionKeys.has(key)} disabled={alreadyAdded} onChange={() => toggleCatalogSelection(product, option.name)} />{optionLabel}{option.addPrice > 0 ? ` (+${option.addPrice.toLocaleString()}원)` : ''}{alreadyAdded && <span className="text-[10px]">등록됨</span>}</label> })}</div></div></div>)}{searched && !catalog.length && <p className="py-10 text-center text-sm text-muted-foreground">검색된 공개 상품이 없습니다.</p>}</div><footer className="flex items-center justify-between gap-2 border-t px-4 py-3 text-xs">{catalogTarget.bundleId ? <><span>구성품 {active?.bundleComponents?.length ?? 0}종 추가</span><button className={buttonClass} onClick={closeCatalog}>구성 확인</button></> : <><span>선택한 상품·옵션 {catalogSelections.length}개</span><div className="flex gap-2"><button className={buttonClass} disabled={!catalogSelections.length} onClick={() => void addSelectedProducts()}>선택 상품 {catalogSelections.length}개 추가</button><button className={buttonClass} onClick={closeCatalog}>닫기</button></div></>}</footer></section></div>}
   </fieldset>
 }
 

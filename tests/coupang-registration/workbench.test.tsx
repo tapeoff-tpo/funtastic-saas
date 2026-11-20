@@ -8,7 +8,7 @@ const source = { code: '1471', name: '마미백 플러스', price: 15000, status
 
 describe('registration pricing workbench', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : init?.method === 'POST' && url.endsWith('/catalog') ? { products: [source] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
   })
   it('builds one registration row from searched components and saves their quantities', async () => {
     render(<CoupangRegistrationWorkbench />)
@@ -68,8 +68,9 @@ describe('registration pricing workbench', () => {
     const dialog = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
     fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '마미백' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
-    fireEvent.click(await within(dialog).findByRole('button', { name: '베이지' }))
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '상품 검색 닫기' })).toBeEnabled())
+    fireEvent.click(await within(dialog).findByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 1개 추가' }))
+    await screen.findByLabelText('마미백 플러스 베이지 원가')
     fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
     expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
     expect(screen.getByLabelText('마미백 플러스 베이지 도매가')).toHaveTextContent('15,000원')
@@ -108,5 +109,41 @@ describe('registration pricing workbench', () => {
       const body = JSON.parse(String(call![1]!.body))
       expect(body.draft.rows[0]).toMatchObject({ costPrice: 10000, priceMode: 'manual', manualSupplyPrice: 18000, saleMode: 'manual', manualSalePrice: 29000, supplyDeductionPercent: 10 })
     })
+  })
+
+  it('adds multiple selected products and options together without duplicating registered options', async () => {
+    const second = {
+      code: '1472', name: '루멘 철제 사이드 테이블', price: 20000, status: 'SELLING', thumbnails: [], detailImages: [],
+      options: [{ name: '블랙', addPrice: 1000 }], notice: [], costCandidates: [{ sku: '112362-0001', name: '루멘 철제 사이드 테이블', optionName: '블랙', costPrice: 12000 }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({
+      ok: true,
+      json: async () => {
+        if (String(url).endsWith('/drafts')) return { drafts: [] }
+        if (init?.method === 'POST' && String(url).endsWith('/catalog')) return { products: [source, second] }
+        return { products: [{ ...source, costCandidates: [] }, { ...second, costCandidates: [] }] }
+      },
+    })))
+
+    render(<CoupangRegistrationWorkbench />)
+    fireEvent.click(screen.getByRole('button', { name: '상품 추가' }))
+    const dialog = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
+    fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '테이블' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
+    fireEvent.click(await within(dialog).findByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(within(dialog).getByLabelText('루멘 철제 사이드 테이블 블랙 선택'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 2개 추가' }))
+
+    expect(await screen.findByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
+    expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
+    expect(within(dialog).getByText('선택한 상품·옵션 0개')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
+    fireEvent.click(screen.getByRole('button', { name: '상품 추가' }))
+    const reopened = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
+    fireEvent.change(within(reopened).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '테이블' } })
+    fireEvent.click(within(reopened).getByRole('button', { name: '검색' }))
+    expect(await within(reopened).findByLabelText('마미백 플러스 베이지 선택')).toBeDisabled()
+    expect(within(reopened).getByLabelText('루멘 철제 사이드 테이블 블랙 선택')).toBeDisabled()
   })
 })

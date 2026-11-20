@@ -4,12 +4,24 @@ import ExcelJS from 'exceljs'
 export const SAAS_CHINA_INVENTORY_EXCEL_SHEET = 'SaaS 중국재고'
 export const SAAS_CHINA_INVENTORY_EXCEL_HEADERS = [
   '중국창고',
+  '총 박스수량',
   '품목코드',
   '상품명',
   '옵션명',
   '현재고',
+  '가로',
+  '세로',
+  '높이',
+  '무게',
+  'cbm',
   '메모',
 ] as const
+
+const PACKAGING_SHEET = '포장정보'
+const PACKAGING_FIELDS = ['totalBoxCount', 'lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
+type PackagingField = typeof PACKAGING_FIELDS[number]
+type OptionalPackaging = Partial<Record<PackagingField, number | null>>
+const TEMPLATE_WIDTHS = [18, 16, 20, 38, 28, 14, 14, 14, 14, 16, 16, 36]
 
 export const SAAS_CHINA_INVENTORY_ID_HEADER = 'SaaS재고ID'
 
@@ -59,7 +71,7 @@ function resolveDefaultWarehouseCode(value: string | null | undefined) {
 
 export type SaasChinaInventoryWorkbookSource = 'saas_china_inventory' | 'inventory_status_report'
 
-export type SaasChinaInventoryExcelRow = {
+export type SaasChinaInventoryExcelRow = OptionalPackaging & {
   rowNumber: number
   inventoryId: string | null
   warehouseCode: string
@@ -101,7 +113,7 @@ export type SaasChinaInventoryExcelExportRow = {
   reservedQuantity?: number
   availableQuantity?: number
   lastReceivedAt?: Date | string | null
-}
+} & Partial<Record<PackagingField, number | string | null>>
 
 const HEADER_ALIASES = {
   inventoryId: [SAAS_CHINA_INVENTORY_ID_HEADER, '재고ID', 'inventoryid'],
@@ -111,6 +123,12 @@ const HEADER_ALIASES = {
   optionName: ['옵션명', '옵션', '규격', 'optionname'],
   itemCategory: ['품목구분', '품목 분류', 'itemcategory'],
   onHandQuantity: ['현재고', '재고수량', '재고', '수량', 'onhandquantity'],
+  totalBoxCount: ['총 박스수량', '총 박스수', '박스수량', 'totalboxcount'],
+  lengthCm: ['가로', '가로(cm)', 'lengthcm'],
+  widthCm: ['세로', '세로(cm)', 'widthcm'],
+  heightCm: ['높이', '높이(cm)', 'heightcm'],
+  grossWeightKg: ['무게', '무게(kg)', '총중량', '총중량(kg)', 'grossweightkg'],
+  manualCbm: ['cbm', '체적(m3)', 'manualcbm'],
   note: ['메모', '비고', 'note'],
 } as const
 
@@ -223,6 +241,7 @@ export async function parseSaasChinaInventoryWorkbook(
     })
   }
 
+  if (columns.source === 'inventory_status_report') applyPackagingSheet(workbook, rows, defaultWarehouseCode)
   addDuplicateIdentityErrors(rows)
   return {
     rows,
@@ -239,7 +258,7 @@ export async function exportSaasChinaInventoryTemplateWorkbook(options: { defaul
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()
-  const sheet = createSheet(workbook, SAAS_CHINA_INVENTORY_EXCEL_SHEET, SAAS_CHINA_INVENTORY_EXCEL_HEADERS, [18, 20, 38, 28, 14, 36])
+  const sheet = createSheet(workbook, SAAS_CHINA_INVENTORY_EXCEL_SHEET, SAAS_CHINA_INVENTORY_EXCEL_HEADERS, TEMPLATE_WIDTHS)
   const input = sheet.getRow(2)
   input.height = 20
   for (let column = 1; column <= SAAS_CHINA_INVENTORY_EXCEL_HEADERS.length; column += 1) {
@@ -248,7 +267,9 @@ export async function exportSaasChinaInventoryTemplateWorkbook(options: { defaul
     cell.fill = INPUT_FILL
   }
   input.getCell(1).value = defaultWarehouseCode
-  input.getCell(5).numFmt = '#,##0'
+  input.getCell(2).numFmt = '#,##0'
+  input.getCell(6).numFmt = '#,##0'
+  for (let column = 7; column <= 11; column += 1) input.getCell(column).numFmt = '0.######'
 
   const guide = workbook.addWorksheet('작성안내')
   guide.columns = [{ width: 22 }, { width: 90 }]
@@ -258,6 +279,10 @@ export async function exportSaasChinaInventoryTemplateWorkbook(options: { defaul
   guide.addRow(['상품명', '필수입니다. 새 파일에 있는 모든 재고 행을 새로 생성합니다.'])
   guide.addRow(['옵션명', '중국창고·품목코드·옵션명은 재고 식별키입니다. 새 목록에 필요한 행을 모두 입력하세요.'])
   guide.addRow(['현재고', '현재 활성 재고로 만들 수량을 1개 이상 입력합니다. 0 재고는 행에서 제외하세요.'])
+  guide.addRow(['총 박스수량', '선택 입력입니다. 0 이상의 정수를 입력하며, 비워도 저장됩니다.'])
+  guide.addRow(['가로·세로·높이', '선택 입력입니다. cm 단위로 입력하며 일부 또는 전부 비워도 저장됩니다.'])
+  guide.addRow(['무게', '선택 입력입니다. kg 단위로 입력하며 비워도 저장됩니다.'])
+  guide.addRow(['cbm', '선택 입력입니다. 직접 입력한 부피를 저장하며, 비워도 저장됩니다.'])
   guide.addRow(['메모', '새로 생성한 재고의 시작 이력에 남습니다.'])
   guide.addRow(['주의', '이 양식도 전체 교체용입니다. 반영하면 기존 활성 재고를 전부 목록에서 삭제하고, 이 파일의 행만 새 활성 재고로 생성합니다. 출고 예약 또는 발주 연동 재고가 있으면 전체 교체가 차단됩니다.'])
   guide.getRow(1).eachCell((cell) => {
@@ -340,6 +365,25 @@ export async function exportSaasChinaInventoryWorkbook(rows: readonly SaasChinaI
     ])
     styleDataRow(row, new Set<number>())
     for (let column = 5; column <= headers.length; column += 1) row.getCell(column).numFmt = '#,##0'
+  }
+  // The warehouse matrix aggregates identities across warehouses. Keep
+  // warehouse-specific packaging separately so a download/upload round trip
+  // never copies one warehouse's measurements to another warehouse's stock.
+  const packagingRows = activeRows.filter((row) => PACKAGING_FIELDS.some((field) => row[field] != null))
+  if (packagingRows.length) {
+    const packaging = createSheet(workbook, PACKAGING_SHEET, SAAS_CHINA_INVENTORY_EXCEL_HEADERS, TEMPLATE_WIDTHS)
+    for (const value of packagingRows) {
+      const numberAt = (field: PackagingField) => value[field] == null ? null : Number(value[field])
+      const row = packaging.addRow([
+        value.warehouseCode, numberAt('totalBoxCount'), value.sku, value.productName, value.optionName ?? '',
+        value.onHandQuantity, numberAt('lengthCm'), numberAt('widthCm'), numberAt('heightCm'),
+        numberAt('grossWeightKg'), numberAt('manualCbm'), '',
+      ])
+      styleDataRow(row, new Set([2, 7, 8, 9, 10, 11]))
+      row.getCell(2).numFmt = '#,##0'
+      row.getCell(6).numFmt = '#,##0'
+      for (let column = 7; column <= 11; column += 1) row.getCell(column).numFmt = '0.######'
+    }
   }
   return toBuffer(workbook)
 }
@@ -448,10 +492,12 @@ function headerColumns(row: ExcelJS.Row): HeaderColumns {
     && chinaWarehouseColumn > itemCategoryColumn
   ) {
     const reportWarehouseColumns: Array<{ warehouseCode: string; columnNumber: number }> = []
+    const packagingColumns = new Set(PACKAGING_FIELDS.map((field) => columns[field]))
     for (let columnNumber = itemCategoryColumn + 1; columnNumber <= row.cellCount; columnNumber += 1) {
       const warehouseCode = cellText(row.getCell(columnNumber).value).trim()
       if (
         !warehouseCode
+        || packagingColumns.has(columnNumber)
         || normalizeHeader(warehouseCode) === normalizeHeader('합계')
         || isSaasChinaInventoryExcludedWarehouseCode(warehouseCode)
       ) continue
@@ -573,6 +619,7 @@ function parseRow(
     : reportBlankQuantity
       ? 0
       : null
+  const packaging = parsePackaging(row, columns, errors)
 
   if (!sku) errors.push('품목코드를 입력해주세요.')
   if (columns.source === 'inventory_status_report' && !productName) {
@@ -600,9 +647,57 @@ function parseRow(
     itemCategory,
     optionKey,
     onHandQuantity,
+    ...packaging,
     ...(reportBlankQuantity ? { reportBlankQuantity: true } : {}),
     note,
     errors,
+  }
+}
+
+function parsePackaging(row: ExcelJS.Row, columns: HeaderColumns, errors: string[]): OptionalPackaging {
+  const result: OptionalPackaging = {}
+  const labels: Record<PackagingField, string> = {
+    totalBoxCount: '총 박스수량', lengthCm: '가로', widthCm: '세로', heightCm: '높이', grossWeightKg: '무게', manualCbm: 'CBM',
+  }
+  for (const field of PACKAGING_FIELDS) {
+    const column = columns[field]
+    if (!column) continue
+    const text = cellText(row.getCell(column).value).trim().replaceAll(',', '')
+    if (!text) { result[field] = null; continue }
+    const value = Number(text)
+    const isCount = field === 'totalBoxCount'
+    const maximum = isCount ? 2_147_483_647 : 999_999_999
+    if (!/^\d+(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0 || value > maximum || (isCount && !Number.isInteger(value))) {
+      errors.push(`${labels[field]}은(는) 0 이상의 ${isCount ? '정수' : '숫자'}로 입력해주세요.`)
+      result[field] = null
+    } else result[field] = isCount ? value : Math.round(value * 1_000_000) / 1_000_000
+  }
+  return result
+}
+
+function applyPackagingSheet(workbook: ExcelJS.Workbook, rows: SaasChinaInventoryExcelRow[], defaultWarehouseCode: string) {
+  const sheet = workbook.getWorksheet(PACKAGING_SHEET)
+  if (!sheet) return
+  const header = findHeaderRow(sheet)
+  if (!header) throw new Error('포장정보 시트에서 품목코드와 현재고 헤더를 찾을 수 없습니다.')
+  if (sheet.rowCount > header.rowNumber + MAX_DATA_ROWS) throw new Error('포장정보 시트는 1,000행 이하만 업로드할 수 있습니다.')
+  const byIdentity = new Map(rows.map((row) => [saasChinaInventoryIdentityKey(row), row]))
+  const seen = new Set<string>()
+  for (let rowNumber = header.rowNumber + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const raw = sheet.getRow(rowNumber)
+    if (isEmptyRow(raw)) continue
+    const parsed = parseRow(raw, rowNumber, header.columns, defaultWarehouseCode)
+    const key = saasChinaInventoryIdentityKey(parsed)
+    const target = byIdentity.get(key)
+    // The first sheet remains authoritative for active identities/quantities.
+    // Packaging for a removed warehouse row does not re-create inventory.
+    if (!target) continue
+    if (seen.has(key)) target.errors.push('포장정보 시트에 같은 중국창고·품목코드·옵션명이 중복되어 있습니다.')
+    seen.add(key)
+    target.errors.push(...parsed.errors.map((message) => `포장정보 ${rowNumber}행: ${message}`))
+    for (const field of PACKAGING_FIELDS) {
+      if (parsed[field] !== undefined) target[field] = parsed[field]
+    }
   }
 }
 

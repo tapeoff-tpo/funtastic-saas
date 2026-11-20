@@ -4,7 +4,7 @@ import { useRef, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { ChevronDown, Layers3 } from 'lucide-react'
-import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm, formatChinaOutboundBoxDimensions } from '@/lib/purchasing/china-outbound-dimensions'
+import { fillChinaOutboundDimensionInputs, calculateChinaOutboundBoxCbm, formatChinaOutboundCbm, formatChinaOutboundBoxDimensions } from '@/lib/purchasing/china-outbound-dimensions'
 import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from '@/lib/purchasing/china-outbound-pallet-weight'
 import { saveChinaOutboundPalletDimensionsAction, saveChinaOutboundPalletTareWeightAction } from '../saas-china-actions'
 import { PackageWeightEditor } from './outbound-package-editors'
@@ -106,7 +106,8 @@ function PalletMeasurements({ shipmentId, pallet, editable, isPending, renderWei
   const [dimensions, setDimensions] = useState(() => ({ ...initial, ...(guard.getDraft(draftId)?.snapshot as Partial<typeof initial> | undefined) }))
   const dirty = Object.keys(dimensions).some((key) => dimensions[key as keyof typeof initial] !== baseline[key as keyof typeof initial])
   async function save() {
-    const values = [dimensions.lengthCm, dimensions.widthCm, dimensions.heightCm]
+    const prepared = fillChinaOutboundDimensionInputs(dimensions)
+    const values = [prepared.lengthCm, prepared.widthCm, prepared.heightCm]
     const empty = values.every((value) => !value.trim())
     if (!empty && values.some((value) => !value.trim() || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) > 9_999_999.99)) { toast.error('파렛트 가로·세로·높이를 모두 입력해주세요.'); return false }
     const hasCbm = !!dimensions.manualCbm.trim()
@@ -116,17 +117,18 @@ function PalletMeasurements({ shipmentId, pallet, editable, isPending, renderWei
     }
     const clearsManualCbm = !hasCbm && !!baseline.manualCbm.trim() && dimensions.manualCbm !== baseline.manualCbm
     if (empty && !hasCbm && !clearsManualCbm) { toast.error('파렛트 규격이나 CBM을 입력해주세요.'); return false }
+    setDimensions(prepared)
     const result = await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: pallet.id,
-      lengthCm: empty ? null : Number(dimensions.lengthCm), widthCm: empty ? null : Number(dimensions.widthCm), heightCm: empty ? null : Number(dimensions.heightCm),
+      lengthCm: empty ? null : Number(prepared.lengthCm), widthCm: empty ? null : Number(prepared.widthCm), heightCm: empty ? null : Number(prepared.heightCm),
       ...(dimensions.manualCbm !== baseline.manualCbm ? { manualCbm: hasCbm ? Number(dimensions.manualCbm) : null } : {}),
     })
     if (!result.ok) { toast.error(result.error); return false }
-    setBaseline({ ...dimensions }); guard.setDraft(draftId, null); router.refresh(); toast.success('파렛트 실측 규격을 저장했습니다.'); return true
+    setBaseline({ ...prepared }); guard.setDraft(draftId, null); router.refresh(); toast.success('파렛트 규격을 저장했습니다.'); return true
   }
-  useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${pallet.palletNo} 실측 규격`, snapshot: dimensions, save, discard: () => setDimensions({ ...baseline }) } : null)
+  useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${pallet.palletNo} 규격`, snapshot: dimensions, save, discard: () => setDimensions({ ...baseline }) } : null)
   return <div className={`flex flex-1 items-center justify-between gap-4 ${editable ? 'min-w-max' : 'min-w-0 flex-wrap'}`}>
-    {renderWeight(editable ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">{([['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)']] as const).map(([key, label]) => <label key={key} className="inline-flex items-center gap-1 text-xs">{label}<input aria-label={`파렛트 ${pallet.palletNo} ${label}`} type="number" min="0.01" max="9999999.99" step="0.01" value={dimensions[key]} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [key]: event.target.value }))} className="h-8 w-16 rounded-md border bg-background px-2 text-sm" /></label>)}<label className="inline-flex items-center gap-1 text-xs">CBM(직접 입력)<input aria-label={`파렛트 ${pallet.palletNo} CBM(직접 입력)`} type="number" min="0.000001" max="999999999" step="0.000001" value={dimensions.manualCbm} placeholder={formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...dimensions, manualCbm: null })) ?? '자동 계산'} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, manualCbm: event.target.value }))} className="h-8 w-28 rounded-md border bg-background px-2 text-sm" /></label><button type="button" aria-label={`파렛트 ${pallet.palletNo} 규격 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 shrink-0 rounded-md border px-3 text-sm">규격 저장</button></div>
-      : <p className="text-sm">파렛트 실측 규격: {formatChinaOutboundBoxDimensions(pallet) ?? '미입력'}</p>)}
-    <div className="shrink-0 whitespace-nowrap rounded-lg border border-blue-100 bg-white px-3 py-2 text-right text-sm tabular-nums"><p className="font-semibold text-blue-950">최종 파렛트 CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(dimensions)) ?? '미입력'} CBM</p><p className="mt-1 text-xs text-slate-500">제품 적재 CBM: {formatChinaOutboundCbm(productCbm)} CBM</p></div>
+    {renderWeight(editable ? <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">{([['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)']] as const).map(([key, label]) => <label key={key} className="inline-flex items-center gap-1 text-xs">{label}<input aria-label={`파렛트 ${pallet.palletNo} ${label}`} type="number" min="0.01" max="9999999.99" step="0.01" value={dimensions[key]} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [key]: event.target.value }))} className="h-8 w-16 rounded-md border bg-background px-2 text-sm" /></label>)}<label className="inline-flex items-center gap-1 text-xs">CBM(직접 입력)<input aria-label={`파렛트 ${pallet.palletNo} CBM(직접 입력)`} type="number" min="0.000001" max="999999999" step="0.000001" value={dimensions.manualCbm} placeholder={formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...dimensions, manualCbm: null })) ?? '자동 계산'} disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, manualCbm: event.target.value }))} onBlur={() => setDimensions(fillChinaOutboundDimensionInputs)} className="h-8 w-28 rounded-md border bg-background px-2 text-sm" /></label><button type="button" aria-label={`파렛트 ${pallet.palletNo} 규격 저장`} disabled={isPending || pending || guard.busy || !dirty} onClick={() => start(async () => { await guard.runTask(save) })} className="h-8 shrink-0 rounded-md border px-3 text-sm">규격 저장</button></div>
+      : <p className="text-sm">파렛트 규격: {formatChinaOutboundBoxDimensions(pallet) ?? '미입력'}</p>)}
+    <div className="shrink-0 whitespace-nowrap rounded-lg border border-blue-100 bg-white px-3 py-2 text-right text-sm tabular-nums"><p className="font-semibold text-blue-950">최종 파렛트 CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(dimensions)) ?? '미입력'} CBM</p><p className="mt-1 text-xs text-slate-500">제품 적재 CBM: {formatChinaOutboundCbm(productCbm)} CBM</p>{editable && <p className="mt-1 max-w-60 whitespace-normal text-[10px] text-slate-500">CBM 입력 시 빈 치수는 같은 부피의 추정 치수로 채웁니다.</p>}</div>
   </div>
 }

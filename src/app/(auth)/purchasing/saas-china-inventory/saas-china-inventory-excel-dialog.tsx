@@ -16,6 +16,12 @@ type ImportPreviewRow = {
   optionName: string
   beforeQuantity: number | null
   afterQuantity: number | null
+  totalBoxCount: number | null
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  grossWeightKg: number | null
+  manualCbm: number | null
   message: string
 }
 
@@ -148,7 +154,7 @@ export function SaasChinaInventoryExcelDialog() {
             aria-modal="true"
             aria-labelledby="saas-inventory-excel-title"
             aria-describedby="saas-inventory-excel-description"
-            className="max-h-[calc(100vh-2rem)] w-full max-w-5xl overflow-y-auto rounded-lg bg-background p-5 shadow-xl"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-7xl overflow-y-auto rounded-lg bg-background p-5 shadow-xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -172,6 +178,7 @@ export function SaasChinaInventoryExcelDialog() {
               <p className="text-sm font-medium">엑셀 파일 선택</p>
               <p className="mt-1 text-xs text-muted-foreground">현재 목록 다운로드 파일을 기준으로 수정하면 창고별 수량과 품목구분을 그대로 유지할 수 있습니다.</p>
               <p className="mt-1 text-xs text-muted-foreground">새 파일을 반영하면 기존 활성 재고 전체가 삭제되고, 파일에 적힌 재고 행만 새로 생성됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리합니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">총 박스수량·가로·세로·높이·무게·CBM은 선택 입력이며, 빈칸이어도 저장할 수 있습니다. 치수는 cm, 무게는 kg으로 입력하세요.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />
@@ -261,7 +268,7 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[1200px] text-left text-sm">
           <thead className="bg-muted/60 text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">행</th>
@@ -270,6 +277,10 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
               <th className="px-3 py-2 font-medium">품목</th>
               <th className="px-3 py-2 text-right font-medium">기존 현재고</th>
               <th className="px-3 py-2 text-right font-medium">변경 현재고</th>
+              <th className="px-3 py-2 text-right font-medium">총 박스수량</th>
+              <th className="px-3 py-2 font-medium">가로 × 세로 × 높이(cm)</th>
+              <th className="px-3 py-2 text-right font-medium">무게(kg)</th>
+              <th className="px-3 py-2 text-right font-medium">CBM</th>
               <th className="px-3 py-2 font-medium">안내</th>
             </tr>
           </thead>
@@ -285,6 +296,10 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatQuantity(row.beforeQuantity)}</td>
                 <td className="px-3 py-2 text-right font-medium tabular-nums">{formatQuantity(row.afterQuantity)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatQuantity(row.totalBoxCount)}</td>
+                <td className="whitespace-nowrap px-3 py-2 tabular-nums">{formatDimensions(row)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatMeasurement(row.grossWeightKg)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatMeasurement(row.manualCbm)}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{row.message || '-'}</td>
               </tr>
             ))}
@@ -348,6 +363,12 @@ function normalizeRow(value: unknown): ImportPreviewRow | null {
     optionName: readString(record.optionName) || readString(nested.optionName) || readString(record.option),
     beforeQuantity: readNumber(record.beforeQuantity) ?? readNumber(record.currentQuantity) ?? readNumber(record.existingQuantity),
     afterQuantity: readNumber(record.afterQuantity) ?? readNumber(record.targetQuantity) ?? readNumber(record.quantity),
+    totalBoxCount: readNumber(record.totalBoxCount) ?? readNumber(nested.totalBoxCount),
+    lengthCm: readNumber(record.lengthCm) ?? readNumber(nested.lengthCm),
+    widthCm: readNumber(record.widthCm) ?? readNumber(nested.widthCm),
+    heightCm: readNumber(record.heightCm) ?? readNumber(nested.heightCm),
+    grossWeightKg: readNumber(record.grossWeightKg) ?? readNumber(nested.grossWeightKg),
+    manualCbm: readNumber(record.manualCbm) ?? readNumber(nested.manualCbm),
     message,
   }
 }
@@ -409,4 +430,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function formatQuantity(value: number | null) {
   return value === null ? '-' : value.toLocaleString('ko-KR')
+}
+
+function formatMeasurement(value: number | null) {
+  return value === null ? '-' : value.toLocaleString('ko-KR', { maximumFractionDigits: 6 })
+}
+
+function formatDimensions(row: Pick<ImportPreviewRow, 'lengthCm' | 'widthCm' | 'heightCm'>) {
+  if (row.lengthCm === null && row.widthCm === null && row.heightCm === null) return '-'
+  return [row.lengthCm, row.widthCm, row.heightCm].map(formatMeasurement).join(' × ')
 }

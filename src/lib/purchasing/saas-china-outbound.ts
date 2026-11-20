@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
-import { calculateChinaOutboundBoxCbm, dimensionNumber } from './china-outbound-dimensions'
+import { calculateChinaOutboundBoxCbm, dimensionNumber, estimateChinaOutboundBoxDimensions } from './china-outbound-dimensions'
 import { palletTareWeightKg } from './china-outbound-pallet-weight'
 import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-state'
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
@@ -130,6 +130,12 @@ export type SaasChinaInventoryWorkbookPreviewRow = {
   productName: string | null
   optionName: string | null
   itemCategory?: string | null
+  totalBoxCount?: number | null
+  lengthCm?: number | null
+  widthCm?: number | null
+  heightCm?: number | null
+  grossWeightKg?: number | null
+  manualCbm?: number | null
   beforeQuantity: number | null
   afterQuantity: number | null
   status: 'new' | 'changed' | 'unchanged' | 'removed' | 'invalid' | 'protected'
@@ -369,6 +375,13 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ADD COLUMN IF NOT EXISTS archived_at timestamptz;
   ALTER TABLE saas_china_inventory
     ADD COLUMN IF NOT EXISTS item_category varchar(100);
+  ALTER TABLE saas_china_inventory
+    ADD COLUMN IF NOT EXISTS total_box_count integer,
+    ADD COLUMN IF NOT EXISTS length_cm numeric(18, 6),
+    ADD COLUMN IF NOT EXISTS width_cm numeric(18, 6),
+    ADD COLUMN IF NOT EXISTS height_cm numeric(18, 6),
+    ADD COLUMN IF NOT EXISTS gross_weight_kg numeric(18, 6),
+    ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
   -- A replacement workbook creates a fresh active inventory generation.
   -- Retired rows stay for immutable movement/outbound/purchase references.
   DROP INDEX IF EXISTS saas_china_inventory_user_warehouse_sku_option;
@@ -1419,6 +1432,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
             itemCategory: row.itemCategory,
             optionKey: row.optionKey,
             optionName: row.optionName,
+            ...saasChinaInventoryWorkbookMeasurementValues(row),
             onHandQuantity: targetOnHand,
             reservedQuantity: 0,
             availableQuantity: targetOnHand,
@@ -1503,6 +1517,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
             itemCategory: row.itemCategory,
             optionKey: row.optionKey,
             optionName: row.optionName,
+            ...saasChinaInventoryWorkbookMeasurementValues(row),
             onHandQuantity: targetOnHand,
             reservedQuantity: 0,
             availableQuantity: targetOnHand,
@@ -1540,6 +1555,7 @@ export async function applySaasChinaInventoryWorkbook(input: {
         .set({
           productName: nextProductName,
           itemCategory: nextItemCategory,
+          ...saasChinaInventoryWorkbookMeasurementValues(row, existing),
           onHandQuantity: targetOnHand,
           availableQuantity: afterAvailable,
           archivedAt: null,
@@ -2792,7 +2808,18 @@ export async function saveChinaOutboundBoxesMeasurements(input: {
     if (boxes.length !== ids.length) throw new Error('선택한 박스를 현재 출고작업에서 찾을 수 없습니다. 새로고침 후 다시 선택해주세요.')
     const sealed = boxes.find((box) => box.status !== 'open')
     if (sealed) throw new Error(`${sealed.boxNo}은(는) 봉인되어 규격과 총중량을 수정할 수 없습니다.`)
-    const dimensionChanged = (box: ChinaOutboundBoxRow) => dimensions != null && (Number(box.lengthCm) !== dimensions.lengthCm || Number(box.widthCm) !== dimensions.widthCm || Number(box.heightCm) !== dimensions.heightCm)
+    const dimensionsByBoxId = new Map(boxes.map((box) => {
+      const estimate = dimensions == null && manualCbm != null
+        ? estimateChinaOutboundBoxDimensions({ ...box, manualCbm })
+        : null
+      return [box.id, dimensions ?? (estimate ? {
+        lengthCm: dimensionNumber(box.lengthCm), widthCm: dimensionNumber(box.widthCm), heightCm: dimensionNumber(box.heightCm), ...estimate,
+      } : null)] as const
+    }))
+    const dimensionChanged = (box: ChinaOutboundBoxRow) => {
+      const next = dimensionsByBoxId.get(box.id)
+      return next != null && (dimensionNumber(box.lengthCm) !== next.lengthCm || dimensionNumber(box.widthCm) !== next.widthCm || dimensionNumber(box.heightCm) !== next.heightCm)
+    }
     const cbmChanged = (box: ChinaOutboundBoxRow) => manualCbm !== undefined && dimensionNumber(box.manualCbm) !== manualCbm
     const changedBoxes = boxes.filter((box) => dimensionChanged(box) || cbmChanged(box) || (grossWeightKg !== undefined && dimensionNumber(box.grossWeightKg) !== grossWeightKg))
     const values = {
@@ -2804,7 +2831,16 @@ export async function saveChinaOutboundBoxesMeasurements(input: {
     const batchSize = 500
     for (let offset = 0; offset < changedBoxes.length; offset += batchSize) {
       const batch = changedBoxes.slice(offset, offset + batchSize)
-      const saved = await tx.update(chinaOutboundBoxes).set(values).where(and(
+      const inferredDimensionValues = dimensions == null && batch.some(dimensionChanged)
+        ? Object.fromEntries((['lengthCm', 'widthCm', 'heightCm'] as const).map((field) => [
+          field,
+          sql`CASE ${chinaOutboundBoxes.id} ${sql.join(batch.map((box) => {
+            const next = dimensionsByBoxId.get(box.id)?.[field]
+            return sql`WHEN ${box.id} THEN ${next == null ? box[field] : String(next)}::numeric`
+          }), sql` `)} ELSE ${chinaOutboundBoxes[field]} END`,
+        ]))
+        : {}
+      const saved = await tx.update(chinaOutboundBoxes).set({ ...values, ...inferredDimensionValues }).where(and(
         eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id), inArray(chinaOutboundBoxes.id, batch.map((box) => box.id)),
       )).returning({ id: chinaOutboundBoxes.id })
       if (saved.length !== batch.length) throw new Error('선택한 박스의 규격과 총중량을 저장하지 못했습니다.')
@@ -3984,6 +4020,9 @@ export function buildSaasChinaInventoryWorkbookPreview(
   ]))
   const inventoriesById = new Map(workspaceInventories.map((inventory) => [inventory.id, inventory]))
   const rows = input.rows.map(normalizeSaasChinaInventoryWorkbookRow)
+  const workbookRowsByIdentity = new Map(rows.map((row) => [
+    saasChinaInventoryWorkbookPlanKey(row.rowNumber, row.warehouseCode, row.sku, row.optionName), row,
+  ]))
   // A specified scope limits a replacement to those warehouses. Production
   // uploads omit this option and therefore replace every active warehouse.
   const snapshotWarehouseCodeList = input.fullSnapshot
@@ -4182,6 +4221,10 @@ export function buildSaasChinaInventoryWorkbookPreview(
 
     const productName = row.productName ?? existing.productName
     const itemCategory = row.itemCategory ?? existing.itemCategory
+    const measurements = saasChinaInventoryWorkbookMeasurements(row, existing)
+    const measurementsChanged = SAAS_CHINA_INVENTORY_MEASUREMENT_FIELDS.some((field) => (
+      measurements[field] !== inventoryMeasurementNumber(existing[field])
+    ))
     const restoresArchivedInventory = existing.archivedAt != null
     const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
       ? afterQuantity === existing.onHandQuantity
@@ -4200,6 +4243,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
       status: afterQuantity === existing.onHandQuantity
         && productName === existing.productName
         && itemCategory === existing.itemCategory
+        && !measurementsChanged
         && !restoresArchivedInventory
         ? 'unchanged'
         : 'changed',
@@ -4265,8 +4309,59 @@ export function buildSaasChinaInventoryWorkbookPreview(
       invalidCount: invalidRows.length,
       rowCount: previewRows.length,
     },
-    rows: previewRows,
+    rows: previewRows.map((plan) => {
+      const workbookRow = plan.row == null ? null : workbookRowsByIdentity.get(
+        saasChinaInventoryWorkbookPlanKey(plan.row, plan.warehouseCode, plan.sku, plan.optionName),
+      )
+      const existing = plan.inventoryId
+        ? inventoriesById.get(plan.inventoryId)
+        : inventoriesByIdentity.get(saasChinaInventoryIdentityKey(plan.warehouseCode, plan.sku, plan.optionName ?? ''))
+      const isReplacement = input.fullSnapshot
+        && (snapshotWarehouseCodes == null || snapshotWarehouseCodes.has(plan.warehouseCode))
+      return {
+        ...plan,
+        ...saasChinaInventoryWorkbookMeasurements(workbookRow, isReplacement && plan.row != null ? undefined : existing),
+      }
+    }),
     ...(errors.length > 0 ? { errors } : {}),
+  }
+}
+
+const SAAS_CHINA_INVENTORY_MEASUREMENT_FIELDS = ['totalBoxCount', 'lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
+
+type SaasChinaInventoryMeasurements = Record<(typeof SAAS_CHINA_INVENTORY_MEASUREMENT_FIELDS)[number], number | null>
+
+function inventoryMeasurementNumber(value: number | string | null | undefined) {
+  return value == null ? null : Number(value)
+}
+
+function saasChinaInventoryWorkbookMeasurements(
+  row: SaasChinaInventoryExcelRow | null | undefined,
+  existing?: typeof saasChinaInventory.$inferSelect,
+): SaasChinaInventoryMeasurements {
+  return {
+    totalBoxCount: row?.totalBoxCount ?? inventoryMeasurementNumber(existing?.totalBoxCount),
+    lengthCm: row?.lengthCm ?? inventoryMeasurementNumber(existing?.lengthCm),
+    widthCm: row?.widthCm ?? inventoryMeasurementNumber(existing?.widthCm),
+    heightCm: row?.heightCm ?? inventoryMeasurementNumber(existing?.heightCm),
+    grossWeightKg: row?.grossWeightKg ?? inventoryMeasurementNumber(existing?.grossWeightKg),
+    manualCbm: row?.manualCbm ?? inventoryMeasurementNumber(existing?.manualCbm),
+  }
+}
+
+function saasChinaInventoryWorkbookMeasurementValues(
+  row: SaasChinaInventoryExcelRow,
+  existing?: typeof saasChinaInventory.$inferSelect,
+) {
+  const values = saasChinaInventoryWorkbookMeasurements(row, existing)
+  const decimalValue = (value: number | null) => value == null ? null : String(Math.round(value * 1_000_000) / 1_000_000)
+  return {
+    totalBoxCount: values.totalBoxCount,
+    lengthCm: decimalValue(values.lengthCm),
+    widthCm: decimalValue(values.widthCm),
+    heightCm: decimalValue(values.heightCm),
+    grossWeightKg: decimalValue(values.grossWeightKg),
+    manualCbm: decimalValue(values.manualCbm),
   }
 }
 
@@ -4313,6 +4408,16 @@ function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventory
   if (row.note && row.note.length > 2_000) errors.push('메모는 2,000자 이하로 입력해주세요.')
   if (row.onHandQuantity != null && (!Number.isSafeInteger(row.onHandQuantity) || row.onHandQuantity < 0)) {
     errors.push('현재고는 0 이상의 정수로 입력해주세요.')
+  }
+  if (row.totalBoxCount != null && (!Number.isSafeInteger(row.totalBoxCount) || row.totalBoxCount < 0 || row.totalBoxCount > 2_147_483_647)) {
+    errors.push('총 박스수량은 0 이상 2,147,483,647 이하의 정수로 입력해주세요.')
+  }
+  const measurementLabels = { lengthCm: '가로', widthCm: '세로', heightCm: '높이', grossWeightKg: '무게', manualCbm: 'CBM' } as const
+  for (const field of ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const) {
+    const value = row[field]
+    if (value != null && (!Number.isFinite(value) || value < 0 || value > 999_999_999)) {
+      errors.push(`${measurementLabels[field]}는 0 이상 999,999,999 이하의 숫자로 입력해주세요.`)
+    }
   }
   return errors
 }

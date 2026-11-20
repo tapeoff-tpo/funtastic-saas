@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateChinaOutboundBoxCbm,
+  estimateChinaOutboundBoxDimensions,
+  fillChinaOutboundDimensionInputs,
   formatChinaOutboundBoxDimensions,
   formatChinaOutboundCbm,
 } from './china-outbound-dimensions'
 
 describe('China outbound box dimensions', () => {
+  it('estimates equal missing sides from manual CBM and keeps the exact CBM authoritative', () => {
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.125 })).toEqual({ lengthCm: 50, widthCm: 50, heightCm: 50 })
+    const filled = fillChinaOutboundDimensionInputs({ lengthCm: '', widthCm: '', heightCm: '', manualCbm: '0.2' })
+    expect(filled).toEqual({ lengthCm: '58.48', widthCm: '58.48', heightCm: '58.48', manualCbm: '0.2' })
+    expect(calculateChinaOutboundBoxCbm(filled)).toBe(0.2)
+  })
+
+  it('preserves entered sides and estimates only the remaining volume', () => {
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.125, lengthCm: 50 })).toEqual({ widthCm: 50, heightCm: 50 })
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.06, lengthCm: 50, widthCm: 40 })).toEqual({ heightCm: 30 })
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.125, lengthCm: 10, widthCm: 20, heightCm: 30 })).toBeNull()
+    expect(fillChinaOutboundDimensionInputs({ manualCbm: '0.06', lengthCm: '50.00', widthCm: '40', heightCm: '' })).toEqual({ manualCbm: '0.06', lengthCm: '50.00', widthCm: '40', heightCm: '30' })
+  })
+
+  it('leaves invalid CBM or invalid entered dimensions for validation instead of inventing a value', () => {
+    for (const manualCbm of [null, 0, -1, 0.0000001, 1_000_000_000, Number.NaN]) expect(estimateChinaOutboundBoxDimensions({ manualCbm })).toBeNull()
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.125, lengthCm: -1 })).toBeNull()
+    expect(estimateChinaOutboundBoxDimensions({ manualCbm: 0.125, lengthCm: 'invalid' })).toBeNull()
+  })
+
   it('calculates CBM from centimeter dimensions', () => {
     expect(calculateChinaOutboundBoxCbm({ lengthCm: 50, widthCm: 40, heightCm: 30 })).toBe(0.06)
     expect(formatChinaOutboundBoxDimensions({ lengthCm: '50', widthCm: '40', heightCm: '30' })).toBe('50 × 40 × 30 cm')

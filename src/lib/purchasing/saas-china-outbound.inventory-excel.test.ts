@@ -22,6 +22,12 @@ function inventory(overrides: Partial<Inventory> = {}): Inventory {
     itemCategory: null,
     optionKey: '',
     optionName: null,
+    totalBoxCount: null,
+    lengthCm: null,
+    widthCm: null,
+    heightCm: null,
+    grossWeightKg: null,
+    manualCbm: null,
     onHandQuantity: 10,
     reservedQuantity: 4,
     availableQuantity: 6,
@@ -68,6 +74,42 @@ function preview(
 }
 
 describe('SaaS China inventory Excel planner', () => {
+  it('previews an optional packaging-only change without changing stock', () => {
+    const result = preview([row({ onHandQuantity: 10, totalBoxCount: 3, grossWeightKg: 7.25, manualCbm: 0.125 })])
+    expect(result.summary.changedCount).toBe(1)
+    expect(result.rows[0]).toMatchObject({
+      status: 'changed', beforeQuantity: 10, afterQuantity: 10,
+      totalBoxCount: 3, grossWeightKg: 7.25, manualCbm: 0.125,
+      lengthCm: null, widthCm: null, heightCm: null,
+    })
+  })
+
+  it('accepts blank packaging cells and preserves existing partial-update measurements', () => {
+    const result = preview([row({ onHandQuantity: 10, totalBoxCount: null, grossWeightKg: null, manualCbm: null })], [inventory({ totalBoxCount: 2, lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '8.5', manualCbm: '0.006' })])
+    expect(result.summary.invalidCount).toBe(0)
+    expect(result.rows[0]).toMatchObject({ status: 'unchanged', totalBoxCount: 2, lengthCm: 30, widthCm: 20, heightCm: 10, grossWeightKg: 8.5, manualCbm: 0.006 })
+  })
+
+  it('keeps optional blanks null in a fresh replacement even if the old identity had measurements', () => {
+    const result = preview([row({ productName: '상품 A', onHandQuantity: 10 })], [inventory({ reservedQuantity: 0, availableQuantity: 10, totalBoxCount: 2, lengthCm: '30', grossWeightKg: '8.5', manualCbm: '0.006' })], new Map(), { fullSnapshot: true })
+    expect(result.rows[0]).toMatchObject({ status: 'new', totalBoxCount: null, lengthCm: null, grossWeightKg: null, manualCbm: null })
+  })
+
+  it.each([
+    { totalBoxCount: -1 }, { totalBoxCount: 1.5 }, { totalBoxCount: 2_147_483_648 },
+    { lengthCm: -1 }, { widthCm: Number.NaN }, { heightCm: Number.POSITIVE_INFINITY },
+    { grossWeightKg: 1_000_000_000 }, { manualCbm: -0.01 },
+  ])('rejects malformed optional packaging values before apply (%j)', (values) => {
+    const result = preview([row({ onHandQuantity: 10, ...values })])
+    expect(result.rows[0]?.status).toBe('invalid')
+  })
+
+  it('accepts explicit zero packaging quantities and measurements', () => {
+    const result = preview([row({ onHandQuantity: 10, totalBoxCount: 0, lengthCm: 0, widthCm: 0, heightCm: 0, grossWeightKg: 0, manualCbm: 0 })])
+    expect(result.summary.invalidCount).toBe(0)
+    expect(result.rows[0]).toMatchObject({ totalBoxCount: 0, lengthCm: 0, widthCm: 0, heightCm: 0, grossWeightKg: 0, manualCbm: 0 })
+  })
+
   it('treats current stock as an absolute target and preserves a blank existing product name', () => {
     const result = preview([row({ onHandQuantity: 7, productName: null })])
 

@@ -12,7 +12,7 @@ import {
   SAAS_CHINA_INVENTORY_STATUS_WAREHOUSE_CODES,
 } from './saas-china-inventory-excel'
 
-async function workbookBuffer(rows: Array<Array<string | number | null | undefined>>, headers = [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]) {
+async function workbookBuffer(rows: Array<Array<string | number | null | undefined>>, headers: string[] = ['중국창고', '품목코드', '상품명', '옵션명', '현재고', '메모']) {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('재고')
   sheet.addRow(headers)
@@ -21,6 +21,54 @@ async function workbookBuffer(rows: Array<Array<string | number | null | undefin
 }
 
 describe('SaaS China inventory Excel workbook', () => {
+  it('matches the supplied expanded template and accepts blank or partial packaging measurements', async () => {
+    expect([...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]).toEqual(['중국창고', '총 박스수량', '품목코드', '상품명', '옵션명', '현재고', '가로', '세로', '높이', '무게', 'cbm', '메모'])
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', '', 'SKU-BLANK', '측정 전 상품', '', 10, '', '', '', '', '', '미측정'],
+      ['중국창고', 2, 'SKU-WEIGHT', '무게만 측정', '', 12, '', '', '', 4.5, 0.123456, ''],
+      ['중국창고', 0, 'SKU-PARTIAL', '일부 측정', '', 3, 30, '', 20, 0, 0, ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows[0]).toMatchObject({ sku: 'SKU-BLANK', totalBoxCount: null, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null })
+    expect(parsed.rows[1]).toMatchObject({ totalBoxCount: 2, grossWeightKg: 4.5, manualCbm: 0.123456, lengthCm: null, widthCm: null, heightCm: null })
+    expect(parsed.rows[2]).toMatchObject({ totalBoxCount: 0, lengthCm: 30, widthCm: null, heightCm: 20, grossWeightKg: 0, manualCbm: 0 })
+  })
+
+  it('blocks malformed optional measurements and supports aliases with explicit units', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1.5, 'SKU-BAD', '오류 상품', '', 10, -1, '측정 전', 1_000_000_000, 3, 'NaN', ''],
+      ['중국창고', 2, 'SKU-OK', '정상 상품', '', 10, 10, 20, 30, 4.5678912, 0.006, ''],
+    ], ['중국창고', '총박스수량', '상품코드', '상품명', '옵션명', '현재고', '가로(cm)', '세로(cm)', '높이(cm)', '무게(kg)', 'CBM', '메모']))
+    expect(parsed.rows[0].errors).toHaveLength(5)
+    expect(parsed.rows[1]).toMatchObject({ totalBoxCount: 2, lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 4.567891, manualCbm: 0.006, errors: [] })
+  })
+
+  it('retains warehouse-specific packaging on a matrix download/upload round trip', async () => {
+    const current = await exportSaasChinaInventoryWorkbook([
+      { id: 'one', warehouseCode: '중국창고', sku: 'SKU-1', productName: '상품', optionName: '블랙', itemCategory: '[상품]', onHandQuantity: 10, totalBoxCount: 2, lengthCm: '30', widthCm: null, heightCm: null, grossWeightKg: '4.5', manualCbm: '0.08' },
+      { id: 'two', warehouseCode: '대량창고', sku: 'SKU-1', productName: '상품', optionName: '블랙', itemCategory: '[상품]', onHandQuantity: 20, totalBoxCount: 4, grossWeightKg: '12', manualCbm: '0.2' },
+    ])
+    const parsed = await parseSaasChinaInventoryWorkbook(current)
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ warehouseCode: '중국창고', onHandQuantity: 10, totalBoxCount: 2, lengthCm: 30, widthCm: null, grossWeightKg: 4.5, manualCbm: 0.08 }),
+      expect.objectContaining({ warehouseCode: '대량창고', onHandQuantity: 20, totalBoxCount: 4, lengthCm: null, grossWeightKg: 12, manualCbm: 0.2 }),
+    ]))
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(current as unknown as ExcelJS.Buffer)
+    wb.getWorksheet('포장정보')!.getCell('J2').value = -5
+    const invalid = await parseSaasChinaInventoryWorkbook(await wb.xlsx.writeBuffer())
+    expect(invalid.errors.some((error) => error.message.includes('포장정보') && error.message.includes('무게'))).toBe(true)
+  })
+
+  it('never interprets recognized measurement headers as stock warehouses in a matrix', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['SKU-1', '상품', '', '[상품]', 10, 10, 3, 20, 30, 40, 5, 0.024],
+    ], ['품목코드', '품목명', '규격', '품목구분', '합계', '중국창고', '총 박스수량', '가로', '세로', '높이', '무게', 'CBM']))
+    expect(parsed.rows).toHaveLength(1)
+    expect(parsed.rows[0]).toMatchObject({ warehouseCode: '중국창고', onHandQuantity: 10 })
+  })
+
   it('omits blank and zero generic-template quantities as no inventory while defaulting the warehouse', async () => {
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
       ['', 'SKU-1', '상품 A', '', '', '이름만 수정'],

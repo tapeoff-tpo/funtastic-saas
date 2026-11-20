@@ -169,7 +169,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
       userId: workspaceUserId,
       createdBy: 'operator-a',
       rows: [
-        excelRow({ rowNumber: 2, warehouseCode: '중국창고', productName: '상품 A', itemCategory: '[상품]', onHandQuantity: 12 }),
+        excelRow({ rowNumber: 2, warehouseCode: '중국창고', productName: '상품 A', itemCategory: '[상품]', onHandQuantity: 12, totalBoxCount: 4, lengthCm: 30, widthCm: 20, heightCm: 10, grossWeightKg: 18.5, manualCbm: 0.024 }),
         excelRow({ rowNumber: 2, warehouseCode: '대량', productName: '대량 상품', itemCategory: '[상품]', onHandQuantity: 4 }),
       ],
       sourceLabel: '재고현황.xlsx',
@@ -189,6 +189,8 @@ describe('applySaasChinaInventoryWorkbook', () => {
         onHandQuantity: 12,
         reservedQuantity: 0,
         availableQuantity: 12,
+        totalBoxCount: 4,
+        lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '18.5', manualCbm: '0.024',
       }),
       expect.objectContaining({
         warehouseCode: '대량',
@@ -198,6 +200,8 @@ describe('applySaasChinaInventoryWorkbook', () => {
         onHandQuantity: 4,
         reservedQuantity: 0,
         availableQuantity: 4,
+        totalBoxCount: null,
+        lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null,
       }),
     ])
     expect(movementValues).toHaveBeenCalledTimes(2)
@@ -237,7 +241,7 @@ describe('applySaasChinaInventoryWorkbook', () => {
   })
 
   it('keeps a partial workbook update as an in-place adjustment', async () => {
-    const existing = { ...inventory(), reservedQuantity: 0, availableQuantity: 10 }
+    const existing = { ...inventory(), reservedQuantity: 0, availableQuantity: 10, totalBoxCount: 3, lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '9.5', manualCbm: '0.018' }
     const tx = transaction([existing])
     const updateValues: Array<Record<string, unknown>> = []
     const movementValues = vi.fn().mockResolvedValue(undefined)
@@ -268,6 +272,8 @@ describe('applySaasChinaInventoryWorkbook', () => {
       onHandQuantity: 12,
       availableQuantity: 12,
       archivedAt: null,
+      totalBoxCount: 3,
+      lengthCm: '30', widthCm: '20', heightCm: '10', grossWeightKg: '9.5', manualCbm: '0.018',
     })])
     expect(movementValues).toHaveBeenCalledWith(expect.objectContaining({
       inventoryId,
@@ -275,5 +281,33 @@ describe('applySaasChinaInventoryWorkbook', () => {
       onHandDelta: 2,
       onHandAfter: 12,
     }))
+  })
+
+  it('saves a measurement-only update with blank dimensions and no inventory movement', async () => {
+    const existing = inventory({ reservedQuantity: 0, availableQuantity: 10 })
+    const tx = transaction([existing])
+    const updateValues: Array<Record<string, unknown>> = []
+    tx.update.mockImplementation(() => ({ set: (values: Record<string, unknown>) => {
+      updateValues.push(values)
+      return { where: () => ({ returning: async () => [{ ...existing, ...values }] }) }
+    } }))
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId, createdBy: 'operator-a',
+      rows: [excelRow({ onHandQuantity: 10, totalBoxCount: 2, grossWeightKg: 6.1234567, manualCbm: 0.125 })],
+    })).resolves.toMatchObject({ updatedCount: 1, createdCount: 0 })
+    expect(updateValues[0]).toMatchObject({ totalBoxCount: 2, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: '6.123457', manualCbm: '0.125', onHandQuantity: 10 })
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid packaging fields before retiring a snapshot', async () => {
+    const tx = transaction([inventory({ reservedQuantity: 0, availableQuantity: 10 })])
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await expect(applySaasChinaInventoryWorkbook({
+      userId: workspaceUserId, createdBy: 'operator-a', fullSnapshot: true,
+      rows: [excelRow({ productName: '상품 A', manualCbm: Number.POSITIVE_INFINITY })],
+    })).rejects.toThrow('CBM')
+    expect(tx.update).not.toHaveBeenCalled()
+    expect(tx.insert).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SaasChinaInventoryExcelDialog } from './saas-china-inventory-excel-dialog'
 
@@ -166,5 +166,43 @@ describe('SaasChinaInventoryExcelDialog', () => {
     expect(screen.getByText('새 엑셀 반영을 위해 기존 활성 재고를 삭제합니다.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeEnabled()
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows optional box measurements precisely and allows applying rows with all measurement cells blank', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response({
+        fullSnapshot: true,
+        preview: {
+          summary: { newCount: 2, invalidCount: 0 },
+          rows: [
+            { row: 2, status: 'new', warehouseCode: '중국창고', sku: 'MEASURED-01', productName: '측정 상품', afterQuantity: 30, totalBoxCount: 3, lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: '12.3456', manualCbm: 0.000001 },
+            { row: 3, status: 'new', warehouseCode: '중국창고', sku: 'BLANK-01', productName: '미측정 상품', afterQuantity: 20, totalBoxCount: null, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null, manualCbm: null },
+          ],
+          errors: [],
+        },
+      }))
+      .mockResolvedValueOnce(response({ result: { createdCount: 2, archivedCount: 0 } }))
+
+    render(<SaasChinaInventoryExcelDialog />)
+    fireEvent.click(screen.getByRole('button', { name: '엑셀로 재고 변경' }))
+    expect(screen.getByText('총 박스수량·가로·세로·높이·무게·CBM은 선택 입력이며, 빈칸이어도 저장할 수 있습니다. 치수는 cm, 무게는 kg으로 입력하세요.')).toBeInTheDocument()
+    selectWorkbook()
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
+
+    const measuredRow = (await screen.findByText('측정 상품')).closest('tr')!
+    const blankRow = screen.getByText('미측정 상품').closest('tr')!
+    expect(within(measuredRow).getAllByRole('cell').slice(6, 10).map((cell) => cell.textContent)).toEqual(['3', '50 × 40 × 30', '12.3456', '0.000001'])
+    expect(within(blankRow).getAllByRole('cell').slice(6, 10).map((cell) => cell.textContent)).toEqual(['-', '-', '-', '-'])
+    expect(screen.getByRole('columnheader', { name: '총 박스수량' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '가로 × 세로 × 높이(cm)' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '무게(kg)' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'CBM' })).toBeInTheDocument()
+
+    const apply = screen.getByRole('button', { name: '검토 결과 반영' })
+    expect(apply).toBeEnabled()
+    fireEvent.click(apply)
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(toastError).not.toHaveBeenCalled()
   })
 })

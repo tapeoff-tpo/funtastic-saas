@@ -8,7 +8,7 @@ import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-out
 import { applyChinaShipmentBoxSplitSavedState } from './china-shipment-save-state'
 import { Dialog } from '@base-ui/react/dialog'
 import { toast } from 'sonner'
-import { calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
+import { fillChinaOutboundDimensionInputs, calculateChinaOutboundBoxCbm, formatChinaOutboundBoxDimensions, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import { CHINA_SHIPMENT_PERIODS, resolveChinaShipmentPeriod, withChinaShipmentPeriod, type ChinaShipmentPeriod } from '@/lib/purchasing/china-shipment-period'
 import { useChinaWorkNavigation } from './china-work-navigation'
@@ -1084,7 +1084,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     const count = drafts.filter((draft) => draft.boxNo.trim()).length
     return count ? String(count) : ''
   })
-  const firstBox = drafts[0]
+  const firstBox = drafts[0] ? fillChinaOutboundDimensionInputs(drafts[0]) : undefined
   const firstDimensions = firstBox ? [firstBox.lengthCm, firstBox.widthCm, firstBox.heightCm] : []
   const firstManualCbmValid = !!firstBox?.manualCbm.trim() && Number.isFinite(Number(firstBox.manualCbm)) && Number(firstBox.manualCbm) >= 0.000001 && Number(firstBox.manualCbm) <= 999_999_999
   const canApplyFirstBoxDimensions = firstBox && (firstDimensions.every((value) => !value.trim()) || firstDimensions.every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
@@ -1134,7 +1134,8 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
       toast.error('CBM은 0.000001 이상, 999,999,999 이하로 입력해주세요.')
       return false
     }
-    const nextAllocations = drafts
+    const preparedDrafts = drafts.map(fillChinaOutboundDimensionInputs)
+    const nextAllocations = preparedDrafts
       .filter((draft) => [draft.boxNo, draft.quantity, draft.lengthCm, draft.widthCm, draft.heightCm, draft.manualCbm, draft.grossWeightKg].some((value) => value.trim()))
       .map((draft) => {
         const previous = initialDrafts.find((candidate) => candidate.key === draft.key)
@@ -1156,6 +1157,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
           ...(moved || draft.grossWeightKg !== (previous?.grossWeightKg ?? '') ? { grossWeightKg: optionalNumber(draft.grossWeightKg) } : {}),
         }
       })
+    setDrafts(preparedDrafts)
     const hasBoxSplitStatusChange = currentBoxSplitStatus !== initialBoxSplitStatus
     const result = await saveChinaOutboundItemBoxSplitsAction({
       shipmentId,
@@ -1173,7 +1175,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
     const persistedDrafts = result.savedState ? result.savedState.boxItems.flatMap((allocation) => {
       const box = savedBoxes.get(allocation.boxId)
       return box && allocation.shipmentItemId === item.id ? [allocationDraft(allocation, box)] : []
-    }) : drafts
+    }) : preparedDrafts
     setDrafts(cloneBoxSplitDrafts(persistedDrafts))
     setInitialDrafts(cloneBoxSplitDrafts(persistedDrafts))
     setInitialBoxSplitStatus(currentBoxSplitStatus)
@@ -1239,7 +1241,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
         </button>}
       </div>
       <p className="border-b px-3 py-2 text-xs text-muted-foreground">혼합박스는 품목별 중량을 합산하고 가장 큰 부피의 규격을 적용합니다. 품목별 중량을 모두 입력해주세요. 박스 전체 실측값은 2단계에서 수정할 수 있습니다.</p>
-      <p className="border-b px-3 py-2 text-xs text-muted-foreground">CBM을 직접 입력하면 그 값을 우선 사용합니다. 비워두면 규격으로 자동 계산하며, 실제 치수는 임의로 채우지 않습니다.</p>
+      <p className="border-b px-3 py-2 text-xs text-muted-foreground">CBM을 직접 입력하면 빈 치수는 같은 부피의 추정 치수로 채웁니다. 입력한 치수는 유지하며, CBM을 비우면 규격으로 자동 계산합니다.</p>
       <div className="overflow-x-auto">
         <table className="min-w-[1000px] w-full text-sm">
           <thead className="bg-muted/10 text-xs text-muted-foreground">
@@ -1335,7 +1337,7 @@ function ProductBoxSplitEditor({ shipmentId, item, allocations, allBoxes = [], a
                       placeholder="미입력"
                     />
                   </td>
-                  <td className="px-3 py-2"><input aria-label={`박스 ${draft.boxNo} CBM(직접 입력)`} type="number" min="0.000001" max="999999999" step="0.000001" value={draft.manualCbm} onChange={(event) => patchDraft(draft.key, { manualCbm: event.target.value })} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder={formatChinaOutboundCbm(cbm) ?? '직접 입력'} /></td>
+                  <td className="px-3 py-2"><input aria-label={`박스 ${draft.boxNo} CBM(직접 입력)`} type="number" min="0.000001" max="999999999" step="0.000001" value={draft.manualCbm} onChange={(event) => patchDraft(draft.key, { manualCbm: event.target.value })} onBlur={() => { const filled = fillChinaOutboundDimensionInputs(draft); patchDraft(draft.key, { lengthCm: filled.lengthCm, widthCm: filled.widthCm, heightCm: filled.heightCm }) }} disabled={!editable || isPending} className={`${compactInputClass} text-right tabular-nums`} placeholder={formatChinaOutboundCbm(cbm) ?? '직접 입력'} /></td>
                   <td className="px-3 py-2 text-center">
                     <button
                       type="button"

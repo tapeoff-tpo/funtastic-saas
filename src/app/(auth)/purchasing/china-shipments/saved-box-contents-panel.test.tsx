@@ -121,7 +121,7 @@ describe('saved box list', () => {
     expect(saveDimensions).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 45, widthCm: 20, heightCm: 30 })
   })
 
-  it('saves CBM without inventing dimensions or weight and keeps a failed manual entry for retry', async () => {
+  it('estimates missing dimensions from CBM without inventing weight and keeps a failed entry for retry', async () => {
     const unmeasured = box('1')
     Object.assign(unmeasured.box, { lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: null })
     saveDimensions.mockResolvedValueOnce({ ok: false, error: '저장 실패' })
@@ -132,11 +132,11 @@ describe('saved box list', () => {
     fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('저장 실패'))
     expect(cbmInput).toHaveValue(0.123456)
-    expect(screen.getByRole('spinbutton', { name: '박스 1 가로(cm)' })).toHaveValue(null)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 가로(cm)' })).toHaveValue(49.79)
     expect(screen.getByRole('spinbutton', { name: '박스 1 총중량(kg)' })).toHaveValue(null)
     fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
     await waitFor(() => expect(saveDimensions).toHaveBeenCalledTimes(2))
-    expect(saveDimensions).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxId: '1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.123456 })
+    expect(saveDimensions).toHaveBeenLastCalledWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 49.79, widthCm: 49.79, heightCm: 49.79, manualCbm: 0.123456 })
     expect(saveWeight).not.toHaveBeenCalled()
   })
 
@@ -151,6 +151,21 @@ describe('saved box list', () => {
     fireEvent.change(cbmInput, { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
     await waitFor(() => expect(saveDimensions).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 10, widthCm: 20, heightCm: 30, manualCbm: null }))
+  })
+
+  it('fills only missing dimensions on CBM blur and preserves entered measurements', async () => {
+    const partial = box('1')
+    Object.assign(partial.box, { lengthCm: 50, widthCm: 40, heightCm: null })
+    renderPanel([partial])
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 펼치기' }))
+    const cbm = screen.getByRole('spinbutton', { name: '박스 1 CBM(직접 입력)' })
+    fireEvent.change(cbm, { target: { value: '0.06' } })
+    fireEvent.blur(cbm)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 가로(cm)' })).toHaveValue(50)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 세로(cm)' })).toHaveValue(40)
+    expect(screen.getByRole('spinbutton', { name: '박스 1 높이(cm)' })).toHaveValue(30)
+    fireEvent.click(screen.getByRole('button', { name: '박스 1 규격 저장' }))
+    await waitFor(() => expect(saveDimensions).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'shipment', boxId: '1', lengthCm: 50, widthCm: 40, heightCm: 30, manualCbm: 0.06 }))
   })
 
   it('applies dimensions to selected editable boxes in one request and omits a blank weight', async () => {

@@ -453,16 +453,33 @@ describe('China outbound box and pallet completion', () => {
     expect(pallets[0]).toMatchObject({ manualCbm: null, lengthCm: null, widthCm: null, heightCm: null })
   })
 
-  it('bulk applies and clears only CBM, preserving box dimensions, weights and component measurements', async () => {
+  it('bulk applies CBM and fills missing dimensions while preserving measured dimensions, weights and component measurements', async () => {
     const before = JSON.stringify(boxItems)
     boxes[0]!.grossWeightKg = '7'
     await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', 'box-2'], manualCbm: 0.4567894 })
     expect(boxes[0]).toMatchObject({ manualCbm: '0.456789', grossWeightKg: '7', lengthCm: '10', widthCm: '20', heightCm: '30' })
-    expect(boxes[1]).toMatchObject({ manualCbm: '0.456789', lengthCm: null, widthCm: null, heightCm: null })
+    expect(boxes[1]).toMatchObject({ manualCbm: '0.456789', lengthCm: expect.any(String), widthCm: expect.any(String), heightCm: expect.any(String) })
+    expect(Number(boxes[1]!.lengthCm)).toBeGreaterThan(0)
+    expect(Number(boxes[1]!.lengthCm) * Number(boxes[1]!.widthCm) * Number(boxes[1]!.heightCm) / 1_000_000).toBeCloseTo(0.456789, 3)
     expect(JSON.stringify(boxItems)).toBe(before)
     await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1'], manualCbm: null })
     expect(boxes[0]!.manualCbm).toBeNull()
     expect(boxes[1]!.manualCbm).toBe('0.456789')
+  })
+
+  it('estimates bulk CBM dimensions separately for boxes with different measured sides and skips unchanged retries', async () => {
+    Object.assign(boxes[0]!, { lengthCm: '40', widthCm: '25', heightCm: null })
+    Object.assign(boxes[1]!, { lengthCm: '50', widthCm: null, heightCm: null })
+    const tx = makeTransaction()
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', 'box-2'], manualCbm: 0.125 })
+    expect(boxes[0]).toMatchObject({ lengthCm: '40', widthCm: '25', heightCm: '125', manualCbm: '0.125' })
+    expect(boxes[1]).toMatchObject({ lengthCm: '50', widthCm: '50', heightCm: '50', manualCbm: '0.125' })
+    const boxWrites = tx.updateStatements.filter((entry) => entry.table === chinaOutboundBoxes)
+    expect(boxWrites).toHaveLength(2) // one measured batch, one completion-status invalidation batch
+    const beforeRetry = tx.updateStatements.length
+    await saveChinaOutboundBoxesMeasurements({ userId, shipmentId, boxIds: ['box-1', 'box-2'], manualCbm: 0.125 })
+    expect(tx.updateStatements).toHaveLength(beforeRetry)
   })
 
   it.each([0, -1, 0.0000001, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000_000])('rejects invalid manual CBM before writes (%s)', async (manualCbm) => {

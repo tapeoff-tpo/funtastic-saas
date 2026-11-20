@@ -466,20 +466,22 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveWeight).not.toHaveBeenCalled()
   })
 
-  it.each([undefined, 4.5])('saves manual CBM with unmeasured dimensions and optional weight %s', async (weight) => {
+  it.each([undefined, 4.5])('estimates missing dimensions from manual CBM with optional weight %s', async (weight) => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     const detail = makeFullyPackedInProgressShipment()
     renderShipment(detail, 'items')
     const editor = itemEditor('SKU-A')
     const cbm = editor.getByLabelText('박스 1 CBM(직접 입력)')
     fireEvent.change(cbm, { target: { value: '0.125' } })
+    fireEvent.blur(cbm)
+    for (const input of editor.getAllByPlaceholderText('선택')) expect(input).toHaveValue(50)
     if (weight != null) fireEvent.change(editor.getByLabelText('박스 1 총중량(kg)'), { target: { value: String(weight) } })
     parkEditor()
     const reopened = itemEditor('SKU-A')
     expect(reopened.getByLabelText('박스 1 CBM(직접 입력)')).toHaveValue(0.125)
     fireEvent.click(reopened.getByRole('button', { name: '박스분할 저장' }))
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
-    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ manualCbm: 0.125, lengthCm: null, widthCm: null, heightCm: null })
+    expect(saveBoxSplits.mock.calls[0][0].allocations[0]).toMatchObject({ manualCbm: 0.125, lengthCm: 50, widthCm: 50, heightCm: 50 })
     expect(saveBoxSplits.mock.calls[0][0].allocations[0].grossWeightKg).toBe(weight)
   })
 
@@ -726,7 +728,7 @@ describe('ChinaShipmentsBoard', () => {
     })
   })
 
-  it('applies a first-box manual CBM to every split without inventing dimensions or weights', async () => {
+  it('applies first-box CBM and its estimated dimensions to every split without inventing weights', async () => {
     saveBoxSplits.mockResolvedValue({ ok: true })
     renderShipment(makeFullyPackedInProgressShipment(), 'items')
     const editor = itemEditor('SKU-A')
@@ -738,7 +740,7 @@ describe('ChinaShipmentsBoard', () => {
     fireEvent.click(editor.getByRole('button', { name: '박스분할 저장' }))
     await waitFor(() => expect(saveBoxSplits).toHaveBeenCalledOnce())
     expect(saveBoxSplits.mock.calls[0][0].allocations).toHaveLength(2)
-    for (const allocation of saveBoxSplits.mock.calls[0][0].allocations) expect(allocation).toMatchObject({ manualCbm: 0.2, lengthCm: null, widthCm: null, heightCm: null })
+    for (const allocation of saveBoxSplits.mock.calls[0][0].allocations) expect(allocation).toMatchObject({ manualCbm: 0.2, lengthCm: 58.48, widthCm: 58.48, heightCm: 58.48 })
     expect(saveBoxSplits.mock.calls[0][0].allocations.every((allocation: { grossWeightKg?: number | null }) => allocation.grossWeightKg == null)).toBe(true)
   })
 
@@ -1381,7 +1383,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
     expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     const card = screen.getByRole('button', { name: '파렛트 P1 접기' }).closest('article')!
-    expect(within(card).getByText('파렛트 실측 규격: 120 × 100 × 150 cm')).toBeVisible()
+    expect(within(card).getByText('파렛트 규격: 120 × 100 × 150 cm')).toBeVisible()
     expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
     expect(within(card).getByText('최종 파렛트 CBM: 1.8000 CBM')).toBeVisible()
     expect(within(card).queryByRole('spinbutton')).not.toBeInTheDocument()
@@ -1403,17 +1405,17 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(savePalletDimensions).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: 120, widthCm: 100, heightCm: 150 }))
   })
 
-  it('saves and clears a pallet CBM without inventing dimensions', async () => {
+  it('estimates missing pallet dimensions and keeps them when the manual CBM is cleared', async () => {
     savePalletDimensions.mockResolvedValue({ ok: true })
     renderShipment(makeShipmentWithBoxAndPalletStatuses(), 'pallets')
     const cbm = screen.getByLabelText('파렛트 P1 CBM(직접 입력)')
     fireEvent.change(cbm, { target: { value: '0.75' } })
     expect(screen.getByText('최종 파렛트 CBM: 0.7500 CBM')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 규격 저장' }))
-    await waitFor(() => expect(savePalletDimensions).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.75 }))
+    await waitFor(() => expect(savePalletDimensions).toHaveBeenCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: 90.86, widthCm: 90.86, heightCm: 90.86, manualCbm: 0.75 }))
     fireEvent.change(cbm, { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: '파렛트 P1 규격 저장' }))
-    await waitFor(() => expect(savePalletDimensions).toHaveBeenLastCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: null, widthCm: null, heightCm: null, manualCbm: null }))
+    await waitFor(() => expect(savePalletDimensions).toHaveBeenLastCalledWith({ shipmentId: 'a', palletId: 'pallet-1', lengthCm: 90.86, widthCm: 90.86, heightCm: 90.86, manualCbm: null }))
   })
 
   it('retains pallet dimension edits after collapsing and reopening', () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SQL } from 'drizzle-orm'
+import { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import {
   chinaOutboundShipmentItems,
@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
-import { addChinaOutboundSample, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment, deleteChinaOutboundShipment } from './saas-china-outbound'
+import { addChinaOutboundSample, applyChinaOutboundInventoryPacking, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment, deleteChinaOutboundShipment } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
 
@@ -107,7 +107,14 @@ function makeTransaction() {
           if (!rows) throw new Error('Unexpected update table')
           const matchingRows = queryRows(rows, condition)
           for (const match of matchingRows) {
-            Object.assign(rows.find((row) => row.id === match.id)!, values)
+            const resolved = Object.fromEntries(Object.entries(values).map(([field, value]) => {
+              if (!(value instanceof SQL)) return [field, value]
+              const query = dialect.sqlToQuery(value)
+              if (!query.sql.startsWith('CASE ')) throw new Error('Unexpected SQL update')
+              const position = query.params.indexOf(match.id)
+              return [field, position < 0 ? match[field] : query.params[position + 1]]
+            }))
+            Object.assign(rows.find((row) => row.id === match.id)!, resolved)
           }
           return { returning: async () => matchingRows.map((match) => ({ ...rows.find((row) => row.id === match.id)! })) }
         },
@@ -262,6 +269,91 @@ describe('createChinaOutboundShipment', () => {
     mocks.transaction.mockImplementation((callback) => callback(tx))
     return tx
   }
+
+  function existingUnpackedInventory(quantity = 100, totalBoxCount = 4) {
+    const tx = measuredInventory(quantity, totalBoxCount)
+    Object.assign(inventories[0]!, { reservedQuantity: quantity, availableQuantity: 0, lengthCm: null, widthCm: null, heightCm: null, grossWeightKg: '29', manualCbm: '0.25' })
+    shipmentItems.push({ id: 'existing-item', userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: 'inventory-a', sku: 'SKU-A', reservedQuantity: quantity, packedQuantity: 0, dispatchedQuantity: 0, sortOrder: 0, boxSplitStatus: 'in_progress' })
+    return tx
+  }
+
+  it('applies inventory totals to existing unboxed work without reserving stock again and is idempotent', async () => {
+    const tx = existingUnpackedInventory()
+    const before = structuredClone(inventories[0])
+    const input = { userId: workspaceUserId, shipmentId: 'existing-shipment' }
+    expect(await applyChinaOutboundInventoryPacking(input)).toEqual({ createdBoxCount: 4, packedQuantity: 100, appliedItemCount: 1, skippedItemCount: 0, preservedBoxCount: 0, missingPackagingCount: 0 })
+    expect(boxes.map((box) => box.boxNo)).toEqual(['1', '2', '3', '4'])
+    expect(boxItems.map((row) => row.quantity)).toEqual([25, 25, 25, 25])
+    for (const row of [...boxes, ...boxItems]) expect(row).toMatchObject({ grossWeightKg: '7.25', manualCbm: '0.0625', lengthCm: '39.69', widthCm: '39.69', heightCm: '39.69' })
+    expect(inventories[0]).toEqual({ ...before, packagingReferenceQuantity: 100 })
+    expect(movements).toHaveLength(0); expect(purchaseLinks).toHaveLength(0); expect(allocations).toHaveLength(0)
+    expect(tx.delete).not.toHaveBeenCalled()
+    expect(await applyChinaOutboundInventoryPacking(input)).toEqual({ createdBoxCount: 0, packedQuantity: 0, appliedItemCount: 0, skippedItemCount: 1, preservedBoxCount: 4, missingPackagingCount: 0 })
+    expect(boxes).toHaveLength(4)
+  })
+
+  it('preserves existing boxes, product allocations, and pallets while appending only the remaining quantities', async () => {
+    existingUnpackedInventory()
+    boxes.push({ id: 'manual-box', userId: workspaceUserId, shipmentId: 'existing-shipment', boxNo: '1', palletId: 'pallet-1', grossWeightKg: '99', lengthCm: '77', note: '수기 수정', status: 'open', sortOrder: 0 })
+    boxItems.push({ id: 'manual-allocation', userId: workspaceUserId, shipmentId: 'existing-shipment', shipmentItemId: 'existing-item', boxId: 'manual-box', quantity: 25, grossWeightKg: '99' })
+    shipmentItems[0]!.packedQuantity = 25
+    const originals = structuredClone({ box: boxes[0], allocation: boxItems[0], pallets })
+    const result = await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })
+    expect(result).toMatchObject({ createdBoxCount: 3, packedQuantity: 75, preservedBoxCount: 1 })
+    expect({ box: boxes[0], allocation: boxItems[0], pallets }).toEqual(originals)
+    expect(boxes.map((box) => box.boxNo)).toEqual(['1', '2', '3', '4'])
+    expect(boxItems.slice(1).map((row) => row.quantity)).toEqual([25, 25, 25])
+    expect(shipmentItems[0]).toMatchObject({ reservedQuantity: 100, packedQuantity: 100, boxSplitStatus: 'completed' })
+  })
+
+  it('leaves already packed items intact while filling other items and skipping missing packaging', async () => {
+    existingUnpackedInventory()
+    inventories.push({ id: 'other-inventory', userId: workspaceUserId, onHandQuantity: 20, reservedQuantity: 20, availableQuantity: 0 })
+    shipmentItems.push({ id: 'already-packed', userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: 'other-inventory', sku: 'SKU-B', reservedQuantity: 20, packedQuantity: 20, sortOrder: 1 })
+    shipmentItems.push({ id: 'no-packaging', userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: 'missing-inventory', sku: 'SKU-C', reservedQuantity: 5, packedQuantity: 0, sortOrder: 2 })
+    boxes.push({ id: 'saved', userId: workspaceUserId, shipmentId: 'existing-shipment', boxNo: '1', status: 'sealed', sortOrder: 0 })
+    boxItems.push({ id: 'saved-allocation', userId: workspaceUserId, shipmentId: 'existing-shipment', shipmentItemId: 'already-packed', boxId: 'saved', quantity: 20 })
+    const saved = structuredClone({ item: shipmentItems[1], box: boxes[0], allocation: boxItems[0] })
+    expect(await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })).toMatchObject({ createdBoxCount: 4, packedQuantity: 100, appliedItemCount: 1, skippedItemCount: 2, preservedBoxCount: 1, missingPackagingCount: 1 })
+    expect({ item: shipmentItems[1], box: boxes[0], allocation: boxItems[0] }).toEqual(saved)
+    expect(boxes.slice(1).map((box) => box.boxNo)).toEqual(['2', '3', '4', '5'])
+  })
+
+  it('makes no writes when inventory has no packaging and validates all stored allocation counts before applying', async () => {
+    const tx = existingUnpackedInventory()
+    for (const field of ['totalBoxCount', 'lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm']) inventories[0]![field] = null
+    expect(await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })).toMatchObject({ createdBoxCount: 0, missingPackagingCount: 1 })
+    expect(tx.insert).not.toHaveBeenCalled(); expect(tx.update).not.toHaveBeenCalled()
+    inventories[0]!.totalBoxCount = 4
+    shipmentItems.push({ id: 'bad-item', userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: 'other-inventory', sku: 'SKU-BAD', reservedQuantity: 10, packedQuantity: 3, sortOrder: 1 })
+    await expect(applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })).rejects.toThrow('SKU-BAD의 분할 수량')
+    expect(tx.insert).not.toHaveBeenCalled(); expect(tx.update).not.toHaveBeenCalled()
+  })
+
+  it('does not apply an existing shipment owned by another workspace or a closed shipment', async () => {
+    const tx = existingUnpackedInventory()
+    await expect(applyChinaOutboundInventoryPacking({ userId: 'foreign-workspace', shipmentId: 'existing-shipment' })).rejects.toThrow('찾을 수 없습니다')
+    shipments[0]!.status = 'ready'
+    await expect(applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })).rejects.toThrow('초안 또는 포장중')
+    expect(tx.insert).not.toHaveBeenCalled(); expect(tx.update).not.toHaveBeenCalled()
+  })
+
+  it('applies a 77-item existing work list in bounded batches while preserving its saved box', async () => {
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx))
+    inventories = Array.from({ length: 77 }, (_, index) => ({ id: `stock-${index}`, userId: workspaceUserId, onHandQuantity: 20, reservedQuantity: 20, availableQuantity: 0, totalBoxCount: 1, grossWeightKg: '5', manualCbm: '0.1' }))
+    shipmentItems = inventories.map((inventory, index) => ({ id: `item-${index}`, userId: workspaceUserId, shipmentId: 'existing-shipment', inventoryId: inventory.id, sku: `SKU-${index}`, reservedQuantity: 20, packedQuantity: index === 0 ? 20 : 0, sortOrder: index }))
+    boxes = [{ id: 'saved-box', userId: workspaceUserId, shipmentId: 'existing-shipment', boxNo: '1', sortOrder: 0, status: 'open', palletId: 'pallet-1', grossWeightKg: '9' }]
+    boxItems = [{ id: 'saved-item', userId: workspaceUserId, shipmentId: 'existing-shipment', shipmentItemId: 'item-0', boxId: 'saved-box', quantity: 20 }]
+    const original = structuredClone({ box: boxes[0], allocation: boxItems[0] })
+    expect(await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: 'existing-shipment' })).toEqual({ createdBoxCount: 76, packedQuantity: 1520, appliedItemCount: 76, skippedItemCount: 1, preservedBoxCount: 1, missingPackagingCount: 0 })
+    expect(boxes).toHaveLength(77)
+    expect({ box: boxes[0], allocation: boxItems[0] }).toEqual(original)
+    expect(shipmentItems.every((item) => item.packedQuantity === 20)).toBe(true)
+    expect(tx.select).toHaveBeenCalledTimes(5)
+    expect(tx.insert).toHaveBeenCalledTimes(2)
+    expect(tx.update).toHaveBeenCalledTimes(3)
+    expect(movements).toEqual([])
+  })
 
   it('automatically creates numbered inventory boxes and preserves their measurement fields on both records', async () => {
     const tx = measuredInventory()

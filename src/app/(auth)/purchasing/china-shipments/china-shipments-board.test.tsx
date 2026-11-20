@@ -5,6 +5,8 @@ import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-swi
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
+const applyInventoryPacking = vi.hoisted(() => vi.fn())
+
 const { mergeBoxes, saveWeight, saveBoxDimensions, saveBoxMeasurements, savePalletTare, saveChineseName, addSample, savePalletDimensions, createShipment, deleteShipmentAction, updateShipment, saveBoxSplits, savePalletAssignments, saveBoxStatuses, savePalletStatuses, addShipmentItems, toastError, navigate, refresh } = vi.hoisted(() => ({
   mergeBoxes: vi.fn(),
   saveWeight: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
 vi.mock('./china-work-navigation', () => ({ useChinaWorkNavigation: () => navigate }))
 vi.mock('../saas-china-actions', () => ({
+  applyChinaOutboundInventoryPackingAction: applyInventoryPacking,
   mergeChinaOutboundBoxesAction: mergeBoxes,
   saveChinaOutboundPackageWeightAction: saveWeight,
   saveChinaOutboundBoxDimensionsAction: saveBoxDimensions,
@@ -318,6 +321,31 @@ describe('ChinaShipmentsBoard', () => {
     toastError.mockReset()
     navigate.mockReset()
     refresh.mockReset()
+    applyInventoryPacking.mockReset()
+  })
+
+  it('applies inventory packing to existing work without reserving items again', async () => {
+    applyInventoryPacking.mockResolvedValueOnce({ ok: true, inventoryPacking: { createdBoxCount: 4, packedQuantity: 10, appliedItemCount: 1, skippedItemCount: 0, preservedBoxCount: 0, missingPackagingCount: 0 } })
+    renderShipment()
+    fireEvent.click(screen.getByRole('button', { name: '중국재고 포장정보 적용', exact: true }))
+    await waitFor(() => expect(applyInventoryPacking).toHaveBeenCalledExactlyOnceWith({ shipmentId: 'a' }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(addShipmentItems).not.toHaveBeenCalled()
+    expect(saveBoxSplits).not.toHaveBeenCalled()
+  })
+
+  it('keeps existing work visible and does not refresh after failed inventory packing', async () => {
+    applyInventoryPacking.mockResolvedValueOnce({ ok: false, error: '기존 박스 수량을 확인해주세요.' })
+    renderShipment()
+    fireEvent.click(screen.getByRole('button', { name: '중국재고 포장정보 적용', exact: true }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('기존 박스 수량을 확인해주세요.'))
+    expect(refresh).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' })).toBeInTheDocument()
+  })
+
+  it('does not offer inventory packing for already packed work', () => {
+    renderShipment(makeFullyPackedInProgressShipment())
+    expect(screen.queryByRole('button', { name: '중국재고 포장정보 적용', exact: true })).not.toBeInTheDocument()
   })
 
   it('keeps box splitting in the first stage without a duplicate filter or product batch-save screen', () => {

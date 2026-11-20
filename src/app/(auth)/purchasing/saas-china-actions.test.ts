@@ -10,15 +10,16 @@ const mocks = vi.hoisted(() => ({
   saveBoxesMeasurements: vi.fn(),
   saveBoxDimensions: vi.fn(),
   savePalletDimensions: vi.fn(),
+  applyInventoryPacking: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/menu-access', () => ({ assertMenuAccess: mocks.assertMenuAccess }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.getWorkspaceUserId }))
 vi.mock('@/lib/auth/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
-vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare, saveChinaOutboundBoxesMeasurements: mocks.saveBoxesMeasurements, saveChinaOutboundBoxDimensions: mocks.saveBoxDimensions, saveChinaOutboundPalletDimensions: mocks.savePalletDimensions }))
+vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ applyChinaOutboundInventoryPacking: mocks.applyInventoryPacking, saveChinaOutboundItemBoxSplits: mocks.saveBoxSplits, saveChinaOutboundPalletTareWeight: mocks.savePalletTare, saveChinaOutboundBoxesMeasurements: mocks.saveBoxesMeasurements, saveChinaOutboundBoxDimensions: mocks.saveBoxDimensions, saveChinaOutboundPalletDimensions: mocks.savePalletDimensions }))
 
-import { saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction, saveChinaOutboundBoxesMeasurementsAction, saveChinaOutboundBoxDimensionsAction, saveChinaOutboundPalletDimensionsAction } from './saas-china-actions'
+import { applyChinaOutboundInventoryPackingAction, saveChinaOutboundItemBoxSplitsAction, saveChinaOutboundPalletTareWeightAction, saveChinaOutboundBoxesMeasurementsAction, saveChinaOutboundBoxDimensionsAction, saveChinaOutboundPalletDimensionsAction } from './saas-china-actions'
 
 const shipmentId = '11111111-1111-4111-8111-111111111111'
 const shipmentItemId = '22222222-2222-4222-8222-222222222222'
@@ -30,6 +31,23 @@ describe('China outbound item box split action weights', () => {
     mocks.getWorkspaceUserId.mockResolvedValue('canonical-owner')
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-login' } }, error: null })
     mocks.saveBoxSplits.mockResolvedValue(undefined)
+  })
+
+  it('applies inventory packaging to the selected existing work under the canonical workspace', async () => {
+    const summary = { createdBoxCount: 4, packedQuantity: 100, appliedItemCount: 1, skippedItemCount: 1, preservedBoxCount: 1, missingPackagingCount: 0 }
+    mocks.applyInventoryPacking.mockResolvedValueOnce(summary)
+    expect(await applyChinaOutboundInventoryPackingAction({ shipmentId, userId: 'untrusted-owner' })).toEqual({ ok: true, inventoryPacking: summary })
+    expect(mocks.applyInventoryPacking).toHaveBeenCalledExactlyOnceWith({ shipmentId, userId: 'canonical-owner' })
+    expect(mocks.assertMenuAccess).toHaveBeenCalledWith('/purchasing/china-shipments')
+    expect(mocks.revalidatePath.mock.calls).toEqual([['/purchasing/china-shipments'], ['/purchasing/import-documents']])
+  })
+
+  it('rejects invalid or unauthenticated existing-work packing requests before a write', async () => {
+    expect((await applyChinaOutboundInventoryPackingAction({ shipmentId: 'invalid' })).ok).toBe(false)
+    mocks.getUser.mockResolvedValueOnce({ data: { user: null }, error: null })
+    expect((await applyChinaOutboundInventoryPackingAction({ shipmentId })).ok).toBe(false)
+    expect(mocks.applyInventoryPacking).not.toHaveBeenCalled()
+    expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
 
   it.each([undefined, null, 0.001, 12.345, 999_999_999])('forwards weight %s and preserves omitted versus explicit clear under the canonical workspace', async (weight) => {

@@ -2381,6 +2381,93 @@ export async function addChinaOutboundShipmentItems(input: {
   })
 }
 
+/** Apply the current inventory packaging only to quantities not already boxed.
+ * This does not reserve more stock or replace any existing physical box. */
+export async function applyChinaOutboundInventoryPacking(input: { userId: string; shipmentId: string }) {
+  await ensureSaasChinaOutboundSchema()
+  return db.transaction(async (tx) => {
+    await lockSaasChinaOutboundWorkspace(tx, input.userId)
+    const shipment = await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
+    const scope = and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.shipmentId, shipment.id))
+    const [items, boxes, boxItems] = await Promise.all([
+      tx.select().from(chinaOutboundShipmentItems).where(scope).orderBy(asc(chinaOutboundShipmentItems.sortOrder), asc(chinaOutboundShipmentItems.createdAt)),
+      tx.select().from(chinaOutboundBoxes).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, shipment.id))),
+      tx.select().from(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, shipment.id))),
+    ])
+    const inventories = items.length ? await tx.select().from(saasChinaInventory).where(and(
+      eq(saasChinaInventory.userId, input.userId), isNull(saasChinaInventory.archivedAt), inArray(saasChinaInventory.id, [...new Set(items.map((item) => item.inventoryId))]),
+    )) : []
+    const inventoryById = new Map(inventories.map((inventory) => [inventory.id, inventory]))
+    const itemIds = new Set(items.map((item) => item.id))
+    const boxIds = new Set(boxes.map((box) => box.id))
+    const packedByItem = new Map<string, number>()
+    for (const row of boxItems) {
+      if (!itemIds.has(row.shipmentItemId) || !boxIds.has(row.boxId) || !Number.isSafeInteger(row.quantity) || row.quantity <= 0) {
+        throw new Error('저장된 박스와 상품 배분이 일치하지 않습니다. 박스현황을 먼저 확인해주세요.')
+      }
+      packedByItem.set(row.shipmentItemId, (packedByItem.get(row.shipmentItemId) ?? 0) + row.quantity)
+    }
+    const result = { createdBoxCount: 0, packedQuantity: 0, appliedItemCount: 0, skippedItemCount: 0, preservedBoxCount: boxes.length, missingPackagingCount: 0 }
+    const plans: Array<{ item: ChinaOutboundShipmentItemRow; inventory: typeof saasChinaInventory.$inferSelect; referenceQuantity: number; pieces: InventoryPackingPiece[] }> = []
+    // Validate every row before the first write so a stale packed counter never
+    // leads to partial backfill or changes to existing user-entered packing.
+    for (const item of items) {
+      const packedQuantity = packedByItem.get(item.id) ?? 0
+      if (packedQuantity !== item.packedQuantity || !Number.isSafeInteger(item.reservedQuantity) || packedQuantity > item.reservedQuantity) {
+        throw new Error(`${item.sku}의 분할 수량과 박스현황이 일치하지 않습니다. 먼저 확인해주세요.`)
+      }
+      const quantity = item.reservedQuantity - packedQuantity
+      if (quantity <= 0) { result.skippedItemCount += 1; continue }
+      const inventory = inventoryById.get(item.inventoryId)
+      if (!inventory) { result.skippedItemCount += 1; result.missingPackagingCount += 1; continue }
+      const referenceQuantity = inventory.packagingReferenceQuantity ?? inventory.onHandQuantity
+      const consumedQuantity = Math.max(0, referenceQuantity - inventory.onHandQuantity)
+        + Math.max(0, inventory.reservedQuantity - item.reservedQuantity) + packedQuantity
+      const pieces = planInventoryPacking({ ...inventory, onHandQuantity: referenceQuantity, quantity, consumedQuantity, measurementBasis: 'total' })
+      if (!pieces.length) { result.skippedItemCount += 1; result.missingPackagingCount += 1; continue }
+      plans.push({ item, inventory, referenceQuantity, pieces })
+      result.createdBoxCount += pieces.length
+      result.packedQuantity += quantity
+      result.appliedItemCount += 1
+    }
+    if (result.createdBoxCount > 5_000) throw new Error('한 번에 자동 생성할 수 있는 박스는 최대 5,000개입니다.')
+    if (!plans.length) return result
+    const numbers = nextAvailableBoxNumbers(result.createdBoxCount, boxes.map((box) => box.boxNo))
+    const nextSort = boxes.reduce((maximum, box) => Math.max(maximum, box.sortOrder), -1) + 1
+    const numberValue = (value: number | null) => value == null ? null : String(value)
+    const rows = plans.flatMap(({ item, pieces }) => pieces.map((piece) => ({ item, piece }))).map(({ item, piece }, index) => ({
+      box: {
+        id: randomUUID(), userId: input.userId, shipmentId: shipment.id, boxNo: numbers[index], sortOrder: nextSort + index,
+        lengthCm: numberValue(piece.lengthCm), widthCm: numberValue(piece.widthCm), heightCm: numberValue(piece.heightCm),
+        grossWeightKg: numberValue(piece.grossWeightKg), manualCbm: numberValue(piece.manualCbm), note: '중국재고 포장정보 자동 적용',
+      },
+      item, piece,
+    }))
+    const batchSize = 500
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize)
+      await tx.insert(chinaOutboundBoxes).values(batch.map(({ box }) => box))
+      await tx.insert(chinaOutboundBoxItems).values(batch.map(({ box, item, piece }) => ({
+        userId: input.userId, shipmentId: shipment.id, shipmentItemId: item.id, boxId: box.id, quantity: piece.quantity,
+        lengthCm: box.lengthCm, widthCm: box.widthCm, heightCm: box.heightCm, grossWeightKg: box.grossWeightKg, manualCbm: box.manualCbm,
+      })))
+    }
+    for (let offset = 0; offset < plans.length; offset += batchSize) {
+      const batch = plans.slice(offset, offset + batchSize)
+      await tx.update(chinaOutboundShipmentItems).set({
+        packedQuantity: sql`CASE ${chinaOutboundShipmentItems.id} ${sql.join(batch.map(({ item }) => sql`WHEN ${item.id} THEN ${item.reservedQuantity}::integer`), sql` `)} ELSE ${chinaOutboundShipmentItems.packedQuantity} END`,
+        boxSplitStatus: 'completed', updatedAt: new Date(),
+      }).where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.shipmentId, shipment.id), inArray(chinaOutboundShipmentItems.id, batch.map(({ item }) => item.id))))
+      const references = batch.filter(({ inventory }) => inventory.packagingReferenceQuantity == null)
+      if (references.length) await tx.update(saasChinaInventory).set({
+        packagingReferenceQuantity: sql`CASE ${saasChinaInventory.id} ${sql.join(references.map(({ inventory, referenceQuantity }) => sql`WHEN ${inventory.id} THEN ${referenceQuantity}::integer`), sql` `)} ELSE ${saasChinaInventory.packagingReferenceQuantity} END`,
+      }).where(and(eq(saasChinaInventory.userId, input.userId), inArray(saasChinaInventory.id, references.map(({ inventory }) => inventory.id))))
+    }
+    await tx.update(chinaOutboundShipments).set({ status: 'packing', updatedAt: new Date() }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, shipment.id), eq(chinaOutboundShipments.status, 'draft')))
+    return result
+  })
+}
+
 /** Manual samples are received and reserved atomically, without touching purchase lots. */
 export async function addChinaOutboundSample(input: {
   userId: string; createdBy: string; shipmentId: string; requestId: string

@@ -8,6 +8,7 @@ import { createClient } from '@/lib/auth/server'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import {
+  applyChinaOutboundInventoryPacking,
   mergeChinaOutboundBoxes,
   saveChinaOutboundPackageWeight,
   saveChinaOutboundItemChineseName,
@@ -39,7 +40,8 @@ import {
   updateChinaOutboundShipment,
 } from '@/lib/purchasing/saas-china-outbound'
 
-type ActionResult = { ok: true; shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState } | { ok: false; error: string }
+type InventoryPackingSummary = Awaited<ReturnType<typeof applyChinaOutboundInventoryPacking>>
+type ActionResult = { ok: true; shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; inventoryPacking?: InventoryPackingSummary } | { ok: false; error: string }
 
 const text = (label: string, max = 500) => z.string().trim().min(1, `${label}을(를) 입력해주세요.`).max(max)
 const optionalText = (max = 2_000) => z.string().trim().max(max).optional().nullable()
@@ -403,6 +405,18 @@ export async function addChinaOutboundShipmentItemsAction(input: unknown): Promi
   })
 }
 
+export async function applyChinaOutboundInventoryPackingAction(input: unknown): Promise<ActionResult> {
+  await assertMenuAccess('/purchasing/china-shipments')
+  return runAction(async () => {
+    const value = z.object({ shipmentId }).parse(input)
+    const actor = await getActor()
+    const inventoryPacking = await applyChinaOutboundInventoryPacking({ ...value, userId: actor.userId })
+    revalidatePath('/purchasing/china-shipments')
+    revalidatePath('/purchasing/import-documents')
+    return { inventoryPacking }
+  })
+}
+
 export async function addChinaOutboundSampleAction(input: unknown): Promise<ActionResult> {
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
@@ -552,7 +566,7 @@ function revalidateSaasChinaPaths() {
   revalidatePath('/purchasing/overdue')
 }
 
-async function runAction(action: () => Promise<{ shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState } | void>): Promise<ActionResult> {
+async function runAction(action: () => Promise<{ shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; inventoryPacking?: InventoryPackingSummary } | void>): Promise<ActionResult> {
   try {
     const result = await action()
     return result ? { ok: true, ...result } : { ok: true }

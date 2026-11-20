@@ -28,6 +28,7 @@ import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
+  applyChinaOutboundInventoryPackingAction,
   addChinaOutboundShipmentItemsAction,
   assignChinaOutboundBoxesToPalletsAction,
   createChinaOutboundShipmentAction,
@@ -792,6 +793,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       {stage === 'items' ? <section className="space-y-3">
         <ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} warehouseCodes={warehouseCodes} editable={editable} isPending={isPending} />
         <ManualSamplePanel shipmentId={shipment.id} defaultWarehouseCode={shipment.originWarehouseCode} warehouseCodes={[...new Set([...warehouseCodes, ...inventoryItems.map((item) => item.warehouseCode)])]} editable={editable} isPending={isPending} />
+        {editable && hasIncompleteBoxSplit && <ApplyInventoryPackingButton shipmentId={shipment.id} isPending={isPending} />}
         <OutboundItemsPanel detail={detail} editable={editable} isPending={isPending} boxItemsByItem={boxItemsByItem} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('boxes')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 저장된 박스현황</button></div>
       </section> : null}
@@ -828,6 +830,30 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 
     </section>
   )
+}
+
+function ApplyInventoryPackingButton({ shipmentId, isPending }: { shipmentId: string; isPending: boolean }) {
+  const router = useRouter()
+  const guard = useChinaWorkGuard()
+  const [pending, start] = useTransition()
+  const hasDrafts = guard.hasDraftKind('box') || guard.hasDraftKind('pallet') || guard.hasDraftKind('items')
+  return <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3">
+    <p className="text-xs text-muted-foreground">중국재고의 포장정보로 아직 담지 않은 수량만 자동 분할합니다. 저장된 박스는 유지됩니다.</p>
+    <button type="button" disabled={isPending || pending || guard.busy || hasDrafts} onClick={() => start(async () => {
+      await guard.runTask(async () => {
+        const result = await applyChinaOutboundInventoryPackingAction({ shipmentId })
+        if (!result.ok) { toast.error(result.error); return false }
+        const summary = result.inventoryPacking
+        if (summary?.createdBoxCount) toast.success(`${summary.appliedItemCount}개 품목 · ${summary.createdBoxCount}박스에 중국재고 포장정보를 적용했습니다.`)
+        else toast.success('자동 적용할 포장정보가 없습니다. 중국재고의 박스수량과 포장정보를 확인해주세요.')
+        if (summary?.missingPackagingCount) toast.error(`포장정보가 없는 ${summary.missingPackagingCount}개 품목은 기존 상태로 유지했습니다.`)
+        router.refresh()
+        return true
+      })
+    })} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-blue-200 bg-white px-3 text-sm font-medium hover:bg-blue-100 disabled:opacity-50">
+      {pending ? <Loader2 className="size-4 animate-spin" /> : <PackagePlus className="size-4" />}중국재고 포장정보 적용
+    </button>
+  </div>
 }
 
 function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {

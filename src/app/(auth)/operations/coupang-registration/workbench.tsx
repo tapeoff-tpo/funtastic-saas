@@ -383,7 +383,7 @@ export function CoupangRegistrationWorkbench() {
       <div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-center text-xs tabular-nums">
         <thead className="border-b bg-muted/40 text-muted-foreground [&_th]:h-11 [&_th]:px-2 [&_th]:text-center [&_th]:align-middle [&_th]:whitespace-nowrap"><tr>
           <th className="w-9"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} /></th>
-          <th className="w-56">상품 · 옵션</th>
+          <th className="w-56 !text-left">상품 · 옵션</th>
           <th className="w-24" title="품목의 works 신규 원가">원가</th>
           <th className="w-24">도매가</th>
           <th className="w-24">쿠팡공급가</th>
@@ -402,7 +402,7 @@ export function CoupangRegistrationWorkbench() {
           const chosen = selected.has(row.id)
           return <tr key={row.id} className={`h-16 border-b last:border-0 [&>td]:px-2 [&>td]:py-3 [&>td]:align-middle ${activeId === row.id ? 'bg-blue-50/70' : chosen ? 'bg-blue-50/30' : 'hover:bg-muted/20'}`}>
             <td><input aria-label={`${row.name} 선택`} type="checkbox" checked={chosen} onChange={() => toggle(row.id)} /></td>
-            <td><button onClick={() => setActiveId(row.id)} className="flex w-full items-center justify-center gap-2"><div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">{isImageUrl(row.primaryImage) ? <img src={row.primaryImage} alt="" className="size-full object-contain" /> : <FileSpreadsheet className="size-4 text-muted-foreground" />}</div><div className="min-w-0"><div className="font-medium leading-5">{row.name || (row.bundleComponents ? '이름 없는 세트' : '상품명 입력 필요')}</div><div className="truncate text-[10px] text-muted-foreground">{row.bundleComponents ? `세트 · 구성품 ${row.bundleComponents.length}종` : row.internalSku || '원가 SKU 미연결'}{row.sourceCode && ` · B2B ${row.sourceCode}`}</div></div></button></td>
+            <td className="text-left"><button onClick={() => setActiveId(row.id)} className="flex w-full items-center justify-start gap-2 text-left"><div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">{isImageUrl(row.primaryImage) ? <img src={row.primaryImage} alt="" className="size-full object-contain" /> : <FileSpreadsheet className="size-4 text-muted-foreground" />}</div><div className="min-w-0"><div className="font-medium leading-5">{row.name || (row.bundleComponents ? '이름 없는 세트' : '상품명 입력 필요')}</div><div className="truncate text-[10px] text-muted-foreground">{row.bundleComponents ? `세트 · 구성품 ${row.bundleComponents.length}종` : row.internalSku || '원가 SKU 미연결'}{row.sourceCode && ` · B2B ${row.sourceCode}`}</div></div></button></td>
             <td>{row.bundleComponents ? <span aria-label={`${row.name} 원가`}>{won(prices.cost)}</span> : <MoneyInput label={`${row.name} 원가`} value={prices.cost} onChange={(value) => patchRow(row.id, { costPrice: value })} />}</td>
             <td><span aria-label={`${row.name} 도매가`} className="inline-flex h-8 items-center justify-center whitespace-nowrap">{won(prices.wholesale)}</span></td>
             <td><MoneyInput label={`${row.name} 쿠팡공급가`} value={prices.supply} onChange={(value) => patchRow(row.id, { priceMode: 'manual', manualSupplyPrice: value })} /></td>

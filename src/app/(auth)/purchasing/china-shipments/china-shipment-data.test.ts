@@ -17,7 +17,7 @@ it('starts Chinese names without waiting for photo lookup and preserves measurem
       { id: 'missing-name', sku: 'SKU2', chineseProductName: '', packedQuantity: 0, reservedQuantity: 1 },
     ],
     pallets: [{ id: 'pallet', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150', manualCbm: '1.25' }],
-    boxes: [{ id: 'box', grossWeightKg: '5.125', manualCbm: '0.125' }], boxItems: [{ id: 'allocation', boxId: 'box', shipmentItemId: 'item', quantity: 1, manualCbm: '0.125' }],
+    boxes: [{ id: 'box', grossWeightKg: '5.125', manualCbm: '0.125', inventoryPackingGroupKey: 'mixed-source', inventoryPackingGroupBoxIndex: 0 }], boxItems: [{ id: 'allocation', boxId: 'box', shipmentItemId: 'item', quantity: 1, manualCbm: '0.125' }],
   })
   const pending = loadChinaShipmentDetailView('owner', 'shipment')
   await vi.waitFor(() => expect(mocks.names).toHaveBeenCalledWith('owner', ['SKU2']))
@@ -29,6 +29,7 @@ it('starts Chinese names without waiting for photo lookup and preserves measurem
   expect(result?.pallets[0]).toMatchObject({ grossWeightKg: 20.125, lengthCm: 120, widthCm: 100, heightCm: 150, manualCbm: 1.25 })
   expect(result?.boxes[0].grossWeightKg).toBe(5.125)
   expect(result?.boxes[0].manualCbm).toBe(0.125)
+  expect(result?.boxes[0]).toMatchObject({ inventoryPackingGroupKey: 'mixed-source', inventoryPackingGroupBoxIndex: 0 })
   expect(result?.boxItems[0].manualCbm).toBe(0.125)
   expect(mocks.stock).not.toHaveBeenCalled()
 })

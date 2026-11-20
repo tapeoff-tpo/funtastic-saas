@@ -57,6 +57,30 @@ async function exportedSheet(shipment: ImportDocumentDetail, overrides: ImportDo
 }
 
 describe('China import documents', () => {
+  it('counts a shared option carton once after quantity-proportional weight and CBM allocation', async () => {
+    const shared: ImportDocumentDetail = {
+      ...detail,
+      items: [
+        { ...detail.items[0], productName: '켈디 지퍼고리', optionName: '실버', reservedQuantity: 50, packedQuantity: 50 },
+        { ...detail.items[1], productName: '켈디 지퍼고리', optionName: '블랙', reservedQuantity: 100, packedQuantity: 100 },
+      ],
+      pallets: [],
+      boxes: [{ ...detail.boxes[0], palletId: null, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: 14.9, widthCm: 14.9, heightCm: 14.9 }],
+      boxItems: [
+        { id: 'silver', boxId: 'box-a', shipmentItemId: 'item-a', quantity: 50 },
+        { id: 'black', boxId: 'box-a', shipmentItemId: 'item-b', quantity: 100 },
+      ],
+    }
+    const prepared = prepareImportDocument(shared, metadata)
+    expect(prepared.packageCount).toBe(1)
+    expect(prepared.boxes).toHaveLength(1)
+    const sheet = await exportedSheet(shared, { ...options, boxes: { 'box-a': { grossWeightKg: 8, cbm: 0.003308 } } })
+    expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 150 })
+    expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 8 })
+    expect(sheet.getCell('X112').value).toBeCloseTo(0.003308, 6)
+    expect(sheet.getCell('W14').value).toBe(1)
+  })
+
   it('compresses consecutive numeric carton marks into ranges', () => {
     expect(formatBoxMarks(['1', '2', '3', '4', '5', '20'])).toBe('1~5, 20')
     expect(formatBoxMarks(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'])).toBe('1~20')

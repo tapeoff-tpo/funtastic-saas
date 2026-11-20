@@ -116,6 +116,8 @@ export type ChinaShipmentDetailView = {
     heightCm: number | null
     manualCbm?: number | null
     grossWeightKg?: number | null
+    inventoryPackingGroupKey?: string | null
+    inventoryPackingGroupBoxIndex?: number | null
   }>
   boxItems: Array<{ id: string; boxId: string; shipmentItemId: string; quantity: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null; grossWeightKg?: number | null }>
 }
@@ -844,7 +846,8 @@ function ApplyInventoryPackingButton({ shipmentId, isPending }: { shipmentId: st
         const result = await applyChinaOutboundInventoryPackingAction({ shipmentId })
         if (!result.ok) { toast.error(result.error); return false }
         const summary = result.inventoryPacking
-        if (summary?.createdBoxCount) toast.success(`${summary.appliedItemCount}개 품목 · ${summary.createdBoxCount}박스에 중국재고 포장정보를 적용했습니다.`)
+        if (summary?.appliedItemCount && summary.createdBoxCount) toast.success(`${summary.appliedItemCount}개 품목 · ${summary.createdBoxCount}박스에 중국재고 포장정보를 적용했습니다.`)
+        else if (summary?.appliedItemCount) toast.success('기존 혼합박스에 포장정보를 적용했습니다.')
         else toast.success('자동 적용할 포장정보가 없습니다. 중국재고의 박스수량과 포장정보를 확인해주세요.')
         if (summary?.missingPackagingCount) toast.error(`포장정보가 없는 ${summary.missingPackagingCount}개 품목은 기존 상태로 유지했습니다.`)
         router.refresh()

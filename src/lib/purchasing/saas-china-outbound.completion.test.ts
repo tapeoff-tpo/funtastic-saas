@@ -439,6 +439,66 @@ describe('China outbound box and pallet completion', () => {
     expect(boxes.every((box) => box.lengthCm === null && box.widthCm === null && box.heightCm === null)).toBe(true)
   })
 
+  it('sums option CBM shares only in imported shared cartons and preserves physical overrides on an unchanged save', async () => {
+    boxes = []; boxItems = []
+    Object.assign(items[0]!, { reservedQuantity: 50, packedQuantity: 0 })
+    items.push({ ...items[0]!, id: 'item-2', sku: 'SKU-BLACK', reservedQuantity: 100, packedQuantity: 0 })
+    const silver = { userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '1', quantity: 50, grossWeightKg: 2.667, manualCbm: 0.001103, lengthCm: 14.9, widthCm: 14.9, heightCm: 14.9 }] }
+    const black = { userId, shipmentId, shipmentItemId: 'item-2', allocations: [{ boxNo: '1', quantity: 100, grossWeightKg: 5.333, manualCbm: 0.002205, lengthCm: 14.9, widthCm: 14.9, heightCm: 14.9 }] }
+    await saveChinaOutboundItemBoxSplits(silver)
+    Object.assign(boxes[0]!, { inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 0 })
+    const saved = await saveChinaOutboundItemBoxSplits(black)
+    expect(boxes[0]).toMatchObject({ grossWeightKg: '8', manualCbm: '0.003308', lengthCm: '14.9', widthCm: '14.9', heightCm: '14.9' })
+    expect(saved.boxes[0]).toMatchObject({ inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 0 })
+    expect(boxItems.map((row) => Number(row.manualCbm))).toEqual([0.001103, 0.002205])
+    boxes[0]!.status = 'open'
+    await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: boxes[0]!.id, lengthCm: 14.9, widthCm: 14.9, heightCm: 14.9, manualCbm: 0.01 })
+    await saveChinaOutboundItemBoxSplits(black)
+    expect(boxes[0]!.manualCbm).toBe('0.01')
+    black.allocations[0].manualCbm = 0.004
+    await saveChinaOutboundItemBoxSplits(black)
+    expect(boxes[0]!.manualCbm).toBe('0.005103')
+    expect(movements).toHaveLength(0)
+  })
+
+  it('retains summed group CBM when mixed cartons and duplicate option components are merged', async () => {
+    boxes = boxes.slice(0, 2)
+    Object.assign(boxes[0]!, { inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 0, grossWeightKg: '2.667', manualCbm: '0.001103' })
+    Object.assign(boxes[1]!, { inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 1, lengthCm: '10', widthCm: '20', heightCm: '30', grossWeightKg: '5.333', manualCbm: '0.002205' })
+    Object.assign(boxItems[0]!, { grossWeightKg: '2.667', manualCbm: '0.001103' })
+    Object.assign(boxItems[1]!, { grossWeightKg: '5.333', manualCbm: '0.002205' })
+    const target = await mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })
+    expect(boxes.find((box) => box.id === target.id)).toMatchObject({ grossWeightKg: '8', manualCbm: '0.003308', inventoryPackingGroupKey: expect.any(String) })
+    expect(boxItems).toHaveLength(1)
+    expect(boxItems[0]).toMatchObject({ quantity: 10, grossWeightKg: '8', manualCbm: '0.003308' })
+  })
+
+  it('converts legacy container CBM into option shares before merging with an imported group carton', async () => {
+    boxes = boxes.slice(0, 2)
+    Object.assign(boxes[0]!, { inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 0, grossWeightKg: '8', manualCbm: '0.003308' })
+    Object.assign(boxes[1]!, { lengthCm: '50', widthCm: '40', heightCm: '30', grossWeightKg: '20', manualCbm: '0.1' })
+    items.push({ ...items[0]!, id: 'item-2', reservedQuantity: 20, packedQuantity: 20 }, { ...items[0]!, id: 'item-3', reservedQuantity: 30, packedQuantity: 30 })
+    boxItems = [
+      { id: 'one', userId, shipmentId, boxId: 'box-1', shipmentItemId: 'item-1', quantity: 10, grossWeightKg: '8', manualCbm: '0.003308' },
+      { id: 'two', userId, shipmentId, boxId: 'box-2', shipmentItemId: 'item-2', quantity: 20, grossWeightKg: '5', manualCbm: '0.1', lengthCm: '50', widthCm: '40', heightCm: '30' },
+      { id: 'three', userId, shipmentId, boxId: 'box-2', shipmentItemId: 'item-3', quantity: 30, grossWeightKg: '15', manualCbm: '0.1', lengthCm: '50', widthCm: '40', heightCm: '30' },
+    ]
+    const target = await mergeChinaOutboundBoxes({ userId, shipmentId, boxIds: ['box-1', 'box-2'] })
+    expect(boxes.find((box) => box.id === target.id)).toMatchObject({ manualCbm: '0.103308', inventoryPackingGroupKey: `merged:${target.id}`, inventoryPackingGroupBoxIndex: null })
+    expect(boxItems.map((row) => Number(row.manualCbm))).toEqual([0.003308, 0.04, 0.06])
+    await saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-2', allocations: [{ boxNo: target.boxNo as string, quantity: 20, manualCbm: 0.05, grossWeightKg: 5, lengthCm: 50, widthCm: 40, heightCm: 30 }] })
+    expect(boxes.find((box) => box.id === target.id)).toMatchObject({ grossWeightKg: '28', manualCbm: '0.113308' })
+  })
+
+  it.each([false, true])('keeps cross-mode carton moves unchanged and directs the user to the merge action (%s)', async (reverse) => {
+    Object.assign(boxes[reverse ? 1 : 0]!, { inventoryPackingGroupKey: 'mixed-keldi', inventoryPackingGroupBoxIndex: 0 })
+    const beforeBoxes = JSON.stringify(boxes)
+    const beforeItems = JSON.stringify(boxItems)
+    await expect(saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '2', quantity: 10 }] })).rejects.toThrow('박스 합치기')
+    expect(JSON.stringify(boxes)).toBe(beforeBoxes)
+    expect(JSON.stringify(boxItems)).toBe(beforeItems)
+  })
+
   it('saves and clears independent box and pallet CBM while preserving unknown dimensions and measured weight', async () => {
     boxes[1]!.grossWeightKg = '7'
     await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: 'box-2', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.3212346 })

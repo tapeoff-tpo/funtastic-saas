@@ -19,6 +19,7 @@ import {
 import { sql } from 'drizzle-orm'
 import type { PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
 import type { InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
+import type { ChinaInventoryPackingGroup } from '@/lib/purchasing/china-inventory-packing-group'
 
 // ─── Phase 1: Marketplace Connections ───────────────────────────
 
@@ -931,6 +932,7 @@ export const saasChinaInventory = pgTable(
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
     totalBoxCount: integer('total_box_count'),
+    packagingGroup: jsonb('packaging_group').$type<ChinaInventoryPackingGroup>(),
     packagingReferenceQuantity: integer('packaging_reference_quantity'),
     lengthCm: numeric('length_cm', { precision: 18, scale: 6 }),
     widthCm: numeric('width_cm', { precision: 18, scale: 6 }),
@@ -1349,6 +1351,8 @@ export const chinaOutboundBoxes = pgTable(
     palletId: uuid('pallet_id'),
     userId: uuid('user_id').notNull(),
     boxNo: varchar('box_no', { length: 100 }).notNull(),
+    inventoryPackingGroupKey: varchar('inventory_packing_group_key', { length: 100 }),
+    inventoryPackingGroupBoxIndex: integer('inventory_packing_group_box_index'),
     labelCode: varchar('label_code', { length: 200 }),
     status: varchar('status', { length: 30 }).notNull().default('open'),
     completionStatus: varchar('completion_status', { length: 20 }),

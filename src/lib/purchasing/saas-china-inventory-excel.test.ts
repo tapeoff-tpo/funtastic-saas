@@ -21,6 +21,121 @@ async function workbookBuffer(rows: Array<Array<string | number | null | undefin
 }
 
 describe('SaaS China inventory Excel workbook', () => {
+  it('recognizes blank option continuation rows as one shared carton and divides totals by quantity', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, '110791-0001', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''],
+      ['중국창고', '', '110791-0002', '켈디 지퍼고리', '블랙', 100, '', '', '', '', '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(parsed.errors).toEqual([])
+    const [silver, black] = parsed.rows
+    expect(silver).toMatchObject({ totalBoxCount: 1, packagingReferenceQuantity: 50, grossWeightKg: 2.667, manualCbm: 0.001103, packagingGroup: { version: 1, totalBoxCount: 1, referenceQuantity: 150, memberStartQuantity: 0, grossWeightKg: 8, manualCbm: 0.003308 } })
+    expect(black).toMatchObject({ totalBoxCount: null, packagingReferenceQuantity: 100, grossWeightKg: 5.333, manualCbm: 0.002205, packagingGroup: { referenceQuantity: 150, memberStartQuantity: 50 } })
+    expect(silver.packagingGroup!.key).toBe(black.packagingGroup!.key)
+    const retry = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, '110791-0001', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''],
+      ['중국창고', '', '110791-0002', '켈디 지퍼고리', '블랙', 100, '', '', '', '', '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(retry.rows[0].packagingGroup).toEqual(silver.packagingGroup)
+  })
+
+  it('retains all seven shared cartons across three options while conserving weight and CBM', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 7, '111180-0001', '바뜨 옷장 레일행거', '30B', 20, 50, 40, 30, 124, 0.25, ''],
+      ['중국창고', '', '111180-0002', '바뜨 옷장 레일행거', '40B', 30, '', '', '', '', '', ''],
+      ['중국창고', '', '111180-0003', '바뜨 옷장 레일행거', '50B', 60, '', '', '', '', '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(parsed.errors).toEqual([])
+    expect(new Set(parsed.rows.map((row) => row.packagingGroup!.key)).size).toBe(1)
+    expect(parsed.rows.map((row) => row.totalBoxCount)).toEqual([7, null, null])
+    expect(parsed.rows.map((row) => row.packagingGroup!.memberStartQuantity)).toEqual([0, 20, 50])
+    expect(parsed.rows.every((row) => row.packagingGroup!.referenceQuantity === 110 && row.packagingGroup!.totalBoxCount === 7)).toBe(true)
+    expect(parsed.rows.reduce((sum, row) => sum + Math.round(row.grossWeightKg! * 1_000), 0)).toBe(124_000)
+    expect(parsed.rows.reduce((sum, row) => sum + Math.round(row.manualCbm! * 1_000_000), 0)).toBe(250_000)
+    expect(parsed.rows[1]).toMatchObject({ lengthCm: 50, widthCm: 40, heightCm: 30 })
+  })
+
+  it('treats merged packaging child cells as blank while resolving merged product and warehouse identities', async () => {
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('혼합적재')
+    sheet.addRow([...SAAS_CHINA_INVENTORY_EXCEL_HEADERS])
+    sheet.addRow(['중국창고', 1, 'K-1', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''])
+    sheet.addRow(['', '', 'K-2', '', '블랙', 100, '', '', '', '', '', ''])
+    for (const column of ['A', 'B', 'D', 'J', 'K']) sheet.mergeCells(`${column}2:${column}3`)
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbook.xlsx.writeBuffer())
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows[1]).toMatchObject({ warehouseCode: '중국창고', productName: '켈디 지퍼고리', totalBoxCount: null, grossWeightKg: 5.333, manualCbm: 0.002205 })
+    expect(parsed.rows[0].packagingGroup!.key).toBe(parsed.rows[1].packagingGroup!.key)
+  })
+
+  it('does not infer mixed cartons across product, warehouse, explicit-zero or populated-measurement boundaries', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, 'K-1', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''],
+      ['대량창고', '', 'K-2', '켈디 지퍼고리', '블랙', 100, '', '', '', '', '', ''],
+      ['중국창고', 1, 'B-1', '바뜨 행거', '대', 20, '', '', '', 5, 0.1, ''],
+      ['중국창고', '', 'C-1', '다른 상품', '중', 10, '', '', '', '', '', ''],
+      ['중국창고', 1, 'X-1', '같은 상품', '화이트', 10, '', '', '', 5, 0.1, ''],
+      ['중국창고', 0, 'X-2', '같은 상품', '블랙', 10, '', '', '', '', '', ''],
+      ['중국창고', 1, 'Y-1', '같은 상품2', '화이트', 10, '', '', '', 5, 0.1, ''],
+      ['중국창고', '', 'Y-2', '같은 상품2', '블랙', 10, '', '', '', 0, '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows.every((row) => !row.packagingGroup)).toBe(true)
+  })
+
+  it('starts a new mixed carton group when the next option has its own explicit box count', async () => {
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, 'K-1', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''],
+      ['중국창고', '', 'K-2', '켈디 지퍼고리', '블랙', 100, '', '', '', '', '', ''],
+      ['중국창고', 2, 'K-3', '켈디 지퍼고리', '레드', 20, '', '', '', 10, 0.2, ''],
+      ['중국창고', '', 'K-4', '켈디 지퍼고리', '그린', 10, '', '', '', '', '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows[0].packagingGroup!.key).toBe(parsed.rows[1].packagingGroup!.key)
+    expect(parsed.rows[2].packagingGroup!.key).toBe(parsed.rows[3].packagingGroup!.key)
+    expect(parsed.rows[0].packagingGroup!.key).not.toBe(parsed.rows[2].packagingGroup!.key)
+    expect(parsed.rows[2].packagingGroup).toMatchObject({ totalBoxCount: 2, referenceQuantity: 30, memberStartQuantity: 0 })
+  })
+
+  it('round trips mixed group metadata without multiplying or reallocating option totals', async () => {
+    const original = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, 'K-1', '켈디 지퍼고리', '실버', 50, '', '', '', 8, 0.003308, ''],
+      ['중국창고', '', 'K-2', '켈디 지퍼고리', '블랙', 100, '', '', '', '', '', ''],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]))
+    const exported = await exportSaasChinaInventoryWorkbook(original.rows.map((row, index) => ({ ...row, id: String(index), productName: row.productName!, onHandQuantity: row.onHandQuantity! })))
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(exported as unknown as ExcelJS.Buffer)
+    expect(wb.getWorksheet('포장정보')!.getColumn(14).hidden).toBe(true)
+    const restored = await parseSaasChinaInventoryWorkbook(exported)
+    expect(restored.errors).toEqual([])
+    for (const row of original.rows) expect(restored.rows.find((candidate) => candidate.sku === row.sku)).toMatchObject({
+      totalBoxCount: row.totalBoxCount, grossWeightKg: row.grossWeightKg, manualCbm: row.manualCbm, packagingReferenceQuantity: row.packagingReferenceQuantity, packagingGroup: row.packagingGroup,
+    })
+    wb.getWorksheet('포장정보')!.getCell('N2').value = '{"version":1,"key":"invalid"}'
+    const invalid = await parseSaasChinaInventoryWorkbook(await wb.xlsx.writeBuffer())
+    expect(invalid.errors.some((error) => error.message.includes('혼합포장정보'))).toBe(true)
+  })
+
+  it.each(['warehouse', 'product', 'total', 'overlap', 'out-of-range'] as const)('blocks inconsistent mixed group metadata (%s)', async (caseName) => {
+    const group = { version: 1, key: 'same-group', totalBoxCount: 1, referenceQuantity: 150, memberStartQuantity: 0, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: null, widthCm: null, heightCm: null }
+    const child = { ...group, memberStartQuantity: caseName === 'overlap' ? 25 : caseName === 'out-of-range' ? 100 : 50, ...(caseName === 'total' ? { grossWeightKg: 9 } : {}) }
+    const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([
+      ['중국창고', 1, 'K-1', '켈디 지퍼고리', '실버', 50, '', '', '', 2.667, 0.001103, '', 50, JSON.stringify(group)],
+      [caseName === 'warehouse' ? '대량창고' : '중국창고', '', 'K-2', caseName === 'product' ? '다른 상품' : '켈디 지퍼고리', '블랙', 100, '', '', '', 5.333, 0.002205, '', 100, JSON.stringify(child)],
+    ], [...SAAS_CHINA_INVENTORY_EXCEL_HEADERS, '포장기준수량', '혼합포장정보']))
+    expect(parsed.errors).toHaveLength(2)
+    expect(parsed.errors.every((error) => error.message.includes('혼합포장정보'))).toBe(true)
+  })
+
+  it('allows a partial remaining-stock export while retaining original mixed option ranges', async () => {
+    const group = { version: 1 as const, key: 'partial-group', totalBoxCount: 1, referenceQuantity: 150, memberStartQuantity: 50, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: null, widthCm: null, heightCm: null }
+    const exported = await exportSaasChinaInventoryWorkbook([
+      { id: 'black', warehouseCode: '중국창고', sku: 'K-2', productName: '켈디 지퍼고리', optionName: '블랙', itemCategory: '[상품]', onHandQuantity: 80, totalBoxCount: null, grossWeightKg: 5.333, manualCbm: 0.002205, packagingReferenceQuantity: 100, packagingGroup: group },
+    ])
+    const parsed = await parseSaasChinaInventoryWorkbook(exported)
+    expect(parsed.errors).toEqual([])
+    expect(parsed.rows[0]).toMatchObject({ onHandQuantity: 80, packagingReferenceQuantity: 100, packagingGroup: group, grossWeightKg: 5.333, manualCbm: 0.002205 })
+  })
+
   it('matches the supplied expanded template and accepts blank or partial packaging measurements', async () => {
     expect([...SAAS_CHINA_INVENTORY_EXCEL_HEADERS]).toEqual(['중국창고', '총 박스수량', '품목코드', '상품명', '옵션명', '현재고', '가로', '세로', '높이', '무게', 'cbm', '메모'])
     const parsed = await parseSaasChinaInventoryWorkbook(await workbookBuffer([

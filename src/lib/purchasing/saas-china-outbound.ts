@@ -7,6 +7,8 @@ import type { ChinaOutboundBoxSplitSavedState } from './china-outbound-save-stat
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { nextAvailableBoxNumbers, planInspectionPacking, planInventoryPacking, type InspectionPackingPiece, type InventoryPackingPiece } from './china-outbound-auto-packing'
+import { normalizeChinaInventoryPackingGroup, proportionalInventoryPackingShare, type ChinaInventoryPackingGroup } from './china-inventory-packing-group'
+import { planMixedInventoryPacking, type MixedInventoryPackingPiece } from './china-inventory-mixed-packing'
 import {
   isSaasChinaInventoryExcludedWarehouseCode,
   SAAS_CHINA_INVENTORY_EXCLUDED_WAREHOUSE_ERROR,
@@ -136,6 +138,7 @@ export type SaasChinaInventoryWorkbookPreviewRow = {
   heightCm?: number | null
   grossWeightKg?: number | null
   manualCbm?: number | null
+  packagingGroup?: ChinaInventoryPackingGroup | null
   beforeQuantity: number | null
   afterQuantity: number | null
   status: 'new' | 'changed' | 'unchanged' | 'removed' | 'invalid' | 'protected'
@@ -377,6 +380,7 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
     ADD COLUMN IF NOT EXISTS item_category varchar(100);
   ALTER TABLE saas_china_inventory
     ADD COLUMN IF NOT EXISTS total_box_count integer,
+    ADD COLUMN IF NOT EXISTS packaging_group jsonb,
     ADD COLUMN IF NOT EXISTS packaging_reference_quantity integer,
     ADD COLUMN IF NOT EXISTS length_cm numeric(18, 6),
     ADD COLUMN IF NOT EXISTS width_cm numeric(18, 6),
@@ -775,6 +779,8 @@ const SAAS_CHINA_OUTBOUND_SCHEMA_SQL = sql`
   ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS height_cm numeric(12, 2);
   ALTER TABLE china_outbound_pallets ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
   ALTER TABLE china_outbound_boxes ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
+  ALTER TABLE china_outbound_boxes ADD COLUMN IF NOT EXISTS inventory_packing_group_key varchar(100);
+  ALTER TABLE china_outbound_boxes ADD COLUMN IF NOT EXISTS inventory_packing_group_box_index integer;
   ALTER TABLE china_outbound_box_items ADD COLUMN IF NOT EXISTS manual_cbm numeric(18, 6);
 
   CREATE UNIQUE INDEX IF NOT EXISTS china_outbound_box_items_box_shipment_item
@@ -2408,7 +2414,7 @@ export async function applyChinaOutboundInventoryPacking(input: { userId: string
       packedByItem.set(row.shipmentItemId, (packedByItem.get(row.shipmentItemId) ?? 0) + row.quantity)
     }
     const result = { createdBoxCount: 0, packedQuantity: 0, appliedItemCount: 0, skippedItemCount: 0, preservedBoxCount: boxes.length, missingPackagingCount: 0 }
-    const plans: Array<{ item: ChinaOutboundShipmentItemRow; inventory: typeof saasChinaInventory.$inferSelect; referenceQuantity: number; pieces: InventoryPackingPiece[] }> = []
+    const plans: Array<{ item: ChinaOutboundShipmentItemRow; inventory: typeof saasChinaInventory.$inferSelect; referenceQuantity: number; pieces: InventoryPackingPiece[]; group?: ChinaInventoryPackingGroup }> = []
     // Validate every row before the first write so a stale packed counter never
     // leads to partial backfill or changes to existing user-entered packing.
     for (const item of items) {
@@ -2423,19 +2429,24 @@ export async function applyChinaOutboundInventoryPacking(input: { userId: string
       const referenceQuantity = inventory.packagingReferenceQuantity ?? inventory.onHandQuantity
       const consumedQuantity = Math.max(0, referenceQuantity - inventory.onHandQuantity)
         + Math.max(0, inventory.reservedQuantity - item.reservedQuantity) + packedQuantity
-      const pieces = planInventoryPacking({ ...inventory, onHandQuantity: referenceQuantity, quantity, consumedQuantity, measurementBasis: 'total' })
+      const group = normalizeChinaInventoryPackingGroup(inventory.packagingGroup)
+      const pieces = group ? planMixedInventoryPacking({ group, memberReferenceQuantity: referenceQuantity, quantity, consumedQuantity }) : planInventoryPacking({ ...inventory, onHandQuantity: referenceQuantity, quantity, consumedQuantity, measurementBasis: 'total' })
       if (!pieces.length) { result.skippedItemCount += 1; result.missingPackagingCount += 1; continue }
-      plans.push({ item, inventory, referenceQuantity, pieces })
-      result.createdBoxCount += pieces.length
+      plans.push({ item, inventory, referenceQuantity, pieces, ...(group ? { group } : {}) })
+      if (!group) result.createdBoxCount += pieces.length
       result.packedQuantity += quantity
       result.appliedItemCount += 1
     }
-    if (result.createdBoxCount > 5_000) throw new Error('한 번에 자동 생성할 수 있는 박스는 최대 5,000개입니다.')
+    const mixedBoxKeys = new Set(plans.filter((plan) => plan.group).flatMap((plan) => (plan.pieces as MixedInventoryPackingPiece[]).map((piece) => `${plan.group!.key}:${piece.sourceBoxIndex}`)))
+    const existingMixedBoxKeys = new Set(boxes.filter((box) => box.inventoryPackingGroupKey && box.inventoryPackingGroupBoxIndex != null).map((box) => `${box.inventoryPackingGroupKey}:${box.inventoryPackingGroupBoxIndex}`))
+    const expectedNewMixedBoxes = [...mixedBoxKeys].filter((key) => !existingMixedBoxKeys.has(key)).length
+    if (result.createdBoxCount + expectedNewMixedBoxes > 5_000) throw new Error('한 번에 자동 생성할 수 있는 박스는 최대 5,000개입니다.')
     if (!plans.length) return result
-    const numbers = nextAvailableBoxNumbers(result.createdBoxCount, boxes.map((box) => box.boxNo))
+    const numbers = result.createdBoxCount ? nextAvailableBoxNumbers(result.createdBoxCount, boxes.map((box) => box.boxNo)) : []
     const nextSort = boxes.reduce((maximum, box) => Math.max(maximum, box.sortOrder), -1) + 1
     const numberValue = (value: number | null) => value == null ? null : String(value)
-    const rows = plans.flatMap(({ item, pieces }) => pieces.map((piece) => ({ item, piece }))).map(({ item, piece }, index) => ({
+    const normalPlans = plans.filter((plan) => !plan.group)
+    const rows = normalPlans.flatMap(({ item, pieces }) => pieces.map((piece) => ({ item, piece }))).map(({ item, piece }, index) => ({
       box: {
         id: randomUUID(), userId: input.userId, shipmentId: shipment.id, boxNo: numbers[index], sortOrder: nextSort + index,
         lengthCm: numberValue(piece.lengthCm), widthCm: numberValue(piece.widthCm), heightCm: numberValue(piece.heightCm),
@@ -2452,8 +2463,8 @@ export async function applyChinaOutboundInventoryPacking(input: { userId: string
         lengthCm: box.lengthCm, widthCm: box.widthCm, heightCm: box.heightCm, grossWeightKg: box.grossWeightKg, manualCbm: box.manualCbm,
       })))
     }
-    for (let offset = 0; offset < plans.length; offset += batchSize) {
-      const batch = plans.slice(offset, offset + batchSize)
+    for (let offset = 0; offset < normalPlans.length; offset += batchSize) {
+      const batch = normalPlans.slice(offset, offset + batchSize)
       await tx.update(chinaOutboundShipmentItems).set({
         packedQuantity: sql`CASE ${chinaOutboundShipmentItems.id} ${sql.join(batch.map(({ item }) => sql`WHEN ${item.id} THEN ${item.reservedQuantity}::integer`), sql` `)} ELSE ${chinaOutboundShipmentItems.packedQuantity} END`,
         boxSplitStatus: 'completed', updatedAt: new Date(),
@@ -2462,6 +2473,11 @@ export async function applyChinaOutboundInventoryPacking(input: { userId: string
       if (references.length) await tx.update(saasChinaInventory).set({
         packagingReferenceQuantity: sql`CASE ${saasChinaInventory.id} ${sql.join(references.map(({ inventory, referenceQuantity }) => sql`WHEN ${inventory.id} THEN ${referenceQuantity}::integer`), sql` `)} ELSE ${saasChinaInventory.packagingReferenceQuantity} END`,
       }).where(and(eq(saasChinaInventory.userId, input.userId), inArray(saasChinaInventory.id, references.map(({ inventory }) => inventory.id))))
+    }
+    for (const plan of plans.filter((candidate) => candidate.group)) {
+      const saved = await appendMixedInventoryPackingInTransaction(tx, { userId: input.userId, shipmentId: shipment.id, shipmentItemId: plan.item.id }, plan.group!, plan.pieces as MixedInventoryPackingPiece[])
+      result.createdBoxCount += saved.createdBoxCount
+      if (plan.inventory.packagingReferenceQuantity == null) await tx.update(saasChinaInventory).set({ packagingReferenceQuantity: plan.referenceQuantity }).where(and(eq(saasChinaInventory.userId, input.userId), eq(saasChinaInventory.id, plan.inventory.id)))
     }
     await tx.update(chinaOutboundShipments).set({ status: 'packing', updatedAt: new Date() }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, shipment.id), eq(chinaOutboundShipments.status, 'draft')))
     return result
@@ -2610,13 +2626,21 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     // Empty source boxes make a retry a no-op, including the measured weight.
     if (!allocations.some((row) => row.boxId !== target.id)) return target
     const products = new Map<string, typeof allocations>()
+    const summedGroupCbm = boxes.some((box) => !!box.inventoryPackingGroupKey)
     for (const row of allocations) {
       const box = boxes.find((candidate) => candidate.id === row.boxId)!
       const source = allocations.filter((candidate) => candidate.boxId === box.id)
       const fields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
       const measured = source.length === 1 && fields.every((field) => row[field] == null)
         ? { ...row, ...Object.fromEntries(fields.map((field) => [field, box[field] ?? null])) } : row
-      products.set(row.shipmentItemId, [...(products.get(row.shipmentItemId) ?? []), measured])
+      // A legacy mixed box may store its whole-container CBM on each product.
+      // Convert that container total to shares before crossing into SUM mode.
+      const sourceCbm = calculateChinaOutboundBoxCbm(box)
+      const sourceQuantity = source.reduce((sum, component) => sum + component.quantity, 0)
+      const startQuantity = source.slice(0, source.findIndex((component) => component.id === row.id)).reduce((sum, component) => sum + component.quantity, 0)
+      const sharedCbm = summedGroupCbm && sourceCbm != null ? proportionalInventoryPackingShare(sourceCbm, sourceQuantity, startQuantity, row.quantity, 1_000_000) : null
+      const normalized = summedGroupCbm ? { ...measured, manualCbm: sharedCbm == null ? null : String(sharedCbm) } : measured
+      products.set(row.shipmentItemId, [...(products.get(row.shipmentItemId) ?? []), normalized])
     }
     await tx.delete(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), inArray(chinaOutboundBoxItems.boxId, ids)))
     for (const [shipmentItemId, rows] of products) {
@@ -2627,7 +2651,7 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
         quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
         lengthCm: dimensions?.lengthCm ?? null, widthCm: dimensions?.widthCm ?? null, heightCm: dimensions?.heightCm ?? null,
         grossWeightKg: weights.every((weight) => weight != null) ? String(Math.round(weights.reduce((sum, weight) => sum + weight!, 0) * 1000) / 1000) : null,
-        manualCbm: rows.some((row) => dimensionNumber(row.manualCbm) != null) && cbms.length ? String(Math.max(...cbms)) : null,
+        manualCbm: rows.some((row) => dimensionNumber(row.manualCbm) != null) && cbms.length ? String(summedGroupCbm ? roundCbm(cbms.reduce((sum, value) => sum + value, 0)) : Math.max(...cbms)) : null,
       })
     }
     const weights = boxes.filter((box) => allocations.some((row) => row.boxId === box.id)).map((box) => dimensionNumber(box.grossWeightKg))
@@ -2635,8 +2659,8 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     if (weight != null && weight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
     const grossWeightKg = weight == null ? null : String(weight)
     const cbms = boxes.map((box) => calculateChinaOutboundBoxCbm(box)).filter((value): value is number => value != null)
-    const manualCbm = boxes.some((box) => dimensionNumber(box.manualCbm) != null) && cbms.length ? String(Math.max(...cbms)) : null
-    await tx.update(chinaOutboundBoxes).set({ grossWeightKg, manualCbm, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
+    const manualCbm = boxes.some((box) => dimensionNumber(box.manualCbm) != null) && cbms.length ? String(summedGroupCbm ? roundCbm(cbms.reduce((sum, value) => sum + value, 0)) : Math.max(...cbms)) : null
+    await tx.update(chinaOutboundBoxes).set({ grossWeightKg, manualCbm, ...(summedGroupCbm ? { inventoryPackingGroupKey: `merged:${target.id}`, inventoryPackingGroupBoxIndex: null } : {}), updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
     // Retain emptied box records for references, but exclude their former weight and pallet.
     await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, manualCbm: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))
     await markChinaOutboundBoxesChanged(tx, input.userId, input.shipmentId, ids)
@@ -3091,6 +3115,7 @@ export async function saveChinaOutboundItemBoxSplits(input: {
         )),
     ])
 
+    assertNoGroupedDuplicateAllocations(input.allocations, boxes)
     const previousBoxIds = new Set(boxItems.filter((row) => row.shipmentItemId === shipmentItem.id).map((row) => row.boxId))
     const saved = await replaceChinaOutboundItemBoxSplitsInTransaction({
       tx,
@@ -3118,6 +3143,8 @@ export async function saveChinaOutboundItemBoxSplits(input: {
         note: box.note, lengthCm: dimensionNumber(box.lengthCm), widthCm: dimensionNumber(box.widthCm),
         heightCm: dimensionNumber(box.heightCm), grossWeightKg: dimensionNumber(box.grossWeightKg),
         manualCbm: dimensionNumber(box.manualCbm),
+        inventoryPackingGroupKey: box.inventoryPackingGroupKey,
+        inventoryPackingGroupBoxIndex: box.inventoryPackingGroupBoxIndex,
       })),
       boxItems: savedBoxItems.map((row) => ({ id: row.id, boxId: row.boxId, shipmentItemId: row.shipmentItemId, quantity: row.quantity,
         lengthCm: dimensionNumber(row.lengthCm), widthCm: dimensionNumber(row.widthCm), heightCm: dimensionNumber(row.heightCm), grossWeightKg: dimensionNumber(row.grossWeightKg),
@@ -3224,6 +3251,7 @@ export async function applyChinaOutboundWorkbook(input: {
         .orderBy(asc(chinaOutboundPallets.sortOrder), asc(chinaOutboundPallets.createdAt)),
     ])
     const itemsById = new Map(shipmentItems.map((item) => [item.id, item]))
+    for (const rawSplit of input.boxSplits) assertNoGroupedDuplicateAllocations(rawSplit.allocations, initialBoxes)
     let boxes = [...initialBoxes]
     let boxItems = [...initialBoxItems]
 
@@ -3794,6 +3822,12 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
   if (input.initializeInspectionPacking !== false && input.inventory && inventoryPackingQuantity > 0) {
     const referenceQuantity = input.inventory.packagingReferenceQuantity ?? input.inventory.onHandQuantity
     const consumedQuantity = Math.max(0, referenceQuantity - input.inventory.onHandQuantity) + input.inventory.reservedQuantity + inspectionPackedQuantity
+    const group = normalizeChinaInventoryPackingGroup(input.inventory.packagingGroup)
+    if (group) {
+      const pieces = planMixedInventoryPacking({ group, memberReferenceQuantity: referenceQuantity, quantity: inventoryPackingQuantity, consumedQuantity })
+      if (pieces.length) await appendMixedInventoryPackingInTransaction(tx, input, group, pieces)
+      return affectedLinkIds
+    }
     const pieces = planInventoryPacking({ ...input.inventory, onHandQuantity: referenceQuantity, quantity: inventoryPackingQuantity, consumedQuantity, measurementBasis: 'total' })
     if (pieces.length) {
       // Preserve the source carton capacity after future stock dispatches.
@@ -3804,6 +3838,123 @@ async function reserveSaasChinaPurchaseLotsForShipmentItem(
     }
   }
   return affectedLinkIds
+}
+
+function roundCbm(value: number) { return Math.round(value * 1_000_000) / 1_000_000 }
+
+function packingProductName(value: string) { return value.replaceAll(/\s+/g, '').toLocaleLowerCase('en-US') }
+
+function assertNoGroupedDuplicateAllocations(allocations: ChinaOutboundBoxSplitInput[], boxes: ChinaOutboundBoxRow[]) {
+  const groupedNumbers = new Set(boxes.filter((box) => box.inventoryPackingGroupKey).map((box) => box.boxNo))
+  const seen = new Set<string>()
+  for (const allocation of allocations) {
+    const boxNo = allocation.boxNo.trim()
+    if (groupedNumbers.has(boxNo) && seen.has(boxNo)) throw new Error('혼합 포장 박스의 같은 상품은 한 행으로 합쳐서 입력해주세요.')
+    seen.add(boxNo)
+  }
+}
+
+function assertPackingModeMoveIsConsistent(input: { boxes: ChinaOutboundBoxRow[]; boxItems: ChinaOutboundBoxItemRow[]; shipmentItem: ChinaOutboundShipmentItemRow; allocations: ChinaOutboundBoxSplitInput[] }) {
+  const byNumber = new Map(input.boxes.map((box) => [box.boxNo, box]))
+  const byId = new Map(input.boxes.map((box) => [box.id, box]))
+  const previous = input.boxItems.filter((row) => row.shipmentItemId === input.shipmentItem.id)
+  const planned = new Map<string, number>()
+  for (const allocation of input.allocations) {
+    const target = allocation.existingBoxId ? byId.get(allocation.existingBoxId) : byNumber.get(allocation.boxNo)
+    if (target) planned.set(target.id, (planned.get(target.id) ?? 0) + allocation.quantity)
+  }
+  const reducedSources = previous.filter((row) => (planned.get(row.boxId) ?? 0) < row.quantity).map((row) => byId.get(row.boxId)).filter((box): box is ChinaOutboundBoxRow => !!box)
+  for (const allocation of input.allocations) {
+    const target = allocation.existingBoxId ? byId.get(allocation.existingBoxId) : byNumber.get(allocation.boxNo)
+    if (!target || !input.boxItems.some((row) => row.boxId === target.id)) continue
+    const previousQuantity = previous.filter((row) => row.boxId === target.id).reduce((sum, row) => sum + row.quantity, 0)
+    if (allocation.quantity <= previousQuantity) continue
+    if (reducedSources.some((source) => !!source.inventoryPackingGroupKey !== !!target.inventoryPackingGroupKey)) throw new Error('혼합적재 박스와 일반 박스를 합치려면 2단계의 박스 합치기를 사용해주세요.')
+  }
+}
+
+async function appendMixedInventoryPackingInTransaction(
+  tx: DbTransaction,
+  input: { userId: string; shipmentId: string; shipmentItemId: string },
+  group: ChinaInventoryPackingGroup,
+  pieces: MixedInventoryPackingPiece[],
+) {
+  const [boxes, allComponents, item] = await Promise.all([
+    tx.select().from(chinaOutboundBoxes).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId))),
+    tx.select().from(chinaOutboundBoxItems).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId))),
+    getChinaOutboundShipmentItem(tx, input.userId, input.shipmentId, input.shipmentItemId),
+  ])
+  const sourceRows = await tx.select().from(saasChinaInventory).where(and(eq(saasChinaInventory.userId, input.userId), isNull(saasChinaInventory.archivedAt), sql`${saasChinaInventory.packagingGroup}->>'key' = ${group.key}`))
+  const groupSources = sourceRows.filter((row) => normalizeChinaInventoryPackingGroup(row.packagingGroup)?.key === group.key)
+  validateStoredInventoryPackingGroup(groupSources, group)
+  const packedQuantity = item.packedQuantity + pieces.reduce((sum, piece) => sum + piece.quantity, 0)
+  if (packedQuantity > item.reservedQuantity) throw new Error('혼합박스 분할 수량이 실제 출고수량을 초과합니다.')
+  const existingByIndex = new Map(boxes.filter((box) => box.inventoryPackingGroupKey === group.key && box.inventoryPackingGroupBoxIndex != null).map((box) => [box.inventoryPackingGroupBoxIndex!, box]))
+  const usedIndices = [...new Set(pieces.map((piece) => piece.sourceBoxIndex))]
+  for (const index of usedIndices) {
+    const existing = existingByIndex.get(index)
+    if (existing && existing.status !== 'open') throw new Error(`${existing.boxNo} 박스는 봉인되어 혼합 상품을 추가할 수 없습니다.`)
+  }
+  const groupedExistingBoxIds = new Set(usedIndices.flatMap((index) => existingByIndex.get(index) ? [existingByIndex.get(index)!.id] : []))
+  const existingMemberIds = [...new Set(allComponents.filter((row) => groupedExistingBoxIds.has(row.boxId)).map((row) => row.shipmentItemId))]
+  if (existingMemberIds.length) {
+    const existingMembers = await tx.select().from(chinaOutboundShipmentItems).where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.shipmentId, input.shipmentId), inArray(chinaOutboundShipmentItems.id, existingMemberIds)))
+    if (existingMembers.some((member) => packingProductName(member.productName) !== packingProductName(item.productName) || (member.originWarehouseCode ?? '') !== (item.originWarehouseCode ?? ''))) throw new Error('다른 상품이나 창고의 재고는 같은 혼합 포장 묶음으로 합칠 수 없습니다.')
+  }
+  const newIndices = usedIndices.filter((index) => !existingByIndex.has(index))
+  const numbers = newIndices.length ? nextAvailableBoxNumbers(newIndices.length, boxes.map((box) => box.boxNo)) : []
+  const nextSort = boxes.reduce((maximum, box) => Math.max(maximum, box.sortOrder), -1) + 1
+  const stringValue = (value: number | null | undefined) => value == null ? null : String(value)
+  const newBoxes = newIndices.map((index, order) => {
+    const piece = pieces.find((candidate) => candidate.sourceBoxIndex === index)!
+    return {
+      id: randomUUID(), userId: input.userId, shipmentId: input.shipmentId,
+      boxNo: numbers[order], sortOrder: nextSort + order, inventoryPackingGroupKey: group.key, inventoryPackingGroupBoxIndex: index,
+      lengthCm: stringValue(piece.lengthCm), widthCm: stringValue(piece.widthCm), heightCm: stringValue(piece.heightCm),
+      grossWeightKg: null, manualCbm: null, note: '중국재고 혼합 포장정보 자동 적용',
+    }
+  })
+  const boxByIndex = new Map<number, typeof boxes[number] | typeof newBoxes[number]>([...existingByIndex, ...newBoxes.map((box) => [box.inventoryPackingGroupBoxIndex, box] as const)])
+  const numberValue = (value: string | number | null | undefined) => value == null ? null : Number(value)
+  const sum = (values: Array<number | null>, precision: number) => values.every((value) => value != null)
+    ? Math.round(values.reduce<number>((total, value) => total + value!, 0) * precision) / precision : null
+  const inserts: Array<typeof chinaOutboundBoxItems.$inferInsert> = []
+  const updates: Array<{ id: string; quantity: number; grossWeightKg: string | null; manualCbm: string | null }> = []
+  const nextComponents = allComponents.map((row) => ({ ...row }))
+  for (const piece of pieces) {
+    const box = boxByIndex.get(piece.sourceBoxIndex)!
+    const existing = nextComponents.find((row) => row.boxId === box.id && row.shipmentItemId === item.id)
+    if (existing) {
+      existing.quantity += piece.quantity
+      existing.grossWeightKg = stringValue(sum([numberValue(existing.grossWeightKg), piece.grossWeightKg], 1_000))
+      existing.manualCbm = stringValue(sum([numberValue(existing.manualCbm), piece.manualCbm], 1_000_000))
+      updates.push({ id: existing.id, quantity: existing.quantity, grossWeightKg: existing.grossWeightKg, manualCbm: existing.manualCbm })
+    } else {
+      const component = {
+        id: randomUUID(), userId: input.userId, shipmentId: input.shipmentId, shipmentItemId: item.id, boxId: box.id, quantity: piece.quantity,
+        lengthCm: box.lengthCm, widthCm: box.widthCm, heightCm: box.heightCm,
+        grossWeightKg: stringValue(piece.grossWeightKg), manualCbm: stringValue(piece.manualCbm),
+      }
+      inserts.push(component)
+      nextComponents.push(component as typeof allComponents[number])
+    }
+  }
+  if (newBoxes.length) await tx.insert(chinaOutboundBoxes).values(newBoxes)
+  if (inserts.length) await tx.insert(chinaOutboundBoxItems).values(inserts)
+  for (const update of updates) await tx.update(chinaOutboundBoxItems).set({ quantity: update.quantity, grossWeightKg: update.grossWeightKg, manualCbm: update.manualCbm, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId), eq(chinaOutboundBoxItems.id, update.id)))
+  for (const index of usedIndices) {
+    const box = boxByIndex.get(index)!
+    const components = nextComponents.filter((row) => row.boxId === box.id)
+    const grossWeightKg = sum(components.map((row) => numberValue(row.grossWeightKg)), 1_000)
+    const manualCbm = sum(components.map((row) => numberValue(row.manualCbm)), 1_000_000)
+    if ((grossWeightKg != null && grossWeightKg > 999_999_999) || (manualCbm != null && manualCbm > 999_999_999)) throw new Error('혼합박스 중량과 CBM을 확인해주세요.')
+    await tx.update(chinaOutboundBoxes).set({ grossWeightKg: stringValue(grossWeightKg), manualCbm: stringValue(manualCbm), updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, box.id)))
+  }
+  await tx.update(chinaOutboundShipmentItems).set({ packedQuantity, boxSplitStatus: packedQuantity === item.reservedQuantity ? 'completed' : 'in_progress', updatedAt: new Date() }).where(and(eq(chinaOutboundShipmentItems.userId, input.userId), eq(chinaOutboundShipmentItems.id, item.id)))
+  const changedExistingBoxes = usedIndices.flatMap((index) => existingByIndex.get(index) ? [existingByIndex.get(index)!.id] : [])
+  if (changedExistingBoxes.length) await markChinaOutboundBoxesChanged(tx, input.userId, input.shipmentId, changedExistingBoxes)
+  await tx.update(chinaOutboundShipments).set({ status: 'packing', updatedAt: new Date() }).where(and(eq(chinaOutboundShipments.userId, input.userId), eq(chinaOutboundShipments.id, input.shipmentId), eq(chinaOutboundShipments.status, 'draft')))
+  return { createdBoxCount: newBoxes.length }
 }
 
 async function appendInventoryPackingInTransaction(
@@ -4162,6 +4313,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
   ]))
   const inventoriesById = new Map(workspaceInventories.map((inventory) => [inventory.id, inventory]))
   const rows = input.rows.map(normalizeSaasChinaInventoryWorkbookRow)
+  validateWorkbookPackingGroupRows(rows)
   const workbookRowsByIdentity = new Map(rows.map((row) => [
     saasChinaInventoryWorkbookPlanKey(row.rowNumber, row.warehouseCode, row.sku, row.optionName), row,
   ]))
@@ -4368,6 +4520,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
       measurements[field] !== inventoryMeasurementNumber(existing[field])
     ))
     const packagingReferenceChanged = saasChinaInventoryWorkbookMeasurementValues(row, existing).packagingReferenceQuantity !== (existing.packagingReferenceQuantity ?? null)
+    const packagingGroupChanged = JSON.stringify(saasChinaInventoryWorkbookMeasurementValues(row, existing).packagingGroup) !== JSON.stringify(existing.packagingGroup ?? null)
     const restoresArchivedInventory = existing.archivedAt != null
     const reportBlankQuantityMessage = row.reportBlankQuantity && afterQuantity === 0
       ? afterQuantity === existing.onHandQuantity
@@ -4388,6 +4541,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
         && itemCategory === existing.itemCategory
         && !measurementsChanged
         && !packagingReferenceChanged
+        && !packagingGroupChanged
         && !restoresArchivedInventory
         ? 'unchanged'
         : 'changed',
@@ -4465,6 +4619,7 @@ export function buildSaasChinaInventoryWorkbookPreview(
       return {
         ...plan,
         ...saasChinaInventoryWorkbookMeasurements(workbookRow, isReplacement && plan.row != null ? undefined : existing),
+        packagingGroup: normalizeChinaInventoryPackingGroup(workbookRow?.packagingGroup ?? (isReplacement && plan.row != null ? null : existing?.packagingGroup)),
       }
     }),
     ...(errors.length > 0 ? { errors } : {}),
@@ -4484,7 +4639,7 @@ function saasChinaInventoryWorkbookMeasurements(
   existing?: typeof saasChinaInventory.$inferSelect,
 ): SaasChinaInventoryMeasurements {
   return {
-    totalBoxCount: row?.totalBoxCount ?? inventoryMeasurementNumber(existing?.totalBoxCount),
+    totalBoxCount: row?.packagingGroup != null ? row.totalBoxCount ?? null : row?.totalBoxCount ?? inventoryMeasurementNumber(existing?.totalBoxCount),
     lengthCm: row?.lengthCm ?? inventoryMeasurementNumber(existing?.lengthCm),
     widthCm: row?.widthCm ?? inventoryMeasurementNumber(existing?.widthCm),
     heightCm: row?.heightCm ?? inventoryMeasurementNumber(existing?.heightCm),
@@ -4506,12 +4661,45 @@ function saasChinaInventoryWorkbookMeasurementValues(
   const packagingReferenceQuantity = referenceQuantity != null && Number.isSafeInteger(referenceQuantity) && referenceQuantity > 0 ? referenceQuantity : null
   return {
     totalBoxCount: values.totalBoxCount,
+    packagingGroup: row.packagingGroup === undefined ? existing?.packagingGroup ?? null : normalizeChinaInventoryPackingGroup(row.packagingGroup),
     packagingReferenceQuantity,
     lengthCm: decimalValue(values.lengthCm),
     widthCm: decimalValue(values.widthCm),
     heightCm: decimalValue(values.heightCm),
     grossWeightKg: decimalValue(values.grossWeightKg),
     manualCbm: decimalValue(values.manualCbm),
+  }
+}
+
+function packingGroupCommonKey(group: ChinaInventoryPackingGroup) {
+  const { memberStartQuantity: _memberStartQuantity, ...common } = group
+  void _memberStartQuantity
+  return JSON.stringify(common)
+}
+
+function validateStoredInventoryPackingGroup(rows: Array<typeof saasChinaInventory.$inferSelect>, expected: ChinaInventoryPackingGroup) {
+  const normalized = rows.map((row) => ({ row, group: normalizeChinaInventoryPackingGroup(row.packagingGroup)! }))
+  if (!normalized.length) throw new Error('혼합 포장 묶음의 원본 재고를 찾을 수 없습니다.')
+  const first = normalized[0].row
+  const intervals = normalized.map(({ row, group }) => ({ start: group.memberStartQuantity, end: group.memberStartQuantity + (row.packagingReferenceQuantity ?? row.onHandQuantity) })).sort((left, right) => left.start - right.start)
+  if (normalized.some(({ row, group }) => !group || packingGroupCommonKey(group) !== packingGroupCommonKey(expected) || row.warehouseCode !== first.warehouseCode || packingProductName(row.productName) !== packingProductName(first.productName))
+    || intervals.some((range, index) => range.end > expected.referenceQuantity || range.end <= range.start || (index > 0 && range.start < intervals[index - 1].end))) {
+    throw new Error('혼합 포장 묶음의 상품·창고·옵션 수량이 일치하지 않습니다. 재고 엑셀을 확인해주세요.')
+  }
+}
+
+function validateWorkbookPackingGroupRows(rows: NormalizedSaasChinaInventoryWorkbookRow[]) {
+  const groups = new Map<string, Array<{ row: NormalizedSaasChinaInventoryWorkbookRow; group: ChinaInventoryPackingGroup }>>()
+  for (const row of rows) {
+    const group = normalizeChinaInventoryPackingGroup(row.packagingGroup)
+    if (group) groups.set(group.key, [...(groups.get(group.key) ?? []), { row, group }])
+  }
+  for (const members of groups.values()) {
+    const first = members[0]
+    const ranges = members.map(({ row, group }) => ({ start: group.memberStartQuantity, end: group.memberStartQuantity + (row.packagingReferenceQuantity ?? row.onHandQuantity ?? 0) })).sort((left, right) => left.start - right.start)
+    const invalid = members.some(({ row, group }) => packingGroupCommonKey(group) !== packingGroupCommonKey(first.group) || row.warehouseCode !== first.row.warehouseCode || (row.productName != null && first.row.productName != null && packingProductName(row.productName) !== packingProductName(first.row.productName)))
+      || ranges.some((range, index) => range.end <= range.start || range.end > first.group.referenceQuantity || (index > 0 && range.start < ranges[index - 1].end))
+    if (invalid) for (const { row } of members) row.errors.push('혼합 포장 묶음의 상품·창고·옵션 수량이 일치하지 않습니다.')
   }
 }
 
@@ -4565,6 +4753,7 @@ function validateSaasChinaInventoryWorkbookRow(row: NormalizedSaasChinaInventory
   if (row.packagingReferenceQuantity != null && (!Number.isSafeInteger(row.packagingReferenceQuantity) || row.packagingReferenceQuantity < 1 || row.packagingReferenceQuantity > 2_147_483_647)) {
     errors.push('포장 기준 수량은 1 이상 2,147,483,647 이하의 정수로 입력해주세요.')
   }
+  if (row.packagingGroup != null && !normalizeChinaInventoryPackingGroup(row.packagingGroup)) errors.push('혼합박스 포장정보를 확인해주세요.')
   const measurementLabels = { lengthCm: '가로', widthCm: '세로', heightCm: '높이', grossWeightKg: '무게', manualCbm: 'CBM' } as const
   for (const field of ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const) {
     const value = row[field]
@@ -4987,6 +5176,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
   boxes: ChinaOutboundBoxRow[]
   boxItems: ChinaOutboundBoxItemRow[]
 }) {
+  assertPackingModeMoveIsConsistent(input)
   const measurementFields = ['lengthCm', 'widthCm', 'heightCm', 'grossWeightKg', 'manualCbm'] as const
   const originalBoxItemsById = new Map(input.boxItems.map((row) => [row.id, row]))
   const originalItemsByBox = new Map<string, ChinaOutboundBoxItemRow[]>()
@@ -5156,7 +5346,7 @@ async function replaceChinaOutboundItemBoxSplitsInTransaction(input: {
     const grossWeightKg = !recalculateWeightBoxIds.has(boxId) ? current.grossWeightKg : totalWeight == null ? null : String(totalWeight)
     const nextDimensions = dimensions && calculateChinaOutboundBoxCbm(dimensions) != null ? dimensions : current
     const effectiveCbms = rows.map((row) => calculateChinaOutboundBoxCbm(row)).filter((value): value is number => value != null)
-    const manualCbm = !recalculateCbmBoxIds.has(boxId) ? current.manualCbm ?? null : rows.some((row) => dimensionNumber(row.manualCbm) != null) && effectiveCbms.length ? String(Math.max(...effectiveCbms)) : null
+    const manualCbm = !recalculateCbmBoxIds.has(boxId) ? current.manualCbm ?? null : rows.some((row) => dimensionNumber(row.manualCbm) != null) && effectiveCbms.length ? String(current.inventoryPackingGroupKey ? roundCbm(effectiveCbms.reduce((sum, value) => sum + value, 0)) : Math.max(...effectiveCbms)) : null
     const box = { ...current, lengthCm: nextDimensions.lengthCm ?? null, widthCm: nextDimensions.widthCm ?? null, heightCm: nextDimensions.heightCm ?? null, grossWeightKg, manualCbm, updatedAt: measurementUpdatedAt }
     const dimensionsChanged = ['lengthCm', 'widthCm', 'heightCm'].some((field) => dimensionNumber(current[field as 'lengthCm']) !== dimensionNumber(box[field as 'lengthCm']))
     const cbmChanged = dimensionNumber(current.manualCbm) !== dimensionNumber(manualCbm)

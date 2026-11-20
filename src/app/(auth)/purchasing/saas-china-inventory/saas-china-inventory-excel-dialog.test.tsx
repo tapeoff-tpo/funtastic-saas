@@ -205,4 +205,22 @@ describe('SaasChinaInventoryExcelDialog', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(toastError).not.toHaveBeenCalled()
   })
+
+  it('marks shared cartons and shows each option quantity share without counting the carton twice', async () => {
+    const group = { version: 1, key: 'mixed-keldi', totalBoxCount: 1, referenceQuantity: 150, grossWeightKg: 8, manualCbm: 0.003308 }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response({ preview: {
+      summary: { newCount: 2, invalidCount: 0 }, errors: [], rows: [
+        { row: 2, status: 'new', warehouseCode: '중국창고', sku: '110791-0001', productName: '켈디 지퍼고리', optionName: '실버', afterQuantity: 50, totalBoxCount: 1, grossWeightKg: 2.667, manualCbm: 0.001103, packagingGroup: { ...group, memberStartQuantity: 0 } },
+        { row: 3, status: 'new', warehouseCode: '중국창고', sku: '110791-0002', productName: '켈디 지퍼고리', optionName: '블랙', afterQuantity: 100, totalBoxCount: null, grossWeightKg: 5.333, manualCbm: 0.002205, packagingGroup: { ...group, memberStartQuantity: 50 } },
+      ],
+    } }))
+    render(<SaasChinaInventoryExcelDialog />)
+    fireEvent.click(screen.getByRole('button', { name: '엑셀로 재고 변경' }))
+    selectWorkbook()
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
+    expect(await screen.findAllByText('혼합적재 1 · 1박스 공유')).toHaveLength(2)
+    const black = screen.getByText('110791-0002 · 블랙').closest('tr')!
+    expect(within(black).getAllByRole('cell').slice(6, 10).map((cell) => cell.textContent)).toEqual(['-', '-', '5.333', '0.002205'])
+    expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeEnabled()
+  })
 })

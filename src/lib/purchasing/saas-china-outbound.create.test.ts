@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: mocks }))
 
-import { addChinaOutboundSample, applyChinaOutboundInventoryPacking, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment, deleteChinaOutboundShipment } from './saas-china-outbound'
+import { addChinaOutboundSample, applyChinaOutboundInventoryPacking, saveChinaOutboundItemBoxSplits, saveChinaOutboundPalletDimensions, addChinaOutboundShipmentItems, cancelChinaOutboundShipment, createChinaOutboundShipment, deleteChinaOutboundShipment } from './saas-china-outbound'
 
 type Row = { id: string; userId: string; [key: string]: unknown }
 
@@ -103,7 +103,7 @@ function makeTransaction() {
               : table === purchaseRequestItems ? purchaseItems
                 : table === chinaOutboundShipments ? shipments
                   : table === saasChinaShipmentPurchaseAllocations ? allocations
-                    : table === chinaOutboundShipmentItems ? shipmentItems : table === chinaOutboundPallets ? pallets : table === chinaOutboundBoxes ? boxes : null
+                    : table === chinaOutboundShipmentItems ? shipmentItems : table === chinaOutboundPallets ? pallets : table === chinaOutboundBoxes ? boxes : table === chinaOutboundBoxItems ? boxItems : null
           if (!rows) throw new Error('Unexpected update table')
           const matchingRows = queryRows(rows, condition)
           for (const match of matchingRows) {
@@ -269,6 +269,83 @@ describe('createChinaOutboundShipment', () => {
     mocks.transaction.mockImplementation((callback) => callback(tx))
     return tx
   }
+
+  function mixedInventory(quantities = [50, 100], count = 1, weight = 8, cbm = 0.003308) {
+    const total = quantities.reduce((sum, quantity) => sum + quantity, 0)
+    let start = 0
+    inventories = quantities.map((quantity, index) => {
+      const memberStartQuantity = start; start += quantity
+      return {
+        id: `mixed-${index}`, userId: workspaceUserId, warehouseCode: '중국창고', sku: `KELDI-${index}`, productName: index === 1 ? '켈디 지퍼고리' : '켈디지퍼고리', optionName: `옵션 ${index}`, optionKey: `옵션 ${index}`,
+        onHandQuantity: quantity, availableQuantity: quantity, reservedQuantity: 0, packagingReferenceQuantity: quantity, totalBoxCount: index === 0 ? count : null,
+        grossWeightKg: String(Math.round(weight * quantity / total * 1000) / 1000), manualCbm: String(Math.round(cbm * quantity / total * 1_000_000) / 1_000_000),
+        packagingGroup: { version: 1, key: 'mixed-options', memberStartQuantity, totalBoxCount: count, referenceQuantity: total, grossWeightKg: weight, manualCbm: cbm, lengthCm: null, widthCm: null, heightCm: null },
+      }
+    })
+    const tx = makeTransaction(); mocks.transaction.mockImplementation((callback) => callback(tx)); return tx
+  }
+
+  it('packs silver and black options in one shared physical box with proportional component measurements', async () => {
+    mixedInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'mixed-0', quantity: 50 }, { inventoryId: 'mixed-1', quantity: 100 }] })
+    expect(boxes).toHaveLength(1)
+    expect(boxes[0]).toMatchObject({ inventoryPackingGroupKey: 'mixed-options', inventoryPackingGroupBoxIndex: 0, grossWeightKg: '8', manualCbm: '0.003308', lengthCm: '14.9', widthCm: '14.9', heightCm: '14.9' })
+    expect(boxItems.map((row) => [row.boxId, row.quantity, row.grossWeightKg, row.manualCbm])).toEqual([[boxes[0]!.id, 50, '2.667', '0.001103'], [boxes[0]!.id, 100, '5.333', '0.002205']])
+    expect(shipmentItems.every((row) => row.packedQuantity === row.reservedQuantity)).toBe(true)
+    expect(boxItems.every((row) => row.shipmentId === shipment.id && row.userId === workspaceUserId && row.lengthCm === '14.9')).toBe(true)
+  })
+
+  it('keeps seven shared cartons for three options while conserving each option and the group totals', async () => {
+    mixedInventory([20, 30, 60], 7, 124, 0.25)
+    await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: inventories.map((row) => ({ inventoryId: row.id, quantity: Number(row.onHandQuantity) })) })
+    expect(boxes).toHaveLength(7)
+    expect(boxes.map((row) => row.boxNo)).toEqual(['1', '2', '3', '4', '5', '6', '7'])
+    expect(shipmentItems.map((item) => boxItems.filter((row) => row.shipmentItemId === item.id).reduce((sum, row) => sum + Number(row.quantity), 0))).toEqual([20, 30, 60])
+    expect(Math.round(boxes.reduce((sum, row) => sum + Number(row.grossWeightKg), 0) * 1000)).toBe(124000)
+    expect(Math.round(boxes.reduce((sum, row) => sum + Number(row.manualCbm), 0) * 1_000_000)).toBe(250000)
+    expect(shipmentItems.map((item) => Math.round(boxItems.filter((row) => row.shipmentItemId === item.id).reduce((sum, row) => sum + Number(row.grossWeightKg), 0) * 1000))).toEqual([22545, 33819, 67636])
+  })
+
+  it('reuses the same group box and component when more of an option and another option are added later', async () => {
+    mixedInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'mixed-0', quantity: 20 }] })
+    const originalBox = boxes[0]!.id; const originalComponent = boxItems[0]!.id
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'mixed-0', quantity: 30 }, { inventoryId: 'mixed-1', quantity: 100 }] })
+    expect(boxes).toHaveLength(1); expect(boxes[0]!.id).toBe(originalBox)
+    expect(boxItems).toHaveLength(2); expect(boxItems[0]!.id).toBe(originalComponent)
+    expect(boxes[0]).toMatchObject({ grossWeightKg: '8', manualCbm: '0.003308' })
+    expect(boxItems.map((row) => row.quantity)).toEqual([50, 100])
+  })
+
+  it('backfills shared option cartons together without changing stock or reservations, and remains idempotent', async () => {
+    mixedInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'mixed-0', quantity: 50 }, { inventoryId: 'mixed-1', quantity: 100 }] }, { initializeInspectionPacking: false })
+    const originalStock = structuredClone(inventories); const originalMovements = structuredClone(movements)
+    expect(await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: shipment.id })).toMatchObject({ createdBoxCount: 1, appliedItemCount: 2, packedQuantity: 150 })
+    expect(boxes).toHaveLength(1); expect(boxItems).toHaveLength(2)
+    expect(inventories).toEqual(originalStock); expect(movements).toEqual(originalMovements)
+    expect(await applyChinaOutboundInventoryPacking({ userId: workspaceUserId, shipmentId: shipment.id })).toMatchObject({ createdBoxCount: 0, appliedItemCount: 0, packedQuantity: 0 })
+    expect(boxes).toHaveLength(1); expect(boxItems).toHaveLength(2)
+  })
+
+  it('does not silently collapse duplicate component CBM rows in a marked mixed box', async () => {
+    mixedInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'mixed-0', quantity: 50 }] })
+    const previousBoxes = structuredClone(boxes); const previousComponents = structuredClone(boxItems)
+    await expect(saveChinaOutboundItemBoxSplits({ userId: workspaceUserId, shipmentId: shipment.id, shipmentItemId: shipmentItems[0]!.id, allocations: [{ boxNo: '1', quantity: 20, manualCbm: 0.000441 }, { boxNo: '1', quantity: 30, manualCbm: 0.000662 }] })).rejects.toThrow('한 행')
+    expect(boxes).toEqual(previousBoxes); expect(boxItems).toEqual(previousComponents)
+  })
+
+  it.each([true, false])('blocks moving a component across mixed and ordinary occupied box modes before writes (%s)', async (fromMixed) => {
+    mixedInventory()
+    const shipment = await createChinaOutboundShipment({ userId: workspaceUserId, createdBy: 'admin', lines: [{ inventoryId: 'mixed-0', quantity: 50 }] })
+    inventories.push({ ...inventories[0]!, id: 'ordinary', sku: 'ORDINARY', productName: '일반 상품', packagingGroup: null, packagingReferenceQuantity: 10, totalBoxCount: 1, onHandQuantity: 10, availableQuantity: 10, reservedQuantity: 0 })
+    await addChinaOutboundShipmentItems({ userId: workspaceUserId, createdBy: 'admin', shipmentId: shipment.id, lines: [{ inventoryId: 'ordinary', quantity: 10 }] })
+    const source = shipmentItems.find((item) => item.inventoryId === (fromMixed ? 'mixed-0' : 'ordinary'))!
+    const previousBoxes = structuredClone(boxes); const previousComponents = structuredClone(boxItems)
+    await expect(saveChinaOutboundItemBoxSplits({ userId: workspaceUserId, shipmentId: shipment.id, shipmentItemId: source.id, allocations: [{ boxNo: fromMixed ? '2' : '1', quantity: Number(source.reservedQuantity), manualCbm: 0.001 }] })).rejects.toThrow('2단계의 박스 합치기')
+    expect(boxes).toEqual(previousBoxes); expect(boxItems).toEqual(previousComponents)
+  })
 
   function existingUnpackedInventory(quantity = 100, totalBoxCount = 4) {
     const tx = measuredInventory(quantity, totalBoxCount)

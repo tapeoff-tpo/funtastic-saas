@@ -23,6 +23,8 @@ function inventory(overrides: Partial<Inventory> = {}): Inventory {
     optionKey: '',
     optionName: null,
     totalBoxCount: null,
+    packagingReferenceQuantity: null,
+    packagingGroup: null,
     lengthCm: null,
     widthCm: null,
     heightCm: null,
@@ -74,6 +76,18 @@ function preview(
 }
 
 describe('SaaS China inventory Excel planner', () => {
+  it('previews durable shared-carton metadata and rejects overlapping or cross-warehouse members', () => {
+    const group = { version: 1 as const, key: 'shared', totalBoxCount: 1, referenceQuantity: 150, memberStartQuantity: 0, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: null, widthCm: null, heightCm: null }
+    const members = [row({ sku: 'SILVER', productName: '켈디 지퍼고리', optionName: '실버', onHandQuantity: 50, packagingReferenceQuantity: 50, packagingGroup: group, totalBoxCount: 1, grossWeightKg: 2.667, manualCbm: 0.001103 }), row({ rowNumber: 3, sku: 'BLACK', productName: '켈디지퍼고리', optionName: '블랙', onHandQuantity: 100, packagingReferenceQuantity: 100, packagingGroup: { ...group, memberStartQuantity: 50 }, grossWeightKg: 5.333, manualCbm: 0.002205 })]
+    const valid = preview(members, [], new Map(), { fullSnapshot: true })
+    expect(valid.summary.invalidCount).toBe(0)
+    expect(valid.rows[0]).toMatchObject({ packagingGroup: group, grossWeightKg: 2.667, manualCbm: 0.001103 })
+    const overlap = preview([members[0], { ...members[1], packagingGroup: { ...group, memberStartQuantity: 40 } }], [], new Map(), { fullSnapshot: true })
+    expect(overlap.summary.invalidCount).toBe(2)
+    const foreignWarehouse = preview([members[0], { ...members[1], warehouseCode: '대량창고' }], [], new Map(), { fullSnapshot: true })
+    expect(foreignWarehouse.summary.invalidCount).toBe(2)
+  })
+
   it('previews an optional packaging-only change without changing stock', () => {
     const result = preview([row({ onHandQuantity: 10, totalBoxCount: 3, grossWeightKg: 7.25, manualCbm: 0.125 })])
     expect(result.summary.changedCount).toBe(1)

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
+import { toast } from 'sonner'
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { ChinaShipmentsBoard, type ChinaShipmentDetailView, type ChinaShipmentListItem } from './china-shipments-board'
 
@@ -341,6 +342,15 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('기존 박스 수량을 확인해주세요.'))
     expect(refresh).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'SKU-A 박스분할 수정' })).toBeInTheDocument()
+  })
+
+  it('reports an added option in an existing mixed carton as applied even when no new carton is created', async () => {
+    applyInventoryPacking.mockResolvedValueOnce({ ok: true, inventoryPacking: { createdBoxCount: 0, packedQuantity: 10, appliedItemCount: 1, skippedItemCount: 0, preservedBoxCount: 1, missingPackagingCount: 0 } })
+    renderShipment()
+    fireEvent.click(screen.getByRole('button', { name: '중국재고 포장정보 적용', exact: true }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('기존 혼합박스에 포장정보를 적용했습니다.'))
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it('does not offer inventory packing for already packed work', () => {

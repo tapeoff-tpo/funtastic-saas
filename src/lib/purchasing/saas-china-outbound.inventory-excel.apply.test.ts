@@ -69,6 +69,28 @@ function transaction(inventories: Row[], linkedBalances: Row[] = []) {
 }
 
 describe('applySaasChinaInventoryWorkbook', () => {
+  it('persists shared-carton source metadata on a measurement-only change without touching quantities or movements', async () => {
+    const existing = inventory({ reservedQuantity: 0, availableQuantity: 10 })
+    const tx = transaction([existing]); const values: Array<Record<string, unknown>> = []
+    tx.update.mockImplementation(() => ({ set: (value: Record<string, unknown>) => { values.push(value); return { where: () => ({ returning: async () => [{ ...existing, ...value }] }) } } }))
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    const group = { version: 1 as const, key: 'shared', totalBoxCount: 1, referenceQuantity: 30, memberStartQuantity: 0, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: null, widthCm: null, heightCm: null }
+    await applySaasChinaInventoryWorkbook({ userId: workspaceUserId, createdBy: 'operator-a', rows: [excelRow({ onHandQuantity: 10, totalBoxCount: 1, packagingReferenceQuantity: 10, packagingGroup: group, grossWeightKg: 2.667, manualCbm: 0.001103 })] })
+    expect(values).toHaveLength(1)
+    expect(values[0]).toMatchObject({ packagingGroup: group, grossWeightKg: '2.667', manualCbm: '0.001103', onHandQuantity: 10, availableQuantity: 10 })
+    expect(tx.insert).not.toHaveBeenCalled()
+  })
+
+  it('clears a continuation option\'s former independent carton count when it joins a shared group', async () => {
+    const existing = inventory({ reservedQuantity: 0, availableQuantity: 10, totalBoxCount: 1 })
+    const tx = transaction([existing]); const values: Array<Record<string, unknown>> = []
+    tx.update.mockImplementation(() => ({ set: (value: Record<string, unknown>) => { values.push(value); return { where: () => ({ returning: async () => [{ ...existing, ...value }] }) } } }))
+    mocks.transaction.mockImplementation((callback) => callback(tx))
+    const group = { version: 1 as const, key: 'shared', totalBoxCount: 1, referenceQuantity: 30, memberStartQuantity: 10, grossWeightKg: 8, manualCbm: 0.003308, lengthCm: null, widthCm: null, heightCm: null }
+    await applySaasChinaInventoryWorkbook({ userId: workspaceUserId, createdBy: 'operator-a', rows: [excelRow({ onHandQuantity: 10, totalBoxCount: null, packagingReferenceQuantity: 10, packagingGroup: group, grossWeightKg: 2.666, manualCbm: 0.001102 })] })
+    expect(values[0]).toMatchObject({ totalBoxCount: null, packagingGroup: group, onHandQuantity: 10 })
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.execute.mockResolvedValue(undefined)

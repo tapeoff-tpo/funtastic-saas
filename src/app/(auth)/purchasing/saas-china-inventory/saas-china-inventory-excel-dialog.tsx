@@ -22,6 +22,8 @@ type ImportPreviewRow = {
   heightCm: number | null
   grossWeightKg: number | null
   manualCbm: number | null
+  packagingGroupKey: string | null
+  packagingGroupBoxCount: number | null
   message: string
 }
 
@@ -180,6 +182,7 @@ export function SaasChinaInventoryExcelDialog() {
               <p className="mt-1 text-xs text-muted-foreground">새 파일을 반영하면 기존 활성 재고 전체가 삭제되고, 파일에 적힌 재고 행만 새로 생성됩니다. 빈 칸과 0 수량은 해당 창고 재고 없음으로 처리합니다.</p>
               <p className="mt-1 text-xs text-muted-foreground">총 박스수량·가로·세로·높이·무게·CBM은 선택 입력이며, 빈칸이어도 저장할 수 있습니다. 치수는 cm, 무게는 kg으로 입력하세요.</p>
               <p className="mt-1 text-xs text-muted-foreground">무게와 CBM은 전체 박스 합계입니다. 중국출고 등록 시 박스 수로 나눠 각 박스에 자동 입력합니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">혼합적재는 같은 상품·창고의 옵션을 이어서 적고 첫 행에만 박스수량·전체 무게·CBM을 입력하세요. 아래 옵션 행의 세 칸을 비우면 같은 박스로 묶어 수량 비율로 배분합니다.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label className="inline-flex h-9 max-w-full cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted">
                   <Upload className="size-4 shrink-0" />
@@ -266,6 +269,7 @@ function PreviewSummary({ preview }: { preview: ImportPreview }) {
 }
 
 function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
+  const groupNumbers = new Map([...new Set(rows.flatMap((row) => row.packagingGroupKey ? [row.packagingGroupKey] : []))].map((key, index) => [key, index + 1]))
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="overflow-x-auto">
@@ -294,6 +298,7 @@ function PreviewTable({ rows }: { rows: ImportPreviewRow[] }) {
                 <td className="px-3 py-2">
                   <p data-no-translate className="font-medium">{row.productName || '-'}</p>
                   <p data-no-translate className="mt-0.5 text-xs text-muted-foreground">{[row.sku, row.optionName].filter(Boolean).join(' · ') || '-'}</p>
+                  {row.packagingGroupKey && <p className="mt-1 text-xs font-medium text-blue-700">혼합적재 {groupNumbers.get(row.packagingGroupKey)} · {row.packagingGroupBoxCount}박스 공유</p>}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatQuantity(row.beforeQuantity)}</td>
                 <td className="px-3 py-2 text-right font-medium tabular-nums">{formatQuantity(row.afterQuantity)}</td>
@@ -355,6 +360,7 @@ function normalizeRow(value: unknown): ImportPreviewRow | null {
   const nested = asRecord(record.input) ?? asRecord(record.item) ?? {}
   const error = readString(record.error)
   const message = readString(record.message) || error || readString(record.reason)
+  const packagingGroup = asRecord(record.packagingGroup) ?? asRecord(nested.packagingGroup)
   return {
     row: readNumber(record.row) ?? readNumber(record.rowNumber),
     status: readStatus(record.status ?? record.action ?? record.type, error),
@@ -370,6 +376,8 @@ function normalizeRow(value: unknown): ImportPreviewRow | null {
     heightCm: readNumber(record.heightCm) ?? readNumber(nested.heightCm),
     grossWeightKg: readNumber(record.grossWeightKg) ?? readNumber(nested.grossWeightKg),
     manualCbm: readNumber(record.manualCbm) ?? readNumber(nested.manualCbm),
+    packagingGroupKey: readString(packagingGroup?.key) || null,
+    packagingGroupBoxCount: readNumber(packagingGroup?.totalBoxCount),
     message,
   }
 }

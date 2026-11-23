@@ -5,14 +5,33 @@ import { chinaOutboundShipmentItems, chinaOutboundShipments, chinaOutboundBoxes,
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), select: vi.fn(), transaction: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: mocks }))
-import { getChinaOutboundShipmentDetail, listChinaOutboundShipments, listSaasChinaOutboundWarehouses } from './saas-china-outbound'
+import { getChinaOutboundShipmentDetail, getSaasChinaInventory, listChinaOutboundShipments, listSaasChinaOutboundWarehouses } from './saas-china-outbound'
 
 beforeEach(() => vi.clearAllMocks())
 describe('China outbound selection reads', () => {
+  it.each([
+    { rows: [{ id: 'a', onHandQuantity: 12, reservedQuantity: 2, availableQuantity: 10 }, { id: 'b', onHandQuantity: 8, reservedQuantity: 5, availableQuantity: 3 }], summary: { onHandQuantity: 20, reservedQuantity: 7, availableQuantity: 13 } },
+    { rows: [], summary: { onHandQuantity: 0, reservedQuantity: 0, availableQuantity: 0 } },
+  ])('summarizes the exact inventory snapshot without a second stock scan', async ({ rows, summary }) => {
+    mocks.execute.mockResolvedValue([{ ready: true }])
+    let condition: SQL | undefined
+    const builder = {
+      from: () => builder,
+      where: (value: SQL) => { condition = value; return builder },
+      orderBy: async () => rows,
+    }
+    mocks.select.mockReturnValue(builder)
+    expect(await getSaasChinaInventory('owner')).toEqual({ items: rows, summary })
+    expect(mocks.select).toHaveBeenCalledTimes(1)
+    const query = new PgDialect().sqlToQuery(condition!)
+    expect(query.params).toContain('owner')
+    expect(query.sql).toContain('"archived_at" is null')
+  })
+
   it('reads a configured warehouse catalog without acquiring the workspace write lock', async () => {
-    mocks.execute.mockResolvedValueOnce([{ ready: true }]).mockResolvedValueOnce([
-      { warehouseCode: '중국창고', isDefault: true, hasActiveInventory: true, configured: true },
-    ])
+    mocks.execute.mockImplementation(async (query: SQL) => new PgDialect().sqlToQuery(query).sql.includes('jsonb_to_recordset')
+      ? [{ ready: true }]
+      : [{ warehouseCode: '중국창고', isDefault: true, hasActiveInventory: true, configured: true }])
     expect(await listSaasChinaOutboundWarehouses('owner')).toEqual([{ warehouseCode: '중국창고', isDefault: true, hasActiveInventory: true }])
     expect(mocks.transaction).not.toHaveBeenCalled()
     const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls.at(-1)![0])

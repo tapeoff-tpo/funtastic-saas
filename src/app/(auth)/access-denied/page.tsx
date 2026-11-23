@@ -5,7 +5,7 @@ import { MENU_PATHS, canAccessPage } from '@/lib/auth/menu-permissions'
 
 export default async function AccessDeniedPage() {
   const user = await getCurrentUser()
-  const access = user ? await getUserMenuAccess(user.id) : null
+  const access = user ? await getUserMenuAccess(user.id, user) : null
   const destination = access ? MENU_PATHS.find((path) => canAccessPage(access, path)) : null
   return <div className="mx-auto max-w-lg space-y-4 rounded-xl border p-6">
     <h1 className="text-xl font-semibold">접근 권한이 없습니다</h1>

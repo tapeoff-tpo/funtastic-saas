@@ -2,10 +2,13 @@ import { cache } from 'react'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { userMenuPermissions, userProfiles } from '@/lib/db/schema'
-import { getCurrentUser } from './current-user'
+import { getCurrentUser, type CurrentUser } from './current-user'
 import { canUseMenu, type MenuAccess } from './menu-permissions'
 
-export const getUserAuthorization = cache(async (userId: string) => {
+export const getUserAuthorization = cache(async (userId: string, sessionUser?: CurrentUser) => {
+  // Session validation already checks the profile and loads current permissions.
+  // Reuse only a matching verified identity, without caching access between requests.
+  if (sessionUser?.id === userId && sessionUser.authorization) return sessionUser.authorization
   const [row] = await db.select({
     role: userProfiles.role, deactivatedAt: userProfiles.deactivatedAt, email: userProfiles.email,
     allowedMenus: userMenuPermissions.allowedMenus,
@@ -22,14 +25,14 @@ export const getUserAuthorization = cache(async (userId: string) => {
   return { deactivatedAt: row.deactivatedAt, email: row.email, access }
 })
 
-export const getUserMenuAccess = cache(async (userId: string): Promise<MenuAccess | null> => {
-  return (await getUserAuthorization(userId))?.access ?? null
+export const getUserMenuAccess = cache(async (userId: string, sessionUser?: CurrentUser): Promise<MenuAccess | null> => {
+  return (await getUserAuthorization(userId, sessionUser))?.access ?? null
 })
 
 /** Check inside the action as well: Server Action IDs can be posted to other pages. */
 export async function assertMenuAccess(...menus: string[]): Promise<void> {
   const user = await getCurrentUser()
-  const access = user && !user.mustChangePassword ? await getUserMenuAccess(user.id) : null
+  const access = user && !user.mustChangePassword ? await getUserMenuAccess(user.id, user) : null
   if (!access || !menus.some((menu) => canUseMenu(access, menu))) {
     throw new Error('이 메뉴에 접근할 권한이 없습니다. 최고관리자에게 문의해주세요.')
   }

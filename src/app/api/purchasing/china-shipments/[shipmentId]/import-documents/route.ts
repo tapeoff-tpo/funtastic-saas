@@ -45,7 +45,7 @@ type Context = { params: Promise<{ shipmentId: string }> }
 async function load(context: Context) {
   const user = await getCurrentUser()
   if (!user || user.mustChangePassword) return { response: NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 }) }
-  const access = await getUserMenuAccess(user.id)
+  const access = await getUserMenuAccess(user.id, user)
   if (!access || !['/purchasing/china-shipments', '/purchasing/import-documents'].some((menu) => canUseMenu(access, menu))) {
     return { response: NextResponse.json({ error: '인보이스·패킹리스트를 사용할 권한이 없습니다.' }, { status: 403 }) }
   }

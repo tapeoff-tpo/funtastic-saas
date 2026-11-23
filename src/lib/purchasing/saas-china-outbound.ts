@@ -899,35 +899,29 @@ export const ensureSaasChinaOutboundSchema = createChinaOutboundSchemaInitialize
 
 export async function getSaasChinaInventory(userId: string) {
   await ensureSaasChinaOutboundSchema()
-  const [items, [summary]] = await Promise.all([
-    db
-      .select()
-      .from(saasChinaInventory)
-      .where(and(
-        eq(saasChinaInventory.userId, userId),
-        isNull(saasChinaInventory.archivedAt),
-      ))
-      .orderBy(
-        asc(saasChinaInventory.warehouseCode),
-        asc(saasChinaInventory.sku),
-        asc(saasChinaInventory.optionKey),
-      ),
-    db
-      .select({
-        onHandQuantity: sql<number>`COALESCE(SUM(${saasChinaInventory.onHandQuantity}), 0)::int`,
-        reservedQuantity: sql<number>`COALESCE(SUM(${saasChinaInventory.reservedQuantity}), 0)::int`,
-        availableQuantity: sql<number>`COALESCE(SUM(${saasChinaInventory.availableQuantity}), 0)::int`,
-      })
-      .from(saasChinaInventory)
-      .where(and(
-        eq(saasChinaInventory.userId, userId),
-        isNull(saasChinaInventory.archivedAt),
-      )),
-  ])
+  const items = await db
+    .select()
+    .from(saasChinaInventory)
+    .where(and(
+      eq(saasChinaInventory.userId, userId),
+      isNull(saasChinaInventory.archivedAt),
+    ))
+    .orderBy(
+      asc(saasChinaInventory.warehouseCode),
+      asc(saasChinaInventory.sku),
+      asc(saasChinaInventory.optionKey),
+    )
+  // Every active row is already needed by the inventory board and exports.
+  // Sum that same snapshot instead of scanning stock again for the header.
+  const summary = items.reduce((totals, item) => ({
+    onHandQuantity: totals.onHandQuantity + item.onHandQuantity,
+    reservedQuantity: totals.reservedQuantity + item.reservedQuantity,
+    availableQuantity: totals.availableQuantity + item.availableQuantity,
+  }), { onHandQuantity: 0, reservedQuantity: 0, availableQuantity: 0 })
 
   return {
     items,
-    summary: summary ?? { onHandQuantity: 0, reservedQuantity: 0, availableQuantity: 0 },
+    summary,
   }
 }
 

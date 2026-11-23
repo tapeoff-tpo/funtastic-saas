@@ -9,7 +9,7 @@ export default async function ProductOperationsPage({ searchParams }: {
 }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
-  const access = await getUserMenuAccess(user.id)
+  const access = await getUserMenuAccess(user.id, user)
   if (!access) redirect('/access-denied')
   const params = await searchParams
   const available = PRODUCT_OPERATIONS_TABS.filter((tab) => tab.menus.some((menu) => canUseMenu(access, menu)))

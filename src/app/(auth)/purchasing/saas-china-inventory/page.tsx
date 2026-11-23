@@ -25,7 +25,7 @@ export default async function SaasChinaInventoryPage() {
   const [{ items, summary }, outboundWarehouses, access] = await Promise.all([
     getSaasChinaInventory(workspaceUserId),
     listSaasChinaOutboundWarehouses(workspaceUserId),
-    getUserMenuAccess(user.id),
+    getUserMenuAccess(user.id, user),
   ])
   const canRequestOutbound = Boolean(access && canUseMenu(access, '/purchasing/china-shipments'))
   const defaultWarehouseCode = outboundWarehouses.find((warehouse) => warehouse.isDefault)?.warehouseCode

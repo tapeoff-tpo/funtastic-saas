@@ -20,7 +20,7 @@ export default async function DetailPagesPage({
 
   const params = await searchParams
   const workflowId = single(params.workflowItem)
-  const access = workflowId ? await getUserMenuAccess(user.id) : null
+  const access = workflowId ? await getUserMenuAccess(user.id, user) : null
   const linkedItem = access && canAccessPage(access, '/new-products') && /^[0-9a-f-]{36}$/i.test(workflowId)
     ? await getNewProductItem({ userId: await getWorkspaceUserId(user.id), itemId: workflowId })
     : null

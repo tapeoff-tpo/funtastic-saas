@@ -6,7 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 export async function registrationWorkspace() {
   const user = await getCurrentUser()
   if (!user || user.mustChangePassword) return null
-  const access = await getUserMenuAccess(user.id)
+  const access = await getUserMenuAccess(user.id, user)
   if (!access || !canUseMenu(access, '/operations/coupang-registration')) return null
   return getWorkspaceUserId(user.id)
 }

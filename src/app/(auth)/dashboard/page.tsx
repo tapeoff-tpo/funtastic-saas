@@ -1,6 +1,6 @@
-import { eq, and, gte, lt, sql, desc, inArray } from 'drizzle-orm'
+import { eq, and, gte, sql, desc, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { orderMemos, orders, products } from '@/lib/db/schema'
+import { orderMemos, orders } from '@/lib/db/schema'
 import { ShoppingCart, Calendar, Package, Wallet, TrendingUp, PackageX, Bell, CheckCircle2, Image as ImageIcon } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -16,6 +16,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { unstable_cache } from 'next/cache'
+import { getDashboardSummary } from '@/lib/dashboard/queries'
 
 export const metadata: Metadata = {
   title: '대시보드',
@@ -55,46 +56,12 @@ const getDashboardData = unstable_cache(async (workspaceUserId: string) => {
   const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1)
 
   const [
-    newOrdersResult,
-    monthOrdersResult,
-    productCountResult,
-    heldOrdersResult,
-    todaySalesResult,
-    monthSalesResult,
+    summary,
     dailyRows,
     monthlyRows,
     recentInspectionMemos,
   ] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(and(eq(orders.userId, workspaceUserId), eq(orders.status, 'new'))),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, monthStart))),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(products)
-      .where(eq(products.userId, workspaceUserId)),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(and(eq(orders.userId, workspaceUserId), eq(orders.isHeld, true))),
-    db
-      .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.userId, workspaceUserId),
-          gte(orders.orderedAt, dayStart),
-          lt(orders.orderedAt, dayEnd),
-        ),
-      ),
-    db
-      .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
-      .from(orders)
-      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, monthStart))),
+    getDashboardSummary(workspaceUserId, { monthStart, dayStart, dayEnd }),
     db
       .select({
         d: sql<string>`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`,
@@ -137,12 +104,7 @@ const getDashboardData = unstable_cache(async (workspaceUserId: string) => {
       .limit(5),
   ])
 
-  const newOrderCount = newOrdersResult[0]?.count ?? 0
-  const monthOrderCount = monthOrdersResult[0]?.count ?? 0
-  const productCount = productCountResult[0]?.count ?? 0
-  const heldOrderCount = heldOrdersResult[0]?.count ?? 0
-  const todaySales = Number(todaySalesResult[0]?.sum ?? 0)
-  const monthSales = Number(monthSalesResult[0]?.sum ?? 0)
+  const { newOrderCount, monthOrderCount, productCount, heldOrderCount, todaySales, monthSales } = summary
 
   // 일별: 최근 7일 모든 날짜를 0으로 채우고 SQL 결과 머지
   const dailyMap = new Map(

@@ -12,9 +12,8 @@ export function createLocalAdmin() {
     auth: { admin: {
       getUserById,
       listUsers: async ({ page = 1, perPage = 1000 } = {}) => {
-        const rows = await sql`SELECT id::text FROM user_profiles ORDER BY created_at LIMIT ${Math.min(perPage,1000)} OFFSET ${(page-1)*perPage}`
-        const users = []
-        for (const row of rows) { const result = await getUserById(String(row.id)); if (result.data.user) users.push(result.data.user) }
+        const rows = await sql`SELECT p.id::text,p.email,p.role,p.display_name FROM user_profiles p ORDER BY p.created_at LIMIT ${Math.min(perPage,1000)} OFFSET ${(page-1)*perPage}`
+        const users = rows.map((row) => ({ id: row.id, email: row.email, app_metadata: { role: row.role }, user_metadata: { full_name: row.display_name } }))
         return { data: { users }, error: null }
       },
       updateUserById: async (id: string, attributes: { password?: string; ban_duration?: string; app_metadata?: Record<string,unknown> }) => {

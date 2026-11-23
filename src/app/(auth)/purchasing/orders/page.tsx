@@ -138,7 +138,7 @@ export async function PurchasingOrdersView({
   const [workspaceUserId, exchangeRateReference, authorization] = await Promise.all([
     getWorkspaceUserId(user.id),
     getLatestCnyKrwReferenceRate(),
-    getUserAuthorization(user.id),
+    getUserAuthorization(user.id, user),
   ])
   const access = authorization?.access ?? null
   const canDelete = canDeletePurchaseRequests(access)
@@ -198,10 +198,24 @@ export async function PurchasingOrdersView({
     overduePurchaseCompletedCount,
     overdueTotalCount,
   } = purchaseRequestResult
-  const productImages: Record<string, ProductImageResult> = await findSavedNewProductImagesBatch(workspaceUserId,
-    items.flatMap((item: { id?: string | null; sku: string; productName: string; status: string }) => item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
-      ? [{ id: item.id, sku: item.sku, productName: item.productName }] : []),
-  ).catch((error) => { console.error('purchase image address preload failed', error); return {} })
+  const showArrivalWarehouse = isMainOrders
+  const [productImages, sourceWarehouses]: [Record<string, ProductImageResult>, Map<string, string>] = await Promise.all([
+    findSavedNewProductImagesBatch(workspaceUserId,
+      items.flatMap((item: { id?: string | null; sku: string; productName: string; status: string }) => item.id && ['purchase_completed', 'inspecting', 'china_arrived'].includes(item.status)
+        ? [{ id: item.id, sku: item.sku, productName: item.productName }] : []),
+    ).catch((error) => { console.error('purchase image address preload failed', error); return {} }),
+    showArrivalWarehouse && ['purchased', 'purchase_completed', 'inspecting'].includes(status)
+      ? resolvePurchaseSourceWarehouses(workspaceUserId, items.flatMap((item) => item.id ? [{
+        id: item.id,
+        status: item.status,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: item.supplierOrderNumber,
+        inboundWarehouseCode: 'inboundWarehouseCode' in item ? item.inboundWarehouseCode : null,
+        rawData: item.rawData,
+      }] : [])).catch((error) => { console.error('purchase source warehouse preload failed', error); return new Map<string, string>() })
+      : Promise.resolve(new Map<string, string>()),
+  ])
   const purchaseStatusCounts = statusCounts as Partial<Record<PurchaseRequestStatus, number>>
   const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
     if (item.rawData.source !== 'auto_purchase_recommendation') return latest
@@ -214,18 +228,6 @@ export async function PurchasingOrdersView({
   const showPriceComparison = isMainOrders && (status === 'purchase_completed' || status === 'inspecting')
   const isSsj = authorization?.email?.trim().toLowerCase().split('@')[0] === 'ssj'
   const showPaymentControls = !isSsj && (status === 'purchased' || status === 'purchase_completed')
-  const showArrivalWarehouse = isMainOrders
-  const sourceWarehouses = showArrivalWarehouse && ['purchased', 'purchase_completed', 'inspecting'].includes(status)
-    ? await resolvePurchaseSourceWarehouses(workspaceUserId, items.flatMap((item) => item.id ? [{
-      id: item.id,
-      status: item.status,
-      sku: item.sku,
-      purchaseManagementCode: item.purchaseManagementCode,
-      supplierOrderNumber: item.supplierOrderNumber,
-      inboundWarehouseCode: 'inboundWarehouseCode' in item ? item.inboundWarehouseCode : null,
-      rawData: item.rawData,
-    }] : [])).catch((error) => { console.error('purchase source warehouse preload failed', error); return new Map<string, string>() })
-    : new Map<string, string>()
   const showPurchaseDateColumn = isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status)
   const showCostColumns = isMainOrders || showCosts
   const newProductFirstSaleItems = isRequestedStatus

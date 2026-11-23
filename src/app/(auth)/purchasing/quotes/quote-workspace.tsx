@@ -5,7 +5,6 @@ import {
   ArrowLeft, Copy, Download, ExternalLink, FileSpreadsheet, LoaderCircle,
   Plus, Printer, Save, Search, Trash2,
 } from 'lucide-react'
-import * as XLSX from 'xlsx'
 import {
   calculateQuoteLineTotals,
   calculateQuoteTotals,
@@ -16,12 +15,6 @@ import {
   quoteItemsFromSale,
   type SalesStatus,
 } from '@/lib/quotes/quote-calculations'
-import {
-  createSabangnetWorkbook,
-  sabangnetFilename,
-  sabangnetValidationIssues,
-  sabangnetWorkbookMimeType,
-} from '@/lib/quotes/sabangnet-export'
 import styles from './quote-workspace.module.css'
 
 type Item = {
@@ -115,7 +108,7 @@ function importedTrackingRows(values: string[]): Track[] {
   })
 }
 function importSalesFromWorkbook(file: File): Promise<Sale[]> {
-  return file.arrayBuffer().then((buffer) => {
+  return Promise.all([file.arrayBuffer(), import('xlsx')]).then(([buffer, XLSX]) => {
     const book = XLSX.read(buffer, { type: 'array', cellDates: true })
     for (const sheetName of book.SheetNames) {
       const sheet = book.Sheets[sheetName]
@@ -565,7 +558,7 @@ export default function QuoteWorkspace() {
       setNotice({ text: '이 브라우저의 기존 기록을 공용 데이터로 가져왔습니다.' })
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : '기존 기록을 가져오지 못했습니다.', error: true }) } finally { setSaving(false) }
   }
-  const exportSales = (scope: ExportScope = 'selected', exportDate = '') => {
+  const exportSales = async (scope: ExportScope = 'selected', exportDate = '') => {
     const source = scope === 'all'
       ? sales
       : scope === 'date'
@@ -579,10 +572,16 @@ export default function QuoteWorkspace() {
       setNotice({ text: scope === 'date' ? '선택한 견적일에 다운로드할 품목이 없습니다.' : '다운로드할 품목이 없습니다.', error: true })
       return
     }
-    const book = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), '영업관리')
-    const prefix = scope === 'all' ? '전체영업목록' : scope === 'date' ? `견적일_${exportDate.replaceAll('-', '')}_영업목록` : '선택영업목록'
-    XLSX.writeFile(book, `${prefix}_${dateToday().replaceAll('-', '')}.xlsx`)
+    setSaving(true)
+    try {
+      const XLSX = await import('xlsx')
+      const book = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), '영업관리')
+      const prefix = scope === 'all' ? '전체영업목록' : scope === 'date' ? `견적일_${exportDate.replaceAll('-', '')}_영업목록` : '선택영업목록'
+      XLSX.writeFile(book, `${prefix}_${dateToday().replaceAll('-', '')}.xlsx`)
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : '영업목록 엑셀을 만들지 못했습니다.', error: true })
+    } finally { setSaving(false) }
   }
   const deleteSelectedSales = async () => {
     const ids = selectedSales.filter((saleId) => sales.some((entry) => entry.id === saleId))
@@ -731,14 +730,16 @@ export default function QuoteWorkspace() {
     link.click()
     link.remove()
   }
-  const downloadSabangnet = () => {
+  const downloadSabangnet = async () => {
     if (!sale) return
-    const issues = sabangnetValidationIssues(sale)
-    if (issues.length) {
-      setNotice({ text: `사방넷 엑셀을 만들려면 ${issues.join(', ')}을(를) 입력해 주세요.`, error: true })
-      return
-    }
+    setSaving(true)
     try {
+      const { createSabangnetWorkbook, sabangnetFilename, sabangnetValidationIssues, sabangnetWorkbookMimeType } = await import('@/lib/quotes/sabangnet-export')
+      const issues = sabangnetValidationIssues(sale)
+      if (issues.length) {
+        setNotice({ text: `사방넷 엑셀을 만들려면 ${issues.join(', ')}을(를) 입력해 주세요.`, error: true })
+        return
+      }
       const blob = new Blob([createSabangnetWorkbook(sale)], { type: sabangnetWorkbookMimeType })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -751,7 +752,7 @@ export default function QuoteWorkspace() {
       setNotice({ text: '사방넷 등록 엑셀을 다운로드했습니다.' })
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : '사방넷 엑셀을 만들지 못했습니다.', error: true })
-    }
+    } finally { setSaving(false) }
   }
 
   return <div className={styles.workspace}>

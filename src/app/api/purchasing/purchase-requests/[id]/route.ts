@@ -59,7 +59,7 @@ export async function PATCH(
     return NextResponse.json({ error: '저장할 발주 정보가 올바르지 않습니다.' }, { status: 400 })
   }
   if (body.data.purchasePriceComparison) {
-    const access = await getUserMenuAccess(user.id)
+    const access = await getUserMenuAccess(user.id, user)
     if (!access || !canUseMenu(access, '/purchasing/orders')) {
       return NextResponse.json({ error: '구매가격을 수정할 권한이 없습니다.' }, { status: 403 })
     }
@@ -111,7 +111,7 @@ export async function DELETE(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
-  if (!canDeletePurchaseRequests(await getUserMenuAccess(user.id))) {
+  if (!canDeletePurchaseRequests(await getUserMenuAccess(user.id, user))) {
     return NextResponse.json({ error: '발주를 삭제할 권한이 없습니다.' }, { status: 403 })
   }
 

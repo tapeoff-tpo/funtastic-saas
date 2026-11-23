@@ -8,7 +8,7 @@ import { getPurchase1688TrackingCandidates } from '@/lib/purchasing/purchase-tra
 export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user || user.mustChangePassword) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
-  const access = await getUserMenuAccess(user.id)
+  const access = await getUserMenuAccess(user.id, user)
   if (!access || !['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))) {
     return NextResponse.json({ error: '송장 조회 권한이 없습니다.' }, { status: 403 })
   }

@@ -16,7 +16,7 @@ export default async function AuthLayout({
   }
 
   // Block deactivated accounts (defense-in-depth alongside Supabase ban)
-  const authorization = await getUserAuthorization(user.id)
+  const authorization = await getUserAuthorization(user.id, user)
   if (authorization?.deactivatedAt) {
     const supabase = await createClient()
     await supabase.auth.signOut()

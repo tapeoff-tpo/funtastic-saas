@@ -1108,7 +1108,7 @@ export async function getPurchaseRequests(input: {
     WHERE ${chinaWarehouseInventory.userId} = ${purchaseRequestItems.userId}
       AND ${chinaWarehouseInventory.sku} = ${purchaseRequestItems.sku}
   )`
-  const [items, [{ total }], statusCounts, costRows, overduePurchaseRequestRows, overduePurchaseCompletedRows] = await Promise.all([
+  const [items, [{ total }], statusCounts, costRows] = await Promise.all([
     db
       .select({
         ...getTableColumns(purchaseRequestItems),
@@ -1158,6 +1158,10 @@ export async function getPurchaseRequests(input: {
       .select({
         status: purchaseRequestItems.status,
         total: count(),
+        // Keep global status badges and search-scoped delay badges in one scan.
+        // Search belongs inside FILTER so it cannot narrow the status totals.
+        overduePurchaseRequestCount: sql<number>`COUNT(*) FILTER (WHERE ${overduePurchaseRequestWhere})::int`,
+        overduePurchaseCompletedCount: sql<number>`COUNT(*) FILTER (WHERE ${overduePurchaseCompletedWhere})::int`,
       })
       .from(purchaseRequestItems)
       .where(and(
@@ -1185,11 +1189,9 @@ export async function getPurchaseRequests(input: {
         eq(products.internalSku, purchaseRequestItems.sku),
       ))
       .where(where),
-    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchaseRequestWhere),
-    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchaseCompletedWhere),
   ])
-  const overduePurchaseRequestCount = overduePurchaseRequestRows[0]?.total ?? 0
-  const overduePurchaseCompletedCount = overduePurchaseCompletedRows[0]?.total ?? 0
+  const overduePurchaseRequestCount = statusCounts.reduce((total, row) => total + row.overduePurchaseRequestCount, 0)
+  const overduePurchaseCompletedCount = statusCounts.reduce((total, row) => total + row.overduePurchaseCompletedCount, 0)
   const pricedItems = items.map((item) => ({
     ...item,
     ...calculatePurchaseCosts({

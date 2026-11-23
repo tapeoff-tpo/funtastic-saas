@@ -17,7 +17,7 @@ const privateHeaders = { 'Cache-Control': 'private, no-store', 'X-Content-Type-O
 async function authorize(context: Context) {
   const user = await getCurrentUser()
   if (!user || user.mustChangePassword) return { error: NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 }) }
-  const access = await getUserMenuAccess(user.id)
+  const access = await getUserMenuAccess(user.id, user)
   if (!access || !['/purchasing/orders', '/purchasing/overdue'].some((menu) => canUseMenu(access, menu))) {
     return { error: NextResponse.json({ error: '검수 자료를 볼 권한이 없습니다.' }, { status: 403 }) }
   }

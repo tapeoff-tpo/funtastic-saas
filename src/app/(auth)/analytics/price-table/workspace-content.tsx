@@ -59,7 +59,7 @@ export default async function PriceTablePage({
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const [access, fees, data] = await Promise.all([
-    getUserMenuAccess(user.id),
+    getUserMenuAccess(user.id, user),
     activeView === 'compare' ? getPriceRegistrationFees(workspaceUserId).catch((error) => {
       console.error('price registration fee lookup error:', error)
       return {}

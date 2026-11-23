@@ -1,3 +1,4 @@
+import { renderChinaImportPreview } from './china-import-preview'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
@@ -343,4 +344,34 @@ describe('China import documents', () => {
     expect(existing.getCell('D2').value).toBe('0392.10-0000')
     expect(existing.getCell('D2').numFmt).toBe('@')
   })
+})
+
+it('renders the exported invoice and packing worksheet with merged cells and escaped text', async () => {
+  const html = await renderChinaImportPreview(await exportChinaImportDocument(detail, metadata, { ...options, exporter: '<script>alert(1)</script>' }))
+  expect(html).toContain('INVOICE')
+  expect(html).toContain('PACKING LIST')
+  expect(html).toContain('colspan="10"')
+  expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  expect(html).not.toContain('<script>')
+  expect(html).toContain('TAPE-1/ 2026-10-30')
+})
+it('shows a draft template even when prices and box measurements are missing without inventing totals', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, { ...options,
+    items: { 'item-a': { englishName: '', unitPriceCny: Number.NaN }, 'item-b': { englishName: '', unitPriceCny: Number.NaN } },
+    boxes: { 'box-a': { grossWeightKg: Number.NaN, cbm: null }, 'box-b': { grossWeightKg: Number.NaN, cbm: null } },
+  }, {}, true)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('G20').value).toBeNull()
+  expect(sheet.getCell('J112').value).toBeNull()
+  expect(sheet.getCell('V112').value).toBeNull()
+  expect(sheet.getCell('X112').value).toBeNull()
+  expect(await renderChinaImportPreview(buffer)).not.toContain('NaN')
+})
+it('exports the saved whole-pallet CBM when its internal boxes have no dimensions', async () => {
+  const shipment = { ...detail, pallets: [{ ...detail.pallets[0], manualCbm: 1.5, tareWeightKg: 5 }] }
+  const sheet = await exportedSheet(shipment, { ...options, boxes: { ...options.boxes, 'box-a': { grossWeightKg: 10, cbm: null } } })
+  expect(sheet.getCell('X112').value).toBeCloseTo(1.52)
+  expect(sheet.getCell('R112').value).toMatchObject({ result: 25 })
 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Download, Loader2 } from 'lucide-react'
 import { ShipmentCostPanel } from './shipment-cost-panel'
 import type { ImportDocumentDetail, prepareImportDocument } from '@/lib/purchasing/china-import-document'
@@ -24,6 +24,12 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
   const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string }>>({})
   const [boxes, setBoxes] = useState<Record<string, { grossWeightKg: string; cbm: string }>>({})
   const [busy, setBusy] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+  const [showFields, setShowFields] = useState(false)
+  const [previewZoom, setPreviewZoom] = useState('0.65')
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewError, setPreviewError] = useState('')
+  const [previewBusy, setPreviewBusy] = useState(false)
   const [error, setError] = useState('')
   const url = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/import-documents`
 
@@ -31,6 +37,8 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
     setBusy(true)
     setError('')
     setData(null)
+    setPreviewHtml('')
+    setPreviewError('')
     try {
       const response = await fetch(url, { cache: 'no-store', signal })
       if (!response.ok) throw new Error((await response.json()).error || '인보이스·패킹리스트 정보를 불러오지 못했습니다.')
@@ -68,6 +76,30 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
     return () => controller.abort()
   }, [load])
 
+  const payload = JSON.stringify({
+    ...settings, snapshot: data?.snapshot,
+    palletTareKg: 5,
+    palletExtraCbm: data?.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
+    items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: value.unitPriceCny.trim() ? Number(value.unitPriceCny) : null }])),
+    boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: value.grossWeightKg.trim() ? Number(value.grossWeightKg) : null, cbm: value.cbm.trim() ? Number(value.cbm) : null }])),
+  })
+  useEffect(() => {
+    if (!data) return
+    const controller = new AbortController()
+    setPreviewBusy(true)
+    setPreviewError('')
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...JSON.parse(payload), intent: 'preview' }), signal: controller.signal })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || '문서 미리보기를 불러오지 못했습니다.')
+        if (!controller.signal.aborted) setPreviewHtml(result.html)
+      } catch (cause) { if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : '문서 미리보기를 불러오지 못했습니다.') }
+      finally { if (!controller.signal.aborted) setPreviewBusy(false) }
+    }, 350)
+    return () => { window.clearTimeout(timeout); controller.abort() }
+  }, [data, url, payload])
+
   async function download(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!data) return
@@ -76,13 +108,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
     try {
       const response = await fetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...settings, snapshot: data.snapshot,
-          palletTareKg: 5,
-          palletExtraCbm: data.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
-          items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: Number(value.unitPriceCny) }])),
-          boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: Number(value.grossWeightKg), cbm: Number(value.cbm) }])),
-        }),
+        body: payload,
       })
       if (!response.ok) throw new Error((await response.json()).error || '인보이스·패킹리스트를 만들지 못했습니다.')
       const blobUrl = URL.createObjectURL(await response.blob())
@@ -104,14 +130,20 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
       {error ? <p role="alert" className="my-3 rounded-md border border-red-200 p-3 text-sm text-red-700">{error}</p> : null}
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
-      {data ? <form onSubmit={download} onChange={() => onDirtyChange(true)} className="space-y-5">
+      {data && <section aria-label="인보이스·패킹리스트 미리보기" className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><p className="text-xs text-muted-foreground">엑셀 양식 미리보기 · 미입력 정보는 공란으로 표시됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" onClick={() => setShowFields((value) => !value)} className="rounded border px-3 py-2 text-sm">{showFields ? '문서 정보 접기' : '문서 정보 수정'}</button><button type="button" disabled={busy || previewBusy} onClick={() => { setShowFields(true); window.setTimeout(() => formRef.current?.requestSubmit(), 0) }} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
+        {previewBusy && <p role="status" className="text-sm text-muted-foreground">양식 미리보기 불러오는 중…</p>}
+        {previewError && <p role="alert" className="text-sm text-red-700">{previewError}</p>}
+        {previewHtml && <iframe title="인보이스·패킹리스트 엑셀 양식" sandbox="" srcDoc={previewHtml.replace('--sheet-zoom:1', `--sheet-zoom:${previewZoom}`)} className="h-[72vh] w-full rounded border bg-white" />}
+      </section>}
+      {data ? <form ref={formRef} hidden={!showFields} onSubmit={download} onChange={() => onDirtyChange(true)} className={`space-y-5 ${showFields ? 'mt-5' : 'hidden'}`}>
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-3">{fields.map(([key, label, type]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required maxLength={500} type={type} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} className={inputClass} /></label>)}</fieldset>
         <p className="text-sm">{data.palletCount} PLT + {data.looseBoxCount} CTN = {data.packageCount} PACKAGES · 내부 박스 / 内箱 {data.boxCount}</p>
         <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">상품 단가 확인 / 商品单价确认 (CNY)</legend>
           <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['품목 / 商品', '실제 수량 / 数量', '영문명 / 英文名称', '단가(CNY) / 单价'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.items.map((item) => <tr key={item.id} className="border-t"><td className="p-2" data-no-translate>{item.sku}<br />{item.productName} {item.optionName}</td><td className="p-2">{item.quantity}</td><td className="p-2"><input required maxLength={500} aria-label={`${item.sku} English name`} className={inputClass} value={items[item.id]?.englishName ?? ''} onChange={(event) => setItems((current) => ({ ...current, [item.id]: { ...current[item.id], englishName: event.target.value } }))} /></td><td className="p-2"><input required type="number" min="0" max="100000000" step="any" aria-label={`${item.sku} CNY price`} className={inputClass} value={items[item.id]?.unitPriceCny ?? ''} onChange={(event) => setItems((current) => ({ ...current, [item.id]: { ...current[item.id], unitPriceCny: event.target.value } }))} /></td></tr>)}</tbody></table></div>
         </fieldset>
         <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">박스 중량·부피 / 箱子重量和体积</legend>
-          <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['박스 / 箱号', '파렛트 / 托盘', '총중량(kg) / 毛重', 'CBM / 体积'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.boxes.map((box) => <tr key={box.id} className="border-t"><td className="p-2">{box.boxNo}</td><td className="p-2">{box.palletNo ?? 'BOX'}</td>{(['grossWeightKg', 'cbm'] as const).map((key) => <td key={key} className="p-2"><input required type="number" min="0.000001" step="any" aria-label={`${box.boxNo} ${key}`} className={inputClass} value={boxes[box.id]?.[key] ?? ''} onChange={(event) => setBoxes((current) => ({ ...current, [box.id]: { ...current[box.id], [key]: event.target.value } }))} /></td>)}</tr>)}</tbody></table></div>
+          <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['박스 / 箱号', '파렛트 / 托盘', '총중량(kg) / 毛重', 'CBM / 体积'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.boxes.map((box) => <tr key={box.id} className="border-t"><td className="p-2">{box.boxNo}</td><td className="p-2">{box.palletNo ?? 'BOX'}</td>{(['grossWeightKg', 'cbm'] as const).map((key) => <td key={key} className="p-2"><input required={key === 'grossWeightKg' || !data.pallets.some((pallet) => pallet.id === box.palletId && calculateChinaOutboundBoxCbm(pallet) != null)} type="number" min="0.000001" step="any" aria-label={`${box.boxNo} ${key}`} className={inputClass} value={boxes[box.id]?.[key] ?? ''} onChange={(event) => setBoxes((current) => ({ ...current, [box.id]: { ...current[box.id], [key]: event.target.value } }))} /></td>)}</tr>)}</tbody></table></div>
           {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{(data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? [['palletExtraCbm', '미실측 파렛트 1개당 추가부피(CBM) / 未测量托盘的额外体积']] : []).map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
           {data.pallets.map((pallet) => {
             const weight = calculateChinaOutboundPalletWeight(data.boxes.filter((box) => box.palletId === pallet.id)

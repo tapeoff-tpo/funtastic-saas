@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn(), images: vi.fn(), allItems: vi.fn(), calculate: vi.fn(), confirm: vi.fn(), revalidate: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn(), images: vi.fn(), allItems: vi.fn(), calculate: vi.fn(), confirm: vi.fn(), revalidate: vi.fn(), preview: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.access }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.workspace }))
@@ -7,6 +7,7 @@ vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmen
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemTradeDataBySku: mocks.metadata, getAllPurchasingItems: mocks.allItems }))
 vi.mock('@/lib/purchasing/china-import-document', () => ({ prepareImportDocument: mocks.prepare, exportChinaImportDocument: mocks.export }))
 vi.mock('@/lib/purchasing/import-document-product-images', () => ({ getImportDocumentProductImages: mocks.images }))
+vi.mock('@/lib/purchasing/china-import-preview', () => ({ renderChinaImportPreview: mocks.preview }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
 vi.mock('@/lib/purchasing/shipment-cost', () => ({ calculateShipmentCost: mocks.calculate }))
 vi.mock('@/lib/purchasing/shipment-cost-store', () => ({ confirmShipmentCost: mocks.confirm }))
@@ -110,4 +111,18 @@ describe('import document export route', () => {
     expect(mocks.detail).not.toHaveBeenCalled()
     expect(mocks.export).not.toHaveBeenCalled()
   })
+  it('previews the actual workbook with blank inputs without image lookup or download validation', async () => {
+    mocks.prepare.mockReturnValue({ shipmentNo: 'CN-1', items: [{ id: shipmentId }], boxes: [{ id: shipmentId }] })
+    mocks.preview.mockResolvedValue('<html>INVOICE</html>')
+    const snapshot = (await (await GET(new Request('http://localhost'), context())).json()).snapshot
+    const body = { intent: 'preview', snapshot, invoiceNo: 'CN-1', invoiceDate: '2026-11-20', sailingDate: '2026-11-20', exporter: '', importer: '', importerAddress: '', loadingPort: '', destinationPort: '', paymentTerms: '', palletTareKg: 5, palletExtraCbm: 0, items: {}, boxes: {} }
+    const response = await POST(request(body), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ html: '<html>INVOICE</html>' })
+    expect(mocks.export).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ items: { [shipmentId]: { englishName: '', unitPriceCny: Number.NaN } } }), {}, true)
+    expect(mocks.images).not.toHaveBeenCalled()
+    expect(mocks.allItems).not.toHaveBeenCalled()
+    expect((await POST(request({ ...body, snapshot: 'a'.repeat(64) }), context())).status).toBe(409)
+  })
+
 })

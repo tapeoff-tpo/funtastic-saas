@@ -1419,7 +1419,7 @@ describe('ChinaShipmentsBoard', () => {
     detail.boxes[0].grossWeightKg = 10
     renderShipment(detail, 'summary')
     expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
-    expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
+    expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
     const card = screen.getByRole('button', { name: '파렛트 P1 접기' }).closest('article')!
     expect(within(card).getByText('파렛트 규격: 120 × 100 × 150 cm')).toBeVisible()
     expect(within(card).getByText('총중량(kg): 15')).toBeVisible()
@@ -2273,7 +2273,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('button', { name: '출고완료' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 최종 리스트' }))
     expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
-    expect(screen.getByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
+    expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
     for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['summary', '4단계.*파렛트 최종 리스트'], ['items', '1단계.*출고품목·박스분할']]) {
       const button = within(nav).getByRole('button', { name: new RegExp(title) })

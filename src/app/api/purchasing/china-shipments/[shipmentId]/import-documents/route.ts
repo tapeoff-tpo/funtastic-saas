@@ -1,3 +1,4 @@
+import { renderChinaImportPreview } from '@/lib/purchasing/china-import-preview'
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -27,7 +28,13 @@ const schema = z.object({
   palletTareKg: z.number().finite().min(0).max(10000),
   palletExtraCbm: z.number().finite().min(0).max(1000),
   items: z.record(z.string().uuid(), z.object({ englishName: text, unitPriceCny: z.number().finite().min(0).max(100000000) })),
-  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000), cbm: z.number().finite().positive().max(10000) })),
+  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000), cbm: z.number().finite().positive().max(10000).nullable() })),
+})
+const previewSchema = schema.extend({
+  exporter: z.string().max(500), importer: z.string().max(500), importerAddress: z.string().max(500),
+  invoiceNo: z.string().max(500), loadingPort: z.string().max(500), destinationPort: z.string().max(500), paymentTerms: z.string().max(500),
+  items: z.record(z.string().uuid(), z.object({ englishName: z.string().max(500), unitPriceCny: z.number().finite().min(0).max(100000000).nullable() })),
+  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000).nullable(), cbm: z.number().finite().positive().max(10000).nullable() })),
 })
 const costSchema = z.object({
   snapshot: z.string().length(64),
@@ -86,6 +93,17 @@ export async function POST(request: Request, context: Context) {
       if (!saved) return NextResponse.json({ error: '이미 원가를 확정한 출고 회차입니다.' }, { status: 409 })
       revalidatePath('/costs')
       return NextResponse.json({ saved: true })
+    }
+    if (body?.intent === 'preview') {
+      const parsed = previewSchema.safeParse(body)
+      if (!parsed.success) return NextResponse.json({ error: '문서 미리보기 입력값을 확인해주세요.' }, { status: 400 })
+      if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보가 변경되었습니다. 새로고침해주세요.' }, { status: 409 })
+      const options = { ...parsed.data,
+        items: Object.fromEntries(loaded.prepared.items.map((item) => [item.id, { englishName: parsed.data.items[item.id]?.englishName ?? '', unitPriceCny: parsed.data.items[item.id]?.unitPriceCny ?? Number.NaN }])),
+        boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
+      }
+      const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, {}, true)
+      return NextResponse.json({ html: await renderChinaImportPreview(buffer) }, { headers: { 'Cache-Control': 'private, no-store' } })
     }
     const parsed = schema.safeParse(body)
     if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })

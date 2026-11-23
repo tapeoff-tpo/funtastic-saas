@@ -1,3 +1,4 @@
+import { resolveChinaLooseBoxes } from './china-pallet-number'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
@@ -15,7 +16,7 @@ export type ImportDocumentOptions = {
   loadingPort: string; destinationPort: string; paymentTerms: string
   palletTareKg: number; palletExtraCbm: number
   items: Record<string, { englishName: string; unitPriceCny: number }>
-  boxes: Record<string, { grossWeightKg: number; cbm: number }>
+  boxes: Record<string, { grossWeightKg: number; cbm: number | null }>
 }
 export type ImportDocumentDetail = Omit<ChinaOutboundPackingExportDetail, 'boxes'> & {
   boxes: Array<ChinaOutboundPackingExportDetail['boxes'][number] & { grossWeightKg?: string | number | null }>
@@ -56,6 +57,7 @@ export function formatBoxMarks(marks: readonly string[]) {
 }
 
 export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Map<string, ImportItemMetadata>) {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 인보이스·패킹리스트를 만들 수 없습니다.')
   if (!detail.items.length) throw new Error('출고상품을 먼저 등록해주세요.')
   const itemById = new Map(detail.items.map((item) => [item.id, item]))
@@ -104,18 +106,22 @@ export async function exportChinaImportDocument(
   metadata: Map<string, ImportItemMetadata>,
   options: ImportDocumentOptions,
   supplements: ImportDocumentSupplements = {},
+  preview = false,
 ) {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   const prepared = prepareImportDocument(detail, metadata)
   for (const item of prepared.items) {
     const override = options.items[item.id]
-    if (!override?.englishName.trim() || !Number.isFinite(override.unitPriceCny) || override.unitPriceCny < 0) {
+    if (!preview && (!override?.englishName.trim() || !Number.isFinite(override.unitPriceCny) || override.unitPriceCny < 0)) {
       throw new Error(`${item.sku}: 영문명과 위안화 단가를 확인해주세요.`)
     }
   }
   for (const box of prepared.boxes) {
     const override = options.boxes[box.id]
-    if (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg < 0.001 || override.grossWeightKg > 999_999_999
-      || !Number.isFinite(override.cbm) || override.cbm <= 0) throw new Error(`${box.boxNo}: 총중량과 CBM을 입력해주세요.`)
+    const pallet = prepared.pallets.find((pallet) => pallet.id === box.palletId)
+    const needsBoxCbm = !pallet || calculateChinaOutboundBoxCbm(pallet) == null
+    if (!preview && (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg < 0.001 || override.grossWeightKg > 999_999_999
+      || (needsBoxCbm && (override.cbm == null || !Number.isFinite(override.cbm) || override.cbm <= 0)))) throw new Error(`${box.boxNo}: 총중량과 CBM을 입력해주세요.`)
   }
   // The supplied INV/PL workbook owns every header, merge, width, font and
   // print setting. Only shipment values and the variable packing groups change.
@@ -168,7 +174,7 @@ export async function exportChinaImportDocument(
       const sku = item.sku.trim()
       const source = options.items[item.id]
       const previous = groupBySku.get(sku) ?? invoiceBySku.get(sku)
-      if (previous) {
+      if (previous && !preview) {
         const previousSource = options.items[previous.itemId]
         if (source.englishName.trim() !== previousSource.englishName.trim() || source.unitPriceCny !== previousSource.unitPriceCny) {
           throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
@@ -256,10 +262,10 @@ export async function exportChinaImportDocument(
     sheet.getCell(`D${row}`).value = item.hsCode || null
     sheet.getCell(`E${row}`).value = invoice.quantity
     sheet.getCell(`F${row}`).value = 'ea'
-    sheet.getCell(`G${row}`).value = source.unitPriceCny
+    sheet.getCell(`G${row}`).value = Number.isFinite(source.unitPriceCny) ? source.unitPriceCny : null
     const amount = money(invoice.quantity * source.unitPriceCny)
     totalAmount += amount
-    sheet.getCell(`J${row}`).value = { formula: `ROUND(G${row}*E${row},2)`, result: amount }
+    sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
   const grossWeight = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0)
@@ -267,16 +273,17 @@ export async function exportChinaImportDocument(
       .map((box) => ({ id: box.id, grossWeightKg: options.boxes[box.id].grossWeightKg })), pallet.tareWeightKg).grossWeightKg!, 0)
   // A loaded pallet is one external package. Its dimensions are measured as
   // a whole; its weight is the boxes plus the saved pallet packaging tare.
-  const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].cbm, 0)
+  const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + (options.boxes[box.id].cbm ?? Number.NaN), 0)
     + prepared.pallets.reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet)
-      ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + options.boxes[box.id].cbm, options.palletExtraCbm)), 0)
-  const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, V: grossWeight }
-  for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = { formula: `SUM(${column}20:${column}${totalRow - 1})`, result }
+      ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + (options.boxes[box.id].cbm ?? Number.NaN), options.palletExtraCbm)), 0)
+  const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, R: totalQuantity, V: grossWeight }
+  for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = Number.isFinite(result) ? { formula: `SUM(${column}20:${column}${totalRow - 1})`, result } : null
   sheet.getCell(`A${totalRow}`).value = 'TOTAL'
   sheet.getCell(`I${totalRow}`).value = 'RMB'
   sheet.getCell(`P${totalRow}`).value = 'CTN'
   sheet.getCell(`W${totalRow}`).value = 'KG'
-  sheet.getCell(`X${totalRow}`).value = totalCbm
+  sheet.getCell(`X${totalRow}`).value = Number.isFinite(totalCbm) ? totalCbm : null
+  if (prepared.boxes.some((box) => !Number.isFinite(options.boxes[box.id]?.grossWeightKg))) sheet.getCell(`V${totalRow}`).value = null
   sheet.pageSetup.printArea = `A1:X${totalRow + 1}`
   addImportDocumentHsSheets(workbook, invoiceRows.map((invoice) => {
     const item = itemById.get(invoice.itemId)!

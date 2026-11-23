@@ -145,8 +145,8 @@ describe('China outbound box and pallet completion', () => {
     inventory = [{ id: 'inventory-1', userId, onHandQuantity: 20, reservedQuantity: 10, availableQuantity: 10 }]
     movements = []
     pallets = [
-      { id: 'pallet-1', userId, shipmentId, palletNo: 'P1', completionStatus: 'completed' },
-      { id: 'pallet-2', userId, shipmentId, palletNo: 'P2', completionStatus: 'completed' },
+      { id: 'pallet-1', userId, shipmentId, palletNo: '1', completionStatus: 'completed' },
+      { id: 'pallet-2', userId, shipmentId, palletNo: '2', completionStatus: 'completed' },
     ]
     boxes = [
       { id: 'box-1', userId, shipmentId, boxNo: '1', palletId: 'pallet-1', status: 'open', completionStatus: 'completed', lengthCm: '10', widthCm: '20', heightCm: '30' },
@@ -627,7 +627,7 @@ describe('China outbound box and pallet completion', () => {
   })
 
   it('rejects completion of an empty pallet without changing another selected pallet', async () => {
-    pallets.push({ id: 'unused-pallet', userId, shipmentId, palletNo: 'P3', completionStatus: 'in_progress' })
+    pallets.push({ id: 'unused-pallet', userId, shipmentId, palletNo: '3', completionStatus: 'in_progress' })
     await expect(saveChinaOutboundPalletCompletionStatuses({
       userId, shipmentId,
       updates: [{ palletId: 'pallet-1', status: 'in_progress' }, { palletId: 'unused-pallet', status: 'completed' }],
@@ -640,7 +640,7 @@ describe('China outbound box and pallet completion', () => {
     boxes[1]!.completionStatus = null
     pallets[0]!.completionStatus = null
     pallets[1]!.completionStatus = null
-    pallets.push({ id: 'unused-pallet', userId, shipmentId, palletNo: 'P3', completionStatus: 'in_progress' })
+    pallets.push({ id: 'unused-pallet', userId, shipmentId, palletNo: '3', completionStatus: 'in_progress' })
     await markChinaOutboundShipmentReady({ userId, shipmentId })
     expect(shipments[0]).toMatchObject({ status: 'ready' })
   })
@@ -836,7 +836,7 @@ describe('China outbound box and pallet completion', () => {
         { shipmentItemId: 'item-1', allocations: [{ boxNo: 'MIXED', quantity: 5, lengthCm: 10, widthCm: 20, heightCm: 30, grossWeightKg: 12.345 }] },
         { shipmentItemId: 'item-2', allocations: [{ boxNo: 'MIXED', quantity: 7, lengthCm: 5, widthCm: 5, heightCm: 5 }] },
       ],
-      palletAssignments: [{ boxNo: 'MIXED', palletNo: 'P1' }],
+      palletAssignments: [{ boxNo: 'MIXED', palletNo: '1' }],
     })
 
     expect(boxes).toHaveLength(1)
@@ -941,8 +941,15 @@ describe('China outbound box and pallet completion', () => {
     expect(boxes[0]).toMatchObject({ boxNo: '1' })
   })
 
+  it.each(['', 'box', '박스', 'bxo', '7box'])('saves %s as loose boxes without creating a pallet', async (value) => {
+    const before = pallets.length
+    await assignChinaOutboundBoxesToPallets({ userId, shipmentId, assignments: [{ boxNo: '1', palletNo: value }] })
+    expect(boxes[0].palletId).toBeNull()
+    expect(pallets).toHaveLength(before)
+  })
+
   it('reopens both old and new pallets when a box is reassigned', async () => {
-    await assignChinaOutboundBoxesToPallets({ userId, shipmentId, assignments: [{ boxNo: '1', palletNo: 'P2' }] })
+    await assignChinaOutboundBoxesToPallets({ userId, shipmentId, assignments: [{ boxNo: '1', palletNo: '2' }] })
     expect(boxes[0]).toMatchObject({ palletId: 'pallet-2' })
     expect(pallets[0]).toMatchObject({ completionStatus: 'in_progress' })
     expect(pallets[1]).toMatchObject({ completionStatus: 'in_progress' })

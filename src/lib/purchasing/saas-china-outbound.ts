@@ -1,3 +1,4 @@
+import { normalizeChinaPalletNumber } from './china-pallet-number'
 import { randomUUID } from 'node:crypto'
 import { createChinaOutboundSchemaInitializer } from './china-outbound-schema'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
@@ -5135,7 +5136,7 @@ function normalizeChinaOutboundPalletAssignments(assignments: ChinaOutboundPalle
   const palletByBoxNo = new Map<string, string | null>()
   for (const assignment of assignments) {
     const boxNo = requiredText(assignment.boxNo, '박스 번호')
-    const palletNo = optionalText(assignment.palletNo)
+    const palletNo = normalizeChinaPalletNumber(assignment.palletNo)
     const current = palletByBoxNo.get(boxNo)
     if (current !== undefined && current !== palletNo) {
       throw new Error(`${boxNo}에 서로 다른 파렛트 번호가 입력되었습니다.`)

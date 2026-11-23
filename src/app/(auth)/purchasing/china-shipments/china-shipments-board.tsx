@@ -1,5 +1,7 @@
 'use client'
 
+import { normalizeChinaPalletNumber } from '@/lib/purchasing/china-pallet-number'
+
 import { type ChangeEvent, type FormEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState, useTransition } from 'react'
 import { nextAvailableBoxNumbers, planAutomaticBoxSplit, type InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -1473,18 +1475,20 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
 
   async function saveDraft(boxNos?: string[], quiet = false) {
     const requested = boxNos ? new Set(boxNos) : null
-    const boxesToSave = changedBoxes.filter((box) => !requested || requested.has(box.boxNo))
+    const boxesToSave = sortedBoxes.filter((box) => canEditBox(box) && (requested ? requested.has(box.boxNo) : changedBoxIds.has(box.id) || (!quiet && !(initialNumbers[box.boxNo] ?? '').trim())))
     if (!boxesToSave.length) {
       if (!quiet) toast.error(requested ? '선택한 박스 중 저장할 파렛트 배정 변경사항이 없습니다.' : '저장할 파렛트 배정 변경사항이 없습니다.')
       return quiet
     }
-    const assignments = boxesToSave.map((box) => ({ boxNo: box.boxNo, palletNo: palletNumbers[box.boxNo]?.trim() || null }))
+    const assignments = boxesToSave.map((box) => ({ boxNo: box.boxNo, palletNo: normalizeChinaPalletNumber(palletNumbers[box.boxNo]) }))
     const result = await assignChinaOutboundBoxesToPalletsAction({ shipmentId, assignments })
     if (!result.ok) { toast.error(result.error ?? '파렛트 적재를 저장하지 못했습니다.'); return false }
-    setInitialNumbers((current) => ({ ...current, ...Object.fromEntries(boxesToSave.map((box) => [box.boxNo, palletNumbers[box.boxNo] ?? ''])) }))
+    const savedNumbers = Object.fromEntries(assignments.map((assignment) => [assignment.boxNo, assignment.palletNo ?? '']))
+    setInitialNumbers((current) => ({ ...current, ...savedNumbers }))
+    setPalletNumbers((current) => ({ ...current, ...savedNumbers }))
     const clearedBoxNos = requested ?? new Set(sortedBoxes.map((box) => box.boxNo))
     setSelectedBoxNos((current) => current.filter((boxNo) => !clearedBoxNos.has(boxNo)))
-    if (boxesToSave.length === changedBoxes.length) guard.setDraft('pallet-assignments', null)
+    if (changedBoxes.every((box) => boxesToSave.some((saved) => saved.id === box.id))) guard.setDraft('pallet-assignments', null)
     if (!quiet) toast.success(`${boxesToSave.length.toLocaleString('ko-KR')}개 박스의 파렛트 배정을 저장했습니다.`)
     router.refresh()
     return true
@@ -1496,6 +1500,7 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   } : null)
 
   return <section className="overflow-hidden rounded-lg border">
+    <p className="border-b px-4 py-2 text-xs text-muted-foreground">파렛트는 숫자로 입력하세요. 공란이나 문자는 박스로 저장됩니다.</p>
     <div className="overflow-x-auto"><table className="min-w-[950px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-center font-medium"><input type="checkbox" aria-label="표시된 파렛트 배정 전체 선택" checked={allSelected} onChange={(event) => selectAll(event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.size} className="size-3.5 accent-primary" /></th><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th><th className="px-3 py-2 text-center font-medium">관리</th></tr></thead><tbody>{sortedBoxes.map((box) => {
       const boxItems = boxItemsByBox.get(box.id) ?? []
       const quantity = boxItems.reduce((total, item) => total + item.quantity, 0)
@@ -1505,7 +1510,7 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
       })
       const cbm = calculateChinaOutboundBoxCbm(box)
       const changed = changedBoxIds.has(box.id)
-      return <tr key={box.id} className={`border-t align-top ${changed ? 'bg-blue-50/60' : ''}`}><td className="px-3 py-3 text-center"><input type="checkbox" aria-label={`박스 ${box.boxNo} 파렛트 배정 선택`} checked={selected.has(box.boxNo)} onChange={(event) => selectBox(box.boxNo, event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.has(box.boxNo)} className="size-3.5 accent-primary" /></td><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.map((product) => <span key={product.id} className="block"><span data-no-translate>{product.identity}</span> <span>({product.quantity.toLocaleString('ko-KR')}개)</span></span>)}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><input aria-label={`박스 ${box.boxNo} 파렛트 번호`} value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!canEditBox(box) || isPending || guard.busy} className={`${compactInputClass} mx-auto block max-w-32 text-center`} placeholder="예: 1" /></td><td className="px-3 py-2 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 파렛트 수정`} disabled={!canEditBox(box) || isPending || guard.busy || !changed} onClick={() => void guard.runTask(() => saveDraft([box.boxNo]))} className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><Check className="size-3.5" />파렛트 수정</button></td></tr>
+      return <tr key={box.id} className={`border-t align-top ${changed ? 'bg-blue-50/60' : ''}`}><td className="px-3 py-3 text-center"><input type="checkbox" aria-label={`박스 ${box.boxNo} 파렛트 배정 선택`} checked={selected.has(box.boxNo)} onChange={(event) => selectBox(box.boxNo, event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.has(box.boxNo)} className="size-3.5 accent-primary" /></td><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.map((product) => <span key={product.id} className="block"><span data-no-translate>{product.identity}</span> <span>({product.quantity.toLocaleString('ko-KR')}개)</span></span>)}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><input aria-label={`박스 ${box.boxNo} 파렛트 번호`} value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!canEditBox(box) || isPending || guard.busy} className={`${compactInputClass} mx-auto block max-w-32 text-center`} placeholder="박스" title="숫자만 파렛트 번호로 저장합니다. 공란·문자는 박스로 저장합니다." /></td><td className="px-3 py-2 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 파렛트 수정`} disabled={!canEditBox(box) || isPending || guard.busy || !changed} onClick={() => void guard.runTask(() => saveDraft([box.boxNo]))} className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><Check className="size-3.5" />파렛트 수정</button></td></tr>
     })}</tbody></table></div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">선택 {selected.size.toLocaleString('ko-KR')}개</span><button type="button" aria-label="파렛트 배정 선택 저장" disabled={!editable || isPending || guard.busy || !selected.size} onClick={() => void guard.runTask(() => saveDraft([...selected]))} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Check className="size-3.5" /> 선택한 박스 배정 저장</button><button type="button" aria-label="파렛트 배정 전체 저장" disabled={!editable || isPending || guard.busy} onClick={() => void guard.runTask(() => saveDraft())} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Check className="size-3.5" /> 파렛트 배정 저장</button></div></div>
   </section>

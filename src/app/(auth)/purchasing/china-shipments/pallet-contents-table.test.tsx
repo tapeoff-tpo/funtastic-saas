@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-const { savePallet } = vi.hoisted(() => ({ savePallet: vi.fn() }))
-vi.mock('../saas-china-actions', () => ({ saveChinaOutboundPalletDimensionsAction: savePallet }))
+const { savePallet, saveLoose } = vi.hoisted(() => ({ savePallet: vi.fn(), saveLoose: vi.fn() }))
+vi.mock('../saas-china-actions', () => ({ saveChinaOutboundPalletDimensionsAction: savePallet, saveChinaOutboundBoxCompletionStatusesAction: saveLoose }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 import { PalletContentsPanel } from './pallet-contents-panel'
 import { ChinaWorkGuardProvider } from './unsaved-china-work'
@@ -43,4 +43,19 @@ it('updates final totals from the saved response without waiting for a page refr
   fireEvent.click(screen.getByRole('button', { name: '최종 적재 확정' }))
   expect(screen.getByText('0.7000')).toBeInTheDocument()
   expect(screen.getByText('12 kg')).toBeInTheDocument()
+})
+
+it('turns the loose-box section yellow only after its save succeeds', async () => {
+  let finish!: (result: { ok: true }) => void
+  saveLoose.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+  const boxes: ChinaShipmentDetailView['boxes'] = [{ id: 'b', shipmentId: 's', editable: true, status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null, boxNo: '1', palletId: null, manualCbm: 0.4, grossWeightKg: 7, completionStatus: 'in_progress' }]
+  const view = render(<ChinaWorkGuardProvider><PalletContentsPanel shipmentId="s" summaries={[]} items={[]} boxItems={[]} unassignedBoxes={boxes} editable isPending={false} /></ChinaWorkGuardProvider>)
+  expect(screen.getByRole('article', { name: '낱박스 적재' })).toHaveClass('bg-background')
+  fireEvent.click(screen.getByRole('button', { name: '낱박스 확정하기' }))
+  expect(screen.getByRole('article', { name: '낱박스 적재' })).not.toHaveClass('bg-amber-50')
+  finish({ ok: true })
+  await waitFor(() => expect(screen.getByRole('article', { name: '낱박스 적재' })).toHaveClass('bg-amber-50', 'border-amber-300'))
+  expect(screen.getByRole('button', { name: '수정하기' })).toBeInTheDocument()
+  view.rerender(<ChinaWorkGuardProvider><PalletContentsPanel shipmentId="s" summaries={[]} items={[]} boxItems={[]} unassignedBoxes={boxes.map((box) => ({ ...box, manualCbm: 0.5 }))} editable isPending={false} /></ChinaWorkGuardProvider>)
+  expect(screen.getByRole('article', { name: '낱박스 적재' })).toHaveClass('bg-background')
 })

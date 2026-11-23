@@ -43,7 +43,7 @@ describe('saved box list', () => {
 
   it('saves the actual box dimensions and total weight without sending allocation or quantity edits', async () => {
     renderPanel([mixedBox('2')])
-    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 가로(cm) 편집' }))
+    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 규격(cm) 편집' }))
     expect(screen.queryByRole('spinbutton', { name: /CBM/ })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 가로(cm)' }), { target: { value: '50.5' } })
     fireEvent.click(screen.getByRole('button', { name: '저장' }))
@@ -60,12 +60,12 @@ describe('saved box list', () => {
 
 it('edits one cell without expanding other measurement inputs and cancels without saving', () => {
   renderPanel([box('1')])
-  for (const label of ['가로(cm)', '세로(cm)', '높이(cm)', '총중량(kg)', 'CBM']) {
+  for (const label of ['품목코드', '상품명', '옵션', '적재수량', '규격 가로×세로×높이(cm)', '총중량(kg)', 'CBM']) {
     expect(screen.getByRole('columnheader', { name: label })).toBeInTheDocument()
   }
-  fireEvent.doubleClick(screen.getByRole('button', { name: '박스 1 세로(cm) 편집' }))
+  fireEvent.doubleClick(screen.getByRole('button', { name: '박스 1 규격(cm) 편집' }))
   const input = screen.getByRole('spinbutton', { name: '박스 1 세로(cm)' })
-  expect(screen.getAllByRole('spinbutton')).toHaveLength(1)
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(3)
   fireEvent.change(input, { target: { value: '99' } })
   fireEvent.keyDown(input, { key: 'Escape' })
   expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()

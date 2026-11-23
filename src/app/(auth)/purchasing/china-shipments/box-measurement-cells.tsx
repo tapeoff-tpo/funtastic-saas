@@ -4,73 +4,62 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
-import { saveChinaOutboundBoxDimensionsAction, saveChinaOutboundPackageWeightAction } from '../saas-china-actions'
+import { saveChinaOutboundBoxesMeasurementsAction } from '../saas-china-actions'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { SavedBoxSummary } from './china-shipments-board'
 
 const fields = [['lengthCm', '가로(cm)'], ['widthCm', '세로(cm)'], ['heightCm', '높이(cm)'], ['grossWeightKg', '총중량(kg)']] as const
-type Field = typeof fields[number][0]
-export function BoxMeasurementCells({ shipmentId, box, editable, isPending }: {
-  shipmentId: string; box: SavedBoxSummary['box']; editable: boolean; isPending: boolean
+type Values = Record<typeof fields[number][0], string>
+export function BoxMeasurementCells({ shipmentId, box, editable, isPending, actions }: {
+  shipmentId: string; box: SavedBoxSummary['box']; editable: boolean; isPending: boolean; actions?: React.ReactNode
 }) {
   const guard = useChinaWorkGuard()
   const router = useRouter()
   const [pending, start] = useTransition()
-  const [values, setValues] = useState(() => Object.fromEntries(fields.map(([field]) => [field, box[field]])) as Record<Field, number | null | undefined>)
-  const [editing, setEditing] = useState<Field | null>(null)
-  const [value, setValue] = useState('')
-  const [dimensions, setDimensions] = useState({ lengthCm: String(box.lengthCm ?? ''), widthCm: String(box.widthCm ?? ''), heightCm: String(box.heightCm ?? '') })
+  const initial = Object.fromEntries(fields.map(([field]) => [field, String(box[field] ?? '')])) as Values
+  const [baseline, setBaseline] = useState(initial)
+  const [values, setValues] = useState(initial)
   const disabled = !editable || isPending || pending || guard.busy
-  const draftId = `box-cell:${box.id}`
-  function cancel() { setEditing(null); guard.setDraft(draftId, null) }
+  const dirty = fields.some(([field]) => values[field] !== baseline[field])
+  const draftId = `box-row:${box.id}`
+  const dimensionsDirty = fields.slice(0, 3).some(([field]) => values[field] !== baseline[field])
   async function save() {
-    if (!editing) return true
-    const number = Number(editing === 'grossWeightKg' ? value : dimensions[editing])
-    const maximum = editing === 'grossWeightKg' ? 999_999_999 : 9_999_999.99
-    if (!(editing === 'grossWeightKg' ? value : dimensions[editing]).trim() || !Number.isFinite(number) || number < (editing === 'grossWeightKg' ? 0.001 : 0.01) || number > maximum) {
-      toast.error('허용 범위의 양수를 입력해주세요.'); return false
+    const patch: { lengthCm?: number; widthCm?: number; heightCm?: number; grossWeightKg?: number; manualCbm?: null } = {}
+    if (dimensionsDirty) {
+      const dimensions = [values.lengthCm, values.widthCm, values.heightCm].map(Number)
+      if (dimensions.some((n) => !Number.isFinite(n) || n < 0.01 || n > 9999999.99)) {
+        toast.error('가로·세로·높이에 0.01 이상인 숫자를 모두 입력해주세요.'); return false
+      }
+      ;[patch.lengthCm, patch.widthCm, patch.heightCm] = dimensions
+      patch.manualCbm = null
     }
-    const next = editing === 'grossWeightKg' ? { ...values, grossWeightKg: number } : { ...values, lengthCm: Number(dimensions.lengthCm), widthCm: Number(dimensions.widthCm), heightCm: Number(dimensions.heightCm) }
-    if (editing !== 'grossWeightKg' && [next.lengthCm, next.widthCm, next.heightCm].some((n) => n == null || !Number.isFinite(n) || n < 0.01 || n > 9999999.99)) {
-      toast.error('가로·세로·높이에 0.01 이상인 숫자를 모두 입력해주세요.'); return false
+    if (values.grossWeightKg !== baseline.grossWeightKg) {
+      const weight = Number(values.grossWeightKg)
+      if (!Number.isFinite(weight) || weight < 0.001 || weight > 999999999) {
+        toast.error('총중량은 0.001kg 이상인 숫자로 입력해주세요.'); return false
+      }
+      patch.grossWeightKg = weight
     }
-    const result = editing === 'grossWeightKg'
-      ? await saveChinaOutboundPackageWeightAction({ shipmentId, packageId: box.id, kind: 'box', grossWeightKg: number })
-      : await saveChinaOutboundBoxDimensionsAction({ shipmentId, boxId: box.id, lengthCm: next.lengthCm!, widthCm: next.widthCm!, heightCm: next.heightCm!, manualCbm: null })
+    if (!Object.keys(patch).length) return true
+    const result = await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [box.id], ...patch })
     if (!result.ok) { toast.error(result.error); return false }
-    setValues(next); cancel(); router.refresh(); return true
+    setBaseline({ ...values }); guard.setDraft(draftId, null); router.refresh(); toast.success('박스 규격·중량을 저장했습니다.'); return true
   }
   function submit() { start(async () => { await guard.runTask(save) }) }
-  const dirty = editing === 'grossWeightKg' ? value !== String(values.grossWeightKg ?? '') : editing !== null && (['lengthCm', 'widthCm', 'heightCm'] as const).some((field) => dimensions[field] !== String(values[field] ?? ''))
-  useChinaWorkDraft(draftId, editing && dirty ? { kind: 'box', label: `박스 ${box.boxNo} 규격·중량`, snapshot: { value, dimensions }, save, discard: cancel } : null)
-  function open(field: Field) {
-    guard.requestNavigation(() => {
-      setEditing(field); setValue(String(values[field] ?? ''))
-      setDimensions({ lengthCm: String(values.lengthCm ?? ''), widthCm: String(values.widthCm ?? ''), heightCm: String(values.heightCm ?? '') })
-    }, ['box'])
+  useChinaWorkDraft(draftId, dirty ? { kind: 'box', label: `박스 ${box.boxNo} 규격·중량`, snapshot: values, save, discard: () => setValues({ ...baseline }) } : null)
+  function input(field: typeof fields[number][0]) {
+    const label = fields.find(([key]) => key === field)![1]
+    return <input aria-label={`박스 ${box.boxNo} ${label}`} type="number" step="any" min={field === 'grossWeightKg' ? '0.001' : '0.01'} value={values[field]} disabled={disabled}
+      onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
+      onKeyDown={(event) => { if (event.key === 'Enter' && dirty) { event.preventDefault(); submit() } if (event.key === 'Escape' && !pending && !guard.busy) setValues({ ...baseline }) }}
+      className={`h-7 w-full min-w-0 rounded border bg-background px-1 text-right text-xs outline-none focus:border-blue-500 ${dirty && values[field] !== baseline[field] ? 'border-blue-400 bg-blue-50/50' : ''}`} />
   }
-  function keys(event: React.KeyboardEvent) {
-    if (event.key === 'Enter') { event.preventDefault(); submit() }
-    if (event.key === 'Escape' && !pending && !guard.busy) { event.preventDefault(); cancel() }
-  }
-  return <>{(['lengthCm', 'grossWeightKg'] as const).map((field) => <td key={field} className="relative h-9 border-r px-1.5 py-1 text-xs tabular-nums">
-    {editing === field ? field === 'lengthCm' ? <div className="flex items-center gap-1" onKeyDown={keys}>
-      {(['lengthCm', 'widthCm', 'heightCm'] as const).map((dimension, index) => <span key={dimension} className="flex min-w-0 flex-1 items-center gap-1">
-        {index > 0 && <span className="text-muted-foreground">×</span>}
-        <input autoFocus={index === 0} aria-label={`박스 ${box.boxNo} ${fields.find(([key]) => key === dimension)![1]}`} type="number" step="0.01" value={dimensions[dimension]}
-          disabled={isPending || pending || guard.busy} onChange={(event) => setDimensions((current) => ({ ...current, [dimension]: event.target.value }))}
-          className="h-7 w-full min-w-0 rounded border border-blue-500 bg-background px-1 text-right outline-none" />
-      </span>)}<span className="text-muted-foreground">cm</span>
-    </div> : <input autoFocus aria-label={`박스 ${box.boxNo} 총중량(kg)`} type="number" step="any" value={value} disabled={isPending || pending || guard.busy}
-      onChange={(event) => setValue(event.target.value)} onKeyDown={keys} className="h-7 w-full rounded border border-blue-500 bg-background px-1 text-right outline-none" />
-    : <button type="button" aria-label={`박스 ${box.boxNo} ${field === 'lengthCm' ? '규격(cm)' : '총중량(kg)'} 편집`} disabled={disabled} title="더블클릭 또는 Enter로 수정"
-      onDoubleClick={() => open(field)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); open(field) } }}
-      className="h-7 w-full cursor-cell truncate rounded px-1 text-left hover:bg-muted disabled:cursor-default">
-      {field === 'lengthCm' ? `${values.lengthCm ?? '—'} × ${values.widthCm ?? '—'} × ${values.heightCm ?? '—'} cm` : values.grossWeightKg ?? '—'}
-    </button>}
-    {editing === field && <div className="absolute right-0 top-full z-30 flex gap-1 whitespace-nowrap rounded border bg-popover p-1 shadow-md">
-      <button type="button" onClick={submit} disabled={isPending || pending || guard.busy} className="rounded bg-primary px-2 py-1 text-primary-foreground">저장</button>
-      <button type="button" onClick={cancel} disabled={pending || guard.busy} className="rounded border px-2 py-1">취소</button>
-    </div>}
-  </td>)}<td className="border-r px-2 py-1 text-right text-xs tabular-nums">{formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...box, ...values, manualCbm: null })) ?? '—'}</td></>
+  return <>
+    <td className="border-r px-1.5 py-1"><div className="flex items-center gap-1">{input('lengthCm')}<span className="text-xs text-muted-foreground">×</span>{input('widthCm')}<span className="text-xs text-muted-foreground">×</span>{input('heightCm')}</div></td>
+    <td className="border-r px-1.5 py-1">{input('grossWeightKg')}</td>
+    <td className="border-r px-2 py-1 text-right text-xs tabular-nums">{formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...box, ...values, manualCbm: dimensionsDirty ? null : box.manualCbm })) ?? '—'}</td>
+    {actions}
+    <td className="px-2 py-1 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 저장하기`} disabled={disabled || !dirty} onClick={submit}
+      className="h-7 whitespace-nowrap rounded border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-900 disabled:border-border disabled:bg-muted disabled:text-muted-foreground">{pending ? '저장 중' : '저장하기'}</button></td>
+  </>
 }

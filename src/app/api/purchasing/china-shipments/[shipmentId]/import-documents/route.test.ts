@@ -85,7 +85,7 @@ describe('import document export route', () => {
     expect(mocks.export).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), {
       productImages: images,
       existingHsItems: [{ sku: 'OUTSIDE-SHIPMENT', productName: '다른 기존 상품', optionName: '대', hsCode: '0392.10-0000' }],
-    })
+    }, true)
   })
   it('rejects a stale shipment or item snapshot before generating the document', async () => {
     const response = await POST(request({
@@ -137,6 +137,16 @@ describe('import document export route', () => {
     expect(mocks.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ userId: 'shared-owner', actorId: 'admin2', shipmentId, revision: 0, inputs: expect.objectContaining({ invoiceNo: 'CN-SAVED' }) }))
     expect((await POST(request(body), context())).status).toBe(409)
     expect(mocks.export).not.toHaveBeenCalled()
+  })
+
+  it('downloads a workbook with blank basic information, names, prices and box measurements', async () => {
+    mocks.prepare.mockReturnValue({ shipmentNo: 'CN-1', items: [{ id: shipmentId, sku: 'SKU-A', hsCode: '' }], boxes: [{ id: shipmentId }] })
+    const snapshot = (await (await GET(new Request('http://localhost'), context())).json()).snapshot
+    const response = await POST(request({ snapshot, invoiceNo: '', invoiceDate: '2026-11-20', sailingDate: '2026-11-20', exporter: '', importer: '', importerAddress: '', loadingPort: '', destinationPort: '', paymentTerms: '', palletTareKg: 5, palletExtraCbm: 0, items: { [shipmentId]: { englishName: '', unitPriceCny: null } }, boxes: { [shipmentId]: { grossWeightKg: null, cbm: null } } }), context())
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('spreadsheetml')
+    expect(response.headers.get('content-disposition')).toContain('_INV_PL.xlsx')
+    expect(mocks.export).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ boxes: { [shipmentId]: { grossWeightKg: Number.NaN, cbm: null } } }), expect.anything(), true)
   })
 
 })

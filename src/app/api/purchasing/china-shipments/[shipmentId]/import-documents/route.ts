@@ -121,8 +121,8 @@ export async function POST(request: Request, context: Context) {
       const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, {}, true, editCells)
       return NextResponse.json({ html: await renderChinaImportPreview(buffer, editCells) }, { headers: { 'Cache-Control': 'private, no-store' } })
     }
-    const parsed = schema.safeParse(body)
-    if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
+    const parsed = previewSchema.safeParse(body)
+    if (!parsed.success) return NextResponse.json({ error: '문서 입력값 형식을 확인해주세요.' }, { status: 400 })
     if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 인보이스·패킹리스트를 새로고침해주세요.' }, { status: 409 })
     const [productImages, allItems] = await Promise.all([
       getImportDocumentProductImages({
@@ -136,7 +136,11 @@ export async function POST(request: Request, context: Context) {
       sku: item.data['품목코드']!, productName: item.data['품목명']!,
       optionName: item.data['규격정보'], hsCode: item.data['HS CODE']!,
     }))
-    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data, { productImages, existingHsItems })
+    const options = { ...parsed.data,
+      items: Object.fromEntries(loaded.prepared.items.map((item) => [item.id, { englishName: parsed.data.items[item.id]?.englishName ?? '', hsCode: parsed.data.items[item.id]?.hsCode, unitPriceCny: parsed.data.items[item.id]?.unitPriceCny ?? Number.NaN }])),
+      boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
+    }
+    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, { productImages, existingHsItems }, true)
     const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

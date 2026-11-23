@@ -34,7 +34,6 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
   const weight = calculateChinaOutboundPalletWeight(summary.boxes, saved.weight ? 5 : 0)
   const disabled = !editable || isPending || pending || guard.busy
   async function save() {
-    if (state.loaded && summary.boxesWithoutDimensions > 0) { toast.error('미입력 박스까지 포함하도록 파렛트 전체 가로·세로·높이를 입력해주세요.'); return false }
     if (!state.loaded && [state.lengthCm, state.widthCm, state.heightCm].some((value) => dimensionNumber(value) === null || Number(value) > 9999999.99)) { toast.error('가로·세로·높이를 모두 입력해주세요.'); return false }
     const cbm = Number(state.cbm)
     if (!state.cbm.trim() || !Number.isFinite(cbm) || cbm < 0.000001 || cbm > 999999999) { toast.error('최종 CBM을 확인해주세요.'); return false }
@@ -46,7 +45,6 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
   return <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" aria-label="적재 CBM 사용" checked={state.loaded} disabled={disabled} onChange={(event) => patch({ loaded: event.target.checked })} />적재 CBM 사용: <strong>{formatChinaOutboundCbm(summary.cbm)} CBM</strong><span>전체 {summary.boxes.length}박스</span></label>
-      {summary.boxesWithoutDimensions > 0 && <p className="text-xs text-amber-800">규격 없는 {summary.boxesWithoutDimensions}박스도 포함하려면 파렛트 전체 규격으로 확정해주세요.</p>}
       <div className="flex items-center gap-2 text-xs"><span>파렛트 전체 규격</span>{(['lengthCm', 'widthCm', 'heightCm'] as const).map((field, index) => <label key={field} className="flex items-center gap-1">{['가로', '세로', '높이'][index]}<input aria-label={`파렛트 ${summary.palletNo} ${['가로', '세로', '높이'][index]}`} type="number" min="0.01" step="0.01" value={state[field]} disabled={disabled} onChange={(event) => patch({ loaded: false, [field]: event.target.value })} className="h-7 w-20 rounded border border-blue-200 bg-blue-50 px-2" /></label>)}<span>cm</span></div>
       <div className="flex flex-wrap gap-3 text-xs">
         <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.volume} onChange={(event) => {

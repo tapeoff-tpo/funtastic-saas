@@ -80,7 +80,6 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
         </div>
         <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}:${summary.pallet.completionStatus}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
       </div></div>
-      {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">전체 박스 수량을 포함합니다. CBM 미입력 {summary.boxesWithoutDimensions}박스는 파렛트 전체 규격을 입력해 확정해주세요.</p>}
       {expanded.has(summary.pallet.id) && <div id={`pallet-contents-${summary.pallet.id}`}>{boxList(summary.boxes)}</div>}
     </article>)}
     {!!unassignedBoxes.length && <article className={`overflow-hidden rounded-xl border-2 ${looseConfirmed ? 'border-amber-300 bg-amber-50' : 'border-blue-300 bg-blue-50/40'}`}>

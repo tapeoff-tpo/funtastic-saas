@@ -499,6 +499,13 @@ describe('China outbound box and pallet completion', () => {
     expect(JSON.stringify(boxItems)).toBe(beforeItems)
   })
 
+  it('persists final pallet confirmation with volume and weight and reopens after a later edit', async () => {
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', manualCbm: 1.5, tareWeightKg: 5, finalize: true })
+    expect(pallets[0]).toMatchObject({ manualCbm: '1.5', tareWeightKg: '5', completionStatus: 'completed' })
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', manualCbm: 1.8 })
+    expect(pallets[0]).toMatchObject({ manualCbm: '1.8', completionStatus: 'in_progress' })
+  })
+
   it('saves and clears independent box and pallet CBM while preserving unknown dimensions and measured weight', async () => {
     boxes[1]!.grossWeightKg = '7'
     await saveChinaOutboundBoxDimensions({ userId, shipmentId, boxId: 'box-2', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 0.3212346 })

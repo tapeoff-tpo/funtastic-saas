@@ -13,6 +13,7 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
   shipmentId: string; summaries: PalletSummary[]; boxItems: ChinaShipmentDetailView['boxItems']; items: ChinaShipmentDetailView['items']
   editable: boolean; dimensionsEditable?: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean
 }) {
+  const [confirmed, setConfirmed] = useState<Record<string, boolean>>({})
   const dialog = useRef<HTMLDialogElement>(null)
   const guard = useChinaWorkGuard()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initiallyExpanded ? summaries.map((summary) => summary.pallet.id) : []))
@@ -48,12 +49,12 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
   const finalCbms = summaries.map((summary) => calculateChinaOutboundBoxCbm(summary.pallet))
   return <section className="space-y-5" aria-label="사용 파렛트">
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">사용 파렛트</h3><div className="flex flex-wrap items-center gap-3 text-sm"><span>{summaries.length} PLT + {unassignedBoxes.length} BOX</span>{assignmentEditor && <button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.showModal()} className="rounded-md border px-3 py-1">파렛트 배정 수정</button>}</div></div>
-    {summaries.map((summary) => <article key={summary.pallet.id} className={`overflow-hidden rounded-xl border-2 shadow-sm ${expanded.has(summary.pallet.id) ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
-      <div className={`overflow-x-auto border-l-4 border-blue-600 ${expanded.has(summary.pallet.id) ? 'bg-blue-50' : 'bg-slate-50'}`}><div className={`flex items-center gap-x-5 gap-y-3 p-4 ${'flex-wrap'}`}>
+    {summaries.map((summary) => <article key={summary.pallet.id} className={`overflow-hidden rounded-xl border-2 shadow-sm ${(confirmed[summary.pallet.id] ?? summary.pallet.completionStatus === 'completed') ? 'border-amber-300 bg-amber-50' : expanded.has(summary.pallet.id) ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
+      <div className={`overflow-x-auto border-l-4 border-blue-600 ${(confirmed[summary.pallet.id] ?? summary.pallet.completionStatus === 'completed') ? 'bg-amber-50' : expanded.has(summary.pallet.id) ? 'bg-blue-50' : 'bg-slate-50'}`}><div className={`flex items-center gap-x-5 gap-y-3 p-4 ${'flex-wrap'}`}>
         <div className="min-w-40 shrink-0 space-y-2">
           <button type="button" aria-expanded={expanded.has(summary.pallet.id)} onClick={() => toggle(summary.pallet.id, setExpanded)} className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-base font-bold text-white"><Layers3 aria-hidden="true" className="size-4" />파렛트 <span data-no-translate>{summary.palletNo}</span><ChevronDown className={expanded.has(summary.pallet.id) ? "size-4 rotate-180" : "size-4"} /></button><p className="whitespace-nowrap text-xs font-medium text-slate-600">박스 {summary.boxes.length}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p>
         </div>
-        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} editable={dimensionsEditable} isPending={isPending} />
+        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
       </div></div>
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
       {expanded.has(summary.pallet.id) && <div id={`pallet-contents-${summary.pallet.id}`}>{boxList(summary.boxes)}</div>}

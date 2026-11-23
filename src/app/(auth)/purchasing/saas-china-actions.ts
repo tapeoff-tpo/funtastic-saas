@@ -475,7 +475,7 @@ export async function saveChinaOutboundItemChineseNameAction(input: unknown): Pr
 export async function saveChinaOutboundPalletDimensionsAction(input: unknown): Promise<ActionResult> {
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
-    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: splitDimension, widthCm: splitDimension, heightCm: splitDimension, manualCbm, tareWeightKg: z.number().finite().min(0).max(999999999).optional() }).superRefine((value, context) => {
+    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: splitDimension, widthCm: splitDimension, heightCm: splitDimension, manualCbm, tareWeightKg: z.number().finite().min(0).max(999999999).optional(), finalize: z.boolean().optional() }).superRefine((value, context) => {
       const count = [value.lengthCm, value.widthCm, value.heightCm].filter((dimension) => dimension != null).length
       if (count > 0 && count < 3) context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력하거나 모두 비워주세요.' })
       if ([value.lengthCm, value.widthCm, value.heightCm, value.manualCbm].every((value) => value === undefined)) context.addIssue({ code: 'custom', message: '파렛트 규격 또는 CBM을 입력해주세요.' })

@@ -26,7 +26,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
     </div>
     {!visibleBoxes.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[1350px] table-fixed border-collapse text-sm">
       <caption className="sr-only">박스번호 순 적재 상품, 수량, 규격·중량, 쉽먼트 인쇄 및 다운로드</caption>
-      <colgroup><col className="w-16" /><col className="w-28" /><col /><col className="w-32" /><col className="w-20" /><col className="w-20" />{[260, 94, 90, 210].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+      <colgroup><col className="w-16" /><col className="w-28" /><col className="w-52" /><col className="w-32" /><col className="w-20" /><col className="w-20" />{[260, 94, 90, 240].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
       <thead className="bg-muted/30 text-xs text-muted-foreground"><tr>{['박스번호', '품목코드', '상품명', '옵션', '적재수량', '총수량', '규격 가로×세로×높이(cm)', '총중량(kg)', 'CBM', '부착용 쉽먼트'].map(label => <th key={label} scope="col" className={`whitespace-nowrap border-r px-2 py-1.5 font-medium last:border-r-0 ${label === '총수량' ? 'text-right' : 'text-left'}`}>{label}</th>)}</tr></thead>
       <tbody>{visibleBoxes.map((summary) => {
         const mixed = new Set(summary.items.map(({ item }) => productKey(item))).size > 1
@@ -41,7 +41,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
           </td>)}
           <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-slate-900">{summary.quantity.toLocaleString('ko-KR')}개</td>
           <BoxMeasurementCells key={`${summary.box.id}:${summary.box.lengthCm}:${summary.box.widthCm}:${summary.box.heightCm}:${summary.box.grossWeightKg}`} shipmentId={shipmentId} box={summary.box} editable={boxEditable} isPending={isPending} />
-          <td className="px-3 py-1.5"><div>{summary.quantity > 0 ? <><a href={`${href}&format=print`} target="_blank" rel="noopener noreferrer" aria-label={`${summary.box.boxNo} 박스 쉽먼트 바로 인쇄`} className="mr-1 inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs"><Printer className="size-3.5" />바로 인쇄</a><a href={href} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs"><Download className="size-3.5" />박스별 다운로드</a></> : '-'}</div></td>
+          <td className="px-2 py-1"><div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">{summary.quantity > 0 ? <><a href={`${href}&format=print`} target="_blank" rel="noopener noreferrer" aria-label={`${summary.box.boxNo} 박스 쉽먼트 바로 인쇄`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border px-2 text-xs"><Printer className="size-3.5" />바로 인쇄</a><a href={href} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border px-2 text-xs"><Download className="size-3.5" />박스별 다운로드</a></> : '-'}</div></td>
         </tr>
       })}</tbody>
     </table></div>}

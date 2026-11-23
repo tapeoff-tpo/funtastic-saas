@@ -39,7 +39,10 @@ export async function findCostCandidates(userId: string, search: string, sourceN
     metadata: products.metadata,
     optionName: sql<string>`COALESCE(NULLIF(${products.metadata}->'esa009m'->>'규격정보', ''), MAX(${inventory.optionName}), '')`,
   }).from(products).leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, userId)))
-    .where(and(eq(products.userId, userId), ne(products.status, 'deleted'), or(...filters)))
+    // The purchasing item master retains option-level ESA009M records even when
+    // their legacy product rows are hidden from the grouped product catalogue.
+    // Match the item master's source instead of dropping those cost-bearing SKUs.
+    .where(and(eq(products.userId, userId), or(ne(products.status, 'deleted'), sql`${products.metadata}->'esa009m' IS NOT NULL`), or(...filters)))
     .groupBy(products.id).limit(500)
   return rows.map(({ metadata, productName, inventoryNames, ...row }) => ({
     ...row,

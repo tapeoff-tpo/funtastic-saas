@@ -455,3 +455,18 @@ it('places safe editable inputs in the exported template and applies changed HS 
   await workbook.xlsx.load(await exportChinaImportDocument(detail, metadata, edited) as unknown as ExcelJS.Buffer)
   expect(workbook.worksheets[0].getCell('D20').value).toBe('0392.10')
 })
+
+it('shows Korean product names to the right of the packing preview but hides them in the downloaded document', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, options)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getColumn('Y').hidden).toBe(true)
+  expect(sheet.getCell('Y18').value).toBe('상품명 (확인용)')
+  expect(sheet.getCell('Y20').value).toBe('상품A')
+  expect(sheet.pageSetup.printArea).toBe('A1:X113')
+  const html = await renderChinaImportPreview(buffer)
+  expect(html).toContain('상품명 (확인용)')
+  expect(html).toContain('상품A')
+  expect(html).toContain('상품B')
+})

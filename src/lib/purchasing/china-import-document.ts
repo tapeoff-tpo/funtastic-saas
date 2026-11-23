@@ -333,6 +333,9 @@ export async function exportChinaImportDocument(
   sheet.getCell(`W${totalRow}`).value = 'KG'
   sheet.getCell(`X${totalRow}`).value = Number.isFinite(totalCbm) ? totalCbm : null
   if (prepared.boxes.some((box) => !Number.isFinite(options.boxes[box.id]?.grossWeightKg))) sheet.getCell(`V${totalRow}`).value = null
+  sheet.getCell('Y18').value = '상품명 (확인용)'
+  sheet.getColumn('Y').width = 36
+  sheet.getColumn('Y').hidden = true
   sheet.pageSetup.printArea = `A1:X${totalRow + 1}`
   addImportDocumentHsSheets(workbook, invoiceRows.map((invoice) => {
     const item = itemById.get(invoice.itemId)!

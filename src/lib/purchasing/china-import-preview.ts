@@ -11,7 +11,8 @@ export async function renderChinaImportPreview(buffer: Buffer, editCells: Import
   const sheet = workbook.worksheets[0]
   const printEnd = sheet.pageSetup.printArea?.match(/\$?([A-Z]+)\$?(\d+)$/)
   const endRow = printEnd ? Number(printEnd[2]) : sheet.rowCount
-  const endColumn = printEnd ? [...printEnd[1]].reduce((sum, character) => sum * 26 + character.charCodeAt(0) - 64, 0) : 24
+  const printEndColumn = printEnd ? [...printEnd[1]].reduce((sum, character) => sum * 26 + character.charCodeAt(0) - 64, 0) : 24
+  const endColumn = Math.max(printEndColumn, sheet.getCell('Y18').value ? 25 : 0)
   const merged = new Map<string, { rows: number; columns: number }>()
   const hidden = new Set<string>()
   for (const range of sheet.model.merges) {
@@ -34,7 +35,7 @@ export async function renderChinaImportPreview(buffer: Buffer, editCells: Import
       // text the same space in HTML without changing the workbook's real merges.
       if (!span && rowNo < 18 && (cell.value != null || editCells[cell.address]) && !cell.alignment?.wrapText) {
         let right = col
-        while (right < endColumn && !row.getCell(right).border?.right?.style && !row.getCell(right + 1).border?.left?.style && row.getCell(right + 1).value == null && !merged.has(`${rowNo}:${right + 1}`) && !hidden.has(`${rowNo}:${right + 1}`)) right++
+        while (right < printEndColumn && !row.getCell(right).border?.right?.style && !row.getCell(right + 1).border?.left?.style && row.getCell(right + 1).value == null && !merged.has(`${rowNo}:${right + 1}`) && !hidden.has(`${rowNo}:${right + 1}`)) right++
         if (right > col) {
           span = { rows: 1, columns: right - col + 1 }
           for (let next = col + 1; next <= right; next++) hidden.add(`${rowNo}:${next}`)
@@ -42,6 +43,7 @@ export async function renderChinaImportPreview(buffer: Buffer, editCells: Import
       }
       const style: string[] = ['padding:2px 3px', 'vertical-align:middle', 'box-sizing:border-box', 'font-size:10pt', `text-align:${cell.alignment?.horizontal === 'center' ? 'center' : cell.alignment?.horizontal === 'right' ? 'right' : 'left'}`]
       style.push(`white-space:${cell.alignment?.wrapText ? 'pre-wrap' : 'pre'}`)
+      if (col === 25) style.push('background:#f8fafc', 'white-space:pre-wrap', 'border-left:1px solid #cbd5e1')
       if (cell.font?.bold) style.push('font-weight:bold')
       if (cell.font?.size) style.push(`font-size:${Number(cell.font.size)}pt`)
       if (color(cell.font?.color)) style.push(`color:${color(cell.font.color)}`)

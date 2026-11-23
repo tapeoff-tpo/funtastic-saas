@@ -1,31 +1,31 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Download, Loader2 } from 'lucide-react'
+import { memo, useCallback, useEffect, useRef, useState, type FocusEvent } from 'react'
+import { Download, Save } from 'lucide-react'
 import { ShipmentCostPanel } from './shipment-cost-panel'
+import { importDocumentProductCode, type ImportDocumentDraft } from '@/lib/purchasing/china-import-editing'
 import type { ImportDocumentDetail, prepareImportDocument } from '@/lib/purchasing/china-import-document'
-import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm } from '@/lib/purchasing/china-outbound-dimensions'
-import { calculateChinaOutboundPalletWeight } from '@/lib/purchasing/china-outbound-pallet-weight'
+import { calculateChinaOutboundBoxCbm } from '@/lib/purchasing/china-outbound-dimensions'
 
-type Prepared = ReturnType<typeof prepareImportDocument> & { snapshot: string; costPacking?: ImportDocumentDetail }
+type Prepared = ReturnType<typeof prepareImportDocument> & { snapshot: string; savedDocument?: { inputs: ImportDocumentDraft; revision: number; snapshot: string } | null; costPacking?: ImportDocumentDetail }
 const inputClass = 'h-9 w-full rounded-md border bg-background px-2 text-sm'
-const fields = [
-  ['invoiceNo', '문서번호 / 发票编号', 'text'], ['invoiceDate', '문서일자 / 发票日期', 'date'],
-  ['sailingDate', '선적일 / 装船日期', 'date'], ['exporter', '수출자 / 出口商', 'text'],
-  ['importer', '수입자 / 进口商', 'text'], ['importerAddress', '수입자 주소 / 进口商地址', 'text'],
-  ['loadingPort', '출발항 / 装货港', 'text'], ['destinationPort', '도착항 / 目的港', 'text'],
-  ['paymentTerms', '결제조건 / 付款条件', 'text'],
-] as const
 const preferenceKeys = ['exporter', 'importer', 'importerAddress', 'loadingPort', 'destinationPort', 'paymentTerms', 'palletTareKg', 'palletExtraCbm']
+
+const ImportDocumentTable = memo(function ImportDocumentTable({ html, zoom }: { html: string; zoom: string }) {
+  return <div style={{ zoom, fontFamily: 'Dotum, Arial, sans-serif' }} dangerouslySetInnerHTML={{ __html: html.slice(html.indexOf('<table'), html.lastIndexOf('</table>') + 8) }} />
+})
 
 export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'document' }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void; mode?: 'document' | 'cost' }) {
   const [data, setData] = useState<Prepared | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
-  const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string }>>({})
+  const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string; hsCode?: string }>>({})
   const [boxes, setBoxes] = useState<Record<string, { grossWeightKg: string; cbm: string }>>({})
   const [busy, setBusy] = useState(false)
-  const formRef = useRef<HTMLFormElement>(null)
-  const [showFields, setShowFields] = useState(false)
+  const [revision, setRevision] = useState(0)
+  const [unsaved, setUnsaved] = useState(false)
+  const [saveNotice, setSaveNotice] = useState('')
+  const [editing, setEditing] = useState(false)
+  const editingRef = useRef(false)
   const [previewZoom, setPreviewZoom] = useState('0.65')
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewError, setPreviewError] = useState('')
@@ -59,8 +59,20 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
         palletTareKg: '', palletExtraCbm: '', ...preferences,
         invoiceNo: next.shipmentNo, invoiceDate: today, sailingDate: next.plannedOutboundDate ?? today,
       })
-      setItems(Object.fromEntries(next.items.map((item) => [item.id, { englishName: item.englishName, unitPriceCny: item.unitPriceCny == null ? '' : String(item.unitPriceCny) }])))
-      setBoxes(Object.fromEntries(next.boxes.map((box) => [box.id, { grossWeightKg: box.grossWeightKg == null ? '' : String(box.grossWeightKg), cbm: box.cbm == null ? '' : String(box.cbm) }])))
+      const saved = next.savedDocument?.inputs
+      if (saved) setSettings((current) => ({ ...current, ...Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) }))
+      setItems(Object.fromEntries(next.items.map((item) => {
+        const override = saved?.items[item.id]
+        const price = override ? override.unitPriceCny : item.unitPriceCny
+        return [item.id, { englishName: override?.englishName ?? item.englishName, hsCode: override?.hsCode ?? item.hsCode, unitPriceCny: price == null ? '' : String(price) }]
+      })))
+      setBoxes(Object.fromEntries(next.boxes.map((box) => {
+        const override = next.savedDocument?.snapshot === next.snapshot ? saved?.boxes[box.id] : undefined
+        return [box.id, { grossWeightKg: (override ? override.grossWeightKg : box.grossWeightKg)?.toString() ?? '', cbm: (override ? override.cbm : box.cbm)?.toString() ?? '' }]
+      })))
+      setRevision(next.savedDocument?.revision ?? 0)
+      setUnsaved(false)
+      setSaveNotice(next.savedDocument ? (next.savedDocument.snapshot === next.snapshot ? '저장된 문서를 불러왔습니다.' : '저장된 문서정보를 불러왔습니다. 변경된 출고자료의 수량·규격을 확인해주세요.') : '')
       setData(next)
       onDirtyChange(false)
     } catch (cause) {
@@ -84,7 +96,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
     boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: value.grossWeightKg.trim() ? Number(value.grossWeightKg) : null, cbm: value.cbm.trim() ? Number(value.cbm) : null }])),
   })
   useEffect(() => {
-    if (!data || mode === 'cost') return
+    if (!data || mode === 'cost' || editing) return
     const controller = new AbortController()
     setPreviewBusy(true)
     setPreviewError('')
@@ -93,15 +105,46 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...JSON.parse(payload), intent: 'preview' }), signal: controller.signal })
         const result = await response.json()
         if (!response.ok) throw new Error(result.error || '문서 미리보기를 불러오지 못했습니다.')
-        if (!controller.signal.aborted) setPreviewHtml(result.html)
+        if (!controller.signal.aborted && !editingRef.current) setPreviewHtml(result.html)
       } catch (cause) { if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : '문서 미리보기를 불러오지 못했습니다.') }
       finally { if (!controller.signal.aborted) setPreviewBusy(false) }
     }, 350)
     return () => { window.clearTimeout(timeout); controller.abort() }
-  }, [data, url, payload, mode])
+  }, [data, url, payload, mode, editing])
 
-  async function download(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  function editCell(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target
+    if (!(target instanceof HTMLInputElement) || !data) return
+    const key = target.dataset.editKey
+    if (!key || target.value === target.defaultValue) return
+    const value = target.value
+    for (const input of event.currentTarget.querySelectorAll<HTMLInputElement>('input[data-edit-key]')) if (input.dataset.editKey === key) { input.value = value; input.defaultValue = value }
+    setUnsaved(true); setSaveNotice(''); onDirtyChange(true)
+    const product = key.match(/^product:(.+):(englishName|unitPriceCny|hsCode)$/)
+    if (product) {
+      setItems((current) => {
+        const next = { ...current }
+        for (const item of data.items) if (importDocumentProductCode(item.sku) === product[1]) next[item.id] = { ...current[item.id], [product[2]]: value }
+        return next
+      })
+    } else if (key === 'importerAddress1' || key === 'importerAddress2') {
+      setSettings((current) => { const lines = (current.importerAddress ?? '').split('\n'); lines[key === 'importerAddress1' ? 0 : 1] = value; return { ...current, importerAddress: lines.join('\n') } })
+    } else if (['invoiceNo', 'invoiceDate', 'sailingDate', 'exporter', 'importer', 'loadingPort', 'destinationPort', 'paymentTerms'].includes(key)) setSettings((current) => ({ ...current, [key]: value }))
+  }
+  async function saveDocument() {
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...JSON.parse(payload), intent: 'save-document', revision }) })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || '문서를 저장하지 못했습니다.')
+    setRevision(result.revision); setUnsaved(false); onDirtyChange(false); setSaveNotice('저장되었습니다.')
+  }
+  async function save() {
+    if (!data || busy) return
+    setBusy(true); setError('')
+    try { await saveDocument() } catch (cause) { setError(cause instanceof Error ? cause.message : '문서를 저장하지 못했습니다.') }
+    finally { setBusy(false) }
+  }
+
+  async function download() {
     if (!data) return
     setBusy(true)
     setError('')
@@ -119,7 +162,6 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       anchor.click()
       anchor.remove()
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
-      onDirtyChange(false)
       try { localStorage.setItem('china-import-document-defaults', JSON.stringify(Object.fromEntries(preferenceKeys.map((key) => [key, settings[key] ?? ''])))) } catch { /* Optional. */ }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '인보이스·패킹리스트를 만들지 못했습니다.') }
     finally { setBusy(false) }
@@ -131,28 +173,16 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
       {data && <section aria-label="인보이스·패킹리스트 미리보기" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><p className="text-xs text-muted-foreground">엑셀 양식 미리보기 · 미입력 정보는 공란으로 표시됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" onClick={() => setShowFields((value) => !value)} className="rounded border px-3 py-2 text-sm">{showFields ? '문서 정보 접기' : '문서 정보 수정'}</button><button type="button" disabled={busy || previewBusy} onClick={() => { setShowFields(true); window.setTimeout(() => formRef.current?.requestSubmit(), 0) }} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><p className="text-xs text-muted-foreground">파란 칸을 클릭해 수정 후 저장하세요. 수량·박스번호·합계는 자동 계산됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm disabled:opacity-50"><Save className="size-4" />{busy ? '처리 중…' : '저장'}</button><button type="button" disabled={busy || previewBusy} onClick={() => void download()} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
         {previewBusy && <p role="status" className="text-sm text-muted-foreground">양식 미리보기 불러오는 중…</p>}
         {previewError && <p role="alert" className="text-sm text-red-700">{previewError}</p>}
-        {previewHtml && <iframe title="인보이스·패킹리스트 엑셀 양식" sandbox="" srcDoc={previewHtml.replace('--sheet-zoom:1', `--sheet-zoom:${previewZoom}`)} className="h-[72vh] w-full rounded border bg-white" />}
+        {saveNotice && <p role="status" className="text-sm text-emerald-700">{saveNotice}</p>}
+        {unsaved && <p className="text-xs text-amber-700">저장하지 않은 변경사항이 있습니다.</p>}
+        {previewHtml && <fieldset disabled={busy} className="min-w-0"><div aria-label="인보이스·패킹리스트 엑셀 양식" className="max-h-[72vh] overflow-auto rounded border bg-slate-100 p-4 text-black" onFocusCapture={() => { editingRef.current = true; setEditing(true) }} onBlurCapture={(event) => { editCell(event); if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { editingRef.current = false; setEditing(false) } }}>
+          <ImportDocumentTable html={previewHtml} zoom={previewZoom} />
+        </div></fieldset>}
+
       </section>}
-      {data ? <form ref={formRef} hidden={!showFields} onSubmit={download} onChange={() => onDirtyChange(true)} className={`space-y-5 ${showFields ? 'mt-5' : 'hidden'}`}>
-        <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-3">{fields.map(([key, label, type]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required maxLength={500} type={type} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} className={inputClass} /></label>)}</fieldset>
-        <p className="text-sm">{data.palletCount} PLT + {data.looseBoxCount} CTN = {data.packageCount} PACKAGES · 내부 박스 / 内箱 {data.boxCount}</p>
-        <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">상품 단가 확인 / 商品单价确认 (CNY)</legend>
-          <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['품목 / 商品', '실제 수량 / 数量', '영문명 / 英文名称', '단가(CNY) / 单价'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.items.map((item) => <tr key={item.id} className="border-t"><td className="p-2" data-no-translate>{item.sku}<br />{item.productName} {item.optionName}</td><td className="p-2">{item.quantity}</td><td className="p-2"><input required maxLength={500} aria-label={`${item.sku} English name`} className={inputClass} value={items[item.id]?.englishName ?? ''} onChange={(event) => setItems((current) => ({ ...current, [item.id]: { ...current[item.id], englishName: event.target.value } }))} /></td><td className="p-2"><input required type="number" min="0" max="100000000" step="any" aria-label={`${item.sku} CNY price`} className={inputClass} value={items[item.id]?.unitPriceCny ?? ''} onChange={(event) => setItems((current) => ({ ...current, [item.id]: { ...current[item.id], unitPriceCny: event.target.value } }))} /></td></tr>)}</tbody></table></div>
-        </fieldset>
-        <fieldset disabled={busy} className="space-y-2"><legend className="font-medium">박스 중량·부피 / 箱子重量和体积</legend>
-          <div className="max-h-64 overflow-auto rounded border"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{['박스 / 箱号', '파렛트 / 托盘', '총중량(kg) / 毛重', 'CBM / 体积'].map((label) => <th key={label} className="p-2 text-left">{label}</th>)}</tr></thead><tbody>{data.boxes.map((box) => <tr key={box.id} className="border-t"><td className="p-2">{box.boxNo}</td><td className="p-2">{box.palletNo ?? 'BOX'}</td>{(['grossWeightKg', 'cbm'] as const).map((key) => <td key={key} className="p-2"><input required={key === 'grossWeightKg' || !data.pallets.some((pallet) => pallet.id === box.palletId && calculateChinaOutboundBoxCbm(pallet) != null)} type="number" min="0.000001" step="any" aria-label={`${box.boxNo} ${key}`} className={inputClass} value={boxes[box.id]?.[key] ?? ''} onChange={(event) => setBoxes((current) => ({ ...current, [box.id]: { ...current[box.id], [key]: event.target.value } }))} /></td>)}</tr>)}</tbody></table></div>
-          {data.palletCount > 0 ? <div className="grid gap-3 sm:grid-cols-2">{(data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? [['palletExtraCbm', '미실측 파렛트 1개당 추가부피(CBM) / 未测量托盘的额外体积']] : []).map(([key, label]) => <label key={key} className="space-y-1 text-sm"><span>{label}</span><input required type="number" min="0" step="any" className={inputClass} value={settings[key] ?? ''} onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div> : null}
-          {data.pallets.map((pallet) => {
-            const weight = calculateChinaOutboundPalletWeight(data.boxes.filter((box) => box.palletId === pallet.id)
-              .map((box) => ({ id: box.id, grossWeightKg: boxes[box.id]?.grossWeightKg })), pallet.tareWeightKg)
-            return <p key={pallet.id} className="text-sm">{pallet.palletNo} · 최종 파렛트 CBM / 最终托盘体积: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(pallet)) ?? '실측 규격 미입력 / 未填写实测尺寸'} · 총중량(kg) / 毛重: {weight.grossWeightKg ?? '미입력 / 未填写'} · 파렛트 무게 / 托盘自重: {weight.tareWeightKg}kg</p>
-          })}
-        </fieldset>
-        <button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}인보이스·패킹리스트 다운로드 / 下载发票和装箱单</button>
-      </form> : null}
     </section>}
     {mode === 'cost' && <section aria-label="회차 원가 상품 단가" className="space-y-3 rounded-lg border bg-background p-4">
       {busy && !data && <p>회차 원가 정보를 불러오는 중…</p>}

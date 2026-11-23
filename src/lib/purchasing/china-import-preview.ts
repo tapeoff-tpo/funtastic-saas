@@ -1,10 +1,11 @@
+import type { ImportDocumentEditCells } from './china-import-editing'
 import ExcelJS from 'exceljs'
 
 const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 const color = (value?: Partial<ExcelJS.Color>) => value?.argb && /^[0-9a-f]{8}$/i.test(value.argb) ? `#${value.argb.slice(2)}` : undefined
 
 /** Render the actual exported worksheet, preserving its cells, merges and widths. */
-export async function renderChinaImportPreview(buffer: Buffer) {
+export async function renderChinaImportPreview(buffer: Buffer, editCells: ImportDocumentEditCells = {}) {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
@@ -31,7 +32,7 @@ export async function renderChinaImportPreview(buffer: Buffer) {
       let span = merged.get(`${rowNo}:${col}`)
       // Excel lets header text extend across neighboring empty cells. Give that
       // text the same space in HTML without changing the workbook's real merges.
-      if (!span && rowNo < 18 && cell.value != null && !cell.alignment?.wrapText) {
+      if (!span && rowNo < 18 && (cell.value != null || editCells[cell.address]) && !cell.alignment?.wrapText) {
         let right = col
         while (right < endColumn && !row.getCell(right).border?.right?.style && !row.getCell(right + 1).border?.left?.style && row.getCell(right + 1).value == null && !merged.has(`${rowNo}:${right + 1}`) && !hidden.has(`${rowNo}:${right + 1}`)) right++
         if (right > col) {
@@ -39,7 +40,7 @@ export async function renderChinaImportPreview(buffer: Buffer) {
           for (let next = col + 1; next <= right; next++) hidden.add(`${rowNo}:${next}`)
         }
       }
-      const style: string[] = [`text-align:${cell.alignment?.horizontal === 'center' ? 'center' : cell.alignment?.horizontal === 'right' ? 'right' : 'left'}`]
+      const style: string[] = ['padding:2px 3px', 'vertical-align:middle', 'box-sizing:border-box', 'font-size:10pt', `text-align:${cell.alignment?.horizontal === 'center' ? 'center' : cell.alignment?.horizontal === 'right' ? 'right' : 'left'}`]
       style.push(`white-space:${cell.alignment?.wrapText ? 'pre-wrap' : 'pre'}`)
       if (cell.font?.bold) style.push('font-weight:bold')
       if (cell.font?.size) style.push(`font-size:${Number(cell.font.size)}pt`)
@@ -55,11 +56,13 @@ export async function renderChinaImportPreview(buffer: Buffer) {
         const decimals = cell.numFmt?.match(/\.([0#]+)/)?.[1].length ?? (Number.isInteger(value) ? 0 : 4)
         value = Number.isFinite(value) ? value.toLocaleString('en-US', { minimumFractionDigits: Math.min(decimals, 6), maximumFractionDigits: Math.min(decimals, 6) }) : ''
       } else if (value && typeof value === 'object') value = ''
-      cells += `<td${span ? ` rowspan="${span.rows}" colspan="${span.columns}"` : ''} style="${style.join(';')}">${escape(value)}</td>`
+      const editors = editCells[cell.address]
+      const content = editors ? editors.map((field) => `<input data-edit-key="${escape(field.key)}" aria-label="${escape(field.label)}" type="${field.type ?? 'text'}" value="${escape(field.value)}" ${field.type === 'number' ? 'min="0" step="0.01"' : 'maxlength="500"'} style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:3px;box-sizing:border-box;min-width:0;width:${editors.length > 1 ? (field.type === 'date' ? '49%' : '50%') : '100%'};font:inherit;color:inherit;padding:2px 3px" />`).join(' ') : escape(value)
+      cells += `<td${span ? ` rowspan="${span.rows}" colspan="${span.columns}"` : ''} style="${style.join(';')}">${content}</td>`
     }
     rows += `<tr style="height:${Number(row.height ?? 15)}pt">${cells}</tr>`
   }
   const sheetWidth = Array.from({ length: endColumn }, (_, index) => Math.round((sheet.getColumn(index + 1).width ?? 8.43) * 7 + 5)).reduce((sum, width) => sum + width, 0)
   const columns = Array.from({ length: endColumn }, (_, index) => `<col style="width:${Math.round((sheet.getColumn(index + 1).width ?? 8.43) * 7 + 5)}px">`).join('')
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>:root{--sheet-zoom:1}body{margin:0;padding:20px;background:#e5e7eb;color:#111;font-family:Dotum,Arial,sans-serif}table{width:${sheetWidth}px;zoom:var(--sheet-zoom);table-layout:fixed;border-collapse:collapse;background:white;box-shadow:0 1px 8px #0002}td{padding:2px 3px;vertical-align:middle;box-sizing:border-box;font-size:10pt} @media print{body{padding:0;background:white}table{box-shadow:none}}</style></head><body><table aria-label="INVOICE AND PACKING LIST">${columns}<tbody>${rows}</tbody></table></body></html>`
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>:root{--sheet-zoom:1}body{margin:0;padding:20px;background:#e5e7eb;color:#111;font-family:Dotum,Arial,sans-serif}table{width:${sheetWidth}px;zoom:var(--sheet-zoom);table-layout:fixed;border-collapse:collapse;background:white;box-shadow:0 1px 8px #0002}td{padding:2px 3px;vertical-align:middle;box-sizing:border-box;font-size:10pt} @media print{body{padding:0;background:white}table{box-shadow:none}}</style></head><body><table style="width:${sheetWidth}px;table-layout:fixed;border-collapse:collapse;background:white" aria-label="INVOICE AND PACKING LIST">${columns}<tbody>${rows}</tbody></table></body></html>`
 }

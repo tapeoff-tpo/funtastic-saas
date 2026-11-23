@@ -1,3 +1,4 @@
+import { importDocumentProductCode, type ImportDocumentEditCells } from './china-import-editing'
 import { resolveChinaLooseBoxes } from './china-pallet-number'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
@@ -15,7 +16,7 @@ export type ImportDocumentOptions = {
   exporter: string; importer: string; importerAddress: string
   loadingPort: string; destinationPort: string; paymentTerms: string
   palletTareKg: number; palletExtraCbm: number
-  items: Record<string, { englishName: string; unitPriceCny: number }>
+  items: Record<string, { englishName: string; unitPriceCny: number; hsCode?: string }>
   boxes: Record<string, { grossWeightKg: number; cbm: number | null }>
 }
 export type ImportDocumentDetail = Omit<ChinaOutboundPackingExportDetail, 'boxes'> & {
@@ -30,11 +31,7 @@ export function importUnitPriceCny(data: Record<string, string | null>) {
   return null
 }
 
-/** Ecount's numeric four-digit suffix identifies an option, not a product. */
-export function importDocumentProductCode(sku: string) {
-  const normalized = sku.trim()
-  return normalized.match(/^(\d+)-\d{4}$/)?.[1] ?? normalized
-}
+export { importDocumentProductCode } from './china-import-editing'
 
 /** Compress a consecutive sequence of numeric carton numbers for the invoice. */
 export function formatBoxMarks(marks: readonly string[]) {
@@ -119,6 +116,7 @@ export async function exportChinaImportDocument(
   options: ImportDocumentOptions,
   supplements: ImportDocumentSupplements = {},
   preview = false,
+  editCells?: ImportDocumentEditCells,
 ) {
   detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   const prepared = prepareImportDocument(detail, metadata)
@@ -158,7 +156,7 @@ export async function exportChinaImportDocument(
     const previous = exactProducts.get(sku)
     if (previous && !preview && (source.englishName.trim() !== previous.englishName.trim() || source.unitPriceCny !== previous.unitPriceCny)) throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
     exactProducts.set(sku, { ...source, quantity: (previous?.quantity ?? 0) + item.quantity })
-    const product = importDocumentProductCode(sku), hs = item.hsCode.trim()
+    const product = importDocumentProductCode(sku), hs = (source.hsCode ?? item.hsCode).trim()
     if (!preview && hs && hsByProduct.has(product) && hsByProduct.get(product) !== hs) throw new Error(`${product}: 옵션별 HS CODE가 다릅니다. 품목정보를 확인해주세요.`)
     if (hs) hsByProduct.set(product, hs)
   }
@@ -264,6 +262,17 @@ export async function exportChinaImportDocument(
     O15: options.destinationPort,
     R14: `${prepared.palletCount}plt + ${prepared.looseBoxCount}ctn`, W14: prepared.packageCount, X14: 'CTN',
   })) sheet.getCell(address).value = value
+  if (editCells) {
+    const field = (key: string, label: string, value: string, type: 'text' | 'date' = 'text') => ({ key, label, value, type })
+    for (const [addresses, key, label] of [
+      [['A3', 'K3'], 'exporter', '수출자'], [['A8', 'K8'], 'importer', '수입자'],
+      [['A15', 'K15'], 'loadingPort', '출발항'], [['O15'], 'destinationPort', '도착항'], [['E14'], 'paymentTerms', '결제조건'],
+    ] as const) for (const address of addresses) editCells[address] = [field(key, label, options[key])]
+    for (const address of ['E3', 'R3']) editCells[address] = [field('invoiceNo', '문서번호', options.invoiceNo), field('invoiceDate', '문서일자', options.invoiceDate, 'date')]
+    for (const address of ['C17', 'O17']) editCells[address] = [field('sailingDate', '선적일', options.sailingDate, 'date')]
+    for (const address of ['A9', 'K9']) editCells[address] = [field('importerAddress1', '수입자 주소 첫째 줄', options.importerAddress.split('\n')[0])]
+    for (const address of ['A10', 'K10']) editCells[address] = [field('importerAddress2', '수입자 주소 둘째 줄', options.importerAddress.split('\n').slice(1).join(' '))]
+  }
   for (const address of ['C17', 'O17']) sheet.getCell(address).value = new Date(`${options.sailingDate}T00:00:00Z`)
   for (const [index, invoice] of invoiceRows.entries()) {
     const row = 20 + index
@@ -298,6 +307,12 @@ export async function exportChinaImportDocument(
     const unitPrice = mixedPrices ? amount / invoice.quantity : source.unitPriceCny
     sheet.getCell(`G${row}`).value = Number.isFinite(unitPrice) ? unitPrice : null
     sheet.getCell(`G${row}`).numFmt = '#,##0.00'
+    if (editCells) {
+      const product = importDocumentProductCode(item.sku)
+      editCells[`C${row}`] = [{ key: `product:${product}:englishName`, label: `${product} 영문명`, value: source.englishName }]
+      editCells[`D${row}`] = [{ key: `product:${product}:hsCode`, label: `${product} HS CODE`, value: hsByProduct.get(product) ?? '' }]
+      editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
+    }
     totalAmount += amount
     sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
   }

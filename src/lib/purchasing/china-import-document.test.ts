@@ -1,3 +1,4 @@
+import type { ImportDocumentEditCells } from './china-import-editing'
 import { renderChinaImportPreview } from './china-import-preview'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
@@ -437,4 +438,20 @@ it('aligns every invoice and packing product row without repeating mixed package
   expect(sheet.getCell('V20').value).toBe(15)
   expect(sheet.getCell('V21').value).toBe(3)
   expect(sheet.getCell('K22').value).toBeNull()
+})
+
+it('places safe editable inputs in the exported template and applies changed HS codes to download', async () => {
+  const cells: ImportDocumentEditCells = {}
+  const edited = { ...options, items: { ...options.items, 'item-a': { ...options.items['item-a'], hsCode: '0392.10' } } }
+  const buffer = await exportChinaImportDocument(detail, metadata, edited, {}, true, cells)
+  expect(cells.E3.map((field) => field.key)).toEqual(['invoiceNo', 'invoiceDate'])
+  expect(cells.G20[0]).toMatchObject({ key: 'product:SKU-A:unitPriceCny', value: '16.76' })
+  expect(cells.D20[0].value).toBe('0392.10')
+  const html = await renderChinaImportPreview(buffer, cells)
+  expect(html).toContain('data-edit-key="invoiceNo"')
+  expect(html).toContain('data-edit-key="product:SKU-A:hsCode"')
+  expect(html).not.toContain('<script')
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(detail, metadata, edited) as unknown as ExcelJS.Buffer)
+  expect(workbook.worksheets[0].getCell('D20').value).toBe('0392.10')
 })

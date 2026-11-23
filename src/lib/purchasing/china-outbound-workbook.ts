@@ -1,3 +1,4 @@
+import { resolveChinaLooseBoxes } from './china-pallet-number'
 import { largestChinaOutboundBox } from './china-outbound-packaging'
 import ExcelJS from 'exceljs'
 import { dimensionNumber } from './china-outbound-dimensions'
@@ -118,6 +119,7 @@ export async function exportChinaOutboundWorkWorkbook(
   detail: ChinaOutboundWorkbookDetail,
   options: ChinaOutboundWorkWorkbookExportOptions = {},
 ): Promise<Buffer> {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   const boxById = new Map(detail.boxes.map((box) => [box.id, box]))
   const palletById = new Map(detail.pallets.map((pallet) => [pallet.id, pallet]))
   const allocationsByItem = new Map(detail.items.map((item) => [

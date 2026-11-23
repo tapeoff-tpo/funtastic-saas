@@ -1,3 +1,4 @@
+import { resolveChinaLooseBoxes } from '@/lib/purchasing/china-pallet-number'
 import { getChinaOutboundShipmentDetail, getSaasChinaInventory } from '@/lib/purchasing/saas-china-outbound'
 import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
@@ -29,6 +30,7 @@ export async function loadChinaShipmentStockItems(userId: string): Promise<China
 }
 
 function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getChinaOutboundShipmentDetail>>>, productImages: Record<string, ProductImageResult>, names: Map<string, { chineseProductName: string }>): ChinaShipmentDetailView {
+  const packaging = resolveChinaLooseBoxes(detail.pallets, detail.boxes)
   return {
     shipment: {
       id: detail.shipment.id,
@@ -64,8 +66,8 @@ function toShipmentDetailView(detail: NonNullable<Awaited<ReturnType<typeof getC
       receiptPacking: item.receiptPacking,
       productImage: productImages[item.id],
     })),
-    pallets: detail.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), manualCbm: dimensionNumber(pallet.manualCbm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), tareWeightKg: palletTareWeightKg(pallet.tareWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
-    boxes: detail.boxes.map((box) => ({
+    pallets: packaging.pallets.map((pallet) => ({ id: pallet.id, palletNo: pallet.palletNo, note: pallet.note, lengthCm: dimensionNumber(pallet.lengthCm), widthCm: dimensionNumber(pallet.widthCm), heightCm: dimensionNumber(pallet.heightCm), manualCbm: dimensionNumber(pallet.manualCbm), grossWeightKg: dimensionNumber(pallet.grossWeightKg), tareWeightKg: palletTareWeightKg(pallet.tareWeightKg), completionStatus: pallet.completionStatus === 'completed' || pallet.completionStatus === 'in_progress' ? pallet.completionStatus : null })),
+    boxes: packaging.boxes.map((box) => ({
       id: box.id,
       shipmentId: detail.shipment.id,
       editable: detail.shipment.status === 'draft' || detail.shipment.status === 'packing',

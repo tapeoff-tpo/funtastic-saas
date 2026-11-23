@@ -52,12 +52,12 @@ export function BoxMeasurementCells({ shipmentId, box, editable, isPending, acti
     return <input aria-label={`박스 ${box.boxNo} ${label}`} type="number" step="any" min={field === 'grossWeightKg' ? '0.001' : '0.01'} value={values[field]} disabled={disabled}
       onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value }))}
       onKeyDown={(event) => { if (event.key === 'Enter' && dirty) { event.preventDefault(); submit() } if (event.key === 'Escape' && !pending && !guard.busy) setValues({ ...baseline }) }}
-      className={`h-7 w-full min-w-0 rounded border bg-background px-1 text-right text-xs outline-none focus:border-blue-500 disabled:border-transparent disabled:bg-muted/30 disabled:text-muted-foreground ${dirty && values[field] !== baseline[field] ? 'border-blue-400 bg-blue-50/50' : ''}`} />
+      className={`h-7 w-full min-w-0 rounded border border-blue-200 bg-blue-50 px-1 text-right text-xs outline-none focus:border-blue-500 disabled:border-transparent disabled:bg-muted/30 disabled:text-muted-foreground ${dirty && values[field] !== baseline[field] ? 'border-blue-500 ring-1 ring-blue-300' : ''}`} />
   }
   return <>
     <td className="px-1.5 py-1"><div className="flex items-center gap-1">{input('lengthCm')}<span className="text-xs text-muted-foreground">×</span>{input('widthCm')}<span className="text-xs text-muted-foreground">×</span>{input('heightCm')}</div></td>
     <td className="px-1.5 py-1">{input('grossWeightKg')}</td>
-    <td className="px-2 py-1 text-right text-xs tabular-nums text-muted-foreground">{formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...box, ...values, manualCbm: dimensionsDirty ? null : box.manualCbm })) ?? '—'}</td>
+    <td className="px-2 py-1 text-right text-xs tabular-nums">{formatChinaOutboundCbm(calculateChinaOutboundBoxCbm({ ...box, ...values, manualCbm: dimensionsDirty ? null : box.manualCbm })) ?? '—'}</td>
     {actions}
     <td className="px-2 py-1 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 저장하기`} disabled={disabled || !dirty} onClick={submit}
       className="h-7 whitespace-nowrap rounded border border-blue-200 bg-blue-50 px-2 text-xs font-semibold text-blue-900 disabled:border-border disabled:bg-muted disabled:text-muted-foreground">{pending ? '저장 중' : '저장하기'}</button></td>

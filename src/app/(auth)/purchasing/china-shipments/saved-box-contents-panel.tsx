@@ -33,13 +33,13 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
         const boxEditable = canEditBox(summary)
         const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`
         return <tr key={summary.box.id} aria-label={`박스 ${summary.box.boxNo}`} className="border-t align-middle hover:bg-muted/20">
-          <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground font-semibold tabular-nums"><span data-no-translate>{summary.box.boxNo}</span>{mixed && <p className="text-xs text-amber-800">혼합박스</p>}</td>
-          {(['code', 'name', 'option', 'quantity'] as const).map((column) => <td key={column} className="overflow-hidden px-2 py-1 text-xs leading-6 text-muted-foreground">
+          <td className="px-3 py-1.5 whitespace-nowrap font-semibold tabular-nums"><span data-no-translate>{summary.box.boxNo}</span>{mixed && <p className="text-xs text-amber-800">혼합박스</p>}</td>
+          {(['code', 'name', 'option', 'quantity'] as const).map((column) => <td key={column} className="overflow-hidden px-2 py-1 text-xs leading-6">
             {summary.items.length ? summary.items.map(({ item, quantity }) => <div key={item.id} className="h-6 truncate" data-no-translate title={column === 'name' ? item.productName : column === 'option' ? item.optionName ?? '' : undefined}>
               {column === 'code' ? <ItemCodeCell code={item.sku} /> : column === 'name' ? item.productName : column === 'option' ? item.optionName || '—' : `${quantity.toLocaleString('ko-KR')}개`}
             </div>) : '—'}
           </td>)}
-          <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{summary.quantity.toLocaleString('ko-KR')}개</td>
+          <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{summary.quantity.toLocaleString('ko-KR')}개</td>
           <BoxMeasurementCells key={`${summary.box.id}:${summary.box.lengthCm}:${summary.box.widthCm}:${summary.box.heightCm}:${summary.box.grossWeightKg}`} shipmentId={shipmentId} box={summary.box} editable={boxEditable} isPending={isPending} actions={
           <td className="px-2 py-1"><div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">{summary.quantity > 0 ? <><a href={`${href}&format=print`} target="_blank" rel="noopener noreferrer" aria-label={`${summary.box.boxNo} 박스 쉽먼트 바로 인쇄`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border px-2 text-xs"><Printer className="size-3.5" />바로 인쇄</a><a href={href} aria-label={`${summary.box.boxNo} 박스 부착용 쉽먼트 다운로드`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border px-2 text-xs"><Download className="size-3.5" />박스별 다운로드</a></> : '-'}</div></td>
           } />

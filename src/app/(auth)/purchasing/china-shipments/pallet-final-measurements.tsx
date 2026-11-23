@@ -5,9 +5,10 @@ import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from '@/lib/pu
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm, dimensionNumber } from '@/lib/purchasing/china-outbound-dimensions'
 import { saveChinaOutboundPalletDimensionsAction } from '../saas-china-actions'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
+import type { ChinaOutboundPalletSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import type { PalletSummary } from './china-shipments-board'
 
-export function PalletFinalMeasurements({ shipmentId, summary, editable, isPending, onConfirmationChange }: { shipmentId: string; summary: PalletSummary; editable: boolean; isPending: boolean; onConfirmationChange?: (confirmed: boolean) => void }) {
+export function PalletFinalMeasurements({ shipmentId, summary, editable, isPending, onConfirmationChange, onSaved }: { shipmentId: string; summary: PalletSummary; editable: boolean; isPending: boolean; onConfirmationChange?: (confirmed: boolean) => void; onSaved?: (pallet: ChinaOutboundPalletSavedState) => void }) {
   const guard = useChinaWorkGuard()
   const [pending, start] = useTransition()
   const measured = calculateChinaOutboundBoxCbm(summary.pallet)
@@ -38,9 +39,9 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
     if (!state.loaded && [state.lengthCm, state.widthCm, state.heightCm].some((value) => dimensionNumber(value) === null || Number(value) > 9999999.99)) { toast.error('가로·세로·높이를 모두 입력해주세요.'); return false }
     const cbm = Number(state.cbm)
     if (!state.cbm.trim() || !Number.isFinite(cbm) || cbm < 0.000001 || cbm > 999999999) { toast.error('최종 CBM을 확인해주세요.'); return false }
-    const result = await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: summary.pallet.id, lengthCm: state.loaded ? null : Number(state.lengthCm), widthCm: state.loaded ? null : Number(state.widthCm), heightCm: state.loaded ? null : Number(state.heightCm), manualCbm: cbm, tareWeightKg: state.weight ? 5 : 0, finalize: true })
+    const result = await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: summary.pallet.id, lengthCm: state.loaded ? null : Number(state.lengthCm), widthCm: state.loaded ? null : Number(state.widthCm), heightCm: state.loaded ? null : Number(state.heightCm), manualCbm: cbm, tareWeightKg: state.weight ? 5 : 0, finalize: true, refresh: false })
     if (!result.ok) { toast.error(result.error); return false }
-    setConfirmed(true); onConfirmationChange?.(true); setBaseline({ ...state }); setSaved({ ...state }); guard.setDraft(draftId, null); return true
+    setConfirmed(true); onConfirmationChange?.(true); setBaseline({ ...state }); setSaved({ ...state }); guard.setDraft(draftId, null); if (result.savedPallet) onSaved?.(result.savedPallet); return true
   }
   useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${summary.palletNo} 최종 규격`, snapshot: state, save, discard: () => setState({ ...baseline }) } : null)
   return <div aria-busy={pending} className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">

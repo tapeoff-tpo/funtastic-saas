@@ -11,12 +11,18 @@ import { PackageWeightEditor } from './outbound-package-editors'
 import { PalletFinalMeasurements } from './pallet-final-measurements'
 import { ItemCodeCell } from './item-code-cell'
 import { useChinaWorkGuard } from './unsaved-china-work'
+import type { ChinaOutboundPalletSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import type { ChinaShipmentDetailView, PalletSummary } from './china-shipments-board'
 
-export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, editable, dimensionsEditable = editable, isPending, assignmentEditor, unassignedBoxes = [], initiallyExpanded = false }: {
+export function PalletContentsPanel({ shipmentId, summaries: serverSummaries, boxItems, items, editable, dimensionsEditable = editable, isPending, assignmentEditor, unassignedBoxes = [], initiallyExpanded = false }: {
   shipmentId: string; summaries: PalletSummary[]; boxItems: ChinaShipmentDetailView['boxItems']; items: ChinaShipmentDetailView['items']
   editable: boolean; dimensionsEditable?: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean
 }) {
+  const [palletSaves, setPalletSaves] = useState<Record<string, { source: string; pallet: ChinaOutboundPalletSavedState }>>({})
+  const summaries = serverSummaries.map((summary) => {
+    const saved = palletSaves[summary.pallet.id]
+    return saved?.source === JSON.stringify(summary) ? { ...summary, pallet: { ...summary.pallet, ...saved.pallet } } : summary
+  })
   const router = useRouter()
   const [savingLoose, startLoose] = useTransition()
   const [looseOpen, setLooseOpen] = useState(initiallyExpanded)
@@ -78,7 +84,7 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
         <div className="min-w-40 shrink-0 space-y-2">
           <button type="button" aria-expanded={expanded.has(summary.pallet.id)} onClick={() => toggle(summary.pallet.id, setExpanded)} className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-base font-bold text-white"><Layers3 aria-hidden="true" className="size-4" />파렛트 <span data-no-translate>{summary.palletNo}</span><ChevronDown className={expanded.has(summary.pallet.id) ? "size-4 rotate-180" : "size-4"} /></button><p className="whitespace-nowrap text-xs font-medium text-slate-600">박스 {summary.boxes.length}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p>
         </div>
-        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}:${summary.pallet.completionStatus}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
+        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}:${summary.pallet.completionStatus}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onSaved={(pallet) => { const source = serverSummaries.find((entry) => entry.pallet.id === pallet.id); if (source) setPalletSaves((current) => ({ ...current, [pallet.id]: { source: JSON.stringify(source), pallet } })) }} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
       </div></div>
       {expanded.has(summary.pallet.id) && <div id={`pallet-contents-${summary.pallet.id}`}>{boxList(summary.boxes)}</div>}
     </article>)}

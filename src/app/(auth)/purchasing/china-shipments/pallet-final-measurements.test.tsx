@@ -17,7 +17,7 @@ it('adds volume and weight independently and persists both in one save without a
   expect(save).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('checkbox', { name: '파렛트 무게 5kg 포함' }))
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
-  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.5, tareWeightKg: 5, finalize: true }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.5, tareWeightKg: 5, finalize: true, refresh: false }))
   await waitFor(() => expect(screen.getByText('최종 무게: 15 kg')).toBeInTheDocument())
   expect(screen.getByText('최종 확정')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '수정하기' }))
@@ -36,7 +36,7 @@ it('includes unmeasured boxes through whole-pallet dimensions and saves all thre
   expect(screen.getByLabelText('파렛트 1 최종 CBM')).toHaveValue(1.8)
   fireEvent.click(screen.getByRole('checkbox', { name: '파렛트 부피 0.3CBM 포함' }))
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
-  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: 120, widthCm: 100, heightCm: 150, manualCbm: 2.1, tareWeightKg: 0, finalize: true }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: 120, widthCm: 100, heightCm: 150, manualCbm: 2.1, tareWeightKg: 0, finalize: true, refresh: false }))
 })
 
 it('confirms the current loaded CBM even when ten boxes have no dimensions', async () => {
@@ -47,7 +47,7 @@ it('confirms the current loaded CBM even when ten boxes have no dimensions', asy
   expect(screen.queryByText(/규격 없는/)).not.toBeInTheDocument()
   expect(screen.getByRole('checkbox', { name: '적재 CBM 사용' })).toBeChecked()
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
-  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.2, tareWeightKg: 0, finalize: true }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.2, tareWeightKg: 0, finalize: true, refresh: false }))
   expect(screen.getByText('최종 확정')).toBeInTheDocument()
 })
 

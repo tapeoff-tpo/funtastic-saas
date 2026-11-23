@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/auth/server'
 import { CHINA_OUTBOUND_DESTINATIONS } from '@/lib/purchasing/china-outbound-destinations'
-import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
+import type { ChinaOutboundBoxSplitSavedState, ChinaOutboundPalletSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import {
   applyChinaOutboundInventoryPacking,
   mergeChinaOutboundBoxes,
@@ -41,7 +41,7 @@ import {
 } from '@/lib/purchasing/saas-china-outbound'
 
 type InventoryPackingSummary = Awaited<ReturnType<typeof applyChinaOutboundInventoryPacking>>
-type ActionResult = { ok: true; shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; inventoryPacking?: InventoryPackingSummary } | { ok: false; error: string }
+type ActionResult = { ok: true; shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; savedPallet?: ChinaOutboundPalletSavedState; inventoryPacking?: InventoryPackingSummary } | { ok: false; error: string }
 
 const text = (label: string, max = 500) => z.string().trim().min(1, `${label}을(를) 입력해주세요.`).max(max)
 const optionalText = (max = 2_000) => z.string().trim().max(max).optional().nullable()
@@ -475,15 +475,17 @@ export async function saveChinaOutboundItemChineseNameAction(input: unknown): Pr
 export async function saveChinaOutboundPalletDimensionsAction(input: unknown): Promise<ActionResult> {
   await assertMenuAccess('/purchasing/china-shipments')
   return runAction(async () => {
-    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: splitDimension, widthCm: splitDimension, heightCm: splitDimension, manualCbm, tareWeightKg: z.number().finite().min(0).max(999999999).optional(), finalize: z.boolean().optional() }).superRefine((value, context) => {
+    const value = z.object({ shipmentId, palletId: z.string().uuid(), lengthCm: splitDimension, widthCm: splitDimension, heightCm: splitDimension, manualCbm, tareWeightKg: z.number().finite().min(0).max(999999999).optional(), finalize: z.boolean().optional(), refresh: z.boolean().optional() }).superRefine((value, context) => {
       const count = [value.lengthCm, value.widthCm, value.heightCm].filter((dimension) => dimension != null).length
       if (count > 0 && count < 3) context.addIssue({ code: 'custom', message: '가로·세로·높이는 모두 입력하거나 모두 비워주세요.' })
       if ([value.lengthCm, value.widthCm, value.heightCm, value.manualCbm].every((value) => value === undefined)) context.addIssue({ code: 'custom', message: '파렛트 규격 또는 CBM을 입력해주세요.' })
     }).parse(input)
     const actor = await getActor()
-    await saveChinaOutboundPalletDimensions({ ...value, userId: actor.userId })
+    const { refresh, ...measurements } = value
+    const pallet = await saveChinaOutboundPalletDimensions({ ...measurements, userId: actor.userId })
     // Pallet measurements do not change inventory or purchasing status.
-    revalidatePath('/purchasing/china-shipments')
+    if (refresh !== false) revalidatePath('/purchasing/china-shipments')
+    if (refresh === false) return { savedPallet: { id: pallet.id, lengthCm: pallet.lengthCm == null ? null : Number(pallet.lengthCm), widthCm: pallet.widthCm == null ? null : Number(pallet.widthCm), heightCm: pallet.heightCm == null ? null : Number(pallet.heightCm), manualCbm: pallet.manualCbm == null ? null : Number(pallet.manualCbm), tareWeightKg: Number(pallet.tareWeightKg ?? 0), completionStatus: value.finalize ? 'completed' as const : 'in_progress' as const } }
   })
 }
 
@@ -567,7 +569,7 @@ function revalidateSaasChinaPaths() {
   revalidatePath('/purchasing/overdue')
 }
 
-async function runAction(action: () => Promise<{ shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; inventoryPacking?: InventoryPackingSummary } | void>): Promise<ActionResult> {
+async function runAction(action: () => Promise<{ shipmentId?: string; savedState?: ChinaOutboundBoxSplitSavedState; savedPallet?: ChinaOutboundPalletSavedState; inventoryPacking?: InventoryPackingSummary } | void>): Promise<ActionResult> {
   try {
     const result = await action()
     return result ? { ok: true, ...result } : { ok: true }

@@ -28,3 +28,14 @@ export type ChinaOutboundBoxSplitSavedState = {
   updatedOtherBoxItems?: ChinaOutboundBoxSplitSavedState['boxItems']
   reopenedPalletIds: string[]
 }
+
+/** Small persisted pallet response used to update the packing screen in place. */
+export type ChinaOutboundPalletSavedState = {
+  id: string
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  manualCbm: number | null
+  tareWeightKg: number
+  completionStatus: 'completed' | 'in_progress'
+}

@@ -30,6 +30,12 @@ export function importUnitPriceCny(data: Record<string, string | null>) {
   return null
 }
 
+/** Ecount's numeric four-digit suffix identifies an option, not a product. */
+export function importDocumentProductCode(sku: string) {
+  const normalized = sku.trim()
+  return normalized.match(/^(\d+)-\d{4}$/)?.[1] ?? normalized
+}
+
 /** Compress a consecutive sequence of numeric carton numbers for the invoice. */
 export function formatBoxMarks(marks: readonly string[]) {
   const normalized = marks.map((mark) => mark.trim()).filter(Boolean)
@@ -139,6 +145,26 @@ export async function exportChinaImportDocument(
   for (const range of [...sheet.model.merges]) {
     if (/^O\d+:O\d+$/.test(range) && Number(range.match(/\d+/)![0]) >= 20) sheet.unMergeCells(range)
   }
+  const exactProducts = new Map<string, { quantity: number; englishName: string; unitPriceCny: number }>()
+  const hsByProduct = new Map<string, string>()
+  for (const item of prepared.items) {
+    const sku = item.sku.trim(), source = options.items[item.id]
+    const previous = exactProducts.get(sku)
+    if (previous && !preview && (source.englishName.trim() !== previous.englishName.trim() || source.unitPriceCny !== previous.unitPriceCny)) throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
+    exactProducts.set(sku, { ...source, quantity: (previous?.quantity ?? 0) + item.quantity })
+    const product = importDocumentProductCode(sku), hs = item.hsCode.trim()
+    if (!preview && hs && hsByProduct.has(product) && hsByProduct.get(product) !== hs) throw new Error(`${product}: 옵션별 HS CODE가 다릅니다. 품목정보를 확인해주세요.`)
+    if (hs) hsByProduct.set(product, hs)
+  }
+  // Preserve the original option-level rounded amounts when combining options.
+  const amountByProduct = new Map<string, number>()
+  const pricesByProduct = new Map<string, Set<number>>()
+  for (const [sku, item] of exactProducts) {
+    const product = importDocumentProductCode(sku)
+    if (!pricesByProduct.has(product)) pricesByProduct.set(product, new Set())
+    pricesByProduct.get(product)!.add(item.unitPriceCny)
+    amountByProduct.set(product, (amountByProduct.get(product) ?? 0) + money(item.quantity * item.unitPriceCny))
+  }
   const itemById = new Map(prepared.items.map((item) => [item.id, item]))
   type TradeRow = { itemId: string; quantity: number; marks: string[]; boxCount: number; gross: number }
   const groups = [...prepared.pallets.map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
@@ -146,11 +172,12 @@ export async function exportChinaImportDocument(
       const rows = new Map<string, TradeRow>()
       for (const box of prepared.boxes.filter((box) => box.palletId === group.id)) {
         for (const [index, allocation] of detail.boxItems.filter((a) => a.boxId === box.id).entries()) {
-          const row = rows.get(allocation.shipmentItemId) ?? { itemId: allocation.shipmentItemId, quantity: 0, marks: [], boxCount: 0, gross: 0 }
+          const product = importDocumentProductCode(itemById.get(allocation.shipmentItemId)!.sku)
+          const row = rows.get(product) ?? { itemId: allocation.shipmentItemId, quantity: 0, marks: [], boxCount: 0, gross: 0 }
           row.quantity += allocation.quantity
           row.marks.push(box.boxNo)
           if (index === 0) { row.boxCount += 1; row.gross += options.boxes[box.id].grossWeightKg }
-          rows.set(row.itemId, row)
+          rows.set(product, row)
         }
       }
       const values = [...rows.values()]
@@ -171,15 +198,7 @@ export async function exportChinaImportDocument(
     const groupBySku = new Map<string, { itemId: string; quantity: number; marks: string[] }>()
     for (const trade of group.rows) {
       const item = itemById.get(trade.itemId)!
-      const sku = item.sku.trim()
-      const source = options.items[item.id]
-      const previous = groupBySku.get(sku) ?? invoiceBySku.get(sku)
-      if (previous && !preview) {
-        const previousSource = options.items[previous.itemId]
-        if (source.englishName.trim() !== previousSource.englishName.trim() || source.unitPriceCny !== previousSource.unitPriceCny) {
-          throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
-        }
-      }
+      const sku = importDocumentProductCode(item.sku)
       const groupRow = groupBySku.get(sku) ?? { itemId: item.id, quantity: 0, marks: [] }
       groupRow.quantity += trade.quantity
       groupRow.marks.push(...trade.marks)
@@ -259,11 +278,14 @@ export async function exportChinaImportDocument(
     sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
-    sheet.getCell(`D${row}`).value = item.hsCode || null
+    sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null
     sheet.getCell(`E${row}`).value = invoice.quantity
     sheet.getCell(`F${row}`).value = 'ea'
-    sheet.getCell(`G${row}`).value = Number.isFinite(source.unitPriceCny) ? source.unitPriceCny : null
-    const amount = money(invoice.quantity * source.unitPriceCny)
+    const amount = money(amountByProduct.get(importDocumentProductCode(item.sku)) ?? Number.NaN)
+    const mixedPrices = (pricesByProduct.get(importDocumentProductCode(item.sku))?.size ?? 0) > 1
+    const unitPrice = mixedPrices ? amount / invoice.quantity : source.unitPriceCny
+    sheet.getCell(`G${row}`).value = Number.isFinite(unitPrice) ? unitPrice : null
+    if (Number.isFinite(unitPrice) && Math.abs(unitPrice - source.unitPriceCny) > 0.0000001) sheet.getCell(`G${row}`).numFmt = '#,##0.000000'
     totalAmount += amount
     sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
   }

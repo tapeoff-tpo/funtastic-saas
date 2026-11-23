@@ -152,8 +152,8 @@ describe('China import documents', () => {
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
-    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([35, 35, 60])
-    expect(sheet.model.merges).toContain('O20:O21')
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([70, 60, null])
+    expect(sheet.model.merges).not.toContain('O20:O21')
     for (const conflicting of [{ englishName: 'Other', unitPriceCny: 1.25 }, { englishName: 'Glass', unitPriceCny: 2 }]) {
       await expect(exportChinaImportDocument(shipment, metadata, { ...overrides, items: { ...overrides.items, 'item-b': conflicting } })).rejects.toThrow('SKU-A: 동일 품목')
     }
@@ -374,4 +374,34 @@ it('exports the saved whole-pallet CBM when its internal boxes have no dimension
   const sheet = await exportedSheet(shipment, { ...options, boxes: { ...options.boxes, 'box-a': { grossWeightKg: 10, cbm: null } } })
   expect(sheet.getCell('X112').value).toBeCloseTo(1.52)
   expect(sheet.getCell('R112').value).toMatchObject({ result: 25 })
+})
+
+it('combines option suffixes by product on both documents while preserving option prices and physical totals', async () => {
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100457-0002' }] }
+  const trade = new Map([['100457-0001', { ...metadata.get('SKU-A')! }], ['100457-0002', { ...metadata.get('SKU-A')! }]])
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass red', unitPriceCny: 20 } } }
+  const buffer = await exportChinaImportDocument(shipment, trade, overrides)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('E20').value).toBe(25)
+  expect(sheet.getCell('G20').value).toBe(12)
+  expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 300 })
+  expect(sheet.getCell('C21').value).toBeNull()
+  expect(sheet.getCell('R20').value).toBe(22)
+  expect(sheet.getCell('R21').value).toBe(3)
+  expect(sheet.getCell('L20').value).toBe(1)
+  expect(sheet.getCell('L21').value).toBe(1)
+  expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
+  expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
+  expect(sheet.getCell('X112').value).toBeCloseTo(0.38)
+  expect(prepareImportDocument(shipment, trade).items).toHaveLength(2)
+})
+it('keeps different products separate even when the English name is identical', async () => {
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100458-0001' }] }
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass', unitPriceCny: 10 } } }
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(shipment, metadata, overrides) as unknown as ExcelJS.Buffer)
+  expect(workbook.worksheets[0].getCell('E20').value).toBe(20)
+  expect(workbook.worksheets[0].getCell('E21').value).toBe(5)
 })

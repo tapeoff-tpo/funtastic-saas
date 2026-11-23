@@ -43,16 +43,31 @@ describe('saved box list', () => {
 
   it('saves the actual box dimensions and total weight without sending allocation or quantity edits', async () => {
     renderPanel([mixedBox('2')])
-    fireEvent.doubleClick(within(screen.getByRole('row', { name: '박스 2' })).getByRole('button'))
+    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 가로(cm) 편집' }))
     expect(screen.queryByRole('spinbutton', { name: /CBM/ })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 가로(cm)' }), { target: { value: '50.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '박스 2 규격 저장' }))
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
     await waitFor(() => expect(saveDimensions).toHaveBeenCalledWith({ shipmentId: 'shipment', boxId: '2', lengthCm: 50.5, widthCm: 20, heightCm: 30, manualCbm: null }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '박스 2 규격 저장' })).toBeDisabled())
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: '박스 2 가로(cm)' })).not.toBeInTheDocument())
+    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 총중량(kg) 편집' }))
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 총중량(kg)' }), { target: { value: '12.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '중량 저장' }))
+    fireEvent.click(screen.getByRole('button', { name: '저장' }))
     await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'shipment', packageId: '2', kind: 'box', grossWeightKg: 12.5 }))
     expect(refresh).toHaveBeenCalledTimes(2)
   })
 
+})
+
+it('edits one cell without expanding other measurement inputs and cancels without saving', () => {
+  renderPanel([box('1')])
+  for (const label of ['가로(cm)', '세로(cm)', '높이(cm)', '총중량(kg)', 'CBM']) {
+    expect(screen.getByRole('columnheader', { name: label })).toBeInTheDocument()
+  }
+  fireEvent.doubleClick(screen.getByRole('button', { name: '박스 1 세로(cm) 편집' }))
+  const input = screen.getByRole('spinbutton', { name: '박스 1 세로(cm)' })
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(1)
+  fireEvent.change(input, { target: { value: '99' } })
+  fireEvent.keyDown(input, { key: 'Escape' })
+  expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+  expect(saveDimensions).not.toHaveBeenCalled()
 })

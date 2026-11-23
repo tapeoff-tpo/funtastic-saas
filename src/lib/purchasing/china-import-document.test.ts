@@ -93,7 +93,7 @@ describe('China import documents', () => {
     [[10, 60, 20], 'P2'],
     [[10, 20, 60], 'P3'],
     [[40, 40, 10], 'P1'],
-  ] as const)('combines invoice quantities %j at %s while keeping actual packing rows', async (quantities, palletNo) => {
+  ] as const)('combines invoice quantities %j at %s with matching packing rows and all pallet locations', async (quantities, palletNo) => {
     const { shipment, overrides } = splitAcrossPallets([...quantities])
     const sheet = await exportedSheet(shipment, overrides)
     expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
@@ -105,8 +105,9 @@ describe('China import documents', () => {
     for (const row of [21, 22]) {
       for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
     }
-    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1', 'P2', 'P3'])
-    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([...quantities])
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1, P2, P3', null, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
+    expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
     expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)', result: 3 })
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
@@ -152,7 +153,7 @@ describe('China import documents', () => {
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
-    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([70, 60, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([130, null, null])
     expect(sheet.model.merges).not.toContain('O20:O21')
     for (const conflicting of [{ englishName: 'Other', unitPriceCny: 1.25 }, { englishName: 'Glass', unitPriceCny: 2 }]) {
       await expect(exportChinaImportDocument(shipment, metadata, { ...overrides, items: { ...overrides.items, 'item-b': conflicting } })).rejects.toThrow('SKU-A: 동일 품목')
@@ -224,7 +225,7 @@ describe('China import documents', () => {
     const sheet = await exportedSheet(shipment, overrides)
     expect(prepareImportDocument(shipment, metadata).pallets[0].tareWeightKg).toBe(tareWeightKg)
     expect(sheet.getCell('V20').value).toBe(12.25 + tareWeightKg)
-    expect(sheet.getCell('V21').value).toBeNull()
+    expect(sheet.getCell('V21').value).toBe(3)
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 15.25 + tareWeightKg })
   })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
@@ -245,8 +246,8 @@ describe('China import documents', () => {
     expect(sheet.getCell('D21').value).toBeNull()
     expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 335.16 })
     expect(sheet.getCell('V20').value).toBe(15)
-    expect(sheet.getCell('V21').value).toBeNull()
-    expect(sheet.getCell('V22').value).toBe(3)
+    expect(sheet.getCell('V21').value).toBe(3)
+    expect(sheet.getCell('V22').value).toBeNull()
     expect(sheet.getCell('V23').value).toBeNull()
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 345.16 })
@@ -261,7 +262,7 @@ describe('China import documents', () => {
     expect(sheet.pageSetup.scale).toBe(31)
     expect(sheet.getColumn('A').width).toBe(19.296875)
     expect(sheet.getColumn('N').width).toBe(28.59765625)
-    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'R18:S18', 'T18:U18', 'V18:W18', 'O20:O21']))
+    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'R18:S18', 'T18:U18', 'V18:W18']))
     expect(sheet.model.merges).not.toContain('C18:D18')
     const reference = new ExcelJS.Workbook()
     await reference.xlsx.load(await readFile(join(process.cwd(), 'src/lib/purchasing/templates/china-invoice-packing-list.xlsx')) as unknown as ExcelJS.Buffer)
@@ -388,10 +389,13 @@ it('combines option suffixes by product on both documents while preserving optio
   expect(sheet.getCell('G20').value).toBe(12)
   expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 300 })
   expect(sheet.getCell('C21').value).toBeNull()
-  expect(sheet.getCell('R20').value).toBe(22)
-  expect(sheet.getCell('R21').value).toBe(3)
-  expect(sheet.getCell('L20').value).toBe(1)
-  expect(sheet.getCell('L21').value).toBe(1)
+  expect(sheet.getCell('R20').value).toBe(25)
+  expect(sheet.getCell('R21').value).toBeNull()
+  expect(sheet.getCell('L20').value).toBe(2)
+  expect(sheet.getCell('L21').value).toBeNull()
+  expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
+  expect(sheet.getCell('M20').value).toBe('P1, box')
+  expect(sheet.getCell('O20').value).toBe(2)
   expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
   expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
   expect(sheet.getCell('X112').value).toBeCloseTo(0.38)
@@ -417,4 +421,20 @@ it('displays unit prices with exactly two decimal places while preserving calcul
   const html = await renderChinaImportPreview(buffer)
   expect(html).toContain('>16.76</td>')
   expect(html).toContain('>2.00</td>')
+})
+
+it('aligns every invoice and packing product row without repeating mixed packages', async () => {
+  const sheet = await exportedSheet(detail, options)
+  for (const row of [20, 21]) {
+    expect(sheet.getCell(`K${row}`).value).toBe(sheet.getCell(`A${row}`).value)
+    expect(sheet.getCell(`R${row}`).value).toBe(sheet.getCell(`E${row}`).value)
+  }
+  expect(sheet.getCell('M21').value).toBe('P1, box')
+  expect(sheet.getCell('O20').value).toBe(1)
+  expect(sheet.getCell('O21').value).toBe(1)
+  expect(sheet.getCell('L20').value).toBe(1)
+  expect(sheet.getCell('L21').value).toBe(1)
+  expect(sheet.getCell('V20').value).toBe(15)
+  expect(sheet.getCell('V21').value).toBe(3)
+  expect(sheet.getCell('K22').value).toBeNull()
 })

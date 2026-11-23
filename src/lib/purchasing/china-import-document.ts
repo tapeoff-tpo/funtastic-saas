@@ -62,6 +62,12 @@ export function formatBoxMarks(marks: readonly string[]) {
   return ranges.join(', ')
 }
 
+function documentBoxMarks(marks: string[]) {
+  const unique = [...new Set(marks)]
+  const text = formatBoxMarks(unique)
+  return text.length > 60 ? `MULTIPLE (${unique.length} CTN)` : text
+}
+
 export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Map<string, ImportItemMetadata>) {
   detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 인보이스·패킹리스트를 만들 수 없습니다.')
@@ -221,7 +227,21 @@ export async function exportChinaImportDocument(
     }
   }
   const invoiceRows = [...invoiceBySku.values()].sort((a, b) => a.groupIndex - b.groupIndex)
-  const count = groups.reduce((sum, group) => sum + group.rows.length, 0)
+  // The two documents share one product order. Keep all physical locations on
+  // that row rather than repeating a product once for every pallet it occupies.
+  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[] }>()
+  for (const group of groups) {
+    for (const [index, trade] of group.rows.entries()) {
+      const product = importDocumentProductCode(itemById.get(trade.itemId)!.sku)
+      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [] }
+      row.boxCount += trade.boxCount
+      row.packageCount += group.id ? (index === 0 ? 1 : 0) : trade.boxCount
+      row.gross += trade.gross
+      if (!row.locations.includes(group.no)) row.locations.push(group.no)
+      packingByProduct.set(product, row)
+    }
+  }
+  const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
   const totalRow = 112 + extra
@@ -231,7 +251,7 @@ export async function exportChinaImportDocument(
   for (let row = 20; row <= totalRow; row++) {
     sheet.getRow(row).hidden = false
     if (row < totalRow) {
-      for (let column = 1; column <= 10; column++) sheet.getRow(row).getCell(column).value = null
+      for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).value = null
     }
   }
   for (const [address, value] of Object.entries({
@@ -245,36 +265,28 @@ export async function exportChinaImportDocument(
     R14: `${prepared.palletCount}plt + ${prepared.looseBoxCount}ctn`, W14: prepared.packageCount, X14: 'CTN',
   })) sheet.getCell(address).value = value
   for (const address of ['C17', 'O17']) sheet.getCell(address).value = new Date(`${options.sailingDate}T00:00:00Z`)
-  let nextRow = 20
-  for (const group of groups) {
-    const start = nextRow
-    for (const trade of group.rows) {
-      const row = nextRow++
-      const item = itemById.get(trade.itemId)!
-      const marks = [...new Set(trade.marks)]
-      const markText = formatBoxMarks(marks)
-      for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
-      sheet.getRow(row).height = 21
-      sheet.getCell(`K${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
-      sheet.getCell(`L${row}`).value = trade.boxCount || null
-      sheet.getCell(`M${row}`).value = group.no
-      sheet.getCell(`O${row}`).value = group.id ? (row === start ? 1 : null) : trade.boxCount || null
-      sheet.getCell(`R${row}`).value = trade.quantity
-      sheet.getCell(`S${row}`).value = 'ea'
-      sheet.getCell(`V${row}`).value = trade.gross || null
-      sheet.getCell(`W${row}`).value = 'kg'
-      sheet.getCell(`Y${row}`).value = item.productName
-    }
-    if (group.id && nextRow - start > 1) sheet.mergeCells(`O${start}:O${nextRow - 1}`)
+  for (const [index, invoice] of invoiceRows.entries()) {
+    const row = 20 + index
+    const item = itemById.get(invoice.itemId)!
+    const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
+    for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
+    sheet.getRow(row).height = 21
+    sheet.getCell(`K${row}`).value = documentBoxMarks(invoice.marks)
+    sheet.getCell(`L${row}`).value = packing.boxCount || null
+    sheet.getCell(`M${row}`).value = packing.locations.join(', ')
+    sheet.getCell(`O${row}`).value = packing.packageCount || null
+    sheet.getCell(`R${row}`).value = invoice.quantity
+    sheet.getCell(`S${row}`).value = 'ea'
+    sheet.getCell(`V${row}`).value = packing.gross || null
+    sheet.getCell(`W${row}`).value = 'kg'
+    sheet.getCell(`Y${row}`).value = item.productName
   }
   let totalAmount = 0
   for (const [index, invoice] of invoiceRows.entries()) {
     const row = 20 + index
     const item = itemById.get(invoice.itemId)!
     const source = options.items[item.id]
-    const marks = [...new Set(invoice.marks)]
-    const markText = formatBoxMarks(marks)
-    sheet.getCell(`A${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
+    sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
     sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.

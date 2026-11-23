@@ -285,7 +285,7 @@ export async function exportChinaImportDocument(
     const mixedPrices = (pricesByProduct.get(importDocumentProductCode(item.sku))?.size ?? 0) > 1
     const unitPrice = mixedPrices ? amount / invoice.quantity : source.unitPriceCny
     sheet.getCell(`G${row}`).value = Number.isFinite(unitPrice) ? unitPrice : null
-    if (Number.isFinite(unitPrice) && Math.abs(unitPrice - source.unitPriceCny) > 0.0000001) sheet.getCell(`G${row}`).numFmt = '#,##0.000000'
+    sheet.getCell(`G${row}`).numFmt = '#,##0.00'
     totalAmount += amount
     sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
   }

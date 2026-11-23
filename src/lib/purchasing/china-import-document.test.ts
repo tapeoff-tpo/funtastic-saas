@@ -405,3 +405,16 @@ it('keeps different products separate even when the English name is identical', 
   expect(workbook.worksheets[0].getCell('E20').value).toBe(20)
   expect(workbook.worksheets[0].getCell('E21').value).toBe(5)
 })
+
+it('displays unit prices with exactly two decimal places while preserving calculation precision', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, options)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('G20').numFmt).toBe('#,##0.00')
+  expect(sheet.getCell('G20').value).toBe(16.758)
+  expect(sheet.getCell('J20').value).toMatchObject({ result: 335.16 })
+  const html = await renderChinaImportPreview(buffer)
+  expect(html).toContain('>16.76</td>')
+  expect(html).toContain('>2.00</td>')
+})

@@ -18,7 +18,7 @@ const fields = [
 ] as const
 const preferenceKeys = ['exporter', 'importer', 'importerAddress', 'loadingPort', 'destinationPort', 'paymentTerms', 'palletTareKg', 'palletExtraCbm']
 
-export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void }) {
+export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'document' }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void; mode?: 'document' | 'cost' }) {
   const [data, setData] = useState<Prepared | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string }>>({})
@@ -84,7 +84,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
     boxes: Object.fromEntries(Object.entries(boxes).map(([id, value]) => [id, { grossWeightKg: value.grossWeightKg.trim() ? Number(value.grossWeightKg) : null, cbm: value.cbm.trim() ? Number(value.cbm) : null }])),
   })
   useEffect(() => {
-    if (!data) return
+    if (!data || mode === 'cost') return
     const controller = new AbortController()
     setPreviewBusy(true)
     setPreviewError('')
@@ -98,7 +98,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
       finally { if (!controller.signal.aborted) setPreviewBusy(false) }
     }, 350)
     return () => { window.clearTimeout(timeout); controller.abort() }
-  }, [data, url, payload])
+  }, [data, url, payload, mode])
 
   async function download(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -126,7 +126,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
   }
 
   return <div className="space-y-4">
-    <section aria-label="인보이스·패킹리스트 작성" className="rounded-lg border bg-background p-4">
+    {mode === 'document' && <section aria-label="인보이스·패킹리스트 작성" className="rounded-lg border bg-background p-4">
       {error ? <p role="alert" className="my-3 rounded-md border border-red-200 p-3 text-sm text-red-700">{error}</p> : null}
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
@@ -153,8 +153,14 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange }: { shipmentId
         </fieldset>
         <button type="submit" disabled={busy} className="inline-flex h-10 items-center gap-2 rounded bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}인보이스·패킹리스트 다운로드 / 下载发票和装箱单</button>
       </form> : null}
-    </section>
-    {data?.costPacking && <ShipmentCostPanel key={data.snapshot} packing={data.costPacking} url={url} snapshot={data.snapshot}
+    </section>}
+    {mode === 'cost' && <section aria-label="회차 원가 상품 단가" className="space-y-3 rounded-lg border bg-background p-4">
+      {busy && !data && <p>회차 원가 정보를 불러오는 중…</p>}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {!data && !busy && <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인</button>}
+      {data && <><h2 className="font-semibold">상품 매입단가 (CNY)</h2><div className="max-h-64 overflow-auto rounded border"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr>{['품목코드', '상품명 / 옵션', '수량', '매입단가(CNY)'].map((label) => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{data.items.map((item) => <tr key={item.id} className="border-t"><td className="p-2">{item.sku}</td><td className="p-2">{item.productName} {item.optionName}</td><td className="p-2">{item.quantity}</td><td className="p-2"><input aria-label={`${item.sku} 원가 계산 단가`} type="number" min="0" step="any" className={inputClass} value={items[item.id]?.unitPriceCny ?? ''} onChange={(event) => { onDirtyChange(true); setItems((current) => ({ ...current, [item.id]: { ...current[item.id], unitPriceCny: event.target.value } })) }} /></td></tr>)}</tbody></table></div></>}
+    </section>}
+    {mode === 'cost' && data?.costPacking && <ShipmentCostPanel key={data.snapshot} packing={data.costPacking} url={url} snapshot={data.snapshot}
       prices={Object.fromEntries(Object.entries(items).map(([id, value]) => [id, value.unitPriceCny]))} />}
   </div>
 }

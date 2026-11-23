@@ -86,7 +86,29 @@ export function ChineseNameEditor({ shipmentId, item, editable, isPending }: { s
     setBaseline(name); setEditing(false); guard.setDraft(draftId, null); router.refresh(); return true
   }
   useChinaWorkDraft(draftId, name !== baseline ? { kind: 'items', label: '중국어 상품명', snapshot: name, save, discard: () => { setName(baseline); setEditing(false) } } : null)
-  return <div className="space-y-1">{editing ? <><input data-no-translate maxLength={1000} aria-label={`${item.sku} 中文品名`} value={name} onChange={(event) => setName(event.target.value)} className="h-8 w-full rounded border px-2 text-sm" disabled={isPending || pending || guard.busy} /><button type="button" disabled={!name.trim() || isPending || pending || guard.busy} onClick={() => start(async () => { await guard.runTask(save) })} className="rounded border px-2 py-1 text-xs">저장</button></> : <><p data-no-translate>{item.chineseProductName || baseline || '—'}</p>{editable && <button type="button" onClick={() => setEditing(true)} disabled={isPending || guard.busy} className="text-xs underline">중국어 상품명 수정</button>}</>}</div>
+  const disabled = !editable || isPending || pending || guard.busy
+  function cancel() { setName(baseline); setEditing(false); guard.setDraft(draftId, null) }
+  function submit() {
+    if (disabled || !name.trim()) return
+    start(async () => { await guard.runTask(save) })
+  }
+  return <div className="min-w-36 space-y-1">{editing ? <>
+    <input data-no-translate autoFocus maxLength={1000} aria-label={`${item.sku} 中文品名`} value={name}
+      onChange={(event) => setName(event.target.value)} onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return
+        if (event.key === 'Enter') { event.preventDefault(); submit() }
+        if (event.key === 'Escape' && !disabled) { event.preventDefault(); cancel() }
+      }} className="h-8 w-full rounded border bg-background px-2 text-sm" disabled={disabled} />
+    <div className="flex gap-2"><button type="button" disabled={!name.trim() || disabled} onClick={submit} className="rounded border px-2 py-1 text-xs">저장</button>
+      <button type="button" disabled={disabled} onClick={cancel} className="rounded border px-2 py-1 text-xs">취소</button></div>
+  </> : editable ? <div data-no-translate role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled}
+    aria-label={`${item.sku} 중국어 상품명 편집`} title="더블클릭하여 수정 · Enter로 편집"
+    onDoubleClick={() => { if (!disabled) setEditing(true) }} onKeyDown={(event) => {
+      if (!disabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(true) }
+    }} className="min-h-8 cursor-text rounded border border-transparent px-2 py-1 hover:border-input hover:bg-muted/30 focus-visible:outline-2">
+    {baseline || '—'}
+  </div> : <p data-no-translate className="px-2 py-1">{baseline || '—'}</p>}</div>
+
 }
 
 export function MergeBoxesButton({ shipmentId, boxes, isPending }: { shipmentId: string; boxes: ChinaShipmentDetailView['boxes']; isPending: boolean }) {

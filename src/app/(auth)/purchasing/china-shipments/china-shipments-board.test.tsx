@@ -1592,10 +1592,21 @@ describe('ChinaShipmentsBoard', () => {
   it('stores a Chinese name for the selected outbound item only', async () => {
     saveChineseName.mockResolvedValue({ ok: true })
     renderShipment(shipmentA, 'items')
-    fireEvent.click(screen.getByRole('button', { name: '중국어 상품명 수정' }))
+    expect(screen.queryByRole('button', { name: '중국어 상품명 수정' })).not.toBeInTheDocument()
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'SKU-A 중국어 상품명 편집' }))
     fireEvent.change(screen.getByLabelText('SKU-A 中文品名'), { target: { value: '样品杯' } })
     fireEvent.click(screen.getByRole('button', { name: '저장' }))
     await waitFor(() => expect(saveChineseName).toHaveBeenCalledWith({ shipmentId: 'a', shipmentItemId: 'shared-item-id', chineseProductName: '样品杯' }))
+  })
+
+  it('cancels a double-click Chinese name edit without saving', () => {
+    renderShipment(shipmentA, 'items')
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'SKU-A 중국어 상품명 편집' }))
+    const input = screen.getByLabelText('SKU-A 中文品名')
+    fireEvent.change(input, { target: { value: '未保存名称' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByLabelText('SKU-A 中文品名')).not.toBeInTheDocument()
+    expect(saveChineseName).not.toHaveBeenCalled()
   })
 
   it('filters additional stock by inclusive Korea receipt dates and preserves hidden selections', async () => {

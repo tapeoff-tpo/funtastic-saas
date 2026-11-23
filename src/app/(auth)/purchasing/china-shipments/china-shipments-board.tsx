@@ -871,9 +871,9 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
   const editingItem = items.find((item) => item.id === editingId)
   return <section className="overflow-hidden rounded-lg border">
     <div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목·박스분할</h3></div>
-    <div className="overflow-x-auto"><table className="min-w-[1100px] w-full text-sm">
+    <div className="overflow-x-auto"><table className="min-w-[1500px] w-full text-sm">
       <thead className="bg-muted/30 text-xs text-muted-foreground"><tr>
-        {['품목코드', '품목구분', '상품명(한국어)', '상품명(중국어)', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수·박스별 수량', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className="px-3 py-2 text-left font-medium">{label}</th>)}
+        {['품목코드', '품목구분', '상품명(한국어)', '상품명(중국어)', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수·박스별 수량', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className={`whitespace-nowrap px-3 py-2 text-left font-medium ${label === '품목코드' ? 'w-[calc(11ch+1.5rem)]' : ''}`}>{label}</th>)}
       </tr></thead>
       <tbody>{sortedItems.map((item) => {
         const complete = item.packedQuantity === item.reservedQuantity
@@ -882,7 +882,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
         for (const allocation of allocations) quantities.set(allocation.quantity, (quantities.get(allocation.quantity) ?? 0) + 1)
         const receipts = [...new Map((item.receiptPacking ?? []).map((piece) => [piece.receiptBoxId, piece])).values()]
         return <tr key={item.id} className="border-t align-top">
-          <td data-no-translate className="px-3 py-3 font-medium">{item.sku}</td><td className="px-3 py-3">{item.itemCategory || '상품'}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-3 py-3"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
+          <td data-no-translate className="w-[calc(11ch+1.5rem)] whitespace-nowrap px-3 py-3 font-mono text-xs font-medium tabular-nums">{item.sku}</td><td className="px-3 py-3">{item.itemCategory || '상품'}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-3 py-3"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
           <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong><div className="mt-1 text-xs text-muted-foreground">작업 가능 {Math.max(0, item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}개</div></td>
           <td className="px-3 py-3 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
           <td className="px-3 py-3"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>

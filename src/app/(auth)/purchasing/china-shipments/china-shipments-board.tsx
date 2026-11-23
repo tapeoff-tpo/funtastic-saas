@@ -1,5 +1,6 @@
 'use client'
 
+import { ItemCodeCell } from './item-code-cell'
 import { normalizeChinaPalletNumber } from '@/lib/purchasing/china-pallet-number'
 
 import { type ChangeEvent, type FormEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState, useTransition } from 'react'
@@ -904,7 +905,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
   return <section className="overflow-hidden rounded-lg border">
     <div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목·박스분할</h3></div>
     <div className="overflow-x-auto"><table className="min-w-[1220px] w-full table-fixed text-sm">
-      <colgroup>{[108, 44, 180, 146, 150, 124, 84, 68, 70, 70, 116, 94].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+      <colgroup>{[94, 40, 180, 146, 150, 124, 84, 68, 70, 70, 116, 94].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
       <thead className="bg-muted/30 text-xs text-muted-foreground"><tr>
         {['품목코드', '구분', '상품명', '중국어 상품명', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className={`whitespace-nowrap px-2 py-1.5 font-medium ${label === "현재고" ? "text-center" : "text-left"}`}>{label}</th>)}
       </tr></thead>
@@ -913,7 +914,7 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
         const allocations = boxItemsByItem.get(item.id) ?? []
         const receipts = [...new Map((item.receiptPacking ?? []).map((piece) => [piece.receiptBoxId, piece])).values()]
         return <tr key={item.id} className="border-t align-middle">
-          <td data-no-translate className="px-2 py-0.5 whitespace-nowrap text-xs font-medium">{item.sku}</td><td className="px-2 py-0.5 whitespace-nowrap text-[10px] text-muted-foreground">{item.itemCategory || '상품'}</td><td className="px-2 py-0.5"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-2 py-0.5"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-2 py-0.5 text-xs text-muted-foreground"><span className="block truncate" title={item.optionName || undefined}>{item.optionName || '-'}</span></td>
+          <td className="overflow-hidden px-1.5 py-0.5 text-xs font-medium"><ItemCodeCell code={item.sku} /></td><td className="px-2 py-0.5 whitespace-nowrap text-[10px] text-muted-foreground">{item.itemCategory || '상품'}</td><td className="px-2 py-0.5"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-2 py-0.5"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-2 py-0.5 text-xs text-muted-foreground"><span className="block truncate" title={item.optionName || undefined}>{item.optionName || '-'}</span></td>
           <td className="px-2 py-0.5 whitespace-nowrap text-center text-xs leading-tight tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong> <span className="block text-[10px] leading-tight text-muted-foreground">작업 가능 {Math.max(0, item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}개</span></td>
           <td className="px-2 py-0.5 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-2 py-0.5 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
           <td className="px-2 py-0.5"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>

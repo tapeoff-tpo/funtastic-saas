@@ -10,6 +10,16 @@ export type DataRefreshSource =
   | 'purchasing_raw:chinaOutbound'
   | 'purchasing_raw:discontinuedProducts'
 
+type PurchasingDataFreshnessRow = {
+  recommendationCalculatedAt: string | null
+  targetStockMonths: string | null
+  rawDataAppliedAt: string | null
+  domesticInventoryAt: string | null
+  chinaInventoryAt: string | null
+  outboundRawAt: string | null
+  outboundReflectionAt: string | null
+}
+
 async function ensureDataRefreshEvents() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS data_refresh_events (
@@ -26,6 +36,11 @@ async function ensureDataRefreshEvents() {
   `)
 }
 
+function isUndefinedTableError(error: unknown) {
+  const failure = error as { code?: string; cause?: { code?: string } }
+  return failure.code === '42P01' || failure.cause?.code === '42P01'
+}
+
 export async function recordDataRefresh(input: {
   userId: string
   source: DataRefreshSource
@@ -36,6 +51,34 @@ export async function recordDataRefresh(input: {
     INSERT INTO data_refresh_events (user_id, source, metadata)
     VALUES (${input.userId}::uuid, ${input.source}, ${JSON.stringify(input.metadata ?? {})}::jsonb)
   `)
+}
+
+/**
+ * Returns only an explicitly recorded successful refresh event. Do not add a
+ * source-table fallback here: callers use this timestamp as an authoritative
+ * snapshot boundary, while rows in those tables can be updated for unrelated
+ * operational reasons.
+ */
+export async function getLatestDataRefreshCompletedAt(
+  userId: string,
+  source: DataRefreshSource,
+) {
+  const query = sql`
+    SELECT MAX(completed_at)::text AS "completedAt"
+    FROM data_refresh_events
+    WHERE user_id = ${userId}::uuid
+      AND source = ${source}
+  `
+  const read = () => db.execute<{ completedAt: string | null }>(query)
+  const result = await read().catch(async (error: unknown) => {
+    if (!isUndefinedTableError(error)) throw error
+    await ensureDataRefreshEvents()
+    return read()
+  })
+  const rows = Array.isArray(result)
+    ? result
+    : ((result as unknown as { rows?: Array<{ completedAt: string | null }> }).rows ?? [])
+  return rows[0]?.completedAt ?? null
 }
 
 export async function getPurchasingDataFreshness(userId: string) {
@@ -77,22 +120,16 @@ export async function getPurchasingDataFreshness(userId: string) {
         WHERE user_id = ${userId}::uuid
       )::text AS "outboundReflectionAt"
   `
-  const read = () => db.execute<{
-    recommendationCalculatedAt: string | null
-    targetStockMonths: string | null
-    rawDataAppliedAt: string | null
-    domesticInventoryAt: string | null
-    chinaInventoryAt: string | null
-    outboundRawAt: string | null
-    outboundReflectionAt: string | null
-  }>(query)
+  const read = () => db.execute<PurchasingDataFreshnessRow>(query)
   const result = await read().catch(async (error: unknown) => {
-    const failure = error as { code?: string; cause?: { code?: string } }
-    if (failure.code !== '42P01' && failure.cause?.code !== '42P01') throw error
+    if (!isUndefinedTableError(error)) throw error
     await ensureDataRefreshEvents()
     return read()
   })
-  return result[0] ?? {
+  const rows = Array.isArray(result)
+    ? result
+    : ((result as unknown as { rows?: PurchasingDataFreshnessRow[] }).rows ?? [])
+  return rows[0] ?? {
     recommendationCalculatedAt: null,
     targetStockMonths: null,
     rawDataAppliedAt: null,

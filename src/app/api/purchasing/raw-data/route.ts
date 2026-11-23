@@ -31,7 +31,11 @@ import {
   summarizeStoredEcountRawFiles,
   type StoredEcountRawFile,
 } from '@/lib/purchasing/ecount-raw-files'
-import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
+import {
+  getLatestDataRefreshCompletedAt,
+  recordDataRefresh,
+} from '@/lib/purchasing/data-freshness'
+import { resolveDomesticInventoryReflectedThrough } from '@/lib/purchasing/domestic-inventory-cutoff'
 import {
   PURCHASING_RAW_BUNDLE_CONTENT_TYPE,
   unpackPurchasingRawDataBundle,
@@ -63,7 +67,15 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
     const { uploads } = uploadRequest
-    if (uploads.length === 0 || uploads.length > REPORT_KINDS.length) {
+    if (uploadRequest.reconcileStored && (
+      uploadRequest.transport !== 'multipart' || uploadRequest.mode !== 'apply'
+    )) {
+      return NextResponse.json({ error: '저장 원본 재동기화는 최종 반영 요청으로만 실행할 수 있습니다.' }, { status: 400 })
+    }
+    if (uploadRequest.reconcileStored && uploads.length > 0) {
+      return NextResponse.json({ error: '저장 원본 재동기화 요청에는 새 파일을 함께 올릴 수 없습니다.' }, { status: 400 })
+    }
+    if (!uploadRequest.reconcileStored && (uploads.length === 0 || uploads.length > REPORT_KINDS.length)) {
       return NextResponse.json({ error: '변경할 원본 파일을 1~5개 선택해주세요.' }, { status: 400 })
     }
     if (uploads.some((file) => !/\.xlsx$/i.test(file.fileName))) {
@@ -104,7 +116,7 @@ async function processPurchasingRawDataRequest(input: {
   requestedByUserId: string
   uploadRequest: PurchasingRawDataRequest
 }) {
-  const { mode, fields, uploads } = input.uploadRequest
+  const { mode, fields, uploads, reconcileStored } = input.uploadRequest
   const classified: StoredEcountRawFile[] = []
   for (const upload of uploads) {
     try {
@@ -122,30 +134,45 @@ async function processPurchasingRawDataRequest(input: {
   }
 
   const stored = await getStoredEcountRawFiles(input.workspaceUserId)
-  let accumulated: StoredEcountRawFile[]
-  try {
-    accumulated = await mergeEcountRawFiles(stored, classified)
-  } catch (error) {
-    return NextResponse.json({
-      error: error instanceof Error ? `기존 누적 원본과 새 파일을 합치지 못했습니다: ${error.message}` : '기존 누적 원본과 새 파일을 합치지 못했습니다.',
-    }, { status: 400 })
+  if (reconcileStored && stored.length === 0) {
+    return NextResponse.json({ error: '재동기화할 저장된 발주 원본이 없습니다.' }, { status: 400 })
+  }
+  let accumulated: StoredEcountRawFile[] = []
+  if (!reconcileStored) {
+    try {
+      accumulated = await mergeEcountRawFiles(stored, classified)
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? `기존 누적 원본과 새 파일을 합치지 못했습니다: ${error.message}` : '기존 누적 원본과 새 파일을 합치지 못했습니다.',
+      }, { status: 400 })
+    }
   }
   const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
   for (const file of accumulated) combined.set(file.kind, file)
-  const changedKinds = classified.map((file) => file.kind)
+  const reportKinds = reconcileStored
+    ? [...combined.keys()]
+    : classified.map((file) => file.kind)
   const purchaseHistoryBridgeKeys = await getPurchaseHistoryBridgeKeys({
     userId: input.workspaceUserId,
     stored,
     incoming: classified,
     combinedFiles: [...combined.values()],
-    chinaInventoryWasUpdated: changedKinds.includes('chinaInventory'),
+    chinaInventoryWasUpdated: !reconcileStored && reportKinds.includes('chinaInventory'),
+  })
+  const latestSuccessfulRefreshAt = await getLatestDataRefreshCompletedAt(
+    input.workspaceUserId,
+    'domestic_inventory',
+  )
+  const domesticInventoryReflectedThrough = resolveDomesticInventoryReflectedThrough({
+    requestedDate: fields.domesticInventoryReflectedThrough,
+    latestSuccessfulRefreshAt,
   })
   let snapshot
   try {
     snapshot = await parseEcountPurchasingSnapshot({
       files: [...combined.values()],
       asOfDate: fields.asOfDate,
-      domesticInventoryReflectedThrough: fields.domesticInventoryReflectedThrough,
+      domesticInventoryReflectedThrough,
       purchasePlanConfirmedSince: fields.purchasePlanConfirmedSince,
       allowMissingReports: true,
       purchaseHistoryBridgeKeys,
@@ -162,7 +189,7 @@ async function processPurchasingRawDataRequest(input: {
       mode,
       summary,
       storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-      changedKinds,
+      changedKinds: reportKinds,
       currentState: await getEcountPurchasingSyncState(input.workspaceUserId),
     })
   }
@@ -171,14 +198,16 @@ async function processPurchasingRawDataRequest(input: {
     userId: input.workspaceUserId,
     requestedByUserId: input.requestedByUserId,
     snapshot,
-    reportKinds: changedKinds,
+    reportKinds,
   })
-  await saveStoredEcountRawFiles(input.workspaceUserId, accumulated)
-  await Promise.all(classified.map((file) => recordDataRefresh({
-    userId: input.workspaceUserId,
-    source: `purchasing_raw:${file.kind}`,
-    metadata: { fileName: file.fileName },
-  })))
+  if (!reconcileStored) {
+    await saveStoredEcountRawFiles(input.workspaceUserId, accumulated)
+    await Promise.all(classified.map((file) => recordDataRefresh({
+      userId: input.workspaceUserId,
+      source: `purchasing_raw:${file.kind}`,
+      metadata: { fileName: file.fileName },
+    })))
+  }
   revalidatePath('/purchasing/raw-data')
   revalidatePath('/purchasing/purchases')
   revalidatePath('/purchasing/orders')
@@ -189,7 +218,7 @@ async function processPurchasingRawDataRequest(input: {
     summary,
     result,
     storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-    changedKinds,
+    changedKinds: reportKinds,
     currentState: await getEcountPurchasingSyncState(input.workspaceUserId),
   })
 }
@@ -199,6 +228,7 @@ async function readPurchasingRawDataRequest(request: NextRequest): Promise<{
   fields: PurchasingRawDataBundleFields
   uploads: EcountPurchasingUpload[]
   transport: 'multipart' | 'gzip-bundle'
+  reconcileStored: boolean
 }> {
   const contentType = request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
   if (contentType === PURCHASING_RAW_BUNDLE_CONTENT_TYPE) {
@@ -225,6 +255,7 @@ async function readPurchasingRawDataRequest(request: NextRequest): Promise<{
         fileBuffer: file.bytes.slice().buffer as ArrayBuffer,
       })),
       transport: 'gzip-bundle',
+      reconcileStored: false,
     }
   }
 
@@ -243,6 +274,7 @@ async function readPurchasingRawDataRequest(request: NextRequest): Promise<{
       fileBuffer: await file.arrayBuffer(),
     }))),
     transport: 'multipart',
+    reconcileStored: form.get('reconcileStored') === 'true',
   }
 }
 

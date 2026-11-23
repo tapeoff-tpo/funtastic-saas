@@ -113,6 +113,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   ))
   const domesticInventoryFile = files.domesticInventory
   const discontinuedProductFile = files.discontinuedProducts
+  const hasStoredPurchasingFiles = PURCHASING_FILE_KEYS.some((key) => Boolean(storedFiles[key]))
   const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
   const isVerified = Boolean(preview || inventoryPreview || discontinuedPreview)
 
@@ -303,13 +304,32 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         let domesticBody: DomesticInventoryResponse | null = null
         let discontinuedBody: DiscontinuedUploadResponse | null = null
 
+        const uploadDomesticInventory = async () => {
+          if (!domesticInventoryFile) return
+          const inventoryForm = new FormData()
+          inventoryForm.set('mode', mode)
+          inventoryForm.set('file', domesticInventoryFile)
+          const response = await fetch('/api/inventory/bulk-upload', { method: 'POST', body: inventoryForm })
+          domesticBody = await readJsonResponse<DomesticInventoryResponse>(response, '국내재고 파일을 처리하지 못했습니다.')
+          if (!response.ok || domesticBody.failed > 0 || domesticBody.success === 0) {
+            const detail = domesticBody.errors?.slice(0, 3).map((item) => `${item.sku}: ${item.error}`).join(' / ')
+            throw new Error(domesticBody.error ?? detail ?? '국내재고 파일에 반영할 재고 행이 없습니다.')
+          }
+          setInventoryPreview(domesticBody)
+        }
+
+        // Purchase-history reconciliation uses the domestic-inventory cutoff.
+        // Apply the new domestic snapshot first so a combined upload never
+        // preserves already-reflected China arrivals against a stale cutoff.
+        if (mode === 'apply') await uploadDomesticInventory()
+
         if (selectedPurchasingFiles.length > 0) {
           const response = await postPurchasingRawData({
             files: selectedPurchasingFiles,
             fields: {
               mode,
               asOfDate: today,
-              domesticInventoryReflectedThrough: inventoryUpdatedDate,
+              domesticInventoryReflectedThrough: domesticInventoryFile ? today : inventoryUpdatedDate,
               purchasePlanConfirmedSince: '2026-07-01',
             },
           })
@@ -329,18 +349,29 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           setPreviewKinds(purchasingBody.changedKinds ?? [])
         }
 
-        if (domesticInventoryFile) {
-          const inventoryForm = new FormData()
-          inventoryForm.set('mode', mode)
-          inventoryForm.set('file', domesticInventoryFile)
-          const response = await fetch('/api/inventory/bulk-upload', { method: 'POST', body: inventoryForm })
-          domesticBody = await readJsonResponse<DomesticInventoryResponse>(response, '국내재고 파일을 처리하지 못했습니다.')
-          if (!response.ok || domesticBody.failed > 0) {
-            const detail = domesticBody.errors?.slice(0, 3).map((item) => `${item.sku}: ${item.error}`).join(' / ')
-            throw new Error(domesticBody.error ?? detail ?? '국내재고 파일을 처리하지 못했습니다.')
+        if (
+          mode === 'apply'
+          && domesticInventoryFile
+          && (hasStoredPurchasingFiles || selectedPurchasingFiles.length > 0)
+        ) {
+          const response = await postPurchasingRawData({
+            files: [],
+            reconcileStored: true,
+            fields: {
+              mode,
+              asOfDate: today,
+              domesticInventoryReflectedThrough: today,
+              purchasePlanConfirmedSince: '2026-07-01',
+            },
+          })
+          purchasingBody = await readJsonResponse<PurchasingUploadResponse>(response, '저장된 발주 로우데이터를 재동기화하지 못했습니다.')
+          if (purchasingBody.storedFiles) setStoredFiles(purchasingBody.storedFiles)
+          if (!response.ok || !purchasingBody.summary) {
+            throw new Error(purchasingBody.error ?? '국내재고는 반영됐지만 저장된 발주 로우데이터를 재동기화하지 못했습니다.')
           }
-          setInventoryPreview(domesticBody)
         }
+
+        if (mode === 'preview') await uploadDomesticInventory()
 
         if (discontinuedProductFile) {
           const discontinuedForm = new FormData()
@@ -362,7 +393,9 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           setMessage(discontinuedProductFile && selectedPurchasingFiles.length === 0 && !domesticInventoryFile
             ? '단종상품 상태가 반영되었습니다. 발주검토에서 추천계산을 다시 실행해주세요.'
             : domesticInventoryFile && selectedPurchasingFiles.length === 0 && !discontinuedProductFile
-            ? '국내재고가 재고관리에 반영되었습니다.'
+            ? hasStoredPurchasingFiles
+              ? '국내재고와 저장된 발주 로우데이터를 함께 재동기화했습니다. 발주검토에서 추천계산을 다시 실행해주세요.'
+              : '국내재고가 재고관리에 반영되었습니다.'
             : domesticInventoryFile || discontinuedProductFile
               ? '선택한 발주 로우데이터가 반영되었습니다. 발주검토에서 추천계산을 다시 실행해주세요.'
               : '발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
@@ -517,6 +550,7 @@ function StateCard({ label, value }: { label: string; value: string }) {
 async function postPurchasingRawData(input: {
   files: File[]
   fields: PurchasingRawDataBundleFields
+  reconcileStored?: boolean
 }) {
   const totalFileBytes = input.files.reduce((sum, file) => sum + file.size, 0)
   if (totalFileBytes <= MAX_MULTIPART_FILE_BYTES) {
@@ -525,6 +559,7 @@ async function postPurchasingRawData(input: {
     form.set('asOfDate', input.fields.asOfDate)
     form.set('domesticInventoryReflectedThrough', input.fields.domesticInventoryReflectedThrough)
     form.set('purchasePlanConfirmedSince', input.fields.purchasePlanConfirmedSince)
+    if (input.reconcileStored) form.set('reconcileStored', 'true')
     for (const file of input.files) form.append('files', file)
     return fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
   }

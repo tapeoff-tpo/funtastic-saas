@@ -12,11 +12,14 @@ const freshness = {
   outboundReflectionAt: null,
 }
 
-function renderUploader(initialStoredFiles: Record<string, { fileName: string; updatedAt: string }> = {}) {
+function renderUploader(
+  initialStoredFiles: Record<string, { fileName: string; updatedAt: string }> = {},
+  inventoryUpdatedDate = '2026-09-11',
+) {
   return render(
     <PurchasingRawDataUpload
       today="2026-09-11"
-      inventoryUpdatedDate="2026-09-11"
+      inventoryUpdatedDate={inventoryUpdatedDate}
       initialStoredFiles={initialStoredFiles}
       dataFreshness={freshness}
     />,
@@ -179,6 +182,148 @@ describe('PurchasingRawDataUpload drag and drop', () => {
     expect(getCard('국내재고현황')).toHaveTextContent(file.name)
     expect(getCard('발주요청현황')).not.toHaveTextContent(file.name)
     expect(screen.getByText(new RegExp(`파일명 기준 자동 분류: .*${file.name}`))).toBeInTheDocument()
+  })
+
+  it('applies domestic inventory before purchasing data and uses the new cutoff', async () => {
+    const emptySection = { rows: 0, quantity: 0, samples: [] }
+    const purchasingResponse = {
+      summary: {
+        asOfDate: '2026-09-11',
+        domesticInventoryReflectedThrough: '2026-09-11',
+        purchasePlanConfirmedSince: '2026-07-01',
+        files: { purchaseHistory: 'purchase-history.xlsx' },
+        activeRequests: emptySection,
+        purchaseCompleted: { ...emptySection, confirmedPlanRows: 0 },
+        chinaArrived: emptySection,
+        chinaInventory: emptySection,
+        outboundCompleted: emptySection,
+        outboundPending: emptySection,
+        warnings: [],
+      },
+      changedKinds: ['purchaseHistory'],
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      return url.includes('/api/inventory/bulk-upload')
+        ? new Response(JSON.stringify({ total: 1, success: 1, failed: 0 }), { status: 200 })
+        : new Response(JSON.stringify(purchasingResponse), { status: 200 })
+    })
+    renderUploader({}, '2026-09-04')
+
+    const purchaseFile = new File(['workbook'], 'purchase-history.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const inventoryFile = new File(['workbook'], '재고코드관리.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    fireEvent.change(getCard('구매현황').querySelector('input[type="file"]')!, {
+      target: { files: [purchaseFile] },
+    })
+    fireEvent.change(getCard('국내재고현황').querySelector('input[type="file"]')!, {
+      target: { files: [inventoryFile] },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /미리보기·검증/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const applyButton = screen.getByRole('button', { name: /최종 반영/ })
+    await waitFor(() => expect(applyButton).toBeEnabled())
+    fireEvent.click(applyButton)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
+
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/inventory/bulk-upload')
+    expect(String(fetchMock.mock.calls[3][0])).toContain('/api/purchasing/raw-data')
+    const purchasingForm = fetchMock.mock.calls[3][1]?.body as FormData
+    expect(purchasingForm.get('mode')).toBe('apply')
+    expect(purchasingForm.get('domesticInventoryReflectedThrough')).toBe('2026-09-11')
+    const reconcileForm = fetchMock.mock.calls[4][1]?.body as FormData
+    expect(reconcileForm.get('reconcileStored')).toBe('true')
+    expect(reconcileForm.getAll('files')).toHaveLength(0)
+  })
+
+  it('reconciles stored purchasing data after a domestic-inventory-only apply', async () => {
+    const emptySection = { rows: 0, quantity: 0, samples: [] }
+    const purchasingResponse = {
+      summary: {
+        asOfDate: '2026-09-11',
+        domesticInventoryReflectedThrough: '2026-09-11',
+        purchasePlanConfirmedSince: '2026-07-01',
+        files: { purchaseHistory: 'stored-purchase-history.xlsx' },
+        activeRequests: emptySection,
+        purchaseCompleted: { ...emptySection, confirmedPlanRows: 0 },
+        chinaArrived: emptySection,
+        chinaInventory: emptySection,
+        outboundCompleted: emptySection,
+        outboundPending: emptySection,
+        warnings: [],
+      },
+      storedFiles: {
+        purchaseHistory: {
+          fileName: 'stored-purchase-history.xlsx',
+          updatedAt: '2026-09-10T01:41:45.000Z',
+        },
+      },
+      changedKinds: ['purchaseHistory'],
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      return url.includes('/api/inventory/bulk-upload')
+        ? new Response(JSON.stringify({ total: 1, success: 1, failed: 0 }), { status: 200 })
+        : new Response(JSON.stringify(purchasingResponse), { status: 200 })
+    })
+    renderUploader({
+      purchaseHistory: {
+        fileName: 'stored-purchase-history.xlsx',
+        updatedAt: '2026-09-10T01:41:45.000Z',
+      },
+    }, '2026-09-04')
+
+    const inventoryFile = new File(['workbook'], '재고코드관리.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    fireEvent.change(getCard('국내재고현황').querySelector('input[type="file"]')!, {
+      target: { files: [inventoryFile] },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /미리보기·검증/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const applyButton = screen.getByRole('button', { name: /최종 반영/ })
+    await waitFor(() => expect(applyButton).toBeEnabled())
+    fireEvent.click(applyButton)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/inventory/bulk-upload')
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/purchasing/raw-data')
+    const reconcileForm = fetchMock.mock.calls[2][1]?.body as FormData
+    expect(reconcileForm.get('mode')).toBe('apply')
+    expect(reconcileForm.get('reconcileStored')).toBe('true')
+    expect(reconcileForm.getAll('files')).toHaveLength(0)
+    expect(await screen.findByText(/저장된 발주 로우데이터를 함께 재동기화/)).toBeInTheDocument()
+  })
+
+  it('does not accept an empty domestic inventory snapshot', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ total: 0, success: 0, failed: 0 }),
+      { status: 200 },
+    ))
+    renderUploader({
+      purchaseHistory: {
+        fileName: 'stored-purchase-history.xlsx',
+        updatedAt: '2026-09-10T01:41:45.000Z',
+      },
+    })
+    const inventoryFile = new File(['headers-only'], '재고코드관리.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    fireEvent.change(getCard('국내재고현황').querySelector('input[type="file"]')!, {
+      target: { files: [inventoryFile] },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /미리보기·검증/ }))
+
+    expect(await screen.findByText('국내재고 파일에 반영할 재고 행이 없습니다.')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /최종 반영/ })).toBeDisabled()
   })
 })
 

@@ -335,13 +335,20 @@ export async function exportChinaImportDocument(
   if (prepared.boxes.some((box) => !Number.isFinite(options.boxes[box.id]?.grossWeightKg))) sheet.getCell(`V${totalRow}`).value = null
   sheet.getCell('Y18').value = '상품명 (확인용)'
   sheet.getColumn('Y').width = 36
-  sheet.getColumn('Y').hidden = true
+  sheet.getColumn('Y').hidden = false
   sheet.pageSetup.printArea = `A1:X${totalRow + 1}`
+  const productImages = new Map(supplements.productImages)
+  for (const item of prepared.items) {
+    const product = importDocumentProductCode(item.sku)
+    const candidate = supplements.productImages?.get(item.sku.trim())
+    const existing = productImages.get(product)
+    if (candidate && (!existing || ('error' in existing && 'buffer' in candidate))) productImages.set(product, candidate)
+  }
   addImportDocumentHsSheets(workbook, invoiceRows.map((invoice) => {
     const item = itemById.get(invoice.itemId)!
-    return { sku: item.sku, productName: item.productName, optionName: item.optionName,
-      englishName: options.items[item.id].englishName, quantity: invoice.quantity, hsCode: item.hsCode }
-  }), supplements)
+    return { sku: importDocumentProductCode(item.sku), productName: item.productName,
+      englishName: options.items[item.id].englishName, quantity: invoice.quantity, hsCode: hsByProduct.get(importDocumentProductCode(item.sku)) ?? '' }
+  }), { ...supplements, productImages })
   clearBlankExcelCells(workbook)
   // ExcelJS resets the Normal font to Calibri on write. Excel measures column
   // widths using that font, so restore the reference's Dotum font as well.

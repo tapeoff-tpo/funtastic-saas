@@ -456,12 +456,12 @@ it('places safe editable inputs in the exported template and applies changed HS 
   expect(workbook.worksheets[0].getCell('D20').value).toBe('0392.10')
 })
 
-it('shows Korean product names to the right of the packing preview but hides them in the downloaded document', async () => {
+it('shows Korean product names to the right of the packing preview but keeps them visible in Excel outside the print area', async () => {
   const buffer = await exportChinaImportDocument(detail, metadata, options)
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
-  expect(sheet.getColumn('Y').hidden).toBe(true)
+  expect(sheet.getColumn('Y').hidden).toBe(false)
   expect(sheet.getCell('Y18').value).toBe('상품명 (확인용)')
   expect(sheet.getCell('Y20').value).toBe('상품A')
   expect(sheet.pageSetup.printArea).toBe('A1:X113')
@@ -469,4 +469,17 @@ it('shows Korean product names to the right of the packing preview but hides the
   expect(html).toContain('상품명 (확인용)')
   expect(html).toContain('상품A')
   expect(html).toContain('상품B')
+})
+
+it('retains an available option image after grouping options into one product in the new-item sheet', async () => {
+  const sharp = (await import('sharp')).default
+  const png = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#ffffff' } }).png().toBuffer()
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100457-0002' }] }
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass', unitPriceCny: 10 } } }
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(shipment, new Map(), overrides, { productImages: new Map([['100457-0001', { error: 'unavailable' }], ['100457-0002', { buffer: png, width: 10, height: 10 }]]) }) as unknown as ExcelJS.Buffer)
+  const sheet = workbook.getWorksheet('신상품_HS미등록')!
+  expect(sheet.getCell('B2').value).toBe('100457')
+  expect(sheet.getImages()).toHaveLength(1)
+  expect(sheet.getCell('A2').value).toBeNull()
 })

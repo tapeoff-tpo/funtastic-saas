@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { SQL } from 'drizzle-orm'
 const mocks = vi.hoisted(() => ({ select: vi.fn(), fetch: vi.fn(), findProductMasters: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: { select: mocks.select } }))
 vi.mock('@/lib/coupang-registration/product-master', () => ({ findRegistrationProductMasters: mocks.findProductMasters }))
 import { getCatalogProduct, searchCatalog } from '@/lib/coupang-registration/catalog'
+import { createRegistrationRow } from '@/lib/coupang-registration/model'
 
 const source = { code: '1471', name: '마미백 플러스', price: 14500, imageUrl: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ optionName: '베이지' }] }
 
@@ -43,6 +46,36 @@ describe('fast registration catalogue search', () => {
     const product = await getCatalogProduct('workspace-owner', source.code)
     expect(product.productMaster).toMatchObject({ itemId: 'product-management-item', match: 'sku', noticeSize: '25*12*41cm' })
     expect(mocks.findProductMasters).toHaveBeenCalledWith('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+  })
+  it('links option costs retained in the item master when legacy option product rows are hidden', async () => {
+    const name = '바뜨 옷장 레일행거'
+    const options = ['30B', '40B', '50B', '60B', '30B 블랙']
+    const costs = [6878, 7679, 9023, 11466, 6640]
+    const records = [
+      { sku: '111180', name, optionName: '', status: 'active', metadata: null },
+      ...options.map((optionName, index) => ({ sku: `111180-000${index + 1}`, name, optionName, status: 'deleted', metadata: { esa009m: { 품목명: name, 규격정보: optionName, 'works 신규 원가': String(costs[index]) } } })),
+      { sku: '111180-9999', name, optionName: '30B', status: 'deleted', metadata: null },
+    ]
+    let condition: SQL
+    const builder = {
+      from: vi.fn().mockReturnThis(), leftJoin: vi.fn().mockReturnThis(),
+      where: vi.fn((value: SQL) => { condition = value; return builder }), groupBy: vi.fn().mockReturnThis(),
+      limit: vi.fn(async () => {
+        const statement = new PgDialect().sqlToQuery(condition)
+        expect(statement.params).toContain('workspace-owner')
+        // Exercise the query's status policy: only an actual ESA item can remain
+        // a cost source after its old product-catalogue row was hidden.
+        const keepsItems = /"products"\."status" <> \$\d+ or "products"\."metadata"->'esa009m' IS NOT NULL/.test(statement.sql)
+        return records.filter((row) => row.status !== 'deleted' || keepsItems && row.metadata?.esa009m)
+      }),
+    }
+    mocks.select.mockReturnValue(builder)
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ code: '938', name, price: 12480, options: options.map((optionName) => ({ optionName })) }) })
+    const product = await getCatalogProduct('workspace-owner', '938')
+    for (const [index, optionName] of options.entries()) {
+      expect(createRegistrationRow(product, optionName)).toMatchObject({ internalSku: `111180-000${index + 1}`, costPrice: costs[index] })
+    }
+    expect(product.costCandidates.some((item) => item.sku === '111180-9999')).toBe(false)
   })
   it('does not query the source for an empty search', async () => {
     expect(await searchCatalog('workspace-owner', ' ')).toEqual([])

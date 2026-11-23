@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   // The quality-PDF renderer loads a platform-specific native canvas binary at runtime.
   serverExternalPackages: ['@napi-rs/canvas'],
+  outputFileTracingIncludes: {
+    '/api/operations/coupang-registration/extension': ['./tools/browser-extensions/funtastic-coupang-registration/**/*'],
+  },
   turbopack: {
     root: process.cwd(),
   },

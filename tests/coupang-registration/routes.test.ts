@@ -23,7 +23,9 @@ describe('shared registration drafts', () => {
   })
   it('returns a conflict rather than overwriting a newer draft revision', async () => {
     mocks.workspace.mockResolvedValue('workspace-owner'); mocks.save.mockResolvedValue(null)
+    mocks.load.mockResolvedValue({ id: 'dcaf2711-a627-44ab-93cd-0645b706b6c4', revision: 1, payload: blankDraft() })
     const response = await POST(new NextRequest('http://test/api/operations/coupang-registration/drafts', { method: 'POST', body: JSON.stringify({ id: 'dcaf2711-a627-44ab-93cd-0645b706b6c4', revision: 1, draft: blankDraft() }) }))
     expect(response.status).toBe(409)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
   })
 })

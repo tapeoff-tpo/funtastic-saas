@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CoupangRegistrationWorkbench } from '@/app/(auth)/operations/coupang-registration/workbench'
-import { blankDraft, createRegistrationRow } from '@/lib/coupang-registration/model'
+import { blankDraft, confirmPricing, createRegistrationRow, type RegistrationDraft, type RegistrationRow } from '@/lib/coupang-registration/model'
+import { pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/lib/coupang-registration/supplier-bridge', () => ({ checkSupplierRegistration: vi.fn(async () => ({ started: true })), pingSupplierExtension: vi.fn(async () => ({ connected: true })), startSupplierRegistration: vi.fn(async () => ({ started: true })), subscribeSupplierRegistration: vi.fn(() => () => undefined) }))
 const source = { code: '1471', name: '마미백 플러스', price: 15000, status: 'SELLING', thumbnails: ['https://cdn.tapeoff.kr/front.jpg'], detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ name: '베이지', addPrice: 0 }], notice: [], costCandidates: [{ sku: '112361-0001', name: '마미백 플러스', optionName: '베이지', costPrice: 10000 }] }
 const second = {
   code: '1472', name: '루멘 철제 사이드 테이블', price: 20000, status: 'SELLING', thumbnails: [], detailImages: [],
@@ -12,6 +14,9 @@ const second = {
 
 describe('registration pricing workbench', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(pingSupplierExtension).mockResolvedValue({ connected: true })
+    vi.mocked(startSupplierRegistration).mockResolvedValue({ started: true })
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : init?.method === 'POST' && url.endsWith('/catalog') ? { products: [source] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
   })
   it('builds one registration row from searched components and saves their quantities', async () => {
@@ -76,6 +81,8 @@ describe('registration pricing workbench', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 1개 추가' }))
     await screen.findByLabelText('마미백 플러스 베이지 원가')
     fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
+    expect(screen.queryByRole('region', { name: '상품등록정보 입력' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('쿠팡 카테고리 양식')).not.toBeInTheDocument()
     expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
     expect(screen.getByLabelText('마미백 플러스 베이지 도매가')).toHaveTextContent('15,000원')
     expect(screen.queryByLabelText('마미백 플러스 베이지 공급가 기준')).not.toBeInTheDocument()
@@ -98,6 +105,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByText('46.4%')).toBeInTheDocument()
     fireEvent.change(supply, { target: { value: '16000' } })
     expect(sale).toHaveValue(28000)
+    fireEvent.click(screen.getByRole('button', { name: /마미백 플러스 베이지 112361-0001/ }))
     fireEvent.click(screen.getByRole('button', { name: '마미백 플러스 베이지 판매가 기준 쿠팡 40% 맞추기' }))
     expect(supply).toHaveValue(16800)
     expect(sale).toHaveValue(28000)
@@ -195,4 +203,166 @@ describe('registration pricing workbench', () => {
       })
     })
   })
+
+  it('keeps new search additions in pricing and persists price confirmation before registration inputs', async () => {
+    const row = createRegistrationRow(source, '베이지')
+    const draft = informationTemplate({ ...blankDraft(), rows: [row] })
+    const saved = mockSavedDraft(draft)
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    await screen.findByLabelText('마미백 플러스 베이지 쿠팡공급가')
+    expect(screen.queryByLabelText('브랜드 *')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '엑셀로 출력' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' }))
+    const editorButton = await screen.findByRole('button', { name: '마미백 플러스 베이지 등록정보 입력' })
+    expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByLabelText('마미백 플러스 베이지 쿠팡공급가')).not.toBeInTheDocument()
+    fireEvent.click(editorButton)
+    fireEvent.change(screen.getByLabelText('브랜드 *'), { target: { value: '생활살림' } })
+    expect(screen.queryByLabelText('고시명 *')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => {
+      const saves = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      const body = JSON.parse(String(saves.at(-1)![1]!.body))
+      expect(body.draft.rows[0]).toMatchObject({ stage: 'information', priceConfirmedAt: expect.any(String), fields: { 브랜드: '생활살림' } })
+    })
+  })
+
+  it('does not allow price confirmation for a row with missing supply price', async () => {
+    const row = { ...createRegistrationRow(source, '베이지'), priceMode: 'manual' as const, manualSupplyPrice: null }
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [row] })
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    expect(await screen.findByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' })).toBeDisabled()
+  })
+
+  it('shows only receipt-confirmed successful products in the registered list', async () => {
+    const complete: RegistrationRow = { ...confirmPricing(createRegistrationRow(source, '베이지')), stage: 'registered', registeredAt: '2026-11-23T03:00:00Z', submission: { jobId: 'job-1', status: 'succeeded', completedAt: '2026-11-23T03:00:00Z', receiptId: 'sku-123', receiptUrl: 'https://supplier.coupang.com/qvt/registration' } }
+    const failed: RegistrationRow = { ...confirmPricing(createRegistrationRow(second, '블랙')), stage: 'registered', submission: { jobId: 'job-2', status: 'failed', message: '검증 실패' } }
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [complete, failed] })
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('tab', { name: /3단계 등록완료/ }))
+    expect(screen.getByRole('tabpanel', { name: '등록완료' })).toHaveTextContent('마미백 플러스 베이지')
+    expect(screen.getByRole('tabpanel', { name: '등록완료' })).not.toHaveTextContent('루멘 철제 사이드 테이블 블랙')
+    expect(screen.getByRole('link', { name: '허브 결과' })).toHaveAttribute('href', complete.submission!.receiptUrl)
+    expect(screen.queryByRole('button', { name: /완료 처리|등록완료로 이동/ })).not.toBeInTheDocument()
+  })
+
+  it('does not queue a Supplier Hub registration when the browser extension is unavailable', async () => {
+    vi.mocked(pingSupplierExtension).mockResolvedValue({ connected: false })
+    const row = { ...confirmPricing(createRegistrationRow(source, '베이지')), fields: { 브랜드: '생활살림' } }
+    const saved = mockSavedDraft(informationTemplate({ ...blankDraft(), rows: [row] }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    expect(await screen.findByRole('button', { name: '상품등록' })).toBeDisabled()
+    expect(screen.getByText('쿠팡 등록 확장 연결 필요')).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/submit'))).toBe(false)
+  })
+
+  it('starts the extension and moves a product only after the server verifies its receipt', async () => {
+    const row = { ...confirmPricing(createRegistrationRow(source, '베이지')), fields: { 브랜드: '생활살림' } }
+    const initial = informationTemplate({ ...blankDraft(), rows: [row] })
+    const saved = mockSavedDraft(initial)
+    const fallback = vi.mocked(fetch)
+    const transfer = { jobId: 'job-1', token: 'token-1', files: [{ name: '견적서.xlsx', data: '', kind: 'workbook' as const }], rows: [{ id: row.id, name: row.name }] }
+    const queued: RegistrationDraft = { ...initial, rows: initial.rows.map((item) => ({ ...item, submission: { jobId: transfer.jobId, status: 'queued' } })) }
+    const completed: RegistrationDraft = { ...initial, rows: initial.rows.map((item) => ({ ...item, stage: 'registered', registeredAt: '2026-11-23T03:00:00Z', submission: { jobId: transfer.jobId, status: 'succeeded', completedAt: '2026-11-23T03:00:00Z', receiptId: 'SKU-123' } })) }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/submit')) return { ok: true, json: async () => ({ ...saved, revision: 2, payload: queued, transfer }) }
+      if (url.endsWith('/submissions') && init?.method === 'POST') return { ok: true, json: async () => ({ ...saved, revision: 3, payload: completed, submissions: [] }) }
+      return fallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: '상품등록' }))
+    await waitFor(() => expect(startSupplierRegistration).toHaveBeenCalledWith(transfer))
+    expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveTextContent('0개')
+    const receive = vi.mocked(subscribeSupplierRegistration).mock.calls.at(-1)![0]
+    await act(async () => { receive({ jobId: transfer.jobId, token: transfer.token, status: 'succeeded', message: '상품 검수 완료', completedAt: '2026-11-23T03:00:00Z', receiptId: 'SKU-123' }) })
+    await waitFor(() => expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveTextContent('1개'))
+    fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
+    expect(screen.getByRole('tabpanel', { name: '등록완료' })).toHaveTextContent('SKU-123')
+  })
+
+  it('keeps the reservation when START times out instead of allowing another upload', async () => {
+    const row = { ...confirmPricing(createRegistrationRow(source, '베이지')), fields: { 브랜드: '생활살림' } }
+    const initial = informationTemplate({ ...blankDraft(), rows: [row] })
+    const saved = mockSavedDraft(initial)
+    const fallback = vi.mocked(fetch)
+    const transfer = { jobId: 'job-timeout', token: 'token-timeout', files: [], rows: [{ id: row.id, name: row.name }] }
+    const queued = { ...initial, rows: initial.rows.map((item) => ({ ...item, submission: { jobId: transfer.jobId, status: 'queued' } })) }
+    vi.mocked(startSupplierRegistration).mockRejectedValueOnce(new Error('timeout'))
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/submit')) return { ok: true, json: async () => ({ ...saved, revision: 2, payload: queued, transfer }) }
+      return fallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: '상품등록' }))
+    await waitFor(() => expect(startSupplierRegistration).toHaveBeenCalledWith(transfer))
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    expect(screen.getByText('등록 대기')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '상품등록' }))
+    expect(startSupplierRegistration).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).endsWith('/submissions') && init?.method === 'POST')).toBe(false)
+  })
+
+  it('preserves edits made while progress is in flight and saves with the latest revision', async () => {
+    const queued = { ...confirmPricing(createRegistrationRow(source, '베이지')), fields: { 브랜드: '생활살림' }, submission: { jobId: 'job-1', status: 'running' as const } }
+    const editable = { ...confirmPricing(createRegistrationRow(second, '블랙')), fields: { 브랜드: '생활살림' } }
+    const initial = informationTemplate({ ...blankDraft(), rows: [queued, editable] })
+    const saved = mockSavedDraft(initial)
+    const fallback = vi.mocked(fetch)
+    let finish!: (value: unknown) => void
+    const progress = new Promise((resolve) => { finish = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/submissions') && init?.method === 'POST') return { ok: true, json: () => progress }
+      return fallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: '루멘 철제 사이드 테이블 블랙 등록정보 입력' }))
+    const receive = vi.mocked(subscribeSupplierRegistration).mock.calls.at(-1)![0]
+    act(() => { receive({ jobId: 'job-1', token: 'token-1', status: 'running', message: '검수중' }) })
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/submissions'))).toBe(true))
+    fireEvent.change(screen.getByLabelText('브랜드 *'), { target: { value: '수정한 브랜드' } })
+    await act(async () => { finish({ ...saved, revision: 3, payload: initial, submissions: [] }) })
+    expect(screen.getByLabelText('브랜드 *')).toHaveValue('수정한 브랜드')
+    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await waitFor(() => {
+      const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String(call![1]!.body))
+      expect(body.revision).toBe(3)
+      expect(body.draft.rows[1].fields.브랜드).toBe('수정한 브랜드')
+    })
+  })
 })
+
+function informationTemplate(draft: RegistrationDraft): RegistrationDraft {
+  return { ...draft, rows: draft.rows.map((row) => ({ ...row, templateId: 'template-1', sheetName: 'QF_1_가방' })), templates: [{ id: 'template-1', name: '쿠팡 양식.xlsx', file: { name: '쿠팡 양식.xlsx', data: '' }, sheets: [{ name: 'QF_1_가방', columns: [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '브랜드', requirement: '필수', guide: '' }, { column: 3, label: '고시명', requirement: '필수', guide: '카테고리에 따라 자동설정', autoGenerated: true }] }] }] }
+}
+
+function mockSavedDraft(initial: RegistrationDraft) {
+  const saved = { id: 'draft-1', name: '단계 작업', revision: 1, updatedAt: '2026-11-23' }
+  let payload = initial
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({
+    ok: true,
+    json: async () => {
+      if (url.endsWith('/drafts') && init?.method === 'POST') { payload = JSON.parse(String(init.body)).draft; return { ...saved, payload } }
+      if (url.includes('?id=') || url.includes('/submissions?')) return { ...saved, payload, submissions: [], transfers: [] }
+      if (url.endsWith('/costs')) return { costs: [] }
+      return { drafts: [saved] }
+    },
+  })))
+  return saved
+}

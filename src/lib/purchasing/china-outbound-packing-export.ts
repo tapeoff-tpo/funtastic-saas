@@ -1,3 +1,4 @@
+import { resolveChinaLooseBoxes } from './china-pallet-number'
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
 import { addChinaOutboundReceivingSheets } from './china-outbound-receiving-sheets'
@@ -71,6 +72,7 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 }
 
 export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPackingExportDetail): Promise<Buffer> {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Funtastic SaaS'
   workbook.created = new Date()

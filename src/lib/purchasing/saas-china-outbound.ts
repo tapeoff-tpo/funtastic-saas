@@ -2544,17 +2544,24 @@ export async function saveChinaOutboundPalletDimensions(input: {
   await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
-    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
-    const current = await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    // These scoped reads are independent once the workspace mutation lock is held.
+    // Fetch only IDs for the loaded-box check instead of every allocation payload.
+    const [, current, loadedBoxes] = await Promise.all([
+      getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId),
+      getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId),
+      input.finalize ? tx.select({ id: chinaOutboundBoxes.id }).from(chinaOutboundBoxes)
+        .innerJoin(chinaOutboundBoxItems, and(
+          eq(chinaOutboundBoxItems.boxId, chinaOutboundBoxes.id),
+          eq(chinaOutboundBoxItems.userId, chinaOutboundBoxes.userId),
+          eq(chinaOutboundBoxItems.shipmentId, chinaOutboundBoxes.shipmentId),
+        ))
+        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.palletId, input.palletId)))
+        .limit(1) : Promise.resolve([]),
+    ])
     if (dimensions && dimensions.lengthCm == null && manualCbm === undefined && dimensionNumber(current.manualCbm) == null) throw new Error('파렛트 가로·세로·높이는 0보다 큰 숫자로 모두 입력해주세요.')
     if (input.finalize) {
       if (!(manualCbm != null && manualCbm > 0)) throw new Error('최종 CBM을 입력해주세요.')
-      const loadedBoxes = await tx.select().from(chinaOutboundBoxes)
-        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.palletId, input.palletId)))
-      const allocations = await tx.select().from(chinaOutboundBoxItems)
-        .where(and(eq(chinaOutboundBoxItems.userId, input.userId), eq(chinaOutboundBoxItems.shipmentId, input.shipmentId)))
-      const loaded = loadedBoxes.some((box) => allocations.some((allocation) => allocation.boxId === box.id))
-      if (!loaded) throw new Error('적재된 박스가 없어 확정할 수 없습니다.')
+      if (!loadedBoxes.length) throw new Error('적재된 박스가 없어 확정할 수 없습니다.')
     }
     const [pallet] = await tx.update(chinaOutboundPallets).set({
       ...(dimensions ? { lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm), widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm), heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm) } : {}),

@@ -127,8 +127,10 @@ describe('China outbound item box split action weights', () => {
     const dimensions = { lengthCm: null, widthCm: null, heightCm: null, manualCbm }
     expect(await saveChinaOutboundBoxDimensionsAction({ shipmentId, boxId: shipmentItemId, ...dimensions })).toEqual({ ok: true })
     expect(mocks.saveBoxDimensions).toHaveBeenCalledWith({ shipmentId, boxId: shipmentItemId, ...dimensions, userId: 'canonical-owner' })
+    mocks.revalidatePath.mockClear()
     expect(await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: shipmentItemId, ...dimensions })).toEqual({ ok: true })
     expect(mocks.savePalletDimensions).toHaveBeenCalledWith({ shipmentId, palletId: shipmentItemId, ...dimensions, userId: 'canonical-owner' })
+    expect(mocks.revalidatePath.mock.calls).toEqual([['/purchasing/china-shipments']])
     expect(await saveChinaOutboundBoxesMeasurementsAction({ shipmentId, boxIds: [shipmentItemId], manualCbm })).toEqual({ ok: true })
     expect(mocks.saveBoxesMeasurements).toHaveBeenCalledWith({ shipmentId, boxIds: [shipmentItemId], manualCbm, userId: 'canonical-owner' })
   })

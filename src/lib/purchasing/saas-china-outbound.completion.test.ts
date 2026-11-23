@@ -75,6 +75,12 @@ function makeTransaction() {
     execute: vi.fn().mockResolvedValue(undefined),
     select: vi.fn().mockImplementation(() => ({
       from: (table: unknown) => ({
+        innerJoin: (joined: unknown) => ({
+          where: (condition: SQL) => ({
+            limit: async (count: number) => matchingRows(rowsFor(table), condition)
+              .filter((row) => rowsFor(joined).some((allocation) => allocation.boxId === row.id && allocation.userId === row.userId && allocation.shipmentId === row.shipmentId)).slice(0, count),
+          }),
+        }),
         where: (condition: SQL) => {
           const result = Promise.resolve(matchingRows(rowsFor(table), condition).map((row) => ({ ...row })))
           return Object.assign(result, {

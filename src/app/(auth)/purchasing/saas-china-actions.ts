@@ -482,7 +482,8 @@ export async function saveChinaOutboundPalletDimensionsAction(input: unknown): P
     }).parse(input)
     const actor = await getActor()
     await saveChinaOutboundPalletDimensions({ ...value, userId: actor.userId })
-    revalidateSaasChinaPaths()
+    // Pallet measurements do not change inventory or purchasing status.
+    revalidatePath('/purchasing/china-shipments')
   })
 }
 

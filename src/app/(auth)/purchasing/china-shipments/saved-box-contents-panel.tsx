@@ -1,5 +1,10 @@
 'use client'
 
+import { useRef, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { mergeChinaOutboundBoxesAction } from '../saas-china-actions'
+import { largestChinaOutboundBox } from '@/lib/purchasing/china-outbound-packaging'
 import { Download, Printer } from 'lucide-react'
 import { ItemCodeCell } from './item-code-cell'
 import { BoxMeasurementCells } from './box-measurement-cells'
@@ -13,12 +18,26 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
   onFilterChange: (filter: 'all' | 'saved') => void
 }) {
   const guard = useChinaWorkGuard()
+  const router = useRouter()
+  const dialog = useRef<HTMLDialogElement>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [pending, start] = useTransition()
   const savedBoxes = summaries.filter((box) => box.quantity > 0)
   const visibleBoxes = [...(filter === 'all' ? summaries : savedBoxes)].sort((left, right) => boxNumberCollator.compare(left.box.boxNo, right.box.boxNo))
   const canEditBox = (summary: SavedBoxSummary) => editable && summary.box.editable && summary.box.status === 'open'
+  const selectedBoxes = summaries.filter((summary) => selected.includes(summary.box.id) && canEditBox(summary) && summary.quantity > 0)
+  const target = largestChinaOutboundBox(selectedBoxes.map((summary) => summary.box))
+  async function merge() {
+    if (selectedBoxes.length < 2) return false
+    if (guard.hasDraftKind('box') || guard.hasDraftKind('pallet')) { toast.error('박스·파렛트 변경사항을 먼저 저장해주세요.'); return false }
+    const result = await mergeChinaOutboundBoxesAction({ shipmentId, boxIds: selectedBoxes.map((summary) => summary.box.id) })
+    if (!result.ok) { toast.error(result.error); return false }
+    setSelected([]); dialog.current?.close(); router.refresh(); toast.success('선택한 박스를 합쳤습니다.'); return true
+  }
   return <section className="overflow-hidden rounded-lg border bg-card" aria-labelledby="saved-box-contents-title">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
-      <h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
+      <div className="flex items-center gap-3"><h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
+      {editable && <button type="button" disabled={selectedBoxes.length < 2 || isPending || pending || guard.busy} onClick={() => dialog.current?.showModal()} className="h-7 rounded border bg-background px-2 text-xs disabled:opacity-40">선택 박스 합치기 ({selectedBoxes.length})</button>}</div>
       <div role="group" aria-label="저장된 박스 필터" className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={filter === 'saved'} onClick={() => { if (filter !== 'saved') guard.requestNavigation(() => onFilterChange('saved')) }} className="h-8 rounded-md border px-3 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground">저장된 박스 (내용 있음) {savedBoxes.length.toLocaleString('ko-KR')}</button>
         <button type="button" aria-pressed={filter === 'all'} onClick={() => { if (filter !== 'all') guard.requestNavigation(() => onFilterChange('all')) }} className="h-8 rounded-md border px-3 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground">전체 박스 {summaries.length.toLocaleString('ko-KR')}</button>
@@ -33,7 +52,8 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
         const boxEditable = canEditBox(summary)
         const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`
         return <tr key={summary.box.id} aria-label={`박스 ${summary.box.boxNo}`} className="border-t align-middle hover:bg-muted/20">
-          <td className="px-3 py-1.5 whitespace-nowrap font-semibold tabular-nums"><span data-no-translate>{summary.box.boxNo}</span>{mixed && <p className="text-xs text-amber-800">혼합박스</p>}</td>
+          <td className="px-3 py-1.5 whitespace-nowrap font-semibold tabular-nums"><label className="flex items-center gap-2">{editable && <input type="checkbox" aria-label={`박스 ${summary.box.boxNo} 합치기 선택`} checked={selected.includes(summary.box.id)} disabled={!boxEditable || summary.quantity <= 0 || isPending || pending || guard.busy}
+            onChange={(event) => setSelected((current) => event.target.checked ? [...current, summary.box.id] : current.filter((id) => id !== summary.box.id))} />}<span data-no-translate>{summary.box.boxNo}</span></label>{mixed && <p className="text-xs text-amber-800">혼합박스</p>}</td>
           {(['code', 'name', 'option', 'quantity'] as const).map((column) => <td key={column} className="overflow-hidden px-2 py-1 text-xs leading-6">
             {summary.items.length ? summary.items.map(({ item, quantity }) => <div key={item.id} className="h-6 truncate" data-no-translate title={column === 'name' ? item.productName : column === 'option' ? item.optionName ?? '' : undefined}>
               {column === 'code' ? <ItemCodeCell code={item.sku} /> : column === 'name' ? item.productName : column === 'option' ? item.optionName || '—' : `${quantity.toLocaleString('ko-KR')}개`}
@@ -46,5 +66,13 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
         </tr>
       })}</tbody>
     </table></div>}
+    <dialog ref={dialog} aria-label="선택 박스 합치기 확인" onCancel={(event) => { if (pending || guard.busy) event.preventDefault() }} className="m-auto w-[min(32rem,95vw)] space-y-3 rounded-xl border bg-background p-4 text-sm text-foreground backdrop:bg-black/40">
+      <h3 className="font-semibold">선택 박스 합치기</h3>
+      <p>박스 {selectedBoxes.map((summary) => summary.box.boxNo).join(', ')} · 총 {selectedBoxes.reduce((sum, summary) => sum + summary.quantity, 0).toLocaleString('ko-KR')}개</p>
+      <ul className="max-h-48 overflow-y-auto">{selectedBoxes.map((summary) => <li key={summary.box.id}>박스 {summary.box.boxNo}: {summary.items.map(({ item, quantity }) => `${item.productName} ${item.optionName ?? ''} (${quantity}개)`).join(' / ')}</li>)}</ul>
+      <p>선택한 박스 중 가장 큰 박스 {target?.boxNo}의 규격을 사용합니다.</p>
+      <div className="flex justify-end gap-2"><button type="button" disabled={pending || guard.busy} onClick={() => dialog.current?.close()} className="rounded border px-3 py-1.5">취소</button>
+        <button type="button" disabled={selectedBoxes.length < 2 || pending || isPending || guard.busy} onClick={() => start(async () => { await guard.runTask(merge) })} className="rounded bg-primary px-3 py-1.5 text-primary-foreground">합치기 확인</button></div>
+    </dialog>
   </section>
 }

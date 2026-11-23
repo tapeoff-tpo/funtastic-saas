@@ -18,7 +18,7 @@ import { useChinaWorkNavigation } from './china-work-navigation'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { TitleHelp } from './title-help'
-import { ChineseNameEditor, MergeBoxesButton } from './outbound-package-editors'
+import { ChineseNameEditor } from './outbound-package-editors'
 import { matchesChinaStockPeriod } from '@/lib/purchasing/china-outbound-packaging'
 import { ManualSamplePanel } from './manual-sample-panel'
 import { PalletContentsPanel } from './pallet-contents-panel'
@@ -805,10 +805,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             </dl>
           </StageHelp>
         </div>
-        {editable && <MergeBoxesButton shipmentId={shipment.id} boxes={boxesWithItems} productsByBox={new Map(boxesWithItems.map(box => [box.id, [...new Set((boxItemsByBox.get(box.id) ?? []).flatMap(row => {
-          const item = itemById.get(row.shipmentItemId)
-          return item ? [[item.productName, item.optionName].filter(Boolean).join(' · ')] : []
-        }))]]))} isPending={isPending} />}
         <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 파렛트 배정</button></div>
       </section> : null}

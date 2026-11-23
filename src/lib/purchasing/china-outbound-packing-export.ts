@@ -1,3 +1,4 @@
+import { chinaOutboundFinalTotals } from './china-outbound-final-totals'
 import { resolveChinaLooseBoxes } from './china-pallet-number'
 import { clearBlankExcelCells } from '../excel/empty-cells'
 import ExcelJS from 'exceljs'
@@ -124,6 +125,10 @@ export async function exportChinaOutboundPackingWorkbook(detail: ChinaOutboundPa
     }
   }
 
+  const loadedBoxIds = new Set(detail.boxItems.filter((allocation) => allocation.quantity > 0 && detail.items.some((item) => item.id === allocation.shipmentItemId)).map((allocation) => allocation.boxId))
+  const totals = chinaOutboundFinalTotals(detail.pallets, detail.boxes.filter((box) => loadedBoxIds.has(box.id)))
+  const totalsSheet = createListSheet(workbook, '최종 적재 요약', ['파렛트 수', '낱박스 수', '전체 박스 수(파렛트 내 포함)', '최종 CBM', '최종 무게(kg)'], [16, 16, 30, 20, 20])
+  addDataRow(totalsSheet, [totals.palletCount, totals.looseBoxCount, totals.totalBoxCount, totals.cbm ?? '미입력', totals.weightKg ?? '미입력'])
   addChinaOutboundReceivingSheets(workbook, detail)
 
   clearBlankExcelCells(workbook)

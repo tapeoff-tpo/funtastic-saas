@@ -1,8 +1,12 @@
 'use client'
 
-import { useRef, useState, type ReactNode } from 'react'
-import { ChevronDown, Layers3 } from 'lucide-react'
+import { useRef, useState, useTransition, type ReactNode } from 'react'
+import { ChevronDown, Layers3, Package } from 'lucide-react'
 import { calculateChinaOutboundBoxCbm, formatChinaOutboundCbm, formatChinaOutboundBoxDimensions } from '@/lib/purchasing/china-outbound-dimensions'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { chinaOutboundFinalTotals } from '@/lib/purchasing/china-outbound-final-totals'
+import { saveChinaOutboundBoxCompletionStatusesAction } from '../saas-china-actions'
 import { PackageWeightEditor } from './outbound-package-editors'
 import { PalletFinalMeasurements } from './pallet-final-measurements'
 import { ItemCodeCell } from './item-code-cell'
@@ -13,6 +17,10 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
   shipmentId: string; summaries: PalletSummary[]; boxItems: ChinaShipmentDetailView['boxItems']; items: ChinaShipmentDetailView['items']
   editable: boolean; dimensionsEditable?: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean
 }) {
+  const router = useRouter()
+  const [savingLoose, startLoose] = useTransition()
+  const [looseOpen, setLooseOpen] = useState(initiallyExpanded)
+  const [finalSnapshot, setFinalSnapshot] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({})
   const dialog = useRef<HTMLDialogElement>(null)
   const guard = useChinaWorkGuard()
@@ -45,8 +53,24 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
     </table></div>
   }
 
-  const looseCbms = unassignedBoxes.map(calculateChinaOutboundBoxCbm)
-  const finalCbms = summaries.map((summary) => calculateChinaOutboundBoxCbm(summary.pallet))
+  const looseTotals = chinaOutboundFinalTotals([], unassignedBoxes)
+  const totals = chinaOutboundFinalTotals(summaries.map((summary) => summary.pallet), [...summaries.flatMap((summary) => summary.boxes), ...unassignedBoxes])
+  const snapshot = JSON.stringify({ totals, pallets: summaries.map((summary) => summary.pallet), boxes: [...summaries.flatMap((summary) => summary.boxes), ...unassignedBoxes] })
+  const looseConfirmed = unassignedBoxes.every((box) => box.completionStatus === 'completed')
+  const allPalletsConfirmed = summaries.every((summary) => confirmed[summary.pallet.id] ?? summary.pallet.completionStatus === 'completed')
+  const finalConfirmed = finalSnapshot === snapshot && allPalletsConfirmed && looseConfirmed && !guard.hasDraftKind('pallet') && !guard.hasDraftKind('box')
+  async function confirmLoose() {
+    if (looseTotals.cbm == null || looseTotals.weightKg == null) { toast.error('낱박스 CBM과 무게를 2단계에서 입력해주세요.'); return false }
+    const result = await saveChinaOutboundBoxCompletionStatusesAction({ shipmentId, updates: unassignedBoxes.map((box) => ({ boxId: box.id, status: 'completed' })) })
+    if (!result.ok) { toast.error(result.error); return false }
+    router.refresh(); return true
+  }
+  function confirmFinal() {
+    if (guard.hasDraftKind('pallet') || guard.hasDraftKind('box')) { toast.error('변경한 규격을 먼저 저장해주세요.'); return }
+    if (!allPalletsConfirmed || !looseConfirmed) { toast.error('파렛트와 낱박스를 먼저 확정해주세요.'); return }
+    if (totals.cbm == null || totals.weightKg == null) { toast.error('CBM과 무게의 미입력 값을 확인해주세요.'); return }
+    setFinalSnapshot(snapshot)
+  }
   return <section className="space-y-5" aria-label="사용 파렛트">
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">사용 파렛트</h3><div className="flex flex-wrap items-center gap-3 text-sm"><span>{summaries.length} PLT + {unassignedBoxes.length} BOX</span>{assignmentEditor && <button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.showModal()} className="rounded-md border px-3 py-1">파렛트 배정 수정</button>}</div></div>
     {summaries.map((summary) => <article key={summary.pallet.id} className={`overflow-hidden rounded-xl border-2 shadow-sm ${(confirmed[summary.pallet.id] ?? summary.pallet.completionStatus === 'completed') ? 'border-amber-300 bg-amber-50' : expanded.has(summary.pallet.id) ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-white'}`}>
@@ -54,13 +78,22 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
         <div className="min-w-40 shrink-0 space-y-2">
           <button type="button" aria-expanded={expanded.has(summary.pallet.id)} onClick={() => toggle(summary.pallet.id, setExpanded)} className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-base font-bold text-white"><Layers3 aria-hidden="true" className="size-4" />파렛트 <span data-no-translate>{summary.palletNo}</span><ChevronDown className={expanded.has(summary.pallet.id) ? "size-4 rotate-180" : "size-4"} /></button><p className="whitespace-nowrap text-xs font-medium text-slate-600">박스 {summary.boxes.length}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p>
         </div>
-        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
+        <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.pallet.lengthCm}:${summary.pallet.widthCm}:${summary.pallet.heightCm}:${summary.pallet.completionStatus}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
       </div></div>
       {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">전체 박스 수량을 포함합니다. CBM 미입력 {summary.boxesWithoutDimensions}박스는 파렛트 전체 규격을 입력해 확정해주세요.</p>}
       {expanded.has(summary.pallet.id) && <div id={`pallet-contents-${summary.pallet.id}`}>{boxList(summary.boxes)}</div>}
     </article>)}
-    {!!unassignedBoxes.length && <details open={initiallyExpanded} className="group overflow-hidden rounded-xl border-2 border-amber-200"><summary className="flex cursor-pointer list-none items-center justify-between border-l-4 border-amber-500 bg-amber-50 p-4 text-sm font-semibold text-amber-950 [&::-webkit-details-marker]:hidden">낱박스 {unassignedBoxes.length}개<span>{looseCbms.some(value => value == null) ? "CBM 미입력" : `${formatChinaOutboundCbm(looseCbms.reduce<number>((sum, value) => sum + (value ?? 0), 0))} CBM`}</span><ChevronDown aria-hidden="true" className="size-5 transition-transform group-open:rotate-180" /></summary>{boxList(unassignedBoxes)}</details>}
-    {!!summaries.length && <div className="rounded-lg bg-muted/30 p-3 text-right text-sm"><p className="whitespace-nowrap">제품 적재 CBM 합계: {formatChinaOutboundCbm(summaries.reduce((sum, row) => sum + row.cbm, 0))} CBM</p><p className="whitespace-nowrap font-semibold">최종 파렛트 CBM 합계: {finalCbms.some((value) => value == null) ? '미입력' : `${formatChinaOutboundCbm(finalCbms.reduce<number>((sum, value) => sum + (value ?? 0), 0))} CBM`}</p></div>}
+    {!!unassignedBoxes.length && <article className={`overflow-hidden rounded-xl border-2 ${looseConfirmed ? 'border-amber-300 bg-amber-50' : 'border-blue-300 bg-blue-50/40'}`}>
+      <div className={`border-l-4 border-blue-600 p-4 ${looseConfirmed ? 'bg-amber-50' : 'bg-blue-50'}`}><div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="min-w-40 shrink-0 space-y-2"><button type="button" aria-expanded={looseOpen} onClick={() => setLooseOpen((value) => !value)} className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-base font-bold text-white"><Package aria-hidden="true" className="size-4" />낱박스<ChevronDown className={looseOpen ? 'size-4 rotate-180' : 'size-4'} /></button><p className="whitespace-nowrap text-xs font-medium text-slate-600">박스 {unassignedBoxes.length}개</p></div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4"><div className="space-y-2 text-xs"><p>적재 CBM: <strong>{formatChinaOutboundCbm(looseTotals.cbm) ?? '미입력'} CBM</strong></p><p>규격·무게 수정은 2단계에서 가능합니다.</p><button type="button" disabled={!dimensionsEditable || isPending || savingLoose || guard.busy} onClick={() => startLoose(async () => { await guard.runTask(confirmLoose) })} className="h-7 rounded border px-2 disabled:opacity-40">{looseConfirmed ? '확정됨 · 다시 저장' : '낱박스 확정하기'}</button></div>
+          <div className="ml-auto whitespace-nowrap rounded border bg-white px-3 py-2 text-right text-xs tabular-nums"><p className="font-semibold">최종 CBM: {formatChinaOutboundCbm(looseTotals.cbm) ?? '미입력'} CBM</p><p className="font-semibold">최종 무게: {looseTotals.weightKg == null ? '무게 미입력' : `${looseTotals.weightKg.toLocaleString('ko-KR')} kg`}</p><p>박스 {unassignedBoxes.length}개</p>{looseConfirmed && <p className="font-semibold text-amber-800">최종 확정 · 수정 가능</p>}</div></div>
+      </div></div>{looseOpen && boxList(unassignedBoxes)}
+    </article>}
+    <div className={`space-y-3 rounded-lg border p-4 ${finalConfirmed ? 'border-amber-300 bg-amber-50' : 'bg-muted/30'}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3"><p className="font-semibold">최종 출고 합계</p><button type="button" disabled={isPending || guard.busy || savingLoose || totals.totalBoxCount === 0} onClick={confirmFinal} className="rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{finalConfirmed ? '확정됨 · 다시 확인' : '최종 적재 확정'}</button></div>
+      {finalConfirmed && <><div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums"><span>파렛트 <strong>{totals.palletCount} PLT</strong></span><span>낱박스 <strong>{totals.looseBoxCount} BOX</strong></span><span>전체 박스(파렛트 내 포함) <strong>{totals.totalBoxCount}개</strong></span><span>최종 CBM <strong>{formatChinaOutboundCbm(totals.cbm)}</strong></span><span>최종 무게 <strong>{totals.weightKg?.toLocaleString('ko-KR')} kg</strong></span></div><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/export`} className="inline-flex rounded-md border bg-white px-3 py-2 text-sm">최종 합계·적재리스트 엑셀 다운로드</a></>}
+    </div>
     {assignmentEditor && <dialog ref={dialog} data-purchasing-translate aria-label="파렛트 배정 수정" onCancel={(event) => { if (isPending || guard.busy) event.preventDefault() }} className="m-auto max-h-[90dvh] w-[min(72rem,96vw)] overflow-auto rounded-xl border bg-background p-4 text-foreground backdrop:bg-black/40"><div className="mb-3 flex items-center justify-between"><h3 className="font-semibold">파렛트 배정 수정</h3><button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.close()} className="rounded border px-3 py-1">닫기</button></div>{assignmentEditor}</dialog>}
   </section>
 }

@@ -52,9 +52,9 @@ const palletHeaders = ['파렛트', '파렛트박스수량', '박스번호', '�
 const boxHeaders = ['박스번호', '박스수량', '상품코드', '상품명', '옵션명', '입고수량', '중국창고', '대량창고', '창고구분', '무게(kg)', 'CBM', '로케이션']
 
 describe('exportChinaOutboundPackingWorkbook', () => {
-  it('keeps the product detail without a summary while using the requested pallet and box column order', async () => {
+  it('includes final totals alongside product detail while using the requested pallet and box column order', async () => {
     const workbook = await exportWorkbook()
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['상품별 분할', '박스별 적재', '파렛트별 적재', '파렛트 미지정'])
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['상품별 분할', '최종 적재 요약', '박스별 적재', '파렛트별 적재', '파렛트 미지정'])
     expect(workbook.getWorksheet('상품별 분할')!.rowCount).toBe(6)
     expect(headers(workbook.getWorksheet('파렛트별 적재')!)).toEqual(palletHeaders)
     expect(headers(workbook.getWorksheet('박스별 적재')!)).toEqual(boxHeaders)
@@ -173,4 +173,12 @@ describe('exportChinaOutboundPackingWorkbook', () => {
       expect(dataRows(sheet).every((row) => cell(sheet, row, '무게(kg)').value === null && cell(sheet, row, 'CBM').value === null)).toBe(true)
     }
   })
+})
+
+it('exports whole-pallet volume and loose boxes once with the final shipment weight', async () => {
+  const detail = packingDetail()
+  detail.boxes[2].grossWeightKg = 3
+  const workbook = await exportWorkbook(detail)
+  const sheet = workbook.getWorksheet('최종 적재 요약')!
+  expect(sheet.getRow(2).values).toEqual([, 1, 1, 3, 1.801, 45.125])
 })

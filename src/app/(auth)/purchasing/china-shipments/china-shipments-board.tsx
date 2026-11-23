@@ -3,7 +3,7 @@
 import { type ChangeEvent, type FormEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState, useTransition } from 'react'
 import { nextAvailableBoxNumbers, planAutomaticBoxSplit, type InspectionPackingPiece } from '@/lib/purchasing/china-outbound-auto-packing'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Check, ChevronLeft, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload, X } from 'lucide-react'
+import { CircleAlert, Check, ChevronLeft, Download, FileSpreadsheet, Loader2, PackagePlus, Plus, Send, Trash2, Upload, X } from 'lucide-react'
 import type { ChinaOutboundBoxSplitSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import { applyChinaShipmentBoxSplitSavedState } from './china-shipment-save-state'
 import { Dialog } from '@base-ui/react/dialog'
@@ -698,9 +698,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 
   const [savedBoxFilter, setSavedBoxFilter] = useState<SavedBoxFilter>('saved')
 
-  const [editingBoxItemId, setEditingBoxItemId] = useState<string | null>(null)
   const [editorStage, setEditorStage] = useState(stage)
-  if (editorStage !== stage) { setEditorStage(stage); setEditingBoxItemId(null) }
 
   if (!detail) return null
 
@@ -725,12 +723,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadShipmentLabels = boxesWithItems.length > 0
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
-  const editingBoxItem = editingBoxItemId ? itemById.get(editingBoxItemId) : null
-
-  function editSavedBoxItem(itemId: string) {
-    if (itemById.has(itemId) && !isPending && !guard.busy) setEditingBoxItemId(itemId)
-  }
-
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
       await guard.runTask(async () => {
@@ -801,37 +793,75 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'boxes' ? <section className="space-y-3">
-        <div><h3 className="font-semibold">2단계 · 저장된 박스현황</h3><p className="mt-1 text-sm text-muted-foreground">박스번호 순서대로 적재 상품을 확인하고 박스 규격과 중량을 수정하세요. 혼합박스는 같은 목록에 표시됩니다.</p></div>
-        {editable && <MergeBoxesButton shipmentId={shipment.id} boxes={boxesWithItems} isPending={isPending} />}
-        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} onEditItem={editSavedBoxItem} />
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold">2단계 · 저장된 박스현황</h3>
+          <StageHelp label="박스현황 안내">
+            <dl className="space-y-3">
+              <div><dt className="font-medium">박스별 내용 확인</dt><dd className="text-muted-foreground">박스번호 순서대로 적재 상품을 확인하고 박스 규격과 중량을 수정하세요. 혼합박스는 같은 목록에 표시됩니다.</dd></div>
+              <div><dt className="font-medium">박스 합치기</dt><dd className="text-muted-foreground">합칠 박스를 선택하고 상품 목록을 펼쳐 내용을 확인하세요.</dd></div>
+            </dl>
+          </StageHelp>
+        </div>
+        {editable && <MergeBoxesButton shipmentId={shipment.id} boxes={boxesWithItems} productsByBox={new Map(boxesWithItems.map(box => [box.id, [...new Set((boxItemsByBox.get(box.id) ?? []).flatMap(row => {
+          const item = itemById.get(row.shipmentItemId)
+          return item ? [[item.productName, item.optionName].filter(Boolean).join(' · ')] : []
+        }))]]))} isPending={isPending} />}
+        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 파렛트 배정</button></div>
-        {editingBoxItem && <ItemBoxSplitDialog key={editingBoxItem.id} detail={detail} item={editingBoxItem} editable={editable} isPending={isPending} allowDeferredSave onClose={() => setEditingBoxItemId(null)} />}
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
-        <div><h3 className="font-semibold">3단계 · 파렛트 배정</h3><p className="mt-1 text-sm text-muted-foreground">각 박스의 파렛트 번호를 입력한 뒤 파렛트 배정 저장을 누르세요. 같은 번호를 입력한 박스는 한 파렛트에 함께 적재됩니다.</p></div>
-        {hasIncompleteBoxSplit ? <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p> : null}
-        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p> : null}
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold">3단계 · 파렛트 배정</h3>
+          <StageHelp label="파렛트 배정 안내" warning={hasIncompleteBoxSplit || hasUnassignedPalletBox}>
+              <dl className="space-y-3">
+                <div><dt className="font-medium">박스별 번호 입력</dt><dd className="mt-0.5 text-muted-foreground">번호를 입력한 뒤 오른쪽 파렛트 수정을 누르면 해당 박스가 저장됩니다.</dd></div>
+                <div><dt className="font-medium">같은 파렛트에 적재</dt><dd className="mt-0.5 text-muted-foreground">같은 번호의 박스는 한 파렛트에 적재됩니다. 번호는 숫자나 문자를 쓸 수 있습니다.</dd></div>
+                <div><dt className="font-medium">낱박스로 출고</dt><dd className="mt-0.5 text-muted-foreground">번호를 비워서 저장하면 배정이 해제됩니다.</dd></div>
+              </dl>
+              {hasIncompleteBoxSplit && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p>}
+          </StageHelp>
+        </div>
         {boxesWithItems.length === 0 ? <EmptyStage title="먼저 박스분할을 저장해주세요." description="1단계에서 출고품목별 박스 수량과 규격을 저장해주세요." onMove={() => onStageChange('items')} moveLabel="1단계로 이동" /> : <>
           <PalletAssignmentPanel shipmentId={shipment.id} boxes={boxesWithItems} boxItemsByBox={boxItemsByBox} itemById={itemById} palletById={palletById} editable={editable} isPending={isPending} />
-          <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} boxItems={detail.boxItems} items={items} editable={editable} isPending={isPending} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} />
         </>}
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('summary')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 파렛트 최종 리스트</button></div>
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">4단계 · 파렛트 최종 리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별 적재 상품·박스·수량·총중량·규격·CBM을 최종 확인하세요.</p></div>{editable && <button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-semibold text-blue-900 hover:bg-blue-100 disabled:opacity-60">파렛트 배정 수정</button>}</div>
-        {hasIncompleteBoxSplit ? <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p> : null}
-        {hasUnassignedPalletBox ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p> : null}
-        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} isPending={isPending} initiallyExpanded /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
+        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2">
+          <h3 className="font-semibold">4단계 · 파렛트 최종 리스트</h3>
+          <StageHelp label="최종 리스트 안내" warning={hasIncompleteBoxSplit || hasUnassignedPalletBox}>
+            <dl className="space-y-3">
+              <div><dt className="font-medium">적재 내역 확인</dt><dd className="text-muted-foreground">파렛트를 펼치면 박스별 상품, 수량, 중량을 확인할 수 있습니다.</dd></div>
+              <div><dt className="font-medium">CBM 비교</dt><dd className="text-muted-foreground">가로·세로·높이를 입력해 파렛트 CBM을 계산하고 제품 적재 CBM과 비교하세요.</dd></div>
+              <div><dt className="font-medium">최종 적재리스트</dt><dd className="text-muted-foreground">파렛트별·박스별 적재 상품과 창고별 입고수량을 엑셀로 다운로드합니다.</dd></div>
+            </dl>
+            {hasIncompleteBoxSplit && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p>}
+            {hasUnassignedPalletBox && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p>}
+          </StageHelp>
+        </div>{editable && <button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-semibold text-blue-900 hover:bg-blue-100 disabled:opacity-60">파렛트 배정 수정</button>}</div>
+        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 p-4">
-          <div><h3 className="font-semibold">최종 적재리스트</h3><p className="mt-1 text-sm text-muted-foreground">파렛트별·박스별 적재 상품과 창고별 입고수량을 엑셀로 다운로드합니다.</p></div>
+
           <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 hover:bg-violet-200"><Download className="size-4" />최종 적재리스트 엑셀 다운로드</a>
         </div>
       </section> : null}
 
     </section>
   )
+}
+
+function StageHelp({ label, warning, children }: { label: string; warning?: boolean; children: ReactNode }) {
+  return <details className="relative">
+    <summary aria-label={label} className="flex size-7 cursor-pointer list-none items-center justify-center rounded-full hover:bg-muted [&::-webkit-details-marker]:hidden">
+      <CircleAlert aria-hidden="true" className={warning ? 'size-4 text-amber-700' : 'size-4 text-muted-foreground'} />
+    </summary>
+    <div className="absolute left-0 z-30 mt-2 w-[min(22rem,65vw)] rounded-xl border bg-background p-4 text-sm shadow-xl">
+      <h4 className="mb-3 font-semibold">{label}</h4>
+      {children}
+    </div>
+  </details>
 }
 
 function ApplyInventoryPackingButton({ shipmentId, isPending }: { shipmentId: string; isPending: boolean }) {
@@ -871,24 +901,23 @@ function OutboundItemsPanel({ detail, editable, isPending, boxItemsByItem }: {
   const editingItem = items.find((item) => item.id === editingId)
   return <section className="overflow-hidden rounded-lg border">
     <div className="border-b bg-muted/20 px-4 py-3"><h3 className="font-semibold">1단계 · 출고품목·박스분할</h3></div>
-    <div className="overflow-x-auto"><table className="min-w-[1500px] w-full text-sm">
+    <div className="overflow-x-auto"><table className="min-w-[1220px] w-full table-fixed text-sm">
+      <colgroup>{[108, 44, 180, 146, 150, 124, 84, 68, 70, 70, 116, 94].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
       <thead className="bg-muted/30 text-xs text-muted-foreground"><tr>
-        {['품목코드', '품목구분', '상품명(한국어)', '상품명(중국어)', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수·박스별 수량', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className={`whitespace-nowrap px-3 py-2 text-left font-medium ${label === '품목코드' ? 'w-[calc(11ch+1.5rem)]' : ''}`}>{label}</th>)}
+        {['품목코드', '구분', '상품명', '중국어 상품명', '옵션', '현재고', '실제 출고수량', '분할 수량', '작업 상태', '박스 수', '입고 송장·포장정보', '관리'].map((label) => <th key={label} className={`whitespace-nowrap px-2 py-1.5 font-medium ${label === "현재고" ? "text-center" : "text-left"}`}>{label}</th>)}
       </tr></thead>
       <tbody>{sortedItems.map((item) => {
         const complete = item.packedQuantity === item.reservedQuantity
         const allocations = boxItemsByItem.get(item.id) ?? []
-        const quantities = new Map<number, number>()
-        for (const allocation of allocations) quantities.set(allocation.quantity, (quantities.get(allocation.quantity) ?? 0) + 1)
         const receipts = [...new Map((item.receiptPacking ?? []).map((piece) => [piece.receiptBoxId, piece])).values()]
-        return <tr key={item.id} className="border-t align-top">
-          <td data-no-translate className="w-[calc(11ch+1.5rem)] whitespace-nowrap px-3 py-3 font-mono text-xs font-medium tabular-nums">{item.sku}</td><td className="px-3 py-3">{item.itemCategory || '상품'}</td><td className="px-3 py-3"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-3 py-3"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-3 py-3 text-muted-foreground">{item.optionName || '-'}</td>
-          <td className="px-3 py-3 tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong><div className="mt-1 text-xs text-muted-foreground">작업 가능 {Math.max(0, item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}개</div></td>
-          <td className="px-3 py-3 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
-          <td className="px-3 py-3"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>
-          <td className="px-3 py-3">{allocations.length ? <details><summary className="cursor-pointer text-xs">{allocations.length}박스 · {[...quantities].map(([quantity, count]) => `${quantity}개 × ${count}`).join(' / ')}</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">{allocations.map((allocation) => <p key={allocation.id}><span data-no-translate>{boxes.find((box) => box.id === allocation.boxId)?.boxNo}</span>번: {allocation.quantity}개</p>)}</div></details> : <span className="text-xs text-muted-foreground">미분할</span>}</td>
-          <td className="px-3 py-3 text-xs">{receipts.length ? <details><summary className="cursor-pointer">입고 {receipts.length}박스 · 송장 {new Set(receipts.map((piece) => piece.trackingNumber)).size}개</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto">{receipts.map((piece) => <p key={piece.receiptBoxId}><span data-no-translate>{piece.trackingNumber}</span> · 입고 {piece.receivedQuantity}개/박스</p>)}</div></details> : <span className="text-muted-foreground">검수 포장정보 없음</span>}</td>
-          <td className="px-3 py-3"><button type="button" disabled={isPending} aria-label={`${item.sku} 박스분할 수정`} onClick={() => setEditingId(item.id)} className="h-8 whitespace-nowrap rounded-md border px-3 text-xs font-medium hover:bg-muted">{editable ? '박스분할 수정' : '박스분할 보기'}</button></td>
+        return <tr key={item.id} className="border-t align-middle">
+          <td data-no-translate className="px-2 py-0.5 whitespace-nowrap text-xs font-medium">{item.sku}</td><td className="px-2 py-0.5 whitespace-nowrap text-[10px] text-muted-foreground">{item.itemCategory || '상품'}</td><td className="px-2 py-0.5"><PurchasingProductImageButton shipmentItemId={item.id} productName={item.productName} imageData={item.productImage} /></td><td className="px-2 py-0.5"><ChineseNameEditor key={`${item.id}:${item.chineseProductName ?? ''}`} shipmentId={detail.shipment.id} item={item} editable={editable} isPending={isPending} /></td><td data-no-translate className="px-2 py-0.5 text-xs text-muted-foreground"><span className="block truncate" title={item.optionName || undefined}>{item.optionName || '-'}</span></td>
+          <td className="px-2 py-0.5 whitespace-nowrap text-center text-xs leading-tight tabular-nums"><strong>{item.onHandQuantity == null ? '—' : `${item.onHandQuantity.toLocaleString('ko-KR')}개`}</strong> <span className="block text-[10px] leading-tight text-muted-foreground">작업 가능 {Math.max(0, item.reservedQuantity - item.packedQuantity).toLocaleString('ko-KR')}개</span></td>
+          <td className="px-2 py-0.5 font-semibold tabular-nums">{item.reservedQuantity.toLocaleString('ko-KR')}개</td><td className="px-2 py-0.5 tabular-nums">{item.packedQuantity.toLocaleString('ko-KR')}개</td>
+          <td className="px-2 py-0.5"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${complete ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>{complete && <Check className="size-3" />}{complete ? '완료' : '미완료'}</span></td>
+          <td className="px-2 py-0.5">{allocations.length ? <details><summary className="block cursor-pointer truncate text-[11px]">{allocations.length}박스</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">{allocations.map((allocation) => <p key={allocation.id}><span data-no-translate>{boxes.find((box) => box.id === allocation.boxId)?.boxNo}</span>번: {allocation.quantity}개</p>)}</div></details> : <span className="text-xs text-muted-foreground">미분할</span>}</td>
+          <td className="px-2 py-0.5 text-xs">{receipts.length ? <details><summary className="block cursor-pointer truncate text-[10px]">입고 {receipts.length}박스 · 송장 {new Set(receipts.map((piece) => piece.trackingNumber)).size}개</summary><div className="mt-2 max-h-48 space-y-1 overflow-y-auto">{receipts.map((piece) => <p key={piece.receiptBoxId}><span data-no-translate>{piece.trackingNumber}</span> · 입고 {piece.receivedQuantity}개/박스</p>)}</div></details> : <span className="whitespace-nowrap text-[10px] text-muted-foreground">검수 포장정보 없음</span>}</td>
+          <td className="px-2 py-0.5"><button type="button" disabled={isPending} aria-label={`${item.sku} 박스분할 수정`} onClick={() => setEditingId(item.id)} className="h-6 whitespace-nowrap rounded-md border px-1.5 text-xs font-medium hover:bg-muted">{editable ? '박스분할 수정' : '박스분할 보기'}</button></td>
         </tr>
       })}</tbody>
     </table></div>
@@ -1425,7 +1454,6 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   const [initialNumbers, setInitialNumbers] = useState<Record<string, string>>(() => Object.fromEntries(sortedBoxes.map((box) => [box.boxNo, box.palletId ? palletById.get(box.palletId)?.palletNo ?? '' : ''])))
   const [palletNumbers, setPalletNumbers] = useState<Record<string, string>>(() => ({ ...initialNumbers }))
   const [selectedBoxNos, setSelectedBoxNos] = useState<string[]>([])
-  const [batchPalletNo, setBatchPalletNo] = useState('')
   const canEditBox = (box: ChinaShipmentDetailView['boxes'][number]) => editable && box.editable && box.status !== 'sealed'
   const changedBoxes = sortedBoxes.filter((box) => canEditBox(box) && (palletNumbers[box.boxNo] ?? '').trim() !== (initialNumbers[box.boxNo] ?? '').trim())
   const changedBoxIds = new Set(changedBoxes.map((box) => box.id))
@@ -1441,13 +1469,6 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   function selectAll(checked: boolean) {
     const visible = selectableBoxNos
     setSelectedBoxNos((current) => checked ? [...new Set([...current, ...visible])] : current.filter((boxNo) => !visible.has(boxNo)))
-  }
-
-  function applySelectedPalletNumber() {
-    const palletNo = batchPalletNo.trim()
-    if (!palletNo || !selected.size) return
-    const boxNos = sortedBoxes.filter((box) => selected.has(box.boxNo)).map((box) => box.boxNo)
-    setPalletNumbers((current) => ({ ...current, ...Object.fromEntries(boxNos.map((boxNo) => [boxNo, palletNo])) }))
   }
 
   async function saveDraft(boxNos?: string[], quiet = false) {
@@ -1475,12 +1496,6 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
   } : null)
 
   return <section className="overflow-hidden rounded-lg border">
-    {editable && <p className="border-b border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-900">파렛트번호를 바로 바꾸고 오른쪽 파렛트 수정을 누르면 해당 박스만 저장됩니다.</p>}
-    <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 p-3">
-      <label className="text-xs font-medium">선택 박스 일괄 파렛트 번호<input aria-label="선택 박스 일괄 파렛트 번호" value={batchPalletNo} onChange={(event) => setBatchPalletNo(event.target.value)} disabled={!editable || isPending || guard.busy} className={`${compactInputClass} mt-1 block w-40`} placeholder="예: P1" /></label>
-      <button type="button" disabled={!editable || isPending || guard.busy || !selected.size || !batchPalletNo.trim()} onClick={applySelectedPalletNumber} className="h-8 rounded-md border bg-background px-3 text-xs font-medium disabled:opacity-60">선택 박스에 번호 적용</button>
-      <p className="py-2 text-xs text-muted-foreground">박스를 선택하고 번호를 적용한 뒤 파렛트 배정 저장을 누르세요.</p>
-    </div>
     <div className="overflow-x-auto"><table className="min-w-[950px] w-full text-sm"><thead className="bg-muted/30 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-center font-medium"><input type="checkbox" aria-label="표시된 파렛트 배정 전체 선택" checked={allSelected} onChange={(event) => selectAll(event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.size} className="size-3.5 accent-primary" /></th><th className="px-3 py-2 text-left font-medium">박스번호</th><th className="px-3 py-2 text-left font-medium">적재 상품</th><th className="px-3 py-2 text-right font-medium">적재수량</th><th className="px-3 py-2 text-right font-medium">박스 규격</th><th className="px-3 py-2 text-right font-medium">CBM</th><th className="px-3 py-2 text-center font-medium">파렛트번호</th><th className="px-3 py-2 text-center font-medium">관리</th></tr></thead><tbody>{sortedBoxes.map((box) => {
       const boxItems = boxItemsByBox.get(box.id) ?? []
       const quantity = boxItems.reduce((total, item) => total + item.quantity, 0)
@@ -1492,7 +1507,7 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
       const changed = changedBoxIds.has(box.id)
       return <tr key={box.id} className={`border-t align-top ${changed ? 'bg-blue-50/60' : ''}`}><td className="px-3 py-3 text-center"><input type="checkbox" aria-label={`박스 ${box.boxNo} 파렛트 배정 선택`} checked={selected.has(box.boxNo)} onChange={(event) => selectBox(box.boxNo, event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.has(box.boxNo)} className="size-3.5 accent-primary" /></td><td className="px-3 py-3 font-medium">{box.boxNo}</td><td className="px-3 py-3 text-xs leading-5">{products.map((product) => <span key={product.id} className="block"><span data-no-translate>{product.identity}</span> <span>({product.quantity.toLocaleString('ko-KR')}개)</span></span>)}</td><td className="px-3 py-3 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-3 py-3 text-right text-xs text-muted-foreground">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-3 py-3 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="px-3 py-2 text-center"><input aria-label={`박스 ${box.boxNo} 파렛트 번호`} value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!canEditBox(box) || isPending || guard.busy} className={`${compactInputClass} mx-auto block max-w-32 text-center`} placeholder="예: 1" /></td><td className="px-3 py-2 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 파렛트 수정`} disabled={!canEditBox(box) || isPending || guard.busy || !changed} onClick={() => void guard.runTask(() => saveDraft([box.boxNo]))} className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><Check className="size-3.5" />파렛트 수정</button></td></tr>
     })}</tbody></table></div>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><p className="text-xs text-muted-foreground">빈칸으로 저장하면 파렛트 배정을 해제합니다. 파렛트 번호는 숫자뿐 아니라 `A`, `B`, `1-2`처럼 자유롭게 입력할 수 있습니다.</p><div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">선택 {selected.size.toLocaleString('ko-KR')}개</span><button type="button" aria-label="파렛트 배정 선택 저장" disabled={!editable || isPending || guard.busy || !selected.size} onClick={() => void guard.runTask(() => saveDraft([...selected]))} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Check className="size-3.5" /> 선택한 박스 배정 저장</button><button type="button" aria-label="파렛트 배정 전체 저장" disabled={!editable || isPending || guard.busy} onClick={() => void guard.runTask(() => saveDraft())} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Check className="size-3.5" /> 파렛트 배정 저장</button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">선택 {selected.size.toLocaleString('ko-KR')}개</span><button type="button" aria-label="파렛트 배정 선택 저장" disabled={!editable || isPending || guard.busy || !selected.size} onClick={() => void guard.runTask(() => saveDraft([...selected]))} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Check className="size-3.5" /> 선택한 박스 배정 저장</button><button type="button" aria-label="파렛트 배정 전체 저장" disabled={!editable || isPending || guard.busy} onClick={() => void guard.runTask(() => saveDraft())} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Check className="size-3.5" /> 파렛트 배정 저장</button></div></div>
   </section>
 }
 

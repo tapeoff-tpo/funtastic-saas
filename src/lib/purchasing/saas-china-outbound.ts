@@ -2652,8 +2652,11 @@ export async function mergeChinaOutboundBoxes(input: { userId: string; shipmentI
     const weight = weights.every((value) => value != null) ? Math.round(weights.reduce((sum, value) => sum + value!, 0) * 1000) / 1000 : null
     if (weight != null && weight > 999_999_999) throw new Error('혼합박스 총중량은 999,999,999kg 이하여야 합니다.')
     const grossWeightKg = weight == null ? null : String(weight)
-    const cbms = boxes.map((box) => calculateChinaOutboundBoxCbm(box)).filter((value): value is number => value != null)
-    const manualCbm = boxes.some((box) => dimensionNumber(box.manualCbm) != null) && cbms.length ? String(summedGroupCbm ? roundCbm(cbms.reduce((sum, value) => sum + value, 0)) : Math.max(...cbms)) : null
+    const occupiedBoxes = boxes.filter(box => allocations.some(row => row.boxId === box.id))
+    const cbms = occupiedBoxes.map(calculateChinaOutboundBoxCbm)
+    const manualCbm = cbms.every(value => value != null)
+      ? String(roundCbm(cbms.reduce<number>((sum, value) => sum + (value ?? 0), 0)))
+      : null
     await tx.update(chinaOutboundBoxes).set({ grossWeightKg, manualCbm, ...(summedGroupCbm ? { inventoryPackingGroupKey: `merged:${target.id}`, inventoryPackingGroupBoxIndex: null } : {}), updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.id, target.id)))
     // Retain emptied box records for references, but exclude their former weight and pallet.
     await tx.update(chinaOutboundBoxes).set({ palletId: null, grossWeightKg: null, manualCbm: null, updatedAt: new Date() }).where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), inArray(chinaOutboundBoxes.id, ids.filter((id) => id !== target.id))))

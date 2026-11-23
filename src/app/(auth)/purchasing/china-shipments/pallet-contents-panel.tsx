@@ -8,7 +8,7 @@ import { fillChinaOutboundDimensionInputs, calculateChinaOutboundBoxCbm, formatC
 import { calculateChinaOutboundPalletWeight } from '@/lib/purchasing/china-outbound-pallet-weight'
 import { saveChinaOutboundPalletDimensionsAction } from '../saas-china-actions'
 import { PackageWeightEditor } from './outbound-package-editors'
-import { ContentsToggle } from './contents-toggle'
+import { ItemCodeCell } from './item-code-cell'
 import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaShipmentDetailView, PalletSummary } from './china-shipments-board'
 
@@ -25,24 +25,29 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
     setter((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }
   function boxList(boxes: ChinaShipmentDetailView['boxes']) {
-    return <div className="border-t border-blue-200 bg-slate-50/80 px-3 py-4 sm:px-5"><div className="grid items-stretch gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr))]">{boxes.map((box) => {
-      const allocations = boxItems.filter((allocation) => allocation.boxId === box.id)
-      return <div key={box.id} role="group" aria-label={`박스 ${box.boxNo} 적재 상품·중량`} className="flex min-w-0 flex-col gap-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm shadow-sm sm:px-4">
-        <h4 className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-b pb-2 font-semibold">
-          <span className="rounded bg-slate-100 px-2 py-0.5">박스 <span data-no-translate>{box.boxNo}</span></span>
-          <span data-no-translate className="break-words">{[...new Set(allocations.map(row => itemById.get(row.shipmentItemId)?.productName).filter(Boolean))].join(' · ') || '—'}</span>
-        </h4>
-        <ul className="min-w-0 divide-y divide-slate-100">{allocations.map((allocation) => {
-          const item = itemById.get(allocation.shipmentItemId)
-          return item && <li key={allocation.id} className="flex items-start justify-between gap-3 py-1.5 first:pt-0 last:pb-0"><span className="min-w-0 break-words leading-6"><span data-no-translate>{item.sku} · {item.productName}{item.optionName ? ` · ${item.optionName}` : ''}{item.chineseProductName ? ` / ${item.chineseProductName}` : ''}</span>{item.itemCategory === '샘플' && <span className="ml-2 rounded bg-amber-50 px-2 text-xs">샘플</span>}</span><span className="shrink-0 rounded bg-blue-50 px-2 py-1 text-xs font-semibold tabular-nums text-blue-900">{allocation.quantity}개</span></li>
-        })}</ul>
-        <div className="mt-auto grid grid-cols-2 items-start gap-2 border-t pt-2 tabular-nums">
-        <PackageWeightEditor key={`${box.id}:${box.grossWeightKg}`} shipmentId={shipmentId} kind="box" packageId={box.id} packageNo={box.boxNo} initialWeight={box.grossWeightKg} editable={editable} isPending={isPending} compact />
-        <p className="text-sm">CBM: {formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(box)) ?? '미입력'}</p>
-        </div>
-      </div>
-    })}</div></div>
+    return <div className="overflow-x-auto border-t bg-background"><table aria-label="박스별 적재리스트" className="w-full min-w-[1100px] table-fixed text-xs">
+      <colgroup>{[70, 110, 220, 140, 140, 80, 210, 100, 90].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+      <thead className="bg-muted/30 text-muted-foreground"><tr>{['박스번호', '품목코드', '상품명', '중국어 상품명', '옵션', '적재수량', '규격 가로×세로×높이(cm)', '총중량(kg)', 'CBM'].map((label) => <th key={label} className="whitespace-nowrap px-2 py-2 text-left font-medium">{label}</th>)}</tr></thead>
+      <tbody>{boxes.flatMap((box) => {
+        const allocations = boxItems.filter((allocation) => allocation.boxId === box.id)
+        return (allocations.length ? allocations : [null]).map((allocation, index) => {
+          const item = allocation ? itemById.get(allocation.shipmentItemId) : null
+          return <tr key={allocation?.id ?? box.id} className="border-t hover:bg-muted/20">
+            {index === 0 && <td rowSpan={Math.max(allocations.length, 1)} className="px-2 py-1 font-semibold" data-no-translate>{box.boxNo}</td>}
+            <td className="overflow-hidden px-2 py-1">{item ? <ItemCodeCell code={item.sku} /> : '—'}</td>
+            <td className="px-2 py-1"><span className="block truncate" title={item?.productName} data-no-translate>{item?.productName ?? '—'}</span></td>
+            <td className="px-2 py-1"><span className="block truncate" title={item?.chineseProductName ?? ''} data-no-translate>{item?.chineseProductName || '—'}</span></td>
+            <td className="px-2 py-1"><span className="block truncate" title={item?.optionName ?? ''} data-no-translate>{item?.optionName || '—'}</span></td>
+            <td className="px-2 py-1 text-right tabular-nums">{allocation?.quantity.toLocaleString('ko-KR') ?? '0'}개</td>
+            {index === 0 && <><td rowSpan={Math.max(allocations.length, 1)} className="whitespace-nowrap px-2 py-1">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td>
+              <td rowSpan={Math.max(allocations.length, 1)} className="px-2 py-1 tabular-nums">{editable ? <PackageWeightEditor key={`${box.id}:${box.grossWeightKg}`} shipmentId={shipmentId} kind="box" packageId={box.id} packageNo={box.boxNo} initialWeight={box.grossWeightKg} editable={editable} isPending={isPending} compact /> : box.grossWeightKg ?? '—'}</td>
+              <td rowSpan={Math.max(allocations.length, 1)} className="px-2 py-1 text-right tabular-nums">{formatChinaOutboundCbm(calculateChinaOutboundBoxCbm(box)) ?? '—'}</td></>}
+          </tr>
+        })
+      })}</tbody>
+    </table></div>
   }
+
   const looseCbms = unassignedBoxes.map(calculateChinaOutboundBoxCbm)
   const finalCbms = summaries.map((summary) => calculateChinaOutboundBoxCbm(summary.pallet))
   return <section className="space-y-5" aria-label="사용 파렛트">

@@ -839,7 +839,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             {hasIncompleteBoxSplit && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">박스에 담긴 수량과 실제 출고수량이 다른 품목이 있습니다. 박스분할 수량을 확인해주세요.</p>}
             {hasUnassignedPalletBox && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p>}
           </StageHelp>
-        </div>{editable && <button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-semibold text-blue-900 hover:bg-blue-100 disabled:opacity-60">파렛트 배정 수정</button>}</div>
+        </div></div>
         {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 p-4">
 

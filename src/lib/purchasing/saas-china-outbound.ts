@@ -2534,8 +2534,9 @@ export async function addChinaOutboundSample(input: {
 
 export async function saveChinaOutboundPalletDimensions(input: {
   userId: string; shipmentId: string; palletId: string
-  lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null
+  lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null; tareWeightKg?: number
 }) {
+  if (input.tareWeightKg !== undefined && (!Number.isFinite(input.tareWeightKg) || input.tareWeightKg < 0 || input.tareWeightKg > 999999999)) throw new Error('파렛트 무게를 확인해주세요.')
   const manualCbm = normalizeOptionalChinaOutboundManualCbm(input.manualCbm)
   const hasDimensions = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value !== undefined)
   const dimensions = hasDimensions ? normalizeChinaOutboundBoxDimensions({ lengthCm: input.lengthCm ?? null, widthCm: input.widthCm ?? null, heightCm: input.heightCm ?? null }) : null
@@ -2549,6 +2550,7 @@ export async function saveChinaOutboundPalletDimensions(input: {
     const [pallet] = await tx.update(chinaOutboundPallets).set({
       ...(dimensions ? { lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm), widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm), heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm) } : {}),
       ...(manualCbm !== undefined ? { manualCbm: manualCbm === null ? null : String(manualCbm) } : {}),
+      ...(input.tareWeightKg !== undefined ? { tareWeightKg: String(input.tareWeightKg) } : {}),
       updatedAt: new Date(),
     }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
     return pallet

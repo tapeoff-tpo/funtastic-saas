@@ -41,33 +41,26 @@ describe('saved box list', () => {
     expect(summaries.map((summary) => summary.box.boxNo)).toEqual(['10', '3', '2', '1'])
   })
 
-  it('saves the actual box dimensions and total weight without sending allocation or quantity edits', async () => {
+  it('saves row dimensions and weight atomically from the rightmost save button', async () => {
     renderPanel([mixedBox('2')])
-    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 규격(cm) 편집' }))
-    expect(screen.queryByRole('spinbutton', { name: /CBM/ })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 가로(cm)' }), { target: { value: '50.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '저장' }))
-    await waitFor(() => expect(saveDimensions).toHaveBeenCalledWith({ shipmentId: 'shipment', boxId: '2', lengthCm: 50.5, widthCm: 20, heightCm: 30, manualCbm: null }))
-    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: '박스 2 가로(cm)' })).not.toBeInTheDocument())
-    fireEvent.doubleClick(screen.getByRole('button', { name: '박스 2 총중량(kg) 편집' }))
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 총중량(kg)' }), { target: { value: '12.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '저장' }))
-    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'shipment', packageId: '2', kind: 'box', grossWeightKg: 12.5 }))
-    expect(refresh).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: '박스 2 저장하기' }))
+    await waitFor(() => expect(saveBulk).toHaveBeenCalledWith({ shipmentId: 'shipment', boxIds: ['2'], lengthCm: 50.5, widthCm: 20, heightCm: 30, manualCbm: null, grossWeightKg: 12.5 }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '박스 2 저장하기' })).toBeDisabled())
+    expect(saveDimensions).not.toHaveBeenCalled()
+    expect(saveWeight).not.toHaveBeenCalled()
   })
-
 })
 
-it('edits one cell without expanding other measurement inputs and cancels without saving', () => {
+it('shows boxed inputs, cancels edits with Escape and keeps save in the last cell', () => {
   renderPanel([box('1')])
-  for (const label of ['품목코드', '상품명', '옵션', '적재수량', '규격 가로×세로×높이(cm)', '총중량(kg)', 'CBM']) {
-    expect(screen.getByRole('columnheader', { name: label })).toBeInTheDocument()
-  }
-  fireEvent.doubleClick(screen.getByRole('button', { name: '박스 1 규격(cm) 편집' }))
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(4)
   const input = screen.getByRole('spinbutton', { name: '박스 1 세로(cm)' })
-  expect(screen.getAllByRole('spinbutton')).toHaveLength(3)
   fireEvent.change(input, { target: { value: '99' } })
   fireEvent.keyDown(input, { key: 'Escape' })
-  expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
-  expect(saveDimensions).not.toHaveBeenCalled()
+  expect(input).toHaveValue(20)
+  expect(saveBulk).not.toHaveBeenCalled()
+  const row = screen.getByRole('row', { name: '박스 1' })
+  expect(within(row.lastElementChild as HTMLElement).getByRole('button', { name: '박스 1 저장하기' })).toBeDisabled()
 })

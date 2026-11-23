@@ -56,7 +56,7 @@ export function PalletContentsPanel({ shipmentId, summaries, boxItems, items, ed
         </div>
         <PalletFinalMeasurements key={`${summary.pallet.id}:${summary.pallet.manualCbm}:${summary.pallet.tareWeightKg}:${summary.cbm}`} shipmentId={shipmentId} summary={summary} onConfirmationChange={(value) => setConfirmed((current) => ({ ...current, [summary.pallet.id]: value }))} editable={dimensionsEditable} isPending={isPending} />
       </div></div>
-      {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">규격 미입력 박스 {summary.boxesWithoutDimensions}개는 제품 적재 CBM에서 제외됩니다.</p>}
+      {summary.boxesWithoutDimensions > 0 && <p className="px-4 pb-3 text-xs text-amber-700">전체 박스 수량을 포함합니다. CBM 미입력 {summary.boxesWithoutDimensions}박스는 파렛트 전체 규격을 입력해 확정해주세요.</p>}
       {expanded.has(summary.pallet.id) && <div id={`pallet-contents-${summary.pallet.id}`}>{boxList(summary.boxes)}</div>}
     </article>)}
     {!!unassignedBoxes.length && <details open={initiallyExpanded} className="group overflow-hidden rounded-xl border-2 border-amber-200"><summary className="flex cursor-pointer list-none items-center justify-between border-l-4 border-amber-500 bg-amber-50 p-4 text-sm font-semibold text-amber-950 [&::-webkit-details-marker]:hidden">낱박스 {unassignedBoxes.length}개<span>{looseCbms.some(value => value == null) ? "CBM 미입력" : `${formatChinaOutboundCbm(looseCbms.reduce<number>((sum, value) => sum + (value ?? 0), 0))} CBM`}</span><ChevronDown aria-hidden="true" className="size-5 transition-transform group-open:rotate-180" /></summary>{boxList(unassignedBoxes)}</details>}

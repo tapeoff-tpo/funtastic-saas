@@ -19,9 +19,10 @@ it('adds volume and weight independently and persists both in one save without a
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
   await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.5, tareWeightKg: 5, finalize: true }))
   await waitFor(() => expect(screen.getByText('최종 무게: 15 kg')).toBeInTheDocument())
-  expect(screen.getByText('최종 확정 · 수정 가능')).toBeInTheDocument()
+  expect(screen.getByText('최종 확정')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '수정하기' }))
   fireEvent.click(screen.getByRole('checkbox', { name: '파렛트 부피 0.3CBM 포함' }))
-  expect(screen.queryByText('최종 확정 · 수정 가능')).not.toBeInTheDocument()
+  expect(screen.queryByText('최종 확정')).not.toBeInTheDocument()
   expect(screen.getByLabelText('파렛트 1 최종 CBM')).toHaveValue(1.2)
 })
 
@@ -47,10 +48,10 @@ it('confirms the current loaded CBM even when ten boxes have no dimensions', asy
   expect(screen.getByRole('checkbox', { name: '적재 CBM 사용' })).toBeChecked()
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
   await waitFor(() => expect(save).toHaveBeenCalledWith({ shipmentId: 's', palletId: 'p', lengthCm: null, widthCm: null, heightCm: null, manualCbm: 1.2, tareWeightKg: 0, finalize: true }))
-  expect(screen.getByText('최종 확정 · 수정 가능')).toBeInTheDocument()
+  expect(screen.getByText('최종 확정')).toBeInTheDocument()
 })
 
-it('shows saving immediately, waits for success, and skips an unchanged confirmed save', async () => {
+it('shows saving immediately, waits for success, and reopens confirmed fields without submitting another save', async () => {
   let finish!: (result: { ok: true }) => void
   save.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
   const summary = { pallet: { id: 'p', palletNo: '1', manualCbm: null, tareWeightKg: 0 }, palletNo: '1', cbm: 1.2,
@@ -58,10 +59,13 @@ it('shows saving immediately, waits for success, and skips an unchanged confirme
   render(<ChinaWorkGuardProvider><PalletFinalMeasurements shipmentId="s" summary={summary} editable isPending={false} /></ChinaWorkGuardProvider>)
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
   expect(screen.getByRole('button', { name: '저장 중…' })).toBeDisabled()
-  expect(screen.queryByText('최종 확정 · 수정 가능')).not.toBeInTheDocument()
+  expect(screen.queryByText('최종 확정')).not.toBeInTheDocument()
   finish({ ok: true })
-  await waitFor(() => expect(screen.getByText('최종 확정 · 수정 가능')).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: '확정됨 · 다시 저장' }))
+  await waitFor(() => expect(screen.getByText('최종 확정')).toBeInTheDocument())
+  expect(screen.getByRole('checkbox', { name: '적재 CBM 사용' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '수정하기' }))
+  expect(screen.getByRole('checkbox', { name: '적재 CBM 사용' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: '최종 저장하기' })).toBeInTheDocument()
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
 })
 
@@ -72,8 +76,8 @@ it('keeps an unsuccessful save unconfirmed and allows retrying', async () => {
   render(<ChinaWorkGuardProvider><PalletFinalMeasurements shipmentId="s" summary={summary} editable isPending={false} /></ChinaWorkGuardProvider>)
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '최종 저장하기' })).toBeEnabled())
-  expect(screen.queryByText('최종 확정 · 수정 가능')).not.toBeInTheDocument()
+  expect(screen.queryByText('최종 확정')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '최종 저장하기' }))
-  await waitFor(() => expect(screen.getByText('최종 확정 · 수정 가능')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('최종 확정')).toBeInTheDocument())
   expect(save).toHaveBeenCalledTimes(2)
 })

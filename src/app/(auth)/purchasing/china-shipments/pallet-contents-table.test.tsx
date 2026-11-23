@@ -24,7 +24,7 @@ it('shows loose box contents in aligned product columns and counts each physical
 
 it('confirms complete loose-box totals and exposes the spreadsheet download', () => {
   render(<ChinaWorkGuardProvider><PalletContentsPanel shipmentId="s" summaries={[]} items={[]} boxItems={[]} unassignedBoxes={[{ id: 'b', shipmentId: 's', editable: true, status: 'open', note: null, lengthCm: null, widthCm: null, heightCm: null, boxNo: '1', palletId: null, manualCbm: 0.4, grossWeightKg: 7, completionStatus: 'completed' }]} editable={false} isPending={false} /></ChinaWorkGuardProvider>)
-  expect(screen.getByRole('button', { name: '낱박스' })).toHaveClass('bg-blue-700')
+  expect(screen.getByRole('button', { name: '낱박스' })).toHaveClass('bg-amber-100')
   fireEvent.click(screen.getByRole('button', { name: '최종 적재 확정' }))
   expect(screen.getByText('0.4000')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: '최종 합계·적재리스트 엑셀 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/s/export')

@@ -31,7 +31,8 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
   const dirty = JSON.stringify(state) !== JSON.stringify(baseline)
   const draftId = `pallet-final:${summary.pallet.id}`
   const weight = calculateChinaOutboundPalletWeight(summary.boxes, saved.weight ? 5 : 0)
-  const disabled = !editable || isPending || pending || guard.busy
+  const busy = !editable || isPending || pending || guard.busy
+  const disabled = busy || confirmed
   async function save() {
     if (confirmed && !dirty) return true
     if (!state.loaded && [state.lengthCm, state.widthCm, state.heightCm].some((value) => dimensionNumber(value) === null || Number(value) > 9999999.99)) { toast.error('가로·세로·높이를 모두 입력해주세요.'); return false }
@@ -53,14 +54,14 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
         <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.weight} onChange={(event) => { changed(); setState((current) => ({ ...current, weight: event.target.checked })) }} />파렛트 무게 5kg 포함</label>
       </div>
       <div className="flex items-center gap-2 text-xs"><label>최종 CBM <input aria-label={`파렛트 ${summary.palletNo} 최종 CBM`} type="number" step="0.000001" value={state.cbm} readOnly className="h-7 w-28 rounded border bg-muted/30 px-2" /></label>
-        <button type="button" disabled={disabled} onClick={() => start(async () => { await guard.runTask(save) })} className="h-7 rounded border px-2 disabled:opacity-40">{pending ? '저장 중…' : confirmed && !dirty ? '확정됨 · 다시 저장' : '최종 저장하기'}</button>
+        <button type="button" disabled={busy} onClick={() => { if (confirmed) { changed(); return } start(async () => { await guard.runTask(save) }) }} className="h-7 rounded border px-2 disabled:opacity-40">{pending ? '저장 중…' : confirmed && !dirty ? '수정하기' : '최종 저장하기'}</button>
       </div>
     </div>
     <div className="ml-auto whitespace-nowrap rounded border bg-white px-3 py-2 text-right text-xs tabular-nums">
       <p className="font-semibold">최종 CBM: {formatChinaOutboundCbm(Number(saved.cbm))} CBM</p>
       <p className="font-semibold">최종 무게: {weight.grossWeightKg == null ? '무게 미입력' : `${weight.grossWeightKg.toLocaleString('ko-KR')} kg`}</p>
       <p>박스 {summary.boxes.length}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p>
-      {confirmed && !dirty && <p className="font-semibold text-amber-800">최종 확정 · 수정 가능</p>}
+      {confirmed && !dirty && <p className="font-semibold text-amber-800">최종 확정</p>}
       {dirty && <p className="text-blue-700">변경사항 저장 전</p>}
     </div>
   </div>

@@ -10,6 +10,20 @@ export function canonicalize1688OfferUrl(value: string | null | undefined) {
   } catch { return null }
 }
 
+// These 1688 surfaces identify an order, cart or buyer workspace, never a
+// purchaseable offer. Share the anchored pattern with the workflow SQL update.
+export const ALIBABA_ORDER_OR_CART_URL_PATTERN = '^(https?:)?//(trade|buy|cart|work)\\.1688\\.com([/?#][^\\s\\\\]*)?$'
+const orderOrCartPattern = new RegExp(ALIBABA_ORDER_OR_CART_URL_PATTERN, 'i')
+
+export function is1688OrderOrCartUrl(value: string | null | undefined) {
+  if (typeof value !== 'string' || !orderOrCartPattern.test(value.trim())) return false
+  try {
+    const url = new URL(value.trim().startsWith('//') ? `https:${value.trim()}` : value.trim())
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      && !url.port && ['trade.1688.com', 'buy.1688.com', 'cart.1688.com', 'work.1688.com'].includes(url.hostname)
+  } catch { return false }
+}
+
 export function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }

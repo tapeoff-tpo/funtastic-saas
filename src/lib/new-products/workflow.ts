@@ -14,6 +14,7 @@ import {
 } from './daou-works-import'
 import { createHash } from 'node:crypto'
 import { getR2Object, newProductObjectKey, putR2Object } from '@/lib/storage/r2'
+import { is1688OrderOrCartUrl } from '@/lib/purchasing/purchase-url-values'
 
 export type { NewProductOptionDetail } from './option-details'
 
@@ -1708,12 +1709,13 @@ async function assertNewProductSampleCodeAvailable(input: {
 }
 
 async function resolveNewProductSourceUrl(tx: WorkflowTransaction, userId: string, values: NewProductInput) {
-  if (values.sourceUrl?.trim()) return values.sourceUrl.trim()
+  const existingUrl = values.sourceUrl?.trim() || null
+  if (existingUrl && !is1688OrderOrCartUrl(existingUrl)) return existingUrl
   const codes = [...new Set([values.sabangnetCode, ...(values.optionDetails ?? []).map(option => option.sabangnetOptionCode)]
     .map(code => code?.trim()).filter((code): code is string => Boolean(code)))]
-  if (!codes.length) return null
+  if (!codes.length) return existingUrl
   const { getPurchaseUrlForNewProduct } = await import('@/lib/purchasing/purchase-url-sync')
-  return getPurchaseUrlForNewProduct(tx, userId, codes)
+  return (await getPurchaseUrlForNewProduct(tx, userId, codes)) ?? existingUrl
 }
 
 export async function deleteNewProduct(input: { userId: string; itemId: string }) {

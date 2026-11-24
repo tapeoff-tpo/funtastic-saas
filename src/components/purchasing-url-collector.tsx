@@ -132,12 +132,13 @@ const EMPTY_VERIFICATION_PROGRESS: VerificationProgress = {
 
 const VERIFICATION_ISSUE_LIMIT = 100
 
-export function PurchasingUrlCollector() {
+export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () => void } = {}) {
   const router = useRouter()
   const [extensionReady, setExtensionReady] = useState(false)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<Progress>(EMPTY_PROGRESS)
   const [verificationRunning, setVerificationRunning] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [verificationProgress, setVerificationProgress] = useState<VerificationProgress>(EMPTY_VERIFICATION_PROGRESS)
   const runIdRef = useRef<string | null>(null)
   const verificationRunIdRef = useRef<string | null>(null)
@@ -154,9 +155,10 @@ export function PurchasingUrlCollector() {
     if (verificationUrlChangedRef.current) {
       verificationUrlChangedRef.current = false
       router.refresh()
+      onUrlsChanged?.()
     }
     toast.success('1688 구매 URL 검증을 완료했습니다.')
-  }, [router])
+  }, [router, onUrlsChanged])
 
   const finalizeRun = useCallback(() => {
     if (
@@ -267,7 +269,8 @@ export function PurchasingUrlCollector() {
     if (!message.url || !message.status) return
 
     const items = message.items ?? []
-    if (message.status === 'unknown' && items.length > 0) {
+    let replaced = 0
+    if (message.status !== 'open' && items.length > 0) {
       const response = await fetch('/api/purchasing/purchase-url-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -281,7 +284,8 @@ export function PurchasingUrlCollector() {
       if (!response.ok) {
         throw new Error(body.error ?? '확인 필요 URL을 반영하지 못했습니다.')
       }
-      if (body.updated > 0) verificationUrlChangedRef.current = true
+      replaced = Number(body.replaced ?? 0) + Number(body.updatedWorkflow ?? 0)
+      if (body.updated > 0 || replaced > 0) verificationUrlChangedRef.current = true
     }
 
     setVerificationProgress((current) => {
@@ -303,6 +307,7 @@ export function PurchasingUrlCollector() {
         unknown += 1
         issues.unshift(`[확인 필요] ${itemLabel || message.url}: ${message.message || '정상 열림 여부 확인 필요'}`)
       }
+      if (replaced > 0) issues.unshift(`[발주 URL로 갱신] ${itemLabel}: ${replaced}건 반영`)
 
       return {
         ...current,
@@ -538,6 +543,7 @@ export function PurchasingUrlCollector() {
     verificationUrlChangedRef.current = false
     setVerificationProgress({ ...EMPTY_VERIFICATION_PROGRESS, message: '검증할 구매 URL을 확인하고 있습니다.' })
     try {
+      await syncSavedPurchaseUrls()
       const response = await fetch('/api/purchasing/purchase-url-verification?limit=2000', {
         cache: 'no-store',
       })
@@ -571,6 +577,28 @@ export function PurchasingUrlCollector() {
     }
   }
 
+  const syncSavedPurchaseUrls = async () => {
+    const response = await fetch('/api/purchasing/purchase-url-verification', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync' }),
+    })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body.error ?? '발주 URL을 연동하지 못했습니다.')
+    if (body.updatedProducts > 0 || body.updatedWorkflow > 0) {
+      router.refresh()
+      onUrlsChanged?.()
+    }
+    return body as { updatedProducts: number; updatedWorkflow: number }
+  }
+
+  const syncPurchaseUrls = async () => {
+    setSyncing(true)
+    try {
+      const result = await syncSavedPurchaseUrls()
+      toast.success(`발주 URL 연동 완료 · 품목 ${result.updatedProducts}건 · 상품관리 ${result.updatedWorkflow}건`)
+    } catch (error) { toast.error(error instanceof Error ? error.message : '발주 URL 연동 실패') }
+    finally { setSyncing(false) }
+  }
+
   const cancelVerification = () => {
     const runId = verificationRunIdRef.current
     if (!runId) return
@@ -596,6 +624,10 @@ export function PurchasingUrlCollector() {
   return (
     <div className="flex max-w-2xl flex-col items-end gap-2">
       <div className="flex flex-wrap items-center justify-end gap-2">
+      <button type="button" onClick={() => void syncPurchaseUrls()} disabled={syncing || running || verificationRunning}
+        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium disabled:opacity-50">
+        {syncing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}발주 URL 연동
+      </button>
         {SHOW_COLLECTION_CONTROLS ? (
           <>
             <button
@@ -625,7 +657,7 @@ export function PurchasingUrlCollector() {
         <button
           type="button"
           onClick={() => void startVerification()}
-          disabled={running || verificationRunning}
+          disabled={syncing || running || verificationRunning}
           className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
         >
           {verificationRunning

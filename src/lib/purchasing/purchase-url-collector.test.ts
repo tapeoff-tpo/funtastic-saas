@@ -27,6 +27,10 @@ describe('canonicalize1688OfferUrl', () => {
 })
 
 describe('resolvePurchaseUrlAssignments', () => {
+  it('does not assign one collected link to unrelated product groups', () => {
+    expect(resolvePurchaseUrlAssignments([products[0]!, { ...products[1]!, sku: '223344-0001', productName: '다른 상품' }],
+      ['https://detail.1688.com/offer/953220387690.html']).status).toBe('ambiguous')
+  })
   it('assigns one exact offer URL to every missing variant in the order', () => {
     expect(resolvePurchaseUrlAssignments(products, [
       'https://detail.1688.com/offer/953220387690.html?spm=test',

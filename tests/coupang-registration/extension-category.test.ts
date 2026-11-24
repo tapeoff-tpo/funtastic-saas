@@ -10,13 +10,13 @@ const channel = 'funtastic-coupang-registration'
 const sender = { tab: { id: 1 }, url: 'https://funtastic-saas-vercel.vercel.app/operations/coupang-registration' }
 const hubTab = { id: 19, url: 'https://supplier.coupang.com/qvt/registration', status: 'complete' }
 type Listener = (message: unknown, sender: unknown, respond: (value: unknown) => void) => void
-function worker(options: { tabs?: object[]; get?: () => Promise<object>; content?: (id: number, message: object) => Promise<unknown> } = {}) {
+function worker(options: { tabs?: object[]; get?: (id: number) => Promise<object>; content?: (id: number, message: object) => Promise<unknown> } = {}) {
   let listener: Listener = () => {}
   const chrome = {
     storage: { local: { get: vi.fn(async () => ({})), set: vi.fn() } },
     tabs: {
       query: vi.fn(async () => options.tabs ?? [hubTab]), create: vi.fn(async () => ({ id: 19 })),
-      get: vi.fn(options.get ?? (async () => hubTab)), update: vi.fn(),
+      get: vi.fn(options.get ?? (async (id: number) => ({ ...hubTab, id }))), update: vi.fn(), reload: vi.fn(),
       sendMessage: vi.fn(options.content ?? (async () => ({ ok: true, categories: [] }))), onUpdated: { addListener: vi.fn() },
     },
     alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
@@ -38,6 +38,56 @@ describe('Supplier category worker routing', () => {
     expect(instance.chrome.tabs.update).not.toHaveBeenCalled()
     expect(instance.chrome.storage.local.get).not.toHaveBeenCalled()
     expect(await instance.send({ type: 'PING' })).toEqual({ ok: true, version: '1.1.0', supportsCategories: true })
+  })
+  it.each([
+    { type: 'CATEGORY_SEARCH', queries: ['선반'] },
+    { type: 'CATEGORY_TEMPLATE', categoryId: '1899' },
+  ])('retries $type once in a fresh inactive tab when the old receiver is absent', async command => {
+    const instance = worker({ content: async id => {
+      if (id === 19) throw new Error('Could not establish connection. Receiving end does not exist.')
+      return { ok: true, recovered: true }
+    } })
+    instance.chrome.tabs.create.mockResolvedValue({ id: 20 })
+    expect(await instance.send(command)).toEqual({ ok: true, recovered: true })
+    expect(instance.chrome.tabs.sendMessage.mock.calls).toEqual([[19, { channel, ...command }], [20, { channel, ...command }]])
+    expect(instance.chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({ url: hubTab.url, active: false })
+    expect(instance.chrome.tabs.query).toHaveBeenCalledTimes(1)
+    expect(instance.chrome.tabs.get.mock.calls).toEqual([[19], [20]])
+    expect(instance.chrome.tabs.update).not.toHaveBeenCalled()
+    expect(instance.chrome.tabs.reload).not.toHaveBeenCalled()
+    expect(instance.chrome.storage.local.get).not.toHaveBeenCalled()
+    expect(instance.chrome.storage.local.set).not.toHaveBeenCalled()
+    expect(instance.chrome.alarms.create).not.toHaveBeenCalled()
+  })
+  it.each([
+    'The message port closed before a response was received.',
+    'No tab with id: 19.',
+    'Extension context invalidated.',
+  ])('does not open a fresh tab for another messaging error: %s', async error => {
+    const instance = worker({ content: async () => { throw new Error(error) } })
+    expect(await instance.send({ type: 'CATEGORY_SEARCH', queries: ['선반'] })).toEqual({ ok: false, error })
+    expect(instance.chrome.tabs.sendMessage).toHaveBeenCalledTimes(1)
+    expect(instance.chrome.tabs.create).not.toHaveBeenCalled()
+    expect(instance.chrome.tabs.update).not.toHaveBeenCalled()
+    expect(instance.chrome.tabs.reload).not.toHaveBeenCalled()
+  })
+  it('does not retry a Hub application error or malformed response', async () => {
+    for (const response of [{ ok: false, error: '서플라이어허브 창에서 로그인해주세요.' }, undefined]) {
+      const instance = worker({ content: async () => response })
+      expect(await instance.send({ type: 'CATEGORY_SEARCH', queries: ['선반'] })).toMatchObject({ ok: false })
+      expect(instance.chrome.tabs.sendMessage).toHaveBeenCalledTimes(1)
+      expect(instance.chrome.tabs.create).not.toHaveBeenCalled()
+    }
+  })
+  it('stops after one fresh-tab retry and explains how to restore a missing receiver', async () => {
+    const instance = worker({ content: async () => { throw new Error('Could not establish connection. Receiving end does not exist.') } })
+    instance.chrome.tabs.create.mockResolvedValue({ id: 20 })
+    expect(await instance.send({ type: 'CATEGORY_SEARCH', queries: ['선반'] })).toMatchObject({ ok: false, error: expect.stringContaining('사이트 접근이 허용되어 있는지 확인') })
+    expect(instance.chrome.tabs.sendMessage).toHaveBeenCalledTimes(2)
+    expect(instance.chrome.tabs.create).toHaveBeenCalledTimes(1)
+    expect(instance.chrome.tabs.query).toHaveBeenCalledTimes(1)
+    expect(instance.chrome.tabs.update).not.toHaveBeenCalled()
+    expect(instance.chrome.tabs.reload).not.toHaveBeenCalled()
   })
   it('rejects foreign origins and invalid category input before opening any tab', async () => {
     const instance = worker()
@@ -71,6 +121,8 @@ describe('Supplier category worker routing', () => {
     const pending = stalled.send({ type: 'CATEGORY_SEARCH', queries: ['행거'] })
     await vi.advanceTimersByTimeAsync(70001)
     expect(await pending).toMatchObject({ ok: false, error: expect.stringContaining('시간이 초과') })
+    expect(stalled.chrome.tabs.sendMessage).toHaveBeenCalledTimes(1)
+    expect(stalled.chrome.tabs.create).not.toHaveBeenCalled()
   })
 })
 

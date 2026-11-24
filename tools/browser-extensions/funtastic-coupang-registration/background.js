@@ -126,8 +126,8 @@ function categoryDeadline(promise, milliseconds, message) {
   let timer
   return Promise.race([promise, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds) })]).finally(() => clearTimeout(timer))
 }
-async function categoryTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://supplier.coupang.com/*' })
+async function categoryTab(fresh = false) {
+  const tabs = fresh ? [] : await chrome.tabs.query({ url: 'https://supplier.coupang.com/*' })
   const existing = tabs.find(tab => { try { const url = new URL(tab.url); return url.origin === 'https://supplier.coupang.com' && url.pathname === '/qvt/registration' } catch { return false } })
   const selected = existing || await chrome.tabs.create({ url: HUB, active: false })
   if (!Number.isInteger(selected.id)) throw new Error('서플라이어허브 창을 열지 못했습니다.')
@@ -144,11 +144,25 @@ async function categoryTab() {
   }
   throw new Error('서플라이어허브 화면 연결 시간이 초과되었습니다. 창을 확인한 뒤 다시 시도해주세요.')
 }
+function categoryReceiverMissing(error) {
+  return /^Could not establish connection\. Receiving end does not exist\.?$/.test(String(error?.message || error))
+}
 async function categoryCommand(message, sender) {
   if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
   const args = categoryArguments(message)
   const tabId = await categoryTab()
-  const response = await categoryDeadline(chrome.tabs.sendMessage(tabId, { channel: CHANNEL, type: message.type, ...args }), 70000, '쿠팡 카테고리 응답 시간이 초과되었습니다. 다시 시도해주세요.')
+  const send = id => categoryDeadline(chrome.tabs.sendMessage(id, { channel: CHANNEL, type: message.type, ...args }), 70000, '쿠팡 카테고리 응답 시간이 초과되었습니다. 다시 시도해주세요.')
+  let response
+  try { response = await send(tabId) } catch (error) {
+    if (!categoryReceiverMissing(error)) throw error
+    // Reloading the extension leaves existing Hub tabs without a receiver. Keep
+    // those user tabs untouched and retry this read-only command in one fresh tab.
+    const freshTabId = await categoryTab(true)
+    try { response = await send(freshTabId) } catch (retryError) {
+      if (!categoryReceiverMissing(retryError)) throw retryError
+      throw new Error('새 서플라이어허브 탭에서도 쿠팡 등록 확장에 연결하지 못했습니다. Chrome에서 확장이 켜져 있고 서플라이어허브 사이트 접근이 허용되어 있는지 확인한 뒤 새 허브 탭을 새로고침하고 다시 검색해주세요.')
+    }
+  }
   if (!response || typeof response.ok !== 'boolean') throw new Error('쿠팡 등록 확장을 새로고침한 뒤 다시 시도해주세요.')
   return response
 }

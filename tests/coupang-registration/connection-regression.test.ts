@@ -33,7 +33,7 @@ describe('Supplier bridge SPA connection regression', () => {
     const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'))
     const matches = manifest.content_scripts.find((script: { js: string[] }) => script.js.includes('saas-bridge.js')).matches
     expect(matches).toContain(origin + '/*')
-    expect(manifest.version).toBe('1.1.2')
+    expect(manifest.version).toBe('1.1.3')
     const instance = bridge()
     instance.send({ type: 'PING' })
     expect(instance.chrome.runtime.sendMessage).not.toHaveBeenCalled()

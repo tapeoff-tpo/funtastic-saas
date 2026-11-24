@@ -26,8 +26,6 @@ import { ChinaShipmentStockTable } from './china-shipment-stock-table'
 import { SavedBoxContentsPanel } from './saved-box-contents-panel'
 import { ShipmentLabelMenu } from './shipment-label-menu'
 import { ChinaShipmentExcelDialog } from './china-shipment-excel-dialog'
-import { useMenuAccess } from '@/components/layout/menu-access-provider'
-import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { ChinaShipmentWarehouseDialog, type ChinaOutboundWarehouseView } from './china-shipment-warehouse-dialog'
 import { ChinaWorkGuardProvider, useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 import {
@@ -696,7 +694,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
-  const canOpenImportDocuments = canUseMenu(useMenuAccess(), '/purchasing/import-documents')
 
 
   const [savedBoxFilter, setSavedBoxFilter] = useState<SavedBoxFilter>('saved')
@@ -763,20 +760,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
           </div>
           {shipment.memo ? <p className="mt-1 text-xs text-muted-foreground">메모: {shipment.memo}</p> : null}
         </div>
-        <div className="flex max-w-full flex-wrap items-center gap-3">
-          <div role="group" aria-label="쉽먼트 출력" className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-            <span className="mr-1 text-xs font-semibold text-blue-800">쉽먼트 출력</span>
-            <ShipmentLabelMenu shipmentId={shipment.id} kind="boxes" enabled={canDownloadShipmentLabels} disabledReason="박스분할을 저장한 박스가 하나 이상 있어야 일괄 다운로드할 수 있습니다." />
-            <ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="상품이 담긴 박스를 파렛트에 배정한 뒤 다운로드할 수 있습니다." />
-          </div>
-          <WorkbookActions shipmentId={shipment.id} editable={editable} />
-          <div role="group" aria-label="출고 문서" className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
-            <span className="mr-1 text-xs font-semibold text-violet-800">출고 문서</span>
-            {canOpenImportDocuments && <button type="button" onClick={() => guard.requestNavigation(() => router.push(`/purchasing/import-documents?shipment=${encodeURIComponent(shipment.id)}`))}
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
-            <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a>
-          </div>
-        </div>
+
       </div>
 
       <nav className="grid gap-1 rounded-lg border bg-muted/20 p-1 sm:grid-cols-2 xl:grid-cols-4" aria-label="중국출고 작업 단계">
@@ -795,6 +779,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'boxes' ? <section className="space-y-3">
+        <div className="flex justify-end"><ShipmentLabelMenu shipmentId={shipment.id} kind="boxes" enabled={canDownloadShipmentLabels} disabledReason="박스분할을 먼저 저장해주세요." /></div>
+
         <div className="flex items-center gap-2">
           <h3 className="font-semibold">2단계 · 저장된 박스현황</h3>
           <StageHelp label="박스현황 안내">
@@ -809,6 +795,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
+        <div className="flex flex-wrap justify-end gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/pallet-worksheet`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm">파레트 배정 작업지 인쇄 · 30박스씩</a><ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="파레트에 박스를 배정해주세요." /></div>
+
         <div className="flex items-center gap-2">
           <h3 className="font-semibold">3단계 · 파렛트 배정</h3>
           <StageHelp label="파렛트 배정 안내" warning={hasIncompleteBoxSplit || hasUnassignedPalletBox}>
@@ -827,6 +815,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'summary' ? <section className="space-y-4">
+        <div className="flex justify-end"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm"><Download className="size-4" />적재현황 엑셀</a></div>
+
         <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2">
           <h3 className="font-semibold">4단계 · 파렛트 최종 리스트</h3>
           <StageHelp label="최종 리스트 안내" warning={hasIncompleteBoxSplit || hasUnassignedPalletBox}>
@@ -1495,9 +1485,8 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
 
   return <section className="overflow-hidden rounded-lg border">
     <p className="border-b px-4 py-2 text-xs text-muted-foreground">파렛트는 숫자로 입력하세요. 공란이나 문자는 박스로 저장됩니다.</p>
-    <div className="overflow-x-auto"><table className="min-w-[1350px] w-full table-fixed border-collapse text-sm"><colgroup>{[36, 64, 106, 220, 130, 80, 80, 220, 90, 100, 110].map((width, index) => <col key={index} style={{ width }} />)}</colgroup><thead className="bg-muted/30 text-xs"><tr><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium"><input type="checkbox" aria-label="표시된 파렛트 배정 전체 선택" checked={allSelected} onChange={(event) => selectAll(event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.size} className="size-3.5 accent-primary" /></th><th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">박스번호</th>{['품목코드', '상품명', '옵션', '적재수량'].map((label) => <th key={label} className="whitespace-nowrap px-2 py-1.5 text-left font-medium">{label}</th>)}<th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">총수량</th><th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">규격 가로×세로×높이(cm)</th><th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">CBM</th><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium">파렛트번호</th><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium">관리</th></tr></thead><tbody>{sortedBoxes.map((box) => {
+    <div className="overflow-x-auto"><table className="min-w-[1350px] w-full table-fixed border-collapse text-sm"><colgroup>{[36, 64, 106, 220, 130, 80, 220, 90, 100, 110].map((width, index) => <col key={index} style={{ width }} />)}</colgroup><thead className="bg-muted/30 text-xs"><tr><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium"><input type="checkbox" aria-label="표시된 파렛트 배정 전체 선택" checked={allSelected} onChange={(event) => selectAll(event.target.checked)} disabled={!editable || isPending || guard.busy || !selectableBoxNos.size} className="size-3.5 accent-primary" /></th><th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">박스번호</th>{['품목코드', '상품명', '옵션', '수량'].map((label) => <th key={label} className="whitespace-nowrap px-2 py-1.5 text-left font-medium">{label}</th>)}<th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">규격 가로×세로×높이(cm)</th><th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">CBM</th><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium">파렛트번호</th><th className="whitespace-nowrap px-2 py-1.5 text-center font-medium">관리</th></tr></thead><tbody>{sortedBoxes.map((box) => {
       const boxItems = boxItemsByBox.get(box.id) ?? []
-      const quantity = boxItems.reduce((total, item) => total + item.quantity, 0)
       const products = boxItems.flatMap((boxItem) => {
         const item = itemById.get(boxItem.shipmentItemId)
         return item ? [{ id: boxItem.id, sku: item.sku, name: item.productName, option: item.optionName, identity: `${item.sku} ${item.productName}${item.optionName ? ` · ${item.optionName}` : ''}${item.chineseProductName ? ` / ${item.chineseProductName}` : ''}`, quantity: boxItem.quantity }] : []
@@ -1508,7 +1497,7 @@ function PalletAssignmentPanel({ shipmentId, boxes, boxItemsByBox, itemById, pal
         {products.map((product) => <div key={product.id} className="h-6 truncate leading-6" data-no-translate title={column === 'name' ? product.name : column === 'option' ? product.option ?? '' : undefined}>
           {column === 'sku' ? <ItemCodeCell code={product.sku} /> : column === 'quantity' ? `${product.quantity.toLocaleString('ko-KR')}개` : product[column] || '—'}
         </div>)}
-      </td>)}<td className="px-2 py-1 text-right tabular-nums">{quantity.toLocaleString('ko-KR')}개</td><td className="px-2 py-1 text-right text-xs">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-2 py-1 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="whitespace-nowrap px-2 py-1.5 text-center"><input aria-label={`박스 ${box.boxNo} 파렛트 번호`} value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!canEditBox(box) || isPending || guard.busy} className={`${compactInputClass} mx-auto block max-w-24 text-center enabled:border-blue-200 enabled:bg-blue-50 focus:border-blue-500 disabled:border-transparent disabled:bg-muted/30 disabled:text-muted-foreground`} placeholder="박스" title="숫자만 파렛트 번호로 저장합니다. 공란·문자는 박스로 저장합니다." /></td><td className="whitespace-nowrap px-2 py-1.5 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 파렛트 수정`} disabled={!canEditBox(box) || isPending || guard.busy || !changed} onClick={() => void guard.runTask(() => saveDraft([box.boxNo]))} className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><Check className="size-3.5" />저장하기</button></td></tr>
+      </td>)}<td className="px-2 py-1 text-right text-xs">{formatChinaOutboundBoxDimensions(box) ?? '미입력'}</td><td className="px-2 py-1 text-right tabular-nums">{formatChinaOutboundCbm(cbm) ?? '-'}</td><td className="whitespace-nowrap px-2 py-1.5 text-center"><input aria-label={`박스 ${box.boxNo} 파렛트 번호`} value={palletNumbers[box.boxNo] ?? ''} onChange={(event) => setPalletNumbers((current) => ({ ...current, [box.boxNo]: event.target.value }))} disabled={!canEditBox(box) || isPending || guard.busy} className={`${compactInputClass} mx-auto block max-w-24 text-center enabled:border-blue-200 enabled:bg-blue-50 focus:border-blue-500 disabled:border-transparent disabled:bg-muted/30 disabled:text-muted-foreground`} placeholder="박스" title="숫자만 파렛트 번호로 저장합니다. 공란·문자는 박스로 저장합니다." /></td><td className="whitespace-nowrap px-2 py-1.5 text-center"><button type="button" aria-label={`박스 ${box.boxNo} 파렛트 수정`} disabled={!canEditBox(box) || isPending || guard.busy || !changed} onClick={() => void guard.runTask(() => saveDraft([box.boxNo]))} className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><Check className="size-3.5" />저장하기</button></td></tr>
     })}</tbody></table></div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><span className="text-xs">선택 {selected.size.toLocaleString('ko-KR')}개</span><button type="button" aria-label="파렛트 배정 선택 저장" disabled={!editable || isPending || guard.busy || !selected.size} onClick={() => void guard.runTask(() => saveDraft([...selected]))} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Check className="size-3.5" /> 선택한 박스 배정 저장</button><button type="button" aria-label="파렛트 배정 전체 저장" disabled={!editable || isPending || guard.busy} onClick={() => void guard.runTask(() => saveDraft())} className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Check className="size-3.5" /> 파렛트 배정 저장</button></div></div>
   </section>

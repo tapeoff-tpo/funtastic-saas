@@ -776,7 +776,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
               className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"><FileSpreadsheet className="size-4" />인보이스·패킹리스트</button>}
             <a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/export`} className="inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-100 px-3 text-sm font-medium text-violet-950 transition-colors hover:bg-violet-200"><Download className="size-4" />적재현황 엑셀</a>
           </div>
-          {shipment.status === 'ready' || (editable && stage === 'summary') ? <button type="button" disabled={isPending || cannotDispatch} onClick={requestDispatch} className="ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"><Send className="size-4" /> 출고완료</button> : null}
         </div>
       </div>
 
@@ -841,6 +840,8 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
           </StageHelp>
         </div></div>
         {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
+        {(editable || shipment.status === 'ready') && <div className="flex items-center justify-between gap-4 border-t pt-4"><p className="text-xs text-muted-foreground">적재 내역과 서류를 모두 확인한 뒤 마지막에 출고완료를 눌러주세요. 재고가 차감됩니다.</p><button type="button" disabled={isPending || guard.busy || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60"><Send className="size-4" />출고완료</button></div>}
+
       </section> : null}
 
     </section>

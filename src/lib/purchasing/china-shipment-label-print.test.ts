@@ -39,4 +39,16 @@ describe('direct shipment label printing', () => {
     expect(pallets.querySelectorAll('.page')).toHaveLength(1)
     expect(pallets.body.textContent).toContain('TAPEOFF (P1)')
   })
+  it('prints each carton on 180 by 100 mm stock while retaining A4 pallet labels', () => {
+    const html = renderChinaShipmentLabelPrint(detail, { boxIds: ['box'], includePalletLabels: false }, 'n')
+    const document = new DOMParser().parseFromString(html, 'text/html')
+    expect(document.querySelectorAll('.box-label')).toHaveLength(1)
+    expect(document.querySelectorAll('.pallet-label')).toHaveLength(0)
+    expect(html).toContain('@page boxLabel{size:180mm 100mm;margin:0}')
+    expect(html).toContain('.box-label{page:boxLabel;width:180mm;height:100mm;')
+    const mixed = new DOMParser().parseFromString(renderChinaShipmentLabelPrint(detail, {}, 'n'), 'text/html')
+    expect(mixed.querySelectorAll('.box-label')).toHaveLength(2)
+    expect(mixed.querySelectorAll('.pallet-label')).toHaveLength(1)
+  })
+
 })

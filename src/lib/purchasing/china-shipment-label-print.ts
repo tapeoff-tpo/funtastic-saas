@@ -1,5 +1,5 @@
 import type ExcelJS from 'exceljs'
-import { createChinaOutboundShipmentLabelWorkbook, type ChinaOutboundShipmentLabelDetail, type ChinaOutboundShipmentLabelWorkbookOptions } from './china-outbound-shipment-labels'
+import { CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS, createChinaOutboundShipmentLabelWorkbook, type ChinaOutboundShipmentLabelDetail, type ChinaOutboundShipmentLabelWorkbookOptions } from './china-outbound-shipment-labels'
 
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 const lines = (value: unknown) => escapeHtml(value).replace(/\r?\n/g, '<br>')
@@ -42,7 +42,7 @@ function labelTable(sheet: ExcelJS.Worksheet) {
     }
     return `<tr style="height:${row.height ?? 20}pt">${cells}</tr>`
   }).join('')
-  return `<section class="page" aria-label="${escapeHtml(sheet.name)}"><div class="canvas" style="width:${width}px;height:${height}px"><table style="width:${width}px;height:${height}px"><colgroup>${columns}</colgroup><tbody>${rows}</tbody></table></div></section>`
+  return `<section class="page ${sheet.name.startsWith(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes) ? 'box-label' : 'pallet-label'}" aria-label="${escapeHtml(sheet.name)}"><div class="canvas" style="width:${width}px;height:${height}px"><table style="width:${width}px;height:${height}px"><colgroup>${columns}</colgroup><tbody>${rows}</tbody></table></div></section>`
 }
 
 /** Render the exact label workbook, including its merged cells, Korean/Chinese
@@ -50,9 +50,9 @@ function labelTable(sheet: ExcelJS.Worksheet) {
 export function renderChinaShipmentLabelPrint(detail: ChinaOutboundShipmentLabelDetail, options: ChinaOutboundShipmentLabelWorkbookOptions, nonce: string) {
   const workbook = createChinaOutboundShipmentLabelWorkbook(detail, options)
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(detail.shipment.shipmentNo)} · 쉽먼트 / 货运标签</title><style>
-@page{size:A4 landscape;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#e5e7eb;color:#000}.toolbar{padding:12px;text-align:center}.toolbar button{padding:8px 20px;cursor:pointer}.page{position:relative;width:287mm;height:200mm;margin:12px auto;background:white;overflow:hidden;break-after:page;page-break-after:always}.page:last-of-type{break-after:auto;page-break-after:auto}.canvas{position:absolute;transform-origin:top left}table{border-collapse:collapse;table-layout:fixed}td{padding:4px;vertical-align:middle;overflow-wrap:anywhere;white-space:normal;font-size:14pt}@media print{body{background:white}.toolbar{display:none}.page{margin:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+@page{size:A4 landscape;margin:5mm}@page boxLabel{size:180mm 100mm;margin:0}@page palletLabel{size:A4 landscape;margin:5mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#e5e7eb;color:#000}.toolbar{padding:12px;text-align:center}.toolbar button{padding:8px 20px;cursor:pointer}.page{position:relative;width:287mm;height:200mm;margin:12px auto;background:white;overflow:hidden;break-after:page;page-break-after:always}.box-label{page:boxLabel;width:180mm;height:100mm;padding:2mm}.pallet-label{page:palletLabel}.page:last-of-type{break-after:auto;page-break-after:auto}.canvas{position:absolute;transform-origin:top left}table{border-collapse:collapse;table-layout:fixed}td{padding:4px;vertical-align:middle;overflow-wrap:anywhere;white-space:normal;font-size:14pt}@media print{body{background:white}.toolbar{display:none}.page{margin:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 </style></head><body><div class="toolbar"><button id="print">인쇄 / 打印</button></div>${workbook.worksheets.map(labelTable).join('')}<script nonce="${escapeHtml(nonce)}">
-function fit(){document.querySelectorAll('.page').forEach(function(page){const canvas=page.querySelector('.canvas');canvas.style.transform='none';const table=canvas.querySelector('table');canvas.style.width=table.offsetWidth+'px';canvas.style.height=table.offsetHeight+'px';const scale=Math.min((page.clientWidth-1)/canvas.offsetWidth,(page.clientHeight-1)/canvas.offsetHeight);canvas.style.transform='scale('+scale+')';canvas.style.left=(page.clientWidth-canvas.offsetWidth*scale)/2+'px';canvas.style.top=(page.clientHeight-canvas.offsetHeight*scale)/2+'px'})}
+function fit(){document.querySelectorAll('.page').forEach(function(page){const canvas=page.querySelector('.canvas');canvas.style.transform='none';const table=canvas.querySelector('table');canvas.style.width=table.offsetWidth+'px';canvas.style.height=table.offsetHeight+'px';const inset=page.classList.contains('box-label')?16:1;const scale=Math.min((page.clientWidth-inset)/canvas.offsetWidth,(page.clientHeight-inset)/canvas.offsetHeight);canvas.style.transform='scale('+scale+')';canvas.style.left=(page.clientWidth-canvas.offsetWidth*scale)/2+'px';canvas.style.top=(page.clientHeight-canvas.offsetHeight*scale)/2+'px'})}
 document.getElementById('print').addEventListener('click',function(){fit();window.print()});window.addEventListener('beforeprint',fit);window.addEventListener('resize',fit);window.addEventListener('load',async function(){await document.fonts.ready;fit();window.print()});
 </script></body></html>`
 }

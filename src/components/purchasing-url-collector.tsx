@@ -692,6 +692,8 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         </span>
       </div>
 
+      <p className="text-xs text-muted-foreground">단종 품목은 URL 수집·검증 대상에서 자동 제외됩니다.</p>
+
       {SHOW_COLLECTION_CONTROLS && progress.total > 0 ? (
         <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">

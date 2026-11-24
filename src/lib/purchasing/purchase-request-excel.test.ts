@@ -111,6 +111,20 @@ describe('canonicalPurchaseRequestExcelHeader', () => {
 })
 
 describe('exportPurchaseRequestsExcel', () => {
+  it('재고와 진행 발주를 뺀 판매 추세만 추천근거에 표시한다', async () => {
+    mocks.rows = [{
+      id: 'decreasing', status: 'requested', sku: '100003-0001', productName: '테스트', requestedQuantity: 10,
+      rawData: { source: 'auto_purchase_recommendation', salesTrend: 'decreasing', pipelineQuantity: 30 },
+    }]
+    mocks.metrics = new Map()
+    const bytes = await exportPurchaseRequestsExcel({ userId: 'workspace', status: 'requested' })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    const sheet = workbook.getWorksheet('발주')!
+    expect(sheet.getCell('B2').value).toBe('판매 감소 · 3개월 평균 유지')
+    expect(sheet.getRow(2).height).toBe(20)
+  })
+
   it('발주검토 외 엑셀의 기존 열 순서는 유지한다', async () => {
     mocks.rows = []
     mocks.metrics = new Map()
@@ -147,8 +161,9 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getCell('B1').value).toBe('추천근거')
     expect(sheet.getCell('A2').value).toBe('review-id')
     const basis = String(sheet.getCell('B2').value)
-    expect(basis).toContain('총 현재고: 91')
-    expect(basis).toContain('목표수량: 128')
+    expect(basis).not.toContain('총 현재고')
+    expect(basis).not.toContain('목표수량')
+    expect(basis).not.toContain('최근 발주수량')
     expect(basis).toContain('판매 증가 · 평균 50% + 당월 50% (65.5)')
     expect(basis).toContain('단일 주문 급증 80개 / 1건 · 평균 제외')
     expect(basis).toContain('MOQ 제품 · 최소 200개 · 보정 20 → 200')
@@ -314,5 +329,6 @@ describe('exportPurchaseRequestsExcel', () => {
     expect(sheet.getRow(2).getCell(quantityColumn).value).toBe(20)
     expect(sheet.getRow(3).getCell(statusColumn).value).toBe('발주불필요')
     expect(sheet.getRow(3).getCell(quantityColumn).value).toBe(0)
+    expect(sheet.getCell('B3').value ?? '').toBe('')
   })
 })

@@ -160,10 +160,9 @@ export async function exportPurchaseRequestsExcel(input: {
       exchangeRateKrw: row.costExchangeRateKrw ?? exchangeRateReference.rate,
     })
     const basis = reviewRow ? getRecommendationBasis(row.rawData, reviewMetrics) : null
-    const basisLines = basis ? [
-      ...[0, 3, 6, 9].map((start) => basis.items.slice(start, start + 3).map(({ label, value }) => `${label}: ${value}`).join(' · ')),
-      ...basis.notes.map(({ label }) => label),
-    ] : []
+    const basisLines = basis?.notes
+      .filter(({ label }) => !label.startsWith('진행 중 발주 '))
+      .map(({ label }) => label) ?? []
     const excelRow = sheet.addRow({
       ID: row.id ?? '',
       '추천근거': basisLines.join('\n'),
@@ -209,7 +208,11 @@ export async function exportPurchaseRequestsExcel(input: {
     })
     if (reviewRow && basisLines.length > 0) {
       excelRow.getCell('추천근거').alignment = { vertical: 'middle', wrapText: true }
-      excelRow.height = Math.max(54, basisLines.length * 16)
+      const estimatedLines = basisLines.reduce((total, line) => {
+        const width = Array.from(line).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
+        return total + Math.max(1, Math.ceil(width / 70))
+      }, 0)
+      excelRow.height = Math.max(20, estimatedLines * 16)
     }
   }
 

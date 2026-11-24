@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CoupangRegistrationWorkbench } from '@/app/(auth)/operations/coupang-registration/workbench'
 import { blankDraft, confirmPricing, createRegistrationRow, type RegistrationDraft, type RegistrationRow } from '@/lib/coupang-registration/model'
-import { pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
+import { getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock('@/lib/coupang-registration/supplier-bridge', () => ({ checkSupplierRegistration: vi.fn(async () => ({ started: true })), pingSupplierExtension: vi.fn(async () => ({ connected: true })), startSupplierRegistration: vi.fn(async () => ({ started: true })), subscribeSupplierRegistration: vi.fn(() => () => undefined) }))
+vi.mock('@/lib/coupang-registration/supplier-bridge', () => ({ checkSupplierRegistration: vi.fn(async () => ({ started: true })), pingSupplierExtension: vi.fn(async () => ({ connected: true })), searchSupplierCategories: vi.fn(async () => []), getSupplierCategoryTemplate: vi.fn(), startSupplierRegistration: vi.fn(async () => ({ started: true })), subscribeSupplierRegistration: vi.fn(() => () => undefined) }))
 const source = { code: '1471', name: '마미백 플러스', price: 15000, status: 'SELLING', thumbnails: ['https://cdn.tapeoff.kr/front.jpg'], detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ name: '베이지', addPrice: 0 }], notice: [], costCandidates: [{ sku: '112361-0001', name: '마미백 플러스', optionName: '베이지', costPrice: 10000 }] }
 const second = {
   code: '1472', name: '루멘 철제 사이드 테이블', price: 20000, status: 'SELLING', thumbnails: [], detailImages: [],
@@ -315,6 +315,46 @@ describe('registration pricing workbench', () => {
     })
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/templates'))).toHaveLength(1)
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/templates?id='))).toHaveLength(1)
+  })
+
+  it('applies a source-category recommendation only to its row while preserving saved product and price data', async () => {
+    const row = confirmPricing({
+      ...createRegistrationRow({ ...source, code: '938', name: '바뜨 옷장 레일행거' }, '베이지'),
+      name: '바뜨 옷장 레일행거 30B', priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500,
+      label: '내 라벨.jpg', fields: { 브랜드: '직접입력 브랜드', 제조국: '대한민국' },
+      productMaster: { itemId: 'master-938', match: 'sku', noticeSize: '', noticeWeight: '', noticeMaterial: '스테인리스', noticeManufacturer: '', noticeCountry: '중국' },
+    })
+    const untouched = confirmPricing({ ...createRegistrationRow(second, '블랙'), priceMode: 'manual', manualSupplyPrice: 21999, saleMode: 'manual', manualSalePrice: 37999 })
+    const existing = { ...informationTemplate(blankDraft()).templates[0], id: 'existing-template' }
+    const template = { ...informationTemplate(blankDraft()).templates[0], id: 'official-template', sheets: [{ name: 'QF_1899_가구_수납가구_행거', columns: informationTemplate(blankDraft()).templates[0].sheets[0].columns }] }
+    const initial = { ...blankDraft(), name: '확정 가격과 라벨 보존', rows: [row, untouched], templates: [existing], labels: [{ name: '내 라벨.jpg', data: 'kept' }] }
+    const saved = mockSavedDraft(initial)
+    const fallback = vi.mocked(fetch)
+    const file = { name: '공식견적서.zip', data: 'UEs=' }
+    vi.mocked(pingSupplierExtension).mockResolvedValue({ connected: true, supportsCategories: true })
+    vi.mocked(searchSupplierCategories).mockResolvedValue([{ id: '1899', name: '행거', path: '가구/홈인테리어 > 가구 > 수납가구 > 행거', matchedQueries: ['행거'] }])
+    vi.mocked(getSupplierCategoryTemplate).mockResolvedValue(file)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/category-context?code=938')) return { ok: true, json: async () => ({ context: { sourceCode: '938', productName: '바뜨 옷장 레일행거', categoryName: '행거', categoryPath: '가구/인테리어 > 수납가구 > 행거', keywords: ['바지걸이행거'], queries: ['행거', '바뜨 옷장 레일행거', '바지걸이행거'] } }) }
+      if (url.endsWith('/category-template')) return { ok: true, json: async () => ({ template, rows: [createRegistrationRow(second, '예시상품')] }) }
+      return fallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: `${row.name} 등록정보 입력` }))
+    fireEvent.click(await screen.findByRole('button', { name: '이 분류 양식 연결' }))
+    expect(await screen.findByLabelText('브랜드 *')).toHaveValue('직접입력 브랜드')
+    expect(searchSupplierCategories).toHaveBeenCalledWith(['행거', '바뜨 옷장 레일행거', '바지걸이행거'])
+    expect(getSupplierCategoryTemplate).toHaveBeenCalledWith('1899')
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => {
+      const saves = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      const body = JSON.parse(String(saves.at(-1)![1]!.body))
+      expect(body).toMatchObject({ id: saved.id, revision: 1 })
+      expect(body.draft).toEqual({ ...initial, templates: [existing, template], rows: [{ ...row, templateId: template.id, sheetName: template.sheets[0].name, fields: { ...row.fields, 재질: '스테인리스', 소재: '스테인리스' }, defaultedFields: { 재질: '스테인리스', 소재: '스테인리스' } }, untouched] })
+      expect(body.draft.rows).toHaveLength(2)
+    })
   })
 
   it('connects a library choice before bulk applying it and skips duplicate files', async () => {

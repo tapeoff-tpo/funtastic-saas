@@ -112,12 +112,56 @@ async function fromSupplier(message, sender) {
   await persist(all)
   return { ok: true }
 }
+
+function categoryArguments(message) {
+  if (message.type === 'CATEGORY_SEARCH') {
+    if (!Array.isArray(message.queries) || !message.queries.length || message.queries.length > 6 || message.queries.some(query => typeof query !== 'string' || !query.trim() || query.trim().length > 200)) throw new Error('카테고리 검색어는 1~6개, 각 200자 이내로 입력해주세요.')
+    return { queries: [...new Set(message.queries.map(query => query.trim()))] }
+  }
+  const categoryId = String(message.categoryId ?? '')
+  if (!/^[1-9]\d*$/.test(categoryId) || !Number.isSafeInteger(Number(categoryId))) throw new Error('쿠팡 카테고리 ID를 확인해주세요.')
+  return { categoryId }
+}
+function categoryDeadline(promise, milliseconds, message) {
+  let timer
+  return Promise.race([promise, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds) })]).finally(() => clearTimeout(timer))
+}
+async function categoryTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://supplier.coupang.com/*' })
+  const existing = tabs.find(tab => { try { const url = new URL(tab.url); return url.origin === 'https://supplier.coupang.com' && url.pathname === '/qvt/registration' } catch { return false } })
+  const selected = existing || await chrome.tabs.create({ url: HUB, active: false })
+  if (!Number.isInteger(selected.id)) throw new Error('서플라이어허브 창을 열지 못했습니다.')
+  const started = Date.now()
+  while (Date.now() - started < 15000) {
+    const tab = await chrome.tabs.get(selected.id)
+    if (tab.status === 'complete') {
+      let url
+      try { url = new URL(tab.url) } catch { throw new Error('서플라이어허브 주소를 확인하지 못했습니다.') }
+      if (url.origin !== 'https://supplier.coupang.com' || /\/(?:login|signin)(?:\/|$)/i.test(url.pathname)) throw new Error('서플라이어허브 창에서 로그인한 뒤 다시 검색해주세요.')
+      return selected.id
+    }
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+  throw new Error('서플라이어허브 화면 연결 시간이 초과되었습니다. 창을 확인한 뒤 다시 시도해주세요.')
+}
+async function categoryCommand(message, sender) {
+  if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
+  const args = categoryArguments(message)
+  const tabId = await categoryTab()
+  const response = await categoryDeadline(chrome.tabs.sendMessage(tabId, { channel: CHANNEL, type: message.type, ...args }), 70000, '쿠팡 카테고리 응답 시간이 초과되었습니다. 다시 시도해주세요.')
+  if (!response || typeof response.ok !== 'boolean') throw new Error('쿠팡 등록 확장을 새로고침한 뒤 다시 시도해주세요.')
+  return response
+}
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.channel !== CHANNEL) return
+  if (['CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(message.type)) {
+    categoryCommand(message, sender).then(respond).catch(error => respond({ ok: false, error: error.message }))
+    return true
+  }
   exclusively(async () => {
     if (['PING', 'START', 'CHECK'].includes(message.type)) {
       if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
-      if (message.type === 'PING') return { ok: true, version: chrome.runtime.getManifest().version }
+      if (message.type === 'PING') return { ok: true, version: chrome.runtime.getManifest().version, supportsCategories: true }
       return openJob(message.job, sender, message.type === 'CHECK')
     }
     return fromSupplier(message, sender)

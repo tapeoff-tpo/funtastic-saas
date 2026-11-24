@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { applyProductMasterDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, createRegistrationRow, detailHtml, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import { checkSupplierRegistration, pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
+import { CategoryRecommendations } from './category-recommendations'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -216,6 +217,21 @@ export function CoupangRegistrationWorkbench() {
       if (!rowIds) setTemplateChoice(choice)
     })
   }
+  function connectRecommendedCategory(rowId: string, template: ConnectedTemplate, categoryId: string) {
+    const sheet = template.sheets.find((item) => item.name.startsWith(`QF_${categoryId}_`))
+    if (!sheet || !template.file) { toast.error('선택한 쿠팡 분류와 공식 양식이 일치하지 않습니다.'); return }
+    if (!draft.templates.some((item) => item.id === template.id) && draft.templates.length >= 6) { toast.error('작업당 카테고리 양식은 6개까지 연결할 수 있습니다. 새 작업으로 나눠주세요.'); return }
+    update((value) => {
+      const existing = value.templates.some((item) => item.id === template.id)
+      const target = value.rows.find((row) => row.id === rowId)
+      if (!target || submissionLocked(target) || !existing && value.templates.length >= 6) return value
+      return {
+        ...value,
+        templates: existing ? value.templates : [...value.templates, template],
+        rows: value.rows.map((row) => row.id === rowId ? applyProductMasterDefaults({ ...row, templateId: template.id, sheetName: sheet.name }) : row),
+      }
+    })
+  }
   async function importTemplates(files: FileList | null) {
     if (!files?.length) return
     const mode = templateImportMode.current
@@ -413,6 +429,7 @@ export function CoupangRegistrationWorkbench() {
   async function load(id: string) {
     if (!id || dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 저장된 작업을 불러올까요?')) return
     draftSession.current++
+    setActiveId('')
     await run('작업 불러오는 중', async () => {
       const response = await jsonRequest(`/drafts?id=${encodeURIComponent(id)}`)
       const payload: RegistrationDraft = response.payload
@@ -691,7 +708,7 @@ export function CoupangRegistrationWorkbench() {
       })}</tbody></table>{!visible.length && <div className="px-5 py-14 text-center text-sm text-muted-foreground">{stage === 'information' ? '가격설정을 완료한 상품이 이곳에 표시됩니다.' : '서플라이어허브에서 상품 검수가 완료된 상품이 이곳에 표시됩니다.'}</div>}</div>
     </section>}
     {active && stage === 'pricing' && <div ref={active.bundleComponents ? bundleEditor : undefined} className="scroll-mt-4"><PricingEditor key={active.id} row={active} draft={draft} onPatch={(patch) => patchRow(active.id, patch)} onClose={() => setActiveId('')} onAddComponent={() => setCatalogTarget({ bundleId: active.id })} /></div>}
-    {active && stage === 'information' && !submissionLocked(active) && <div ref={informationEditor} className="scroll-mt-4"><RowEditor key={active.id} row={active} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap.get(active.id)!} onPatch={(patch) => patchRow(active.id, patch)} onCategory={(choice) => void chooseCategory(choice, [active.id])} onConnectCategory={() => openTemplateInput('category')} onClose={() => setActiveId('')} onAddComponent={() => setCatalogTarget({ bundleId: active.id })} /></div>}
+    {active && stage === 'information' && !submissionLocked(active) && <div ref={informationEditor} className="scroll-mt-4"><RowEditor key={active.id} row={active} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap.get(active.id)!} onPatch={(patch) => patchRow(active.id, patch)} onCategory={(choice) => void chooseCategory(choice, [active.id])} onRecommendedCategory={(template, categoryId) => connectRecommendedCategory(active.id, template, categoryId)} onConnectCategory={() => openTemplateInput('category')} onClose={() => setActiveId('')} onAddComponent={() => setCatalogTarget({ bundleId: active.id })} /></div>}
     {stage === 'information' && <p className="text-xs text-muted-foreground">입력 중인 내용은 저장할 수 있습니다. 필수정보가 모두 갖춰지면 엑셀 출력과 상품등록을 진행하세요.</p>}
     {busy && <div role="status" className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"><Loader2 className="size-4 animate-spin" />{busy}</div>}
 
@@ -776,7 +793,7 @@ function CategoryConnection({ empty, onConnect }: { empty: boolean; onConnect: (
   </div>
 }
 
-function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory, onConnectCategory, onClose, onAddComponent }: { row: RegistrationRow; draft: RegistrationDraft; categoryTemplates: CategoryTemplate[]; issues: string[]; onPatch: (patch: Partial<RegistrationRow>) => void; onCategory: (choice: string) => void; onConnectCategory: () => void; onClose: () => void; onAddComponent: () => void }) {
+function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory, onRecommendedCategory, onConnectCategory, onClose, onAddComponent }: { row: RegistrationRow; draft: RegistrationDraft; categoryTemplates: CategoryTemplate[]; issues: string[]; onPatch: (patch: Partial<RegistrationRow>) => void; onCategory: (choice: string) => void; onRecommendedCategory: (template: ConnectedTemplate, categoryId: string) => void; onConnectCategory: () => void; onClose: () => void; onAddComponent: () => void }) {
   const [costQuery, setCostQuery] = useState('')
   const [costs, setCosts] = useState<CatalogProduct['costCandidates']>([])
   const [finding, setFinding] = useState(false)
@@ -791,6 +808,7 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
   return <section className="rounded-lg border bg-card" aria-label="상품등록정보 입력">
     <header className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">상품등록정보 입력</h2><p className="mt-1 text-xs text-muted-foreground">{row.name} · 별표(*) 항목은 선택한 쿠팡 엑셀 양식의 필수정보입니다.</p></div><button aria-label="상품 상세 닫기" onClick={onClose} className="rounded p-2 hover:bg-muted"><X className="size-4" /></button></header>
     {issues.length > 0 && <div className="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-900">입력 확인 {issues.length}건</p><ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-amber-800">{issues.map((issue) => <li key={issue}>· {issue}</li>)}</ul></div>}
+    <div className="p-4 pb-0"><CategoryRecommendations sourceCode={row.sourceCode} onConnect={onRecommendedCategory} /></div>
     <div className="grid gap-5 p-4 lg:grid-cols-[1fr_360px]"><div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2"><Field label="등록 상품명"><input className={inputClass} value={row.name} placeholder={row.bundleComponents ? '쿠팡에 등록할 세트 상품명' : undefined} onChange={(event) => onPatch({ name: event.target.value, bundleReviewed: false })} /></Field><div className="space-y-2"><Field label="저장된 견적서 양식"><CategorySelect label="쿠팡 카테고리 양식" value={row.templateId && row.sheetName ? `${row.templateId}:${row.sheetName}` : ''} templates={categoryTemplates} onChange={onCategory} /></Field><CategoryConnection empty={!categoryTemplates.some((template) => template.sheets.length > 0)} onConnect={onConnectCategory} /></div></div>
       {row.bundleComponents ? <BundleEditor readOnly components={row.bundleComponents} prices={prices} onAdd={onAddComponent} onChange={(bundleComponents) => onPatch({ bundleComponents, bundleReviewed: false })} /> : <div className="rounded-md border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">원가 SKU 연결 · {row.internalSku || '미연결'}</span><form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); setFinding(true); void jsonRequest(`/catalog?cost=1&q=${encodeURIComponent(costQuery)}`).then((response) => setCosts(response.costs)).catch((error) => toast.error(error.message)).finally(() => setFinding(false)) }}><input aria-label="원가 SKU 검색" className={`${inputClass} w-40`} placeholder="품목코드·상품명" value={costQuery} onChange={(event) => setCostQuery(event.target.value)} /><button className={buttonClass} disabled={finding || !costQuery.trim()}>{finding ? <Loader2 className="size-3 animate-spin" /> : '조회'}</button></form></div>{costs.length > 0 && <div className="mt-2 max-h-36 overflow-y-auto">{costs.map((cost) => <button key={cost.sku} className="flex w-full justify-between gap-2 border-t p-2 text-left text-xs hover:bg-muted" onClick={() => { onPatch({ internalSku: cost.sku, costPrice: cost.costPrice }); setCosts([]) }}><span>{cost.sku} · {cost.name} {cost.optionName}</span><span>{won(cost.costPrice)}</span></button>)}</div>}<p className="mt-2 text-[11px] text-muted-foreground">원가는 품목의 works 신규 원가(원화)에서 가져옵니다. 신규원가가 없으면 비워둡니다. </p></div>}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { checkSupplierRegistration, pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration, type SupplierRegistrationJob } from '@/lib/coupang-registration/supplier-bridge'
+import { checkSupplierRegistration, getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration, type SupplierRegistrationJob } from '@/lib/coupang-registration/supplier-bridge'
 
 const extension = 'funtastic-coupang-registration-extension'
 const job: SupplierRegistrationJob = { jobId: 'bridge-job', token: '0123456789abcdef', files: [{ name: 'bridge-job.xlsx', data: 'UEs=', kind: 'workbook' }], rows: [{ id: 'r1', name: '상품 옵션' }] }
@@ -46,5 +46,24 @@ describe('Supplier registration page bridge', () => {
     expect(sent.type).toBe('CHECK')
     response({ type: 'RESPONSE', requestId: sent.requestId, ok: false, error: '원래 Chrome에서 확인해주세요.' })
     await expect(check).rejects.toThrow('원래 Chrome에서 확인해주세요.')
+  })
+  it('requests official categories using only bounded source queries and correlates the result', async () => {
+    const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    const search = searchSupplierCategories(['행거', '바지걸이', '행거'])
+    const sent = post.mock.calls[0][0]
+    expect(sent).toMatchObject({ type: 'CATEGORY_SEARCH', queries: ['행거', '바지걸이'] })
+    const category = { id: '1899', name: '행거', path: '가구 > 행거', matchedQueries: ['행거'] }
+    response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, categories: [category, { id: '../invalid' }] })
+    expect(await search).toEqual([category])
+    await expect(searchSupplierCategories(['x'.repeat(201)])).rejects.toThrow('검색어')
+  })
+  it('downloads only a selected numeric category and validates the returned file', async () => {
+    const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    const download = getSupplierCategoryTemplate('1899')
+    const sent = post.mock.calls[0][0]
+    expect(sent).toMatchObject({ type: 'CATEGORY_TEMPLATE', categoryId: '1899' })
+    response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, file: { name: 'official.zip', data: 'UEs=' } })
+    expect(await download).toEqual({ name: 'official.zip', data: 'UEs=' })
+    await expect(getSupplierCategoryTemplate('https://evil.test')).rejects.toThrow('카테고리')
   })
 })

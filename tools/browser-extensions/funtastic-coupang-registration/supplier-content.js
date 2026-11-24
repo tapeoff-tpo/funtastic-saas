@@ -150,7 +150,117 @@
     await send({ type: 'OBSERVATION', kind: 'products', rows: rows.map(row => ({ name: row['상품명'], quoteId: row['견적서 ID'], quoteAttributes: row.quoteAttributes, skuId: row['SKU ID'], status: row['상태'] })) })
     renderPanel('이 견적서의 상품 검수 결과를 확인했습니다. SaaS에서 결과를 확인해주세요. 검수중인 상품은 완료될 때까지 2단계에 남습니다.')
   }
+
+  const CATEGORY_LOGIN = '서플라이어허브 창에서 로그인한 뒤 다시 검색해주세요.'
+  function categoryArguments(message) {
+    if (message.type === 'CATEGORY_SEARCH') {
+      if (!Array.isArray(message.queries) || !message.queries.length || message.queries.length > 6 || message.queries.some(query => typeof query !== 'string' || !query.trim() || query.trim().length > 200)) throw new Error('카테고리 검색어는 1~6개, 각 200자 이내로 입력해주세요.')
+      return { queries: [...new Set(message.queries.map(query => query.trim()))] }
+    }
+    const categoryId = String(message.categoryId ?? '')
+    if (!/^[1-9]\d*$/.test(categoryId) || !Number.isSafeInteger(Number(categoryId))) throw new Error('쿠팡 카테고리 ID를 확인해주세요.')
+    return { categoryId }
+  }
+  async function categoryResponse(path, consume) {
+    if (location.origin !== 'https://supplier.coupang.com' || /\/(?:login|signin)(?:\/|$)/i.test(location.pathname) || document.querySelector('input[type="password"]')) throw new Error(CATEGORY_LOGIN)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+    try {
+      const response = await fetch(path, { credentials: 'include', redirect: 'error', signal: controller.signal })
+      if ([401, 403].includes(response.status) || response.redirected || /text\/html/i.test(response.headers.get('content-type') || '')) throw new Error(CATEGORY_LOGIN)
+      if (!response.ok) throw new Error('쿠팡 카테고리 요청에 실패했습니다. (' + response.status + ')')
+      return await consume(response)
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('쿠팡 카테고리 응답 시간이 초과되었습니다. 다시 시도해주세요.')
+      if (error instanceof TypeError) throw new Error('서플라이어허브 로그인 상태와 연결을 확인한 뒤 다시 시도해주세요.')
+      throw error
+    } finally { clearTimeout(timer) }
+  }
+  async function searchCategories(queries) {
+    const responses = await Promise.all(queries.map(query => categoryResponse('/qvt/kan-categories/search?keyword=' + encodeURIComponent(query), response => response.json())))
+    const categories = new Map()
+    const resultsByQuery = responses.map((items, queryIndex) => {
+      if (!Array.isArray(items)) throw new Error('쿠팡 카테고리 응답 형식이 변경되었습니다. 서플라이어허브에서 확인해주세요.')
+      const ids = new Set()
+      for (const item of items.slice(0, 5000)) {
+        if (!item || item.isLeaf !== true || item.valid !== true || item.risky === true) continue
+        const id = String(item.categoryId ?? '')
+        const name = rules.clean(item.name)
+        const path = rules.clean(item.categoryFullPath)
+        if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id)) || !name || name.length > 200 || !path || path.length > 1000) continue
+        const query = queries[queryIndex]
+        const existing = categories.get(id)
+        if (existing) { if (!existing.matchedQueries.includes(query)) existing.matchedQueries.push(query) }
+        else categories.set(id, { id, name, path, matchedQueries: [query] })
+        ids.add(id)
+      }
+      return [...ids]
+    })
+    // Give every query a slot before broad source-category results fill the limit.
+    const positions = resultsByQuery.map(() => 0)
+    const selected = new Set()
+    let added = true
+    while (selected.size < 50 && added) {
+      added = false
+      for (let index = 0; index < resultsByQuery.length && selected.size < 50; index++) {
+        const ids = resultsByQuery[index]
+        while (positions[index] < ids.length && selected.has(ids[positions[index]])) positions[index]++
+        if (positions[index] < ids.length) { selected.add(ids[positions[index]++]); added = true }
+      }
+    }
+    return { ok: true, categories: [...selected].map(id => categories.get(id)) }
+  }
+  function categoryFilename(header, categoryId) {
+    const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header || '')
+    const plain = /filename\s*=\s*(?:"([^"]+)"|([^;]+))/i.exec(header || '')
+    let name = encoded?.[1] || plain?.[1] || plain?.[2] || ''
+    try { name = decodeURIComponent(name.trim()) } catch { name = '' }
+    name = name.split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f\x7f]/g, '_').trim().replace(/^\.+/, '')
+    return name && name.length <= 180 && /\.(?:xlsx|zip)$/i.test(name) ? name : '쿠팡_카테고리_' + categoryId + '.zip'
+  }
+  async function categoryBytes(response) {
+    const maximum = 3_000_000
+    if (Number(response.headers.get('content-length')) > maximum) throw new Error('카테고리 양식은 3MB까지 연결할 수 있습니다.')
+    if (!response.body?.getReader) {
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.length > maximum) throw new Error('카테고리 양식은 3MB까지 연결할 수 있습니다.')
+      return bytes
+    }
+    const reader = response.body.getReader()
+    const chunks = []
+    let total = 0
+    try {
+      while (true) {
+        const part = await reader.read()
+        if (part.done) break
+        total += part.value.length
+        if (total > maximum) { await reader.cancel(); throw new Error('카테고리 양식은 3MB까지 연결할 수 있습니다.') }
+        chunks.push(part.value)
+      }
+    } finally { reader.releaseLock() }
+    const bytes = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
+    return bytes
+  }
+  async function downloadCategory(categoryId) {
+    return categoryResponse('/qvt/v3/kan-categories/download-quotation?leafKanCategoryIds=' + categoryId + '&locale=ko', async response => {
+      const bytes = await categoryBytes(response)
+      if (bytes.length < 4 || bytes[0] !== 80 || bytes[1] !== 75 || bytes[2] !== 3 || bytes[3] !== 4) throw new Error('쿠팡 카테고리 양식 파일을 확인하지 못했습니다. 서플라이어허브에서 확인해주세요.')
+      let binary = ''
+      for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
+      return { ok: true, file: { name: categoryFilename(response.headers.get('content-disposition'), categoryId), data: btoa(binary) } }
+    })
+  }
+  function categoryCommand(message) {
+    const args = categoryArguments(message)
+    return message.type === 'CATEGORY_SEARCH' ? searchCategories(args.queries) : downloadCategory(args.categoryId)
+  }
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+    if (message?.channel === CHANNEL && ['CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(message.type)) {
+      Promise.resolve().then(() => categoryCommand(message)).then(respond).catch(error => respond({ ok: false, error: error.message }))
+      return true
+    }
     if (message?.channel !== CHANNEL || !['PREPARE', 'RESUME_PREPARED', 'CHECK_QUOTE', 'CHECK_PRODUCTS'].includes(message.type)) return
     if (busy) { respond({ ok: true, busy: true }); return }
     busy = true

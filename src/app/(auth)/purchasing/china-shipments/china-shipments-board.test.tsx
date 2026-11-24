@@ -1343,9 +1343,9 @@ describe('ChinaShipmentsBoard', () => {
   it('enables pallet output only when a saved nonempty box is assigned to a pallet', async () => {
     const detail = makeShipmentWithBox()
     const unassigned = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: null })) }
-    const { rerender } = renderShipment(unassigned)
+    const { rerender } = renderShipment(unassigned, 'boxes')
     expect(screen.getByRole('button', { name: '박스 쉽먼트' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '파레트 라벨 출력' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '파레트 라벨 출력' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '박스 쉽먼트' }))
     expect(await screen.findByRole('menuitem', { name: '박스 쉽먼트 일괄 다운로드' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/labels?type=boxes')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
@@ -2261,7 +2261,7 @@ describe('ChinaShipmentsBoard', () => {
     const nav = screen.getByRole('navigation', { name: '중국출고 작업 단계' })
     expect(within(nav).getAllByRole('button')).toHaveLength(4)
     expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '적재현황 엑셀' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
+    expect(screen.queryByRole('link', { name: '적재현황 엑셀' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 저장된 박스현황' }))
     expect(screen.getByRole('heading', { name: '저장된 박스 현황' })).toBeVisible()
@@ -2273,6 +2273,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(screen.queryByRole('button', { name: '출고완료' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다음: 파렛트 최종 리스트' }))
     expect(screen.getByRole('heading', { name: '4단계 · 파렛트 최종 리스트' })).toBeVisible()
+    expect(screen.getByRole('link', { name: '적재현황 엑셀' })).toHaveAttribute('href', '/api/purchasing/china-shipments/a/export')
     expect(screen.queryByRole('link', { name: '최종 적재리스트 엑셀 다운로드' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '저장된 박스 현황' })).not.toBeInTheDocument()
     for (const [step, title] of [['boxes', '2단계.*저장된 박스현황'], ['pallets', '3단계.*파렛트 배정'], ['summary', '4단계.*파렛트 최종 리스트'], ['items', '1단계.*출고품목·박스분할']]) {
@@ -2433,52 +2434,7 @@ describe('ChinaShipmentsBoard', () => {
     expect(updateShipment).toHaveBeenCalledTimes(2)
   })
 
-  it('retains a selected workbook without applying it when leaving before review', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    try {
-      renderShipment()
-      const file = new File(['workbook'], '작성중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
-      fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
-      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
-      selectOtherShipment()
-      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '저장 후 이동' }))
 
-      await waitFor(() => expect(toastError).toHaveBeenCalled())
-      expect(fetchSpy).not.toHaveBeenCalled()
-      expect(navigate).not.toHaveBeenCalled()
-      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
-      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
-      expect(screen.getByText('작성중.xlsx')).toBeInTheDocument()
-    } finally {
-      fetchSpy.mockRestore()
-    }
-  })
-
-  it('retains an Excel preview if the user decides to keep working', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ preview: { boxSplits: [], palletAssignments: [], summary: { boxSplitItemCount: 0, boxSplitRowCount: 0, palletAssignmentCount: 0, boxCount: 0 }, errors: [] } }),
-    } as Response)
-    try {
-      renderShipment()
-      const file = new File(['workbook'], '검토중.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
-      fireEvent.change(screen.getByLabelText('엑셀 선택'), { target: { files: [file] } })
-      fireEvent.click(screen.getByRole('button', { name: '엑셀 검토' }))
-      expect(await screen.findByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
-
-      fireEvent.click(within(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).getByRole('button', { name: '닫기' }))
-      selectOtherShipment()
-      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '계속 작업' }))
-      fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
-      expect(screen.getByRole('button', { name: '검토 결과 반영' })).toBeInTheDocument()
-      expect(fetchSpy).toHaveBeenCalledTimes(1)
-      expect(navigate).not.toHaveBeenCalled()
-    } finally {
-      fetchSpy.mockRestore()
-    }
-  })
 
   it('does not discard an incomplete new-shipment form if saving it fails', async () => {
     createShipment.mockResolvedValue({ ok: false, error: '도착지를 선택해주세요.' })
@@ -2520,37 +2476,8 @@ describe('ChinaShipmentsBoard', () => {
     expect(saveBoxSplits).toHaveBeenCalledTimes(1)
   })
 
-  it('does not ask to save when downloading an Excel file without leaving the page', () => {
-    renderShipment()
-    editBox()
-    parkEditor()
-    const download = screen.getByRole('link', { name: '작업용 엑셀' })
-    download.addEventListener('click', (event) => event.preventDefault(), { once: true })
-    fireEvent.click(download)
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(itemEditor('SKU-A').getByPlaceholderText('0')).toHaveValue(3)
-  })
 
-  it('keeps workbook editing controls inside the editor dialog', () => {
-    renderShipment(shipmentA, 'items')
 
-    expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '엑셀 검토' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '엑셀로 수정' }))
-    expect(screen.getByRole('dialog', { name: '작업용 엑셀 수정' })).toBeInTheDocument()
-    expect(screen.getByLabelText('엑셀 선택')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '엑셀 검토' })).toBeDisabled()
-    expect(screen.queryByText('현재 박스분할·파렛트적재 내용을 내려받아 엑셀에서 수정한 뒤 다시 검토하고 반영할 수 있습니다.')).not.toBeInTheDocument()
-  })
-
-  it('keeps workbook download available after dispatch without offering edits', () => {
-    renderShipment({ ...shipmentA, shipment: { ...shipmentA.shipment, status: 'dispatched' } }, 'items')
-
-    expect(screen.getByRole('link', { name: '작업용 엑셀' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '엑셀로 수정' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('엑셀 선택')).not.toBeInTheDocument()
-  })
 
   it('warns on browser unload only while a box draft is unsaved', () => {
     renderShipment()

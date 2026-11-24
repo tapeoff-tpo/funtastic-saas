@@ -11,7 +11,7 @@ type Props = {
 }
 
 export function ShipmentLabelMenu({ shipmentId, kind, enabled, disabledReason }: Props) {
-  const label = kind === 'boxes' ? '박스 쉽먼트' : '파렛트 쉽먼트'
+  const label = kind === 'boxes' ? '박스 쉽먼트' : '파레트 라벨 출력'
   const Icon = kind === 'boxes' ? Package : Layers3
   const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?type=${kind}`
   const itemClassName = 'flex min-h-9 items-center gap-2 rounded-md px-2.5 py-2 text-sm text-blue-900 outline-none hover:bg-blue-50 data-highlighted:bg-blue-50'

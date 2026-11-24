@@ -793,7 +793,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'pallets' ? <section className="space-y-4">
-        <div className="flex flex-wrap justify-end gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/pallet-worksheet`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm">파레트 배정 작업지 인쇄 · 30박스씩</a><ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="파레트에 박스를 배정해주세요." /></div>
+        <div className="flex flex-wrap justify-end gap-2"><a href={`/api/purchasing/china-shipments/${encodeURIComponent(shipment.id)}/pallet-worksheet`} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm" title="페이지당 30박스 · 박스별 파레트 번호 수기 작성">파레트 작업지 인쇄</a><ShipmentLabelMenu shipmentId={shipment.id} kind="pallets" enabled={canDownloadPalletLabels} disabledReason="파레트에 박스를 배정해주세요." /></div>
 
         <div className="flex items-center gap-2">
           <h3 className="font-semibold">3단계 · 파렛트 배정</h3>

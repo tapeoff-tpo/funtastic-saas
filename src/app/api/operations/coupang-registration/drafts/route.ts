@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { registrationWorkspace } from '@/lib/coupang-registration/auth'
 import { draftSchema } from '@/lib/coupang-registration/schema'
-import { checkedLabel } from '@/lib/coupang-registration/excel'
+import { checkedLabel, readTemplate } from '@/lib/coupang-registration/excel'
 import { listDrafts, loadDraft, saveDraft } from '@/lib/coupang-registration/store'
 import { prepareDraftSave } from '@/lib/coupang-registration/draft-workflow'
 
@@ -14,7 +14,19 @@ export async function GET(request: NextRequest) {
   if (id && !z.uuid().safeParse(id).success) return NextResponse.json({ error: '작업 ID가 올바르지 않습니다.' }, { status: 400 })
   if (!id) return NextResponse.json({ drafts: await listDrafts(workspace) })
   const draft = await loadDraft(workspace, id)
-  return draft ? NextResponse.json(draft) : NextResponse.json({ error: '저장된 작업을 찾을 수 없습니다.' }, { status: 404 })
+  if (!draft) return NextResponse.json({ error: '저장된 작업을 찾을 수 없습니다.' }, { status: 404 })
+  try {
+    // Refresh only official field metadata. Saved product values and revision stay intact.
+    const templates = await Promise.all(draft.payload.templates.map(async (template) => {
+      if (!draft.payload.rows.some((row) => row.templateId === template.id)) return template
+      const parsed = await readTemplate(Buffer.from(template.file.data, 'base64'), template.file.name)
+      if (parsed.template.id !== template.id) throw new Error('저장된 카테고리 양식이 변경되었습니다. 쿠팡 최신 양식을 다시 연결해주세요.')
+      return { ...template, sheets: parsed.template.sheets }
+    }))
+    return NextResponse.json({ ...draft, payload: { ...draft.payload, templates } })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : '저장된 양식을 확인하지 못했습니다.' }, { status: 400 })
+  }
 }
 
 export async function POST(request: NextRequest) {

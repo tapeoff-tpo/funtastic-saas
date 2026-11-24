@@ -10,6 +10,7 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
+import { getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
@@ -1226,131 +1227,18 @@ function RecommendationBasisGrid({
   rawData: Record<string, unknown>
   metrics: PurchaseReviewOperationalMetrics | null
 }) {
-  const isAutomaticRecommendation = rawData.source === 'auto_purchase_recommendation'
-  if (!isAutomaticRecommendation && !metrics) return <span>-</span>
-  const oneOffCurrentMonthSpikeDetected = rawData.oneOffCurrentMonthSpikeDetected === true
-  const currentMonthOrderCount = Number(rawData.currentMonthOrderCount)
-  const currentMonthLargestOrderQuantity = Number(rawData.currentMonthLargestOrderQuantity)
-  const anomalyNote = rawData.salesAnomalyDetected === true
-    ? oneOffCurrentMonthSpikeDetected
-      ? `단일 주문 급증 ${formatNumber(currentMonthLargestOrderQuantity)}개 / ${formatNumber(currentMonthOrderCount)}건 · 평균 제외`
-      : `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
-    : null
-  const seasonalDemandMultiplier = Number(rawData.seasonalDemandMultiplier)
-  const seasonalNote = !Number.isFinite(seasonalDemandMultiplier) || seasonalDemandMultiplier === 1
-    ? null
-    : seasonalDemandMultiplier < 1
-      ? `여름 시즌 감산 ${formatNumber(seasonalDemandMultiplier * 100)}%`
-      : `겨울 시즌 증산 +${formatNumber((seasonalDemandMultiplier - 1) * 100)}%`
-  const moqAdjustedQuantity = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
-  const budgetNote = moqAdjustedQuantity > Number(rawData.allocatedQuantity)
-    ? `예산 조정 ${formatNumber(moqAdjustedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
-    : null
-  const pipelineQuantity = Number(rawData.pipelineQuantity)
-  const pipelineNote = !metrics && Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
-    ? `진행 중 발주 ${formatNumber(pipelineQuantity)}`
-    : null
-  const moqNote = typeof rawData.moqProductGroupName === 'string'
-    ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
-      `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
-    : null
-  const siblingOptionBundleGroupName = typeof rawData.siblingOptionBundleGroupName === 'string'
-    ? rawData.siblingOptionBundleGroupName.trim()
-    : ''
-  const siblingOptionBundleQuantity = Number(rawData.siblingOptionBundleQuantity)
-  const siblingOptionBundleNote = siblingOptionBundleGroupName
-    && Number.isFinite(siblingOptionBundleQuantity)
-    && siblingOptionBundleQuantity > 0
-    ? `동일상품 옵션 동시 발주 · ${formatNumber(siblingOptionBundleQuantity)}개`
-    : null
-  const specialBulkOutgoingNote = specialBulkOutgoingText(rawData.specialBulkOutgoingAdjustment)
-  const trendNote = recommendationTrendText(rawData.salesTrend, rawData.effectiveMonthlyOutgoing)
-  const stateNote = rawData.recommendationState === 'new_product_first_sale'
-    ? '신규상품 첫 판매 감지'
-    : rawData.recommendationState === 'near_target_deferred'
-      ? '목표 재고 근접 · 이번 회차 보류'
-    : rawData.recommendationState === 'monitoring'
-      ? '현재 발주 보류 · 계속 관찰'
-      : null
-  const domesticCurrentStock = metrics?.domesticCurrentStock ?? numericRawDataValue(rawData, 'domesticAvailableStock')
-  const chinaCurrentStock = metrics?.chinaCurrentStock ?? numericRawDataValue(rawData, 'chinaAvailableStock')
-  const currentStock = metrics?.currentStock ?? numericRawDataValue(rawData, 'availableStock')
-  const currentMonthOutgoing = metrics?.currentMonthOutgoing ?? numericRawDataValue(rawData, 'currentMonthOutgoing')
-  const threeMonthAverageOutgoing = metrics?.threeMonthAverageOutgoing ?? numericRawDataValue(rawData, 'averageMonthlyOutgoing')
-  const targetStockQuantity = numericRawDataValue(rawData, 'targetStockQuantity') ?? metrics?.targetStockQuantity
-  const stockCoverageMonths = getPurchaseStockCoverageMonths(rawData)
-
+  const basis = getRecommendationBasis(rawData, metrics)
+  if (!basis) return <span>-</span>
   return (
     <div className="grid grid-cols-2 gap-2 text-center tabular-nums sm:grid-cols-5">
-      <Metric label="최근 발주수량" value={formatNumber(metrics?.lastPurchaseQuantity)} />
-      <Metric label="진행 구매수량" value={formatNumber(metrics?.purchaseInProgressQuantity)} />
-      <Metric label="중국출고 예정수량" value={formatNumber(metrics?.chinaOutboundScheduledQuantity)} />
-      <Metric label="국내재고" value={formatNumber(domesticCurrentStock)} />
-      <Metric label="중국재고" value={formatNumber(chinaCurrentStock)} />
-      <Metric label="총 현재고" value={formatNumber(currentStock)} />
-      <Metric label="당월 출고" value={formatNumber(currentMonthOutgoing)} />
-      <Metric label="3개월평균" value={formatNumber(threeMonthAverageOutgoing)} />
-      <Metric label="목표수량" value={formatNumber(targetStockQuantity)} />
-      <Metric label="재고 보유개월" value={stockCoverageMonths == null ? '-' : `${formatNumber(stockCoverageMonths)}개월`} />
-      {pipelineNote || moqNote || siblingOptionBundleNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
+      {basis.items.map(({ label, value }) => <Metric key={label} label={label} value={value} />)}
+      {basis.notes.length > 0 ? (
         <div className="col-span-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium sm:col-span-5">
-          {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
-          {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
-          {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
-          {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
-          {siblingOptionBundleNote ? <span className="text-cyan-700">{siblingOptionBundleNote}</span> : null}
-          {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
-          {seasonalNote ? <span className={seasonalDemandMultiplier < 1 ? 'text-sky-700' : 'text-rose-700'}>{seasonalNote}</span> : null}
-          {specialBulkOutgoingNote ? <span className="text-fuchsia-700">{specialBulkOutgoingNote}</span> : null}
-          {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
+          {basis.notes.map(({ label, className }, index) => <span key={index} className={className}>{label}</span>)}
         </div>
       ) : null}
     </div>
   )
-}
-
-function recommendationTrendText(value: unknown, effectiveMonthlyOutgoing?: unknown) {
-  if (value === 'sustained_increase') {
-    return {
-      label: `판매 증가 3개월 지속 · 당월 기준 (${formatNumber(effectiveMonthlyOutgoing)})`,
-      className: 'text-emerald-700',
-    }
-  }
-  if (value === 'capped_increase') {
-    return {
-      label: `판매 급증 · 평균 2배 상한 (${formatNumber(effectiveMonthlyOutgoing)})`,
-      className: 'text-amber-700',
-    }
-  }
-  if (value === 'increasing') {
-    return {
-      label: `판매 증가 · 평균 50% + 당월 50% (${formatNumber(effectiveMonthlyOutgoing)})`,
-      className: 'text-blue-700',
-    }
-  }
-  if (value === 'decreasing') return { label: '판매 감소 · 3개월 평균 유지', className: 'text-amber-700' }
-  if (value === 'new_product') return { label: '신규상품 판매 발생', className: 'text-emerald-700' }
-  return value === 'steady' ? { label: '판매 유지', className: 'text-slate-700' } : null
-}
-
-function specialBulkOutgoingText(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const adjustment = value as Record<string, unknown>
-  const specialMall = typeof adjustment.specialMall === 'string' ? adjustment.specialMall.trim() : ''
-  const specialBulkQuantity = Number(adjustment.specialBulkQuantity)
-  const specialBulkMonthCount = Number(adjustment.specialBulkMonthCount)
-  const specialBulkIncludedQuantity = Number(adjustment.specialBulkIncludedQuantity)
-  if (
-    !specialMall
-    || !Number.isFinite(specialBulkQuantity)
-    || specialBulkQuantity <= 0
-    || !Number.isFinite(specialBulkMonthCount)
-    || !Number.isFinite(specialBulkIncludedQuantity)
-  ) return null
-
-  return specialBulkIncludedQuantity <= 0
-    ? `${specialMall} ${formatNumber(specialBulkQuantity)}개 · ${formatNumber(specialBulkMonthCount)}개월성 → 평균 제외`
-    : `${specialMall} ${formatNumber(specialBulkQuantity)}개 · ${formatNumber(specialBulkMonthCount)}개월 반복 → ${formatNumber(specialBulkIncludedQuantity)}개 반영`
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

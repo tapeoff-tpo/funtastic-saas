@@ -239,6 +239,68 @@ describe('registration pricing workbench', () => {
     expect(await screen.findByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' })).toBeDisabled()
   })
 
+  it('keeps official shelf choices unselected until chosen and saves custom brand and packing overrides without changing prices or labels', async () => {
+    const row = confirmPricing({
+      ...createRegistrationRow(source, '베이지'), name: '피에른 데스크 선반 3단',
+      priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500,
+      label: '선반 라벨.jpg', fields: { 카테고리: '', 인증정보: '', '한 개 단품 포장 사이즈': '300*200*100' },
+    })
+    const other = confirmPricing({ ...createRegistrationRow(second, '블랙'), priceMode: 'manual', manualSupplyPrice: 21999, saleMode: 'manual', manualSalePrice: 37999, label: '기존 라벨.jpg' })
+    const initial = informationTemplate({ ...blankDraft(), rows: [row, other], labels: [{ name: '선반 라벨.jpg', data: 'shelf-label' }, { name: '기존 라벨.jpg', data: 'existing-label' }] })
+    const sheet = initial.templates[0].sheets[0]
+    sheet.name = 'QF_2379_선반'
+    sheet.columns = [
+      { column: 1, label: '상품명', requirement: '필수', guide: '' },
+      { column: 2, label: '카테고리', requirement: '필수', guide: '실제 상품 유형을 선택해주세요.', choices: ['벽선반(77939)', '스탠드선반(77940)'], allowCustom: true },
+      { column: 3, label: '브랜드', requirement: '필수', guide: '', choices: ['브랜드 없음'], allowCustom: true },
+      { column: 4, label: '박스 내 SKU 수량', requirement: '필수', guide: '' },
+      { column: 5, label: '한 개 단품 포장 사이즈', requirement: '필수', guide: 'mm' },
+      { column: 6, label: '인증정보', requirement: '필수', guide: '상품별 확인 필요' },
+    ]
+    initial.rows = initial.rows.map(item => ({ ...item, sheetName: sheet.name }))
+    const saved = mockSavedDraft(initial)
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: `${row.name} 등록정보 입력` }))
+    const editor = screen.getByRole('region', { name: '상품등록정보 입력' })
+    const category = within(editor).getByRole('combobox', { name: /^카테고리 \*/ })
+    expect(category).toHaveValue('')
+    expect(within(category).getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toEqual(['', '벽선반(77939)', '스탠드선반(77940)'])
+    expect(within(editor).getByLabelText(/^인증정보 \*/)).toHaveValue('')
+    const brand = within(editor).getByLabelText('브랜드 *')
+    expect(brand.tagName).toBe('INPUT')
+    expect(brand).toHaveValue('생활살림')
+    expect(brand).toHaveAttribute('list')
+    fireEvent.change(brand, { target: { value: '생활살림 프리미엄' } })
+    const packing = within(editor).getByLabelText(/^한 개 단품 포장 사이즈 \*/)
+    const box = within(editor).getByLabelText('박스 내 SKU 수량 *')
+    expect(box).toHaveValue('20')
+    fireEvent.change(packing, { target: { value: '500*400*200' } })
+    expect(box).toHaveValue('1')
+    fireEvent.change(box, { target: { value: '8' } })
+    fireEvent.change(packing, { target: { value: '300*200*100' } })
+    expect(box).toHaveValue('8')
+    fireEvent.change(packing, { target: { value: '700*400*100' } })
+    expect(box).toHaveValue('8')
+    expect(category).toHaveValue('')
+    fireEvent.change(category, { target: { value: '스탠드선반(77940)' } })
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => {
+      const saves = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(saves).toHaveLength(1)
+      const { draft } = JSON.parse(String(saves[0][1]!.body))
+      expect(draft.rows).toHaveLength(2)
+      expect(draft.rows[0]).toMatchObject({
+        id: row.id, name: row.name, manualSupplyPrice: 17700, manualSalePrice: 29500, costPrice: row.costPrice, wholesalePrice: row.wholesalePrice, label: '선반 라벨.jpg',
+        fields: { 카테고리: '스탠드선반(77940)', 인증정보: '', 브랜드: '생활살림 프리미엄', '박스 내 SKU 수량': '8', '한 개 단품 포장 사이즈': '700*400*100' },
+      })
+      expect(draft.rows[1]).toMatchObject({ id: other.id, manualSupplyPrice: 21999, manualSalePrice: 37999, costPrice: other.costPrice, wholesalePrice: other.wholesalePrice, label: '기존 라벨.jpg' })
+      expect(draft.labels).toEqual(initial.labels)
+      expect(draft.templates[0].sheets[0].columns).toEqual(sheet.columns)
+    })
+  })
+
   it('connects an empty category list without importing the workbook example products', async () => {
     const row = { ...confirmPricing(createRegistrationRow(source, '베이지')), manualSupplyPrice: 17700, label: '내 라벨.jpg', fields: { 브랜드: '사용자 브랜드' } }
     const initial = { ...blankDraft(), name: '가격설정 마친 작업', rows: [row], labels: [{ name: '내 라벨.jpg', data: 'kept' }] }
@@ -355,7 +417,8 @@ describe('registration pricing workbench', () => {
       const saves = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
       const body = JSON.parse(String(saves.at(-1)![1]!.body))
       expect(body).toMatchObject({ id: saved.id, revision: 1 })
-      expect(body.draft).toEqual({ ...initial, templates: [existing, template], rows: [{ ...row, templateId: template.id, sheetName: template.sheets[0].name, fields: { ...row.fields, 재질: '스테인리스', 소재: '스테인리스' }, defaultedFields: { 재질: '스테인리스', 소재: '스테인리스' } }, untouched] })
+      // Material is not a header in this chosen sheet; only the user's existing fields remain.
+      expect(body.draft).toEqual({ ...initial, templates: [existing, template], rows: [{ ...row, templateId: template.id, sheetName: template.sheets[0].name }, untouched] })
       expect(body.draft.rows).toHaveLength(2)
     })
   })
@@ -392,7 +455,7 @@ describe('registration pricing workbench', () => {
       expect(calls).toHaveLength(2)
       const { draft } = JSON.parse(String(calls.at(-1)![1]!.body))
       expect(draft.templates).toEqual([template])
-      expect(draft.rows).toEqual(initial.rows.map((row) => ({ ...row, templateId: template.id, sheetName: template.sheets[0].name })))
+      expect(draft.rows).toEqual(initial.rows.map((row) => ({ ...row, templateId: template.id, sheetName: template.sheets[0].name, fields: { 브랜드: '생활살림' }, defaultedFields: { 브랜드: '생활살림' } })))
     })
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/templates?id='))).toHaveLength(1)
   })
@@ -446,7 +509,7 @@ describe('registration pricing workbench', () => {
     await waitFor(() => {
       const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
       expect(call).toBeDefined()
-      expect(JSON.parse(String(call![1]!.body)).draft).toEqual({ ...initial, templates: [template], rows: [...initial.rows, imported] })
+      expect(JSON.parse(String(call![1]!.body)).draft).toEqual({ ...initial, templates: [template], rows: [...initial.rows, { ...imported, fields: { 브랜드: '생활살림' }, defaultedFields: { 브랜드: '생활살림' } }] })
     })
   })
 

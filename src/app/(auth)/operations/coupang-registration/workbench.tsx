@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, createRegistrationRow, detailHtml, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, createRegistrationRow, detailHtml, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import { checkSupplierRegistration, pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 import { CategoryRecommendations } from './category-recommendations'
@@ -26,6 +26,19 @@ const steps: Array<{ stage: RegistrationStage; title: string; note: string }> = 
   { stage: 'registered', title: '등록완료', note: '서플라이어허브 등록 결과 확인' },
 ]
 const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '') || getRegistrationStage(row) === 'registered'
+function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
+  const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
+  return sheet ? applyRegistrationDefaults(row, sheet) : row
+}
+function OfficialColumnInput({ column, value, listId, onChange }: { column: TemplateColumn; value: string; listId: string; onChange: (value: string) => void }) {
+  const className = `${inputClass} ${column.requirement === '필수' && !value.trim() ? 'border-amber-400 bg-amber-50/40' : ''}`
+  if (column.choices?.length && (column.label === '카테고리' || !column.allowCustom)) return <select className={className} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide}>
+    <option value="">선택해주세요</option>
+    {value && !column.choices.includes(value) && <option value={value}>{value}</option>}
+    {column.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+  </select>
+  return <><input className={className} list={column.choices?.length ? listId : undefined} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />{column.choices?.length ? <datalist id={listId}>{column.choices.map((choice) => <option key={choice} value={choice} />)}</datalist> : null}</>
+}
 const submissionText = (row: RegistrationRow) => row.submission ? { queued: '등록 대기', running: '등록 중', login_required: '로그인 필요', failed: '등록 실패', succeeded: '등록 완료' }[row.submission.status] : '미등록'
 
 const catalogOptionKey = (productCode: string, optionName: string) => JSON.stringify([productCode, optionName])
@@ -132,7 +145,7 @@ export function CoupangRegistrationWorkbench() {
     return next
   }
   function patchRow(id: string, patch: Partial<RegistrationRow>) {
-    update((value) => ({ ...value, rows: value.rows.map((row) => row.id === id && !submissionLocked(row) ? { ...row, ...patch } : row) }))
+    update((value) => ({ ...value, rows: value.rows.map((row) => row.id === id && !submissionLocked(row) ? connectedDefaults({ ...row, ...patch }, value.templates) : row) }))
   }
   function changeStage(next: RegistrationStage) { setStage(next); setSelected(new Set()); setActiveId(''); setOnlyIssues(false); setRowSearch('') }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
@@ -212,7 +225,7 @@ export function CoupangRegistrationWorkbench() {
       update((value) => ({
         ...value,
         templates: value.templates.some((item) => item.id === connected.id) ? value.templates : [...value.templates, connected],
-        rows: rowIds ? value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? applyProductMasterDefaults({ ...row, templateId, sheetName }) : row) : value.rows,
+        rows: rowIds ? value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? applyRegistrationDefaults({ ...row, templateId, sheetName }, connected.sheets.find((sheet) => sheet.name === sheetName)!) : row) : value.rows,
       }))
       if (!rowIds) setTemplateChoice(choice)
     })
@@ -228,7 +241,7 @@ export function CoupangRegistrationWorkbench() {
       return {
         ...value,
         templates: existing ? value.templates : [...value.templates, template],
-        rows: value.rows.map((row) => row.id === rowId ? applyProductMasterDefaults({ ...row, templateId: template.id, sheetName: sheet.name }) : row),
+        rows: value.rows.map((row) => row.id === rowId ? applyRegistrationDefaults({ ...row, templateId: template.id, sheetName: sheet.name }, sheet) : row),
       }
     })
   }
@@ -253,7 +266,7 @@ export function CoupangRegistrationWorkbench() {
         return
       }
       const costs = await fillMissingCostsOnOpen(next.rows)
-      setDraft({ ...next, rows: costs.rows }); setDirty(true)
+      setDraft({ ...next, rows: costs.rows.map((row) => connectedDefaults(row, next.templates)) }); setDirty(true)
       toast.success(`견적서 ${next.templates.length}개 · 등록행 ${next.rows.length}개를 불러왔습니다.`)
     })
     if (templateInput.current) templateInput.current.value = ''
@@ -344,7 +357,7 @@ export function CoupangRegistrationWorkbench() {
         const issue = conversionErrors.get(qualityPdf.id)
         return issue ? applyQualityLabelIssue(row, issue) : row
       })
-      setDraft({ ...draft, rows, labels }); setDirty(true)
+      setDraft({ ...draft, rows: rows.map((row) => connectedDefaults(row, draft.templates)), labels }); setDirty(true)
       const count = targets.filter((row) => matchCatalog(row, products)).length
       const success = `${targets.length}개 중 ${count}개를 연결했습니다. 품질표시 JPG ${generatedLabels.length}장을 자동 변환했습니다.`
       toast.success(success)
@@ -434,7 +447,8 @@ export function CoupangRegistrationWorkbench() {
       const response = await jsonRequest(`/drafts?id=${encodeURIComponent(id)}`)
       const payload: RegistrationDraft = response.payload
       const costs = await fillMissingCostsOnOpen(payload.rows)
-      setDraft({ ...payload, rows: costs.rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0); setSelected(new Set()); setActiveId(''); setTemplateChoice('')
+      const rows = costs.rows.map((row) => connectedDefaults(row, payload.templates))
+      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setActiveId(''); setTemplateChoice('')
       setStage(!payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered')
     })
   }
@@ -818,7 +832,7 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
       <Field label="추가이미지 URL" hint="대표이미지를 포함한 후보 목록입니다. JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다."><textarea className={`${inputClass} h-16 py-2 font-mono text-[11px]`} value={row.thumbnails.join('\n')} onChange={(event) => onPatch({ thumbnails: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></Field>
       <Field label="상세이미지 URL" hint="JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다. HTML은 자동 생성됩니다."><textarea className={`${inputClass} h-20 py-2 font-mono text-[11px]`} value={row.detailImages.join('\n')} onChange={(event) => onPatch({ detailImages: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) })} /></Field>
       {preview && <iframe title="쿠팡 상세 HTML 미리보기" sandbox="" className="h-[560px] w-full rounded border bg-white" srcDoc={`<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>${detailHtml(row.detailImages, row.name)}</body></html>`} />}
-      <details open className="rounded-md border"><summary className="cursor-pointer px-3 py-2 text-xs font-medium">카테고리 필수정보 · 상품 사이즈·포장·인증</summary><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{sheet ? sheet.columns.filter((column) => !automatic.has(column.label) && !isAutomaticTemplateColumn(column) && (column.requirement === '필수' || column.requirement.includes('조건부') || !!row.fields[column.label])).map((column) => <Field key={column.column} label={`${column.label}${column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : ''}`} hint={column.guide.slice(0, 120)}><input className={`${inputClass} ${column.requirement === '필수' && !row.fields[column.label]?.trim() ? 'border-amber-400 bg-amber-50/40' : ''}`} value={row.fields[column.label] ?? ''} onChange={(event) => fieldValue(column.label, event.target.value)} title={column.guide} /></Field>) : <p className="text-xs text-muted-foreground">카테고리 양식을 연결하고 선택하면 필수 입력항목이 표시됩니다.</p>}</div></details>
+      <details open className="rounded-md border"><summary className="cursor-pointer px-3 py-2 text-xs font-medium">카테고리 필수정보 · 상품 사이즈·포장·인증</summary><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{sheet ? sheet.columns.filter((column) => !automatic.has(column.label) && !isAutomaticTemplateColumn(column) && (column.requirement === '필수' || column.requirement.includes('조건부') || !!row.fields[column.label])).map((column) => <Field key={column.column} label={`${column.label}${column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : ''}`} hint={column.guide.slice(0, 120)}><OfficialColumnInput column={column} value={row.fields[column.label] ?? ''} listId={`official-${row.id}-${column.column}`} onChange={(value) => fieldValue(column.label, value)} /></Field>) : <p className="text-xs text-muted-foreground">카테고리 양식을 연결하고 선택하면 필수 입력항목이 표시됩니다.</p>}</div></details>
       <fieldset disabled className="rounded-md border p-3">
         <h3 className="text-xs font-medium">수익 계산 상세</h3>
         <div className="mt-2 grid gap-3 sm:grid-cols-2">

@@ -993,7 +993,7 @@ async function collectTrackingLookupFromTab(tabId) {
       const latest = await getTrackingLookupRun(run.runId)
       if (!isSameTrackingLookupRun(latest, run) || trackingTerminalRunIds.has(run.runId)) return
       const topResult = results.find((result) => result.frameId === 0)?.result
-      productLinks = uniqueCandidateUrls([...productLinks, ...(topResult?.productLinks || [])]).slice(0, 30)
+      productLinks = uniqueOrderProductLinks([...productLinks, ...(topResult?.productLinks || [])])
       if (topResult?.fatal) {
         await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
         return
@@ -1038,7 +1038,7 @@ async function completeTrackingLookupRun(run, trackingNumbers, productLinks = []
         // Keep the exact waybill evidence even when several orders finish together.
         trackingSource: 'waybill_number',
         trackingEvidence: { label: '运单号码', extractionVersion: 2 },
-        productLinks,
+        productLinks: uniqueOrderProductLinks(productLinks),
       })
     } catch (error) {
       await sendTrackingLookupToSaas(run, {
@@ -1332,6 +1332,64 @@ async function collect1688TrackingInPage(options = {}) {
   const productLinks = collectOrderProductLinks()
   function collectOrderProductLinks() {
     if (!/^\d{10,40}$/.test(options.orderNumber || '') || !textOf(document.body).includes(options.orderNumber)) return []
+    const offerSelector = 'a[href*="detail.1688.com/offer/"]'
+    const excludedSelector = '[class*="recommend"],[class*="Recommend"],[class*="guess"],aside,nav,footer'
+    const productRowSelector = 'tr,[data-order-product],[class*="order-item"],[class*="orderItem"],[class*="order-product"],[class*="orderProduct"],[class*="goods-info"],[class*="goodsInfo"]'
+    const variantSelector = '[data-option-name],[data-sku-name],[class*="sku-item"],[class*="skuItem"],[class*="sku-row"],[class*="skuRow"],[class*="spec-item"],[class*="specItem"],[class*="option-item"],[class*="optionItem"]'
+    const canonicalFromAnchor = (anchor) => {
+      try {
+        const url = new URL(anchor.getAttribute('href'), 'https://detail.1688.com')
+        const match = url.pathname.match(/^\/offer\/(\d{6,30})\.html\/?$/i)
+        return url.hostname === 'detail.1688.com' && ['https:', 'http:'].includes(url.protocol) && match
+          ? `https://detail.1688.com/offer/${match[1]}.html` : null
+      } catch { return null }
+    }
+    const urlsIn = (element) => new Set(Array.from(element.querySelectorAll(offerSelector))
+      .filter(anchor => !anchor.closest(excludedSelector)).map(canonicalFromAnchor).filter(Boolean))
+    const onlyValue = (values, limit = 1_000) => {
+      const unique = [...new Set(values.map(value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '').filter(Boolean))]
+      return unique.length === 1 ? unique[0].slice(0, limit) : null
+    }
+    const labelledValue = (element, labels, limit = 1_000) => {
+      // Read a compact labelled field, not the product card's combined price,
+      // quantity and other options. Conflicting fields deliberately stay empty.
+      const found = []
+      const labelPattern = new RegExp(`^(?:${labels})\\s*[：:]\\s*(.{1,1000})$`, 'i')
+      const exactLabel = new RegExp(`^(?:${labels})\\s*[：:]?$`, 'i')
+      for (const field of [element, ...element.querySelectorAll('span,div,td,dt,dd,label')]) {
+        const value = textOf(field)
+        if (value.length > 1_000) continue
+        const match = value.match(labelPattern)
+        if (match && field.children.length <= 2) found.push(match[1])
+        else if (exactLabel.test(value)) found.push(textOf(field.nextElementSibling))
+      }
+      return onlyValue(found, limit)
+    }
+    const optionOf = (element) => {
+      const optionFields = Array.from(element.querySelectorAll('[data-option-name],[data-sku-name],[data-spec],[class*="sku-name"],[class*="skuName"],[class*="spec-name"],[class*="specName"],[class*="option-name"],[class*="optionName"],[class*="sku-info"],[class*="skuInfo"]'))
+      const explicit = onlyValue([element, ...optionFields].flatMap(field => [
+        field.getAttribute('data-option-name'), field.getAttribute('data-sku-name'), field.getAttribute('data-spec'),
+        optionFields.includes(field) ? textOf(field) : null,
+      ]))
+      if (explicit) return explicit
+      return labelledValue(element, '规格|规格型号|商品规格|颜色|尺码|型号|款式|选项|옵션|option')
+    }
+    const codeOf = (element) => {
+      const fields = [element, ...element.querySelectorAll('[data-product-code],[data-seller-sku]')]
+      return onlyValue(fields.flatMap(field => [field.getAttribute('data-product-code'), field.getAttribute('data-seller-sku')]), 100)
+        || labelledValue(element, '货号|商家编码|商品编码|产品编码|SKU|품목코드|상품코드', 100)
+    }
+    const imageOf = (element) => {
+      for (const image of element.querySelectorAll('img')) {
+        const value = image.getAttribute('src') || image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
+        if (!value) continue
+        try {
+          const url = new URL(value, 'https://detail.1688.com')
+          if (['http:', 'https:'].includes(url.protocol)) return url.toString().slice(0, 2_000)
+        } catch { /* Ignore inline data and invalid image URLs. */ }
+      }
+      return null
+    }
     const scopes = new Set(document.querySelectorAll(
       '[class*="order-item"], [class*="orderItem"], [class*="order-product"], [class*="orderProduct"], [class*="goods-info"], [class*="goodsInfo"], table',
     ))
@@ -1343,20 +1401,58 @@ async function collect1688TrackingInPage(options = {}) {
       }
     }
     const links = new Map()
+    const visited = new Set()
     for (const scope of scopes) {
-      if (scope.closest('[class*="recommend"],[class*="Recommend"],[class*="guess"],aside,nav,footer')) continue
-      for (const anchor of scope.querySelectorAll('a[href*="detail.1688.com/offer/"]')) {
-        if (anchor.closest('[class*="recommend"],[class*="Recommend"],[class*="guess"],aside,nav,footer')) continue
-        try {
-          const url = new URL(anchor.getAttribute('href'), 'https://detail.1688.com')
-          const match = url.pathname.match(/^\/offer\/(\d{6,30})\.html\/?$/i)
-          if (url.hostname !== 'detail.1688.com' || !match) continue
-          const canonical = `https://detail.1688.com/offer/${match[1]}.html`
-          if (!links.has(canonical)) links.set(canonical, { url: canonical, title: textOf(anchor).slice(0, 1_000) || anchor.getAttribute('title') || null })
-        } catch { /* Ignore non-product links. */ }
+      if (scope.closest(excludedSelector)) continue
+      for (const anchor of scope.querySelectorAll(offerSelector)) {
+        if (visited.has(anchor) || anchor.closest(excludedSelector)) continue
+        visited.add(anchor)
+        const url = canonicalFromAnchor(anchor)
+        if (!url) continue
+        let row = anchor.closest(productRowSelector) || anchor.parentElement
+        // An outer order card may contain several products. Never borrow an
+        // option/code/image from that shared ancestor for one of its links.
+        if (!row || urlsIn(row).size !== 1) row = anchor.parentElement
+        const enclosing = row?.parentElement?.closest(productRowSelector)
+        if (row?.tagName !== 'TR' && enclosing && enclosing.tagName !== 'TR' && enclosing !== row && urlsIn(enclosing).size === 1
+          && textOf(enclosing).length <= 8_000) row = enclosing
+        const safeRow = row && urlsIn(row).size === 1 ? row : null
+        const sameProductAnchors = safeRow ? Array.from(safeRow.querySelectorAll(offerSelector)).filter(link => canonicalFromAnchor(link) === url) : [anchor]
+        const title = (sameProductAnchors.map(textOf).find(Boolean)
+          || sameProductAnchors.map(link => link.getAttribute('title')).find(Boolean))?.slice(0, 1_000) || null
+        const imageUrl = safeRow ? imageOf(safeRow) : null
+        const variants = safeRow ? Array.from(safeRow.querySelectorAll(variantSelector))
+          .filter(element => !element.closest(excludedSelector) && optionOf(element)) : []
+        let detailRows = variants.length ? variants : safeRow ? [safeRow] : []
+        // A product image/title cell can span several SKU rows in the order
+        // table. Only the explicit rowspan relation can carry its URL forward.
+        const spanningCell = safeRow?.tagName === 'TR' ? anchor.closest('td[rowspan],th[rowspan]') : null
+        const span = Number(spanningCell?.getAttribute('rowspan'))
+        if (spanningCell?.parentElement === safeRow && Number.isInteger(span) && span > 1 && span <= 200) {
+          const siblings = Array.from(safeRow.parentElement?.children || []).filter(element => element.tagName === 'TR')
+          const start = siblings.indexOf(safeRow)
+          const spannedRows = siblings.slice(start, start + span)
+          if (spannedRows.length === span && spannedRows.every(element => [...urlsIn(element)].every(candidate => candidate === url))) {
+            detailRows = spannedRows
+          }
+        }
+        if (!detailRows.length) {
+          if (!links.has(`${url}||`)) links.set(`${url}||`, { url, title })
+          continue
+        }
+        for (const detailRow of detailRows) {
+          const optionName = optionOf(detailRow)
+          const productCode = codeOf(detailRow) || (variants.length ? codeOf(safeRow) : null)
+          const key = `${url}|${optionName || ''}|${productCode || ''}`
+          const detailImageUrl = imageOf(detailRow) || imageUrl
+          if (!links.has(key)) links.set(key, { url, title,
+            ...(optionName ? { optionName } : {}), ...(productCode ? { productCode } : {}),
+            ...(detailImageUrl ? { imageUrl: detailImageUrl } : {}),
+          })
+        }
       }
     }
-    return Array.from(links.values()).slice(0, 30)
+    return Array.from(links.values()).slice(0, 200)
   }
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     // The order-detail URL normally selects this tab itself, but some 1688 page
@@ -1636,6 +1732,30 @@ function uniqueCandidateUrls(values) {
     })
   }
   return Array.from(candidates.values())
+}
+
+function uniqueOrderProductLinks(values) {
+  const links = new Map()
+  const text = (value, limit) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, limit) : ''
+  for (const value of Array.isArray(values) ? values : []) {
+    const url = canonicalOfferUrl(typeof value === 'string' ? value : value?.url)
+    if (!url) continue
+    const optionName = text(value?.optionName, 1_000)
+    const productCode = text(value?.productCode, 100)
+    const key = `${url}|${optionName}|${productCode}`
+    let imageUrl = null
+    try {
+      const image = new URL(value?.imageUrl)
+      if (['http:', 'https:'].includes(image.protocol)) imageUrl = image.toString().slice(0, 2_000)
+    } catch { /* Images are optional evidence. */ }
+    const previous = links.get(key)
+    links.set(key, { url, title: text(value?.title, 1_000) || previous?.title || null,
+      ...(optionName ? { optionName } : {}), ...(productCode ? { productCode } : {}),
+      ...(imageUrl || previous?.imageUrl ? { imageUrl: imageUrl || previous.imageUrl } : {}),
+    })
+    if (links.size >= 200) break
+  }
+  return Array.from(links.values())
 }
 
 function uniqueDetailImageUrls(values) {

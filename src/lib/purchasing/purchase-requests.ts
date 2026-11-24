@@ -1131,6 +1131,8 @@ export async function getPurchaseRequests(input: {
             AND ${saasChinaPurchaseLinks.purchaseRequestItemId} = ${purchaseRequestItems.id}
         )` : sql<string | null>`NULL`,
         purchaseUrl: sql<string | null>`COALESCE(
+          CASE WHEN ${purchaseRequestItems.rawData}->'purchaseUrlLookup'->>'orderNumber' = ${purchaseRequestItems.supplierOrderNumber}
+            THEN NULLIF(BTRIM(${purchaseRequestItems.rawData}->'purchaseUrlLookup'->>'resolvedUrl'), '') END,
           NULLIF(BTRIM(${purchaseRequestItems.rawData}->'productWorkflow'->>'purchaseUrl'), ''),
           NULLIF(BTRIM(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}), '')
         )`,

@@ -17,7 +17,10 @@ const lookupResultSchema = z.object({
     extractionVersion: z.literal(2),
   }).strict(),
   replaceUninspectedInspection: z.boolean().optional().default(false),
-  productLinks: z.array(z.object({ url: z.string().trim().url().max(2_000), title: z.string().max(1_000).nullable().optional() }).strict()).max(30).optional(),
+  productLinks: z.array(z.object({ url: z.string().trim().url().max(2_000), title: z.string().max(1_000).nullable().optional(),
+    optionName: z.string().max(1_000).nullable().optional(), productCode: z.string().max(100).nullable().optional(),
+    imageUrl: z.string().url().max(2_000).nullable().optional(),
+  }).strict()).max(200).optional(),
 }).strict()
 
 /**

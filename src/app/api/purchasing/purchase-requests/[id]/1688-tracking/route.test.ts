@@ -43,7 +43,7 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
   it('preserves order product links after the guarded tracking save and refreshes both product screens', async () => {
     mocks.applyPurchaseRequest1688TrackingLookup.mockResolvedValue({ id: 'purchase-item' })
     const { POST } = await import('./route')
-    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }]
+    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品', optionName: '黑色', productCode: '123456-0001' }]
     const response = await POST(postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence, productLinks }) as never,
       { params: Promise.resolve({ id: 'purchase-item' }) })
     expect(response.status).toBe(200)

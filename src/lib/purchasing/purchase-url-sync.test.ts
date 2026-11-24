@@ -9,7 +9,7 @@ vi.mock('@/lib/db', () => {
   const tx = {
     select: () => ({ from: (table: unknown) => {
       const result = () => table === purchaseRequestItems ? mocks.requests : mocks.masters
-      const builder = { where: (condition: SQL) => { mocks.clauses.push(condition); return builder }, orderBy: () => builder, for: async () => result(), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result()).then(resolve) }
+      const builder = { leftJoin: () => builder, where: (condition: SQL) => { mocks.clauses.push(condition); return builder }, orderBy: () => builder, for: async () => result(), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result()).then(resolve) }
       return builder
     } }),
     update: (table: unknown) => ({ set: (values: Record<string, unknown>) => ({ where: async () => { mocks.writes.push({ table, values }) } }) }),
@@ -17,13 +17,13 @@ vi.mock('@/lib/db', () => {
   }
   return { db: { ...tx, transaction: (fn: (value: typeof tx) => unknown) => fn(tx) } }
 })
-import { getPurchaseUrlForNewProduct, getPurchaseUrlReplacementSources, resolveOrderPurchaseUrls, savePurchaseTrackingProductLinks, syncPurchaseUrlsFromHistory, syncWorkflowUrls } from './purchase-url-sync'
+import { confirmPurchaseOrderProductUrl, getPurchaseUrlForNewProduct, getPurchaseUrlReplacementSources, resolveOrderPurchaseUrls, savePurchaseTrackingProductLinks, syncPurchaseUrlsFromHistory, syncWorkflowUrls } from './purchase-url-sync'
 import { db } from '@/lib/db'
 
 const oldUrl = 'https://detail.1688.com/offer/111111111111.html'
 const newUrl = 'https://detail.1688.com/offer/222222222222.html'
 const request = { id: 'request-1', sku: '123456-0001', productName: '상품', orderNumber: '1234567890123', rawData: {} }
-beforeEach(() => { vi.clearAllMocks(); mocks.requests = []; mocks.masters = []; mocks.writes = []; mocks.clauses = []; mocks.execute.mockResolvedValue([{ count: 1 }]) })
+beforeEach(() => { vi.clearAllMocks(); mocks.ensure.mockReset(); mocks.requests = []; mocks.masters = []; mocks.writes = []; mocks.clauses = []; mocks.execute.mockResolvedValue([{ count: 1 }]) })
 
 describe('order product URL matching', () => {
   it('shares an unambiguous offer across options of the same product', () => {
@@ -41,6 +41,28 @@ describe('order product URL matching', () => {
 })
 
 describe('purchase URL history reuse', () => {
+  it('reports a saved manual choice even when later item-master synchronization fails', async () => {
+    mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: null, links: [{ url: newUrl }] } } }]
+    mocks.ensure.mockRejectedValue(new Error('temporary database failure'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await confirmPurchaseOrderProductUrl({ userId: 'owner', requestId: request.id, orderNumber: request.orderNumber, url: newUrl, expectedUrl: null })
+      expect(result).toMatchObject({ url: newUrl, syncWarning: expect.stringContaining('상품 링크는 저장') })
+      expect(mocks.writes[0]).toMatchObject({ values: { rawData: { purchaseUrlLookup: { resolvedUrl: newUrl, matchMethod: 'manual' } } } })
+    } finally { log.mockRestore() }
+  })
+  it('confirms a candidate for just this request without changing quantities, tracking or inspection', async () => {
+    mocks.requests = [{ ...request, rawData: { keep: 'original', purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: null, links: [{ url: newUrl }, { url: oldUrl }] } } }]
+    expect(await confirmPurchaseOrderProductUrl({ userId: 'owner', requestId: request.id, orderNumber: request.orderNumber, url: newUrl, expectedUrl: null })).toMatchObject({ url: newUrl })
+    expect(mocks.writes[0]).toMatchObject({ table: purchaseRequestItems, values: { rawData: { keep: 'original', purchaseUrlLookup: { resolvedUrl: newUrl, matchMethod: 'manual' } } } })
+    expect(Object.keys(mocks.writes[0].values)).toEqual(['rawData'])
+  })
+  it.each(['stale', 'foreign-link', 'changed-order'])('rejects %s URL confirmation', async reason => {
+    mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: reason === 'stale' ? oldUrl : null, links: [{ url: oldUrl }] } } }]
+    await expect(confirmPurchaseOrderProductUrl({ userId: 'owner', requestId: request.id,
+      orderNumber: reason === 'changed-order' ? '9999999999999' : request.orderNumber, url: newUrl, expectedUrl: null })).rejects.toThrow()
+    expect(mocks.writes).toEqual([])
+  })
   it('fills a new product on save only when its exact option codes agree on one URL', async () => {
     mocks.requests = [{ ...request, rawData: { productWorkflow: { purchaseUrl: newUrl } } }]
     expect(await db.transaction(tx => getPurchaseUrlForNewProduct(tx, 'owner', [request.sku]))).toBe(newUrl)

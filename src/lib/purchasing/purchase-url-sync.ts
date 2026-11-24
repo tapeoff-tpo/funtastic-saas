@@ -3,53 +3,69 @@ import { db } from '@/lib/db'
 import { productChangeLogs, products, purchaseRequestItems } from '@/lib/db/schema'
 import { ensureNewProductWorkflowTables } from '@/lib/new-products/workflow'
 import { canonicalize1688OfferUrl, metadataWithPurchaseUrl, purchaseUrlFromMetadata, recordValue } from './purchase-url-values'
+import { matchOrderPurchaseUrls, normalizeOrderProductLinks, type OrderProductLink } from './purchase-order-url-match'
+export { resolveOrderPurchaseUrls, type OrderProductLink } from './purchase-order-url-match'
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
-export type OrderProductLink = { url: string; title?: string | null }
 type PurchaseUrlSource = { sku: string; url: string; requestId: string; workflowItemId: string | null; orderNumber: string | null }
 export const workflowVerificationSku = (id: string) => `new-product:${id}`
-
-/** Links come only from the requested order's product section, never recommendations.
- * A single URL can cover several options of one product, but not unrelated SKUs.
- */
-export function resolveOrderPurchaseUrls(
-  rows: Array<{ id: string; sku: string; productName: string; rawData: unknown }>,
-  links: OrderProductLink[],
-) {
-  const urls = [...new Set(links.map(link => canonicalize1688OfferUrl(link.url)).filter((url): url is string => Boolean(url)))]
-  const groups = new Set(rows.map(row => /^\d{6}-\d{4}$/.test(row.sku.trim())
-    ? row.sku.trim().split('-')[0] : row.productName.trim().replace(/\s+/g, ' ').toLowerCase()))
-  return rows.flatMap(row => {
-    const previous = canonicalize1688OfferUrl(recordValue(recordValue(row.rawData).productWorkflow).purchaseUrl as string | undefined)
-    const url = urls.length === 1 && groups.size === 1 ? urls[0] : previous && urls.includes(previous) ? previous : null
-    return url ? [{ requestId: row.id, url }] : []
-  })
-}
 
 export async function savePurchaseTrackingProductLinks(input: {
   userId: string; requestId: string; orderNumber: string; links: OrderProductLink[]
 }) {
-  const links = input.links.flatMap(link => {
-    const url = canonicalize1688OfferUrl(link.url)
-    return url ? [{ url, title: link.title?.trim().slice(0, 1_000) || null }] : []
-  }).slice(0, 30)
+  const links = normalizeOrderProductLinks(input.links)
   if (!links.length) return { updatedProducts: 0, updatedWorkflow: 0 }
   const skus = await db.transaction(async tx => {
     const rows = await tx.select({ id: purchaseRequestItems.id, sku: purchaseRequestItems.sku,
-      productName: purchaseRequestItems.productName, rawData: purchaseRequestItems.rawData,
-    }).from(purchaseRequestItems).where(and(eq(purchaseRequestItems.userId, input.userId),
-      eq(purchaseRequestItems.supplierOrderNumber, input.orderNumber))).orderBy(purchaseRequestItems.id).for('update')
+      productName: purchaseRequestItems.productName, optionName: purchaseRequestItems.optionName,
+      orderNumber: purchaseRequestItems.supplierOrderNumber, rawData: purchaseRequestItems.rawData, metadata: products.metadata,
+    }).from(purchaseRequestItems).leftJoin(products, and(eq(products.userId, input.userId), eq(products.internalSku, purchaseRequestItems.sku)))
+      .where(and(eq(purchaseRequestItems.userId, input.userId),
+      eq(purchaseRequestItems.supplierOrderNumber, input.orderNumber))).orderBy(purchaseRequestItems.id).for('update', { of: purchaseRequestItems })
     if (!rows.some(row => row.id === input.requestId)) return []
-    const assignments = new Map(resolveOrderPurchaseUrls(rows, links).map(row => [row.requestId, row.url]))
+    const assignments = new Map(matchOrderPurchaseUrls(rows, links).map(row => [row.requestId, row]))
     for (const row of rows) {
       await tx.update(purchaseRequestItems).set({ rawData: {
         ...recordValue(row.rawData), purchaseUrlLookup: { orderNumber: input.orderNumber, links,
-          resolvedUrl: assignments.get(row.id) ?? null, observedAt: new Date().toISOString() },
+          resolvedUrl: assignments.get(row.id)?.url ?? null, matchMethod: assignments.get(row.id)?.method ?? null, observedAt: new Date().toISOString() },
       } }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, row.id)))
     }
     return rows.map(row => row.sku)
   })
   return skus.length ? syncPurchaseUrlsFromHistory(input.userId, skus) : { updatedProducts: 0, updatedWorkflow: 0 }
+}
+
+/** Manual choice is limited to links observed in this exact order. Optimistic
+ * checks keep a stale browser from undoing another operator's selection.
+ */
+export async function confirmPurchaseOrderProductUrl(input: {
+  userId: string; requestId: string; orderNumber: string; url: string; expectedUrl: string | null
+}) {
+  const url = canonicalize1688OfferUrl(input.url)
+  if (!url) throw new Error('1688 상품 링크를 확인해주세요.')
+  const sku = await db.transaction(async tx => {
+    const [row] = await tx.select({ id: purchaseRequestItems.id, sku: purchaseRequestItems.sku, rawData: purchaseRequestItems.rawData,
+      orderNumber: purchaseRequestItems.supplierOrderNumber }).from(purchaseRequestItems)
+      .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.requestId))).for('update')
+    if (!row) throw new Error('발주 항목을 찾을 수 없습니다.')
+    const lookup = recordValue(recordValue(row.rawData).purchaseUrlLookup)
+    if (row.orderNumber !== input.orderNumber || lookup.orderNumber !== input.orderNumber) throw new Error('주문번호가 변경됐습니다. 다시 조회해주세요.')
+    const current = canonicalize1688OfferUrl(lookup.resolvedUrl as string | null)
+    if (current !== canonicalize1688OfferUrl(input.expectedUrl)) throw new Error('상품 링크가 변경됐습니다. 새로고침 후 다시 선택해주세요.')
+    const links = normalizeOrderProductLinks(Array.isArray(lookup.links) ? lookup.links as OrderProductLink[] : [])
+    if (!links.some(link => link.url === url)) throw new Error('이 주문에서 수집한 상품 링크만 선택할 수 있습니다.')
+    await tx.update(purchaseRequestItems).set({ rawData: { ...recordValue(row.rawData), purchaseUrlLookup: {
+      ...lookup, resolvedUrl: url, matchMethod: 'manual', confirmedAt: new Date().toISOString(),
+    } } }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.requestId)))
+    return row.sku
+  })
+  try {
+    return { url, ...await syncPurchaseUrlsFromHistory(input.userId, [sku]) }
+  } catch (error) {
+    console.error('[confirmed-purchase-url-sync]', error)
+    return { url, updatedProducts: 0, updatedWorkflow: 0,
+      syncWarning: '상품 링크는 저장했습니다. 품목·상품관리 반영은 발주 URL 연동을 다시 실행해주세요.' }
+  }
 }
 
 async function purchaseUrlSources(userId: string, skus?: string[], database: Pick<typeof db, 'select'> = db) {

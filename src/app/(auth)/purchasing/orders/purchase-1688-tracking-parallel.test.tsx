@@ -59,7 +59,7 @@ describe('1688 tracking parallel worker pool', () => {
 
   it('carries order product links with their own tracking save', async () => {
     const { fetcher } = await setup(1)
-    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }]
+    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品', optionName: '黑色', productCode: '123456-0001' }]
     await send(() => message({ type: 'FUNTASTIC_1688_TRACKING_RESULT', runId: runId(0), orderNumber: order(0),
       trackingNumbers: ['WAYBILL-0'], trackingSource: 'waybill_number', trackingEvidence: { label: '运单号码', extractionVersion: 2 }, productLinks }))
     await advance()

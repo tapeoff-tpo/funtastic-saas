@@ -536,7 +536,7 @@ function Purchase1688TrackingProgressRunner({
         orderNumber: lookup.job.orderNumber, background: true,
       }, window.location.origin)
     }
-    const saveLookup = async (lookup: ActiveLookup, trackingNumbers: string[], productLinks: Array<{ url: string; title?: string | null }>) => {
+    const saveLookup = async (lookup: ActiveLookup, trackingNumbers: string[], productLinks: Array<{ url: string; title?: string | null; optionName?: string; productCode?: string; imageUrl?: string }>) => {
       const savedIds: string[] = [], failedIds: string[] = []
       let lastError = ''
       for (const id of lookup.job.ids) {
@@ -640,9 +640,13 @@ function Purchase1688TrackingProgressRunner({
       lookup.phase = 'saving'
       updateLookupRows(lookup.job.ids, 'saving', '송장번호 저장 중', trackingNumbers)
       updateProgress(`주문 ${lookup.index + 1}/${batch.jobs.length} 송장 저장 중`)
-      const productLinks = Array.isArray(data.productLinks) ? data.productLinks.slice(0, 30).flatMap(value => {
+      const productLinks = Array.isArray(data.productLinks) ? data.productLinks.slice(0, 200).flatMap(value => {
         if (!value || typeof value !== 'object' || typeof value.url !== 'string' || value.url.length > 2_000) return []
-        return [{ url: value.url, title: typeof value.title === 'string' ? value.title.slice(0, 1_000) : null }]
+        return [{ url: value.url, title: typeof value.title === 'string' ? value.title.slice(0, 1_000) : null,
+          ...(typeof value.optionName === 'string' ? { optionName: value.optionName.slice(0, 1_000) } : {}),
+          ...(typeof value.productCode === 'string' ? { productCode: value.productCode.slice(0, 100) } : {}),
+          ...(typeof value.imageUrl === 'string' ? { imageUrl: value.imageUrl.slice(0, 2_000) } : {}),
+        }]
       }) : []
       void saveLookup(lookup, trackingNumbers, productLinks)
     }

@@ -4,7 +4,8 @@ import vm from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const source = readFileSync(join(process.cwd(), 'tools/browser-extensions/funtastic-1688-url-collector/background.js'), 'utf8')
-type Snapshot = { trackingNumbers: string[]; productLinks?: Array<{ url: string; title?: string | null }>; orderState?: string; error?: string; sawLogisticsTab?: boolean }
+type ProductLink = { url: string; title?: string | null; optionName?: string; productCode?: string; imageUrl?: string }
+type Snapshot = { trackingNumbers: string[]; productLinks?: ProductLink[]; orderState?: string; error?: string; sawLogisticsTab?: boolean }
 
 function loadBackground() {
   const key = 'funtastic1688TrackingLookupRun'
@@ -20,11 +21,12 @@ function loadBackground() {
       remove: vi.fn(async (name: string) => { delete state[name] }),
     } },
   }
-  const api = vm.runInNewContext(source + '\n({ collect1688TrackingInPage, collectTrackingLookupFromTab })', {
+  const api = vm.runInNewContext(source + '\n({ collect1688TrackingInPage, collectTrackingLookupFromTab, uniqueOrderProductLinks })', {
     chrome, window, document, ShadowRoot, Date, URL, setTimeout, clearTimeout,
   }) as {
     collect1688TrackingInPage: (options?: { singlePass?: boolean; activateLogistics?: boolean; orderNumber?: string }) => Promise<Snapshot>
     collectTrackingLookupFromTab: (tabId: number) => Promise<void>
+    uniqueOrderProductLinks: (values: ProductLink[]) => ProductLink[]
   }
   return { api, chrome }
 }
@@ -32,6 +34,66 @@ function loadBackground() {
 afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('1688 extension tracking snapshots', () => {
+  it('keeps each product row title, option, seller code and image separate in a multi-product order', async () => {
+    document.body.innerHTML = '<div>订单号 1234567890123</div><table><tr><td><a href="https://detail.1688.com/offer/222222222222.html"><img src="https://cbu01.alicdn.com/one.jpg" /></a><a href="https://detail.1688.com/offer/222222222222.html">金属挂钩</a></td><td><span class="sku-name">银色 50个</span><div>货号: 123456-0001</div></td></tr><tr><td><a href="https://detail.1688.com/offer/333333333333.html">塑料收纳盒</a><img src="https://cbu01.alicdn.com/two.jpg" /></td><td><span class="sku-name">白色</span><div>商家编码: 654321-0001</div></td></tr></table><label>运单号码:</label><input value="S71268668516" />'
+    const { api } = loadBackground()
+    const result = await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })
+    expect(Array.from(result.productLinks ?? [])).toEqual([
+      { url: 'https://detail.1688.com/offer/222222222222.html', title: '金属挂钩', optionName: '银色 50个', productCode: '123456-0001', imageUrl: 'https://cbu01.alicdn.com/one.jpg' },
+      { url: 'https://detail.1688.com/offer/333333333333.html', title: '塑料收纳盒', optionName: '白色', productCode: '654321-0001', imageUrl: 'https://cbu01.alicdn.com/two.jpg' },
+    ])
+  })
+
+  it('preserves several options with the same offer URL through collection and transmission', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = '<div>订单号 1234567890123</div><section class="order-product"><a href="https://detail.1688.com/offer/222222222222.html">金属挂钩</a><img src="https://cbu01.alicdn.com/main.jpg" /><div class="sku-item" data-option-name="银色"><span>颜色: 银色</span><span>货号: 123456-0001</span></div><div class="sku-item" data-option-name="黑色"><span>颜色: 黑色</span><span>货号: 123456-0002</span></div></section><label>运单号码:</label><input value="S71268668516" />'
+    const { api, chrome } = loadBackground()
+    const result = await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })
+    expect(Array.from(result.productLinks ?? []).map(link => [link.optionName, link.productCode])).toEqual([
+      ['银色', '123456-0001'], ['黑色', '123456-0002'],
+    ])
+    chrome.scripting.executeScript.mockResolvedValueOnce([{ frameId: 0, result: { trackingNumbers: [], productLinks: result.productLinks } }])
+      .mockResolvedValue([{ frameId: 0, result }])
+    const pending = api.collectTrackingLookupFromTab(2)
+    await vi.advanceTimersByTimeAsync(300)
+    await pending
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(1, expect.objectContaining({ productLinks: result.productLinks }))
+  })
+
+  it('does not infer a seller code from an offer id or borrow evidence from a multi-product ancestor', async () => {
+    document.body.innerHTML = '<div>订单号 1234567890123</div><section class="order-product"><div><a href="https://detail.1688.com/offer/222222222222.html">挂钩</a></div><div><a href="https://detail.1688.com/offer/333333333333.html">盒子</a></div><span class="sku-name">这不是单个商品的规格</span><div>货号: DO-NOT-SHARE</div></section><label>运单号码:</label><input value="S71268668516" />'
+    const { api } = loadBackground()
+    const result = await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })
+    expect(Array.from(result.productLinks ?? [])).toEqual([
+      { url: 'https://detail.1688.com/offer/222222222222.html', title: '挂钩' },
+      { url: 'https://detail.1688.com/offer/333333333333.html', title: '盒子' },
+    ])
+  })
+
+  it('carries a product link only across the SKU rows covered by its explicit rowspan', async () => {
+    document.body.innerHTML = '<div>订单号 1234567890123</div><section class="order-product"><table><tr><td rowspan="2"><a href="https://detail.1688.com/offer/222222222222.html">金属挂钩</a></td><td><span class="sku-name">银色</span><div>货号: 123456-0001</div></td></tr><tr><td><span class="sku-name">黑色</span><div>货号: 123456-0002</div></td></tr><tr><td><span class="sku-name">不能借用上一商品链接</span></td></tr></table></section><label>运单号码:</label><input value="S71268668516" />'
+    const { api } = loadBackground()
+    const result = await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })
+    expect(Array.from(result.productLinks ?? [])).toEqual([
+      { url: 'https://detail.1688.com/offer/222222222222.html', title: '金属挂钩', optionName: '银色', productCode: '123456-0001' },
+      { url: 'https://detail.1688.com/offer/222222222222.html', title: '金属挂钩', optionName: '黑色', productCode: '123456-0002' },
+    ])
+  })
+
+  it('normalizes optional row evidence without collapsing different options or accepting inline images', () => {
+    const { api } = loadBackground()
+    const base = { url: 'https://detail.1688.com/offer/222222222222.html', title: '金属挂钩' }
+    expect(Array.from(api.uniqueOrderProductLinks([
+      { ...base, optionName: ' 银色 ', productCode: '123456-0001', imageUrl: 'data:image/png;base64,abc' },
+      { ...base, optionName: '银色', productCode: '123456-0001', imageUrl: 'https://cbu01.alicdn.com/silver.jpg' },
+      { ...base, optionName: '黑色', productCode: '123456-0002' },
+    ]))).toEqual([
+      { ...base, optionName: '银色', productCode: '123456-0001', imageUrl: 'https://cbu01.alicdn.com/silver.jpg' },
+      { ...base, optionName: '黑色', productCode: '123456-0002' },
+    ])
+    expect(api.uniqueOrderProductLinks(Array.from({ length: 40 }, (_, index) => ({ ...base, optionName: `规格 ${index}` })))).toHaveLength(40)
+  })
+
   it('keeps actual order product links and excludes recommendations and unrelated frames', async () => {
     document.body.innerHTML = '<div>订单号 1234567890123</div><section class="order-product"><a href="https://detail.1688.com/offer/222222222222.html?spm=x">货品</a></section><aside class="recommend"><table><tr><td><a href="https://detail.1688.com/offer/999999999999.html">推荐</a></td></tr></table></aside><label>运单号码:</label><input value="S71268668516" />'
     const { api, chrome } = loadBackground()

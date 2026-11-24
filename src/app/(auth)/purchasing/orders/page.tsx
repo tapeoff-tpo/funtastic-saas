@@ -49,6 +49,7 @@ import { resolvePurchaseSourceWarehouses } from '@/lib/purchasing/purchase-sourc
 import { ECOUNT_CHINA_ARRIVED_SOURCE } from '@/lib/purchasing/ecount-purchasing-sync'
 import { PurchaseColumnPicker, PurchaseColumns, PurchaseEmptyCell, type PurchaseColumn } from './purchase-columns'
 import tableSpacing from './purchase-table-spacing.module.css'
+import { PurchaseUrlMatchField } from './purchase-url-match-field'
 import {
   PurchaseArrivalWarehouseField,
   PurchaseBulkDeleteButton,
@@ -233,7 +234,7 @@ export async function PurchasingOrdersView({
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
     : []
-  const showPurchaseUrlColumn = status === 'purchased' || status === 'purchase_completed' || status === 'inspecting' || overdueOnly
+  const showPurchaseUrlColumn = isMainOrders || status === 'purchased' || status === 'purchase_completed' || status === 'inspecting' || overdueOnly
   const recommendationBasisParam = stringParam(params.showRecommendationBasis)
   const showRecommendationBasis = recommendationBasisParam === undefined
     ? isRequestedStatus
@@ -787,6 +788,8 @@ export async function PurchasingOrdersView({
                           ) : (
                             <span className="text-xs text-muted-foreground">-</span>
                           )}
+                          {item.id ? <PurchaseUrlMatchField id={item.id} orderNumber={item.supplierOrderNumber}
+                            productName={item.productName} rawData={item.rawData} /> : null}
                         </td>
                       ) : null}
                       <td data-purchase-column="quantity" className="px-2 py-2 text-center tabular-nums align-middle">

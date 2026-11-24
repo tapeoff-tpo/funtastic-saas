@@ -132,7 +132,6 @@ type BoxSplitDraftSnapshot = {
   baselineStatus?: BoxSplitStatus
 }
 
-type SavedBoxFilter = 'all' | 'saved'
 type WorkbookPreview = {
   boxSplits: Array<{ shipmentItemId: string; allocations: Array<{ boxNo: string; quantity: number }> }>
   palletAssignments: Array<{ boxNo: string; palletNo: string | null }>
@@ -696,7 +695,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const guard = useChinaWorkGuard()
 
 
-  const [savedBoxFilter, setSavedBoxFilter] = useState<SavedBoxFilter>('saved')
 
   const [editorStage, setEditorStage] = useState(stage)
 
@@ -790,7 +788,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             </dl>
           </StageHelp>
         </div>
-        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} filter={savedBoxFilter} editable={editable} isPending={isPending} onFilterChange={setSavedBoxFilter} />
+        <SavedBoxContentsPanel shipmentId={shipment.id} summaries={savedBoxSummaries} editable={editable} isPending={isPending} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('pallets')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 파렛트 배정</button></div>
       </section> : null}
 

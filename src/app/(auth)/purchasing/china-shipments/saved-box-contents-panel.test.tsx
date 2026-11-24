@@ -17,7 +17,7 @@ function box(id: string, items = [{ item: item('one'), quantity: 10 }]): SavedBo
 }
 const mixedBox = (id: string) => box(id, [{ item: item('one'), quantity: 3 }, { item: item('two', 'SKU-B'), quantity: 4 }])
 function renderPanel(summaries: SavedBoxSummary[], props: Partial<Parameters<typeof SavedBoxContentsPanel>[0]> = {}) {
-  return render(<ChinaWorkGuardProvider><SavedBoxContentsPanel shipmentId="shipment" summaries={summaries} filter="saved" editable isPending={false} onFilterChange={vi.fn()} {...props} /></ChinaWorkGuardProvider>)
+  return render(<ChinaWorkGuardProvider><SavedBoxContentsPanel shipmentId="shipment" summaries={summaries} editable isPending={false} {...props} /></ChinaWorkGuardProvider>)
 }
 
 beforeEach(() => {
@@ -75,4 +75,12 @@ it('selects merge boxes beside their numbers and confirms only those boxes', asy
   fireEvent.click(screen.getByRole('button', { name: '선택 박스 합치기 (2)' }))
   fireEvent.click(screen.getByRole('button', { name: '합치기 확인' }))
   await waitFor(() => expect(merge).toHaveBeenCalledWith({ shipmentId: 'shipment', boxIds: ['1', '3'] }))
+})
+
+it('always displays all physical boxes including empty records without filter buttons', () => {
+  renderPanel([box('1'), box('2', [])])
+  expect(screen.getByRole('row', { name: '박스 1' })).toBeInTheDocument()
+  expect(screen.getByRole('row', { name: '박스 2' })).toBeInTheDocument()
+  expect(screen.queryByRole('group', { name: '저장된 박스 필터' })).not.toBeInTheDocument()
+  expect(screen.getByText('전체 박스 2개')).toBeInTheDocument()
 })

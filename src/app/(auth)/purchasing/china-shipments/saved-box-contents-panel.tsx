@@ -13,17 +13,15 @@ import type { SavedBoxSummary } from './china-shipments-board'
 
 const boxNumberCollator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
 const productKey = (item: SavedBoxSummary['items'][number]['item']) => JSON.stringify([item.sku, item.optionName ?? ''])
-export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable, isPending, onFilterChange }: {
-  shipmentId: string; summaries: SavedBoxSummary[]; filter: 'all' | 'saved'; editable: boolean; isPending: boolean
-  onFilterChange: (filter: 'all' | 'saved') => void
+export function SavedBoxContentsPanel({ shipmentId, summaries, editable, isPending }: {
+  shipmentId: string; summaries: SavedBoxSummary[]; editable: boolean; isPending: boolean
 }) {
   const guard = useChinaWorkGuard()
   const router = useRouter()
   const dialog = useRef<HTMLDialogElement>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [pending, start] = useTransition()
-  const savedBoxes = summaries.filter((box) => box.quantity > 0)
-  const visibleBoxes = [...(filter === 'all' ? summaries : savedBoxes)].sort((left, right) => boxNumberCollator.compare(left.box.boxNo, right.box.boxNo))
+  const visibleBoxes = [...summaries].sort((left, right) => boxNumberCollator.compare(left.box.boxNo, right.box.boxNo))
   const canEditBox = (summary: SavedBoxSummary) => editable && summary.box.editable && summary.box.status === 'open'
   const selectedBoxes = summaries.filter((summary) => selected.includes(summary.box.id) && canEditBox(summary) && summary.quantity > 0)
   const target = largestChinaOutboundBox(selectedBoxes.map((summary) => summary.box))
@@ -38,10 +36,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, filter, editable,
     <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
       <div className="flex items-center gap-3"><h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
       {editable && <button type="button" disabled={selectedBoxes.length < 2 || isPending || pending || guard.busy} onClick={() => dialog.current?.showModal()} className="h-7 rounded border bg-background px-2 text-xs disabled:opacity-40">선택 박스 합치기 ({selectedBoxes.length})</button>}</div>
-      <div role="group" aria-label="저장된 박스 필터" className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={filter === 'saved'} onClick={() => { if (filter !== 'saved') guard.requestNavigation(() => onFilterChange('saved')) }} className="h-8 rounded-md border px-3 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground">저장된 박스 (내용 있음) {savedBoxes.length.toLocaleString('ko-KR')}</button>
-        <button type="button" aria-pressed={filter === 'all'} onClick={() => { if (filter !== 'all') guard.requestNavigation(() => onFilterChange('all')) }} className="h-8 rounded-md border px-3 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground">전체 박스 {summaries.length.toLocaleString('ko-KR')}</button>
-      </div>
+      <span className="text-xs text-muted-foreground">전체 박스 {summaries.length.toLocaleString('ko-KR')}개</span>
     </div>
     {!visibleBoxes.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[1350px] table-fixed border-collapse text-sm">
       <caption className="sr-only">박스번호 순 적재 상품, 수량, 규격·중량, 쉽먼트 인쇄 및 다운로드</caption>

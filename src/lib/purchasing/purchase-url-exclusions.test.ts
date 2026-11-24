@@ -23,19 +23,20 @@ vi.mock('@/lib/db', async () => {
   return { db: { ...expose(database), transaction: (fn: (tx: ReturnType<typeof expose>) => Promise<unknown>) => database.transaction(tx => fn(expose(tx))) } }
 })
 
-import { getPurchaseUrlCollectionQueue, getPurchaseUrlVerificationQueue, markPurchaseUrlsForVerification } from './purchase-url-collector'
+import { getPurchaseUrlCollectionQueue, getPurchaseUrlVerificationQueue, markPurchaseUrlsAsVerifiedOpen, markPurchaseUrlsForVerification } from './purchase-url-collector'
+import { ensurePurchaseUrlVerificationHistory } from './purchase-url-verification-history'
 
 const uuid = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`
 const OWNER = uuid(900001), OTHER = uuid(900002)
 const offer = (number: number) => `https://detail.1688.com/offer/${String(number).padStart(12, '1')}.html`
 let nextId = 0
 
-async function product(input: { sku: string; status?: string; legacy?: boolean; url?: string | null; userId?: string }) {
+async function product(input: { sku: string; status?: string; legacy?: boolean; url?: string | null; userId?: string; metadata?: Record<string, unknown> }) {
   const id = uuid(++nextId)
   await memory.client.query(`INSERT INTO products (id,user_id,internal_sku,name,purchasing_status,metadata)
     VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, [id, input.userId ?? OWNER, input.sku, input.sku,
     input.status ?? 'active', JSON.stringify({ esa009m: { '구매 URL': input.url ?? null },
-      ...(input.legacy ? { purchasingOutgoingMetrics: { isDiscontinued: true } } : {}) })])
+      ...(input.legacy ? { purchasingOutgoingMetrics: { isDiscontinued: true } } : {}), ...input.metadata })])
   return id
 }
 
@@ -66,10 +67,11 @@ beforeAll(async () => {
     CREATE TABLE new_product_workflow_items (id uuid PRIMARY KEY, user_id uuid NOT NULL, product_name text,
       registered_product_name text, sabangnet_code text, source_url text, metadata jsonb, updated_at timestamptz DEFAULT now());
   `)
+  await ensurePurchaseUrlVerificationHistory()
 }, 30_000)
 beforeEach(async () => {
   nextId = 0
-  await memory.client.exec('TRUNCATE products, purchase_request_items, new_product_workflow_items')
+  await memory.client.exec('TRUNCATE products, purchase_request_items, new_product_workflow_items, purchasing_url_verification_history')
 })
 afterAll(async () => { await memory.client.close() })
 
@@ -154,5 +156,81 @@ describe('discontinued purchase URL exclusions in PostgreSQL', () => {
     expect(result.rows[0].metadata).toEqual({ esa009m: { '구매 URL': url } })
     const checkedWorkflow = await memory.client.query<{ metadata: Record<string, unknown> }>('SELECT metadata FROM new_product_workflow_items WHERE id=$1', [workflowId])
     expect(checkedWorkflow.rows[0].metadata).not.toHaveProperty('purchaseUrlVerification')
+  })
+
+  it('clears matching and legacy master failure flags while preserving the purchase URL, cost and unrelated metadata', async () => {
+    const url = offer(1)
+    const matchingMetadata = {
+      esa009m: { '구매 URL': `${url}?spm=order`, '원가': '125', 'HS CODE': '123456' },
+      extra: { keep: true },
+      purchaseUrlVerification: { status: 'confirm_required', failedUrl: `${url}?sku=red`, reason: '일시 오류' },
+    }
+    const legacyMetadata = {
+      esa009m: { '구매 URL': url, '배송비': '5' },
+      purchasingOutgoingMetrics: { isDiscontinued: false },
+      purchaseUrlVerification: { status: 'confirm_required', reason: '과거 형식' },
+    }
+    const first = await product({ sku: '100001-0001', metadata: matchingMetadata })
+    const second = await product({ sku: '100001-0002', metadata: legacyMetadata })
+    expect(await markPurchaseUrlsAsVerifiedOpen({ userId: OWNER, url, skus: ['100001-0001', '100001-0002'] }))
+      .toMatchObject({ updated: [{ id: first }, { id: second }], replaced: 0, updatedWorkflow: 0 })
+    const result = await memory.client.query<{ id: string; metadata: Record<string, unknown> }>('SELECT id, metadata FROM products ORDER BY id')
+    expect(result.rows).toEqual([
+      { id: first, metadata: { esa009m: matchingMetadata.esa009m, extra: matchingMetadata.extra } },
+      { id: second, metadata: { esa009m: legacyMetadata.esa009m, purchasingOutgoingMetrics: legacyMetadata.purchasingOutgoingMetrics } },
+    ])
+  })
+
+  it('preserves edited, discontinued, differently failed, foreign-workspace and unrequested master rows on a late normal result', async () => {
+    const url = offer(1), otherUrl = offer(2)
+    const flag = { status: 'confirm_required', failedUrl: url, reason: '확인 필요' }
+    const inputs = [
+      { sku: '100001-0001', metadata: { esa009m: { '구매 URL': otherUrl, '원가': '100' }, purchaseUrlVerification: flag } },
+      { sku: '100001-0002', status: 'discontinued', url, metadata: { purchaseUrlVerification: flag } },
+      { sku: '100001-0003', legacy: true, url, metadata: { purchaseUrlVerification: flag } },
+      { sku: '100001-0004', url, metadata: { purchaseUrlVerification: { ...flag, failedUrl: otherUrl } } },
+      { sku: '100001-0005', userId: OTHER, url, metadata: { purchaseUrlVerification: flag } },
+      { sku: '100001-0006', url, metadata: { purchaseUrlVerification: flag } },
+    ]
+    for (const input of inputs) await product(input)
+    const before = await memory.client.query('SELECT id, metadata FROM products ORDER BY id')
+    expect(await markPurchaseUrlsAsVerifiedOpen({ userId: OWNER, url, skus: inputs.slice(0, 5).map(input => input.sku) }))
+      .toEqual({ updated: [], replaced: 0, updatedWorkflow: 0 })
+    expect((await memory.client.query('SELECT id, metadata FROM products ORDER BY id')).rows).toEqual(before.rows)
+  })
+
+  it('clears only the requested eligible workflow failure flag and preserves its source URL and other details', async () => {
+    const url = offer(1)
+    const sourceUrl = `${url}?spm=original`
+    const keep = { estimatedCost: 300, supplier: '기존 거래처' }
+    const id = await workflow({ url: sourceUrl, metadata: {
+      ...keep,
+      purchaseUrlVerification: { status: 'confirm_required', failedUrl: `${url}?sku=red`, reason: '시간 초과' },
+    } })
+    expect(await markPurchaseUrlsAsVerifiedOpen({ userId: OWNER, url, skus: [`new-product:${id}`] }))
+      .toEqual({ updated: [], replaced: 0, updatedWorkflow: 1 })
+    const result = await memory.client.query<{ sourceUrl: string; metadata: Record<string, unknown> }>(
+      'SELECT source_url AS "sourceUrl", metadata FROM new_product_workflow_items WHERE id=$1', [id],
+    )
+    expect(result.rows).toEqual([{ sourceUrl, metadata: { optionDetails: [], ...keep } }])
+  })
+
+  it('preserves workflows after source edits or discontinuation, and protects other failed URLs, workspaces and IDs', async () => {
+    const url = offer(1), otherUrl = offer(2)
+    const flag = { status: 'confirm_required', failedUrl: url, reason: '확인 필요' }
+    await product({ sku: '100001-0001', status: 'discontinued' })
+    const edited = await workflow({ url: otherUrl, metadata: { purchaseUrlVerification: flag } })
+    const discontinued = await workflow({ primary: '100001-0001', url, metadata: { purchaseUrlVerification: flag } })
+    const differentlyFailed = await workflow({ url, metadata: { purchaseUrlVerification: { ...flag, failedUrl: otherUrl } } })
+    const foreign = await workflow({ userId: OTHER, url, metadata: { purchaseUrlVerification: flag } })
+    const unrequested = await workflow({ url, metadata: { purchaseUrlVerification: flag } })
+    const differentStatus = await workflow({ url, metadata: { purchaseUrlVerification: { ...flag, status: 'manual_review' } } })
+    const noFlag = await workflow({ url, metadata: { keep: '검증 오류 없음' } })
+    const before = await memory.client.query('SELECT id, source_url, metadata FROM new_product_workflow_items ORDER BY id')
+    expect(await markPurchaseUrlsAsVerifiedOpen({ userId: OWNER, url,
+      skus: [edited, discontinued, differentlyFailed, foreign, differentStatus, noFlag].map(id => `new-product:${id}`),
+    })).toEqual({ updated: [], replaced: 0, updatedWorkflow: 0 })
+    expect((await memory.client.query('SELECT id, source_url, metadata FROM new_product_workflow_items ORDER BY id')).rows).toEqual(before.rows)
+    expect(before.rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: unrequested })]))
   })
 })

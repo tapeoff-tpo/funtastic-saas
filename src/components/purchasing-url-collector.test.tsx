@@ -9,7 +9,7 @@ function message(data: Record<string, unknown>) {
   window.dispatchEvent(new MessageEvent('message', { source: window, origin: window.location.origin, data: { source: 'funtastic-1688-extension', ...data } }))
 }
 const response = (body: unknown) => ({ ok: true, json: async () => body }) as Response
-beforeEach(() => { vi.clearAllMocks() })
+beforeEach(() => { vi.clearAllMocks(); window.sessionStorage.clear() })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('purchase URL verification and history synchronization', () => {
@@ -31,7 +31,7 @@ describe('purchase URL verification and history synchronization', () => {
     const post = vi.spyOn(window, 'postMessage')
     render(<PurchasingUrlCollector />)
     act(() => message({ type: 'FUNTASTIC_1688_PONG' }))
-    fireEvent.click(screen.getByRole('button', { name: 'URL 검증' }))
+    fireEvent.click(screen.getByRole('button', { name: /^필요한 URL 검증/ }))
     await waitFor(() => expect(post.mock.calls.some(([value]) => value.type === 'FUNTASTIC_1688_VERIFY_START')).toBe(true))
     const start = post.mock.calls.map(([value]) => value).find(value => value.type === 'FUNTASTIC_1688_VERIFY_START')
     await act(async () => message({ type: 'FUNTASTIC_1688_VERIFY_RESULT', runId: start.runId, url, status, items: start.links[0].items }))

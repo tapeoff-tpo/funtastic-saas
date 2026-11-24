@@ -5,9 +5,13 @@ import { PURCHASE_URL_HEADER } from './items'
 import { ensureNewProductWorkflowTables } from '@/lib/new-products/workflow'
 import { getPurchaseUrlReplacementSources, resolveOrderPurchaseUrls, syncWorkflowUrls } from './purchase-url-sync'
 import { canonicalize1688OfferUrl, metadataWithPurchaseUrl, purchaseUrlFromMetadata, recordValue } from './purchase-url-values'
+import { getPurchaseUrlVerificationHistory } from './purchase-url-verification-history'
 export { canonicalize1688OfferUrl } from './purchase-url-values'
 
 const MAX_QUEUE_ROWS = 2_000
+export const PURCHASE_URL_VERIFICATION_BATCH_SIZE = 200
+const VERIFIED_URL_FRESH_DAYS = 30
+export type PurchaseUrlVerificationMode = 'due' | 'issues' | 'all'
 
 // Use both flags, as older workbook imports only set the metadata flag.
 function eligibleUrlProduct() {
@@ -196,14 +200,18 @@ export async function getPurchaseUrlCollectionQueue(input: {
 export async function getPurchaseUrlVerificationQueue(input: {
   userId: string
   limit?: number
+  mode?: PurchaseUrlVerificationMode
+  cursor?: string | null
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const limit = Math.min(Math.max(input.limit ?? 1_000, 1), MAX_QUEUE_ROWS)
+  const limit = Math.min(Math.max(Math.floor(input.limit ?? PURCHASE_URL_VERIFICATION_BATCH_SIZE), 1), PURCHASE_URL_VERIFICATION_BATCH_SIZE)
+  const mode = input.mode ?? 'due'
+  const cursor = canonicalize1688OfferUrl(input.cursor)
   const rows = await db
     .select({
       sku: products.internalSku,
       productName: products.name,
-      metadata: products.metadata,
+      purchaseUrl: sql<string | null>`${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}`,
     })
     .from(products)
     .where(and(
@@ -216,7 +224,7 @@ export async function getPurchaseUrlVerificationQueue(input: {
   const linksByUrl = new Map<string, PurchaseUrlVerificationLink>()
   let skippedInvalid = 0
   for (const product of rows) {
-    const url = canonicalize1688OfferUrl(purchaseUrlFromMetadata(product.metadata))
+    const url = canonicalize1688OfferUrl(product.purchaseUrl)
     if (!url) {
       skippedInvalid += 1
       continue
@@ -248,13 +256,35 @@ export async function getPurchaseUrlVerificationQueue(input: {
       ...link,
       items: link.items.sort((left, right) => left.sku.localeCompare(right.sku)),
     }))
-    .sort((left, right) => left.url.localeCompare(right.url))
-  const links = allLinks.slice(0, limit)
+    .sort((left, right) => left.url < right.url ? -1 : left.url > right.url ? 1 : 0)
+  const history = new Map((await getPurchaseUrlVerificationHistory(input.userId, allLinks.map(link => link.url)))
+    .map(result => [result.url, result]))
+  const freshSince = Date.now() - VERIFIED_URL_FRESH_DAYS * 24 * 60 * 60 * 1_000
+  const isIssue = (url: string) => ['unavailable', 'unknown'].includes(history.get(url)?.status ?? '')
+  const isDue = (url: string) => {
+    const result = history.get(url)
+    if (!result) return true
+    if (result.status !== 'open') return false
+    const checkedAt = Date.parse(result.checkedAt)
+    return !Number.isFinite(checkedAt) || checkedAt <= freshSince
+  }
+  const counts = {
+    due: allLinks.filter(link => isDue(link.url)).length,
+    issues: allLinks.filter(link => isIssue(link.url)).length,
+    all: allLinks.length,
+  }
+  const selectedLinks = allLinks.filter(link => mode === 'all' || (mode === 'issues' ? isIssue(link.url) : isDue(link.url)))
+  const remainingLinks = cursor ? selectedLinks.filter(link => link.url > cursor) : selectedLinks
+  const links = remainingLinks.slice(0, limit)
+  const hasMore = remainingLinks.length > links.length
   return {
     links,
     totalItems: links.reduce((sum, link) => sum + link.items.length, 0),
     skippedInvalid,
-    hasMore: allLinks.length > limit,
+    hasMore,
+    nextCursor: hasMore ? links.at(-1)?.url ?? null : null,
+    totalLinks: selectedLinks.length,
+    counts,
   }
 }
 
@@ -399,6 +429,48 @@ export async function applyPurchaseUrlCollectionResult(input: {
       updated,
       candidates: resolution.candidates,
     }
+  })
+}
+
+/** A successful recheck clears only the failure flag for the URL just checked.
+ * A newer edited URL, a discontinued item, or a different failedUrl is kept.
+ */
+export async function markPurchaseUrlsAsVerifiedOpen(input: { userId: string; url: string; skus: string[] }) {
+  const url = canonicalize1688OfferUrl(input.url)
+  if (!url) return { updated: [], replaced: 0, updatedWorkflow: 0 }
+  const skus = [...new Set(input.skus.map(sku => sku.trim()).filter(Boolean))]
+  const masterSkus = skus.filter(sku => !sku.startsWith('new-product:'))
+  const workflowIds = skus.filter(sku => /^new-product:[0-9a-f-]{36}$/i.test(sku)).map(sku => sku.slice(12))
+  await ensureNewProductWorkflowTables(input.userId)
+  return db.transaction(async tx => {
+    const candidates = masterSkus.length ? await tx.select({ id: products.id, internalSku: products.internalSku,
+      name: products.name, metadata: products.metadata }).from(products).where(and(
+      eq(products.userId, input.userId), inArray(products.internalSku, masterSkus), eligibleUrlProduct(),
+      sql`${products.metadata}->'purchaseUrlVerification'->>'status' = 'confirm_required'`,
+    )).orderBy(products.id).for('update') : []
+    const updated: Array<{ id: string; sku: string; productName: string }> = []
+    for (const product of candidates) {
+      const metadata = recordValue(product.metadata)
+      const flag = recordValue(metadata.purchaseUrlVerification)
+      if (canonicalize1688OfferUrl(purchaseUrlFromMetadata(metadata)) !== url
+        || (typeof flag.failedUrl === 'string' && canonicalize1688OfferUrl(flag.failedUrl) !== url)) continue
+      const nextMetadata = { ...metadata }
+      delete nextMetadata.purchaseUrlVerification
+      await tx.update(products).set({ metadata: nextMetadata, updatedAt: new Date() })
+        .where(and(eq(products.userId, input.userId), eq(products.id, product.id)))
+      updated.push({ id: product.id, sku: product.internalSku, productName: product.name })
+    }
+    const workflows = workflowIds.length ? await tx.execute(sql`
+      UPDATE new_product_workflow_items item SET metadata = item.metadata - 'purchaseUrlVerification', updated_at = now()
+      WHERE item.user_id = ${input.userId}::uuid AND item.id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+        AND ${eligibleUrlWorkflow(input.userId)}
+        AND item.metadata->'purchaseUrlVerification'->>'status' = 'confirm_required'
+        AND (NULLIF(item.metadata->'purchaseUrlVerification'->>'failedUrl', '') IS NULL
+          OR regexp_replace(rtrim(split_part(split_part(item.metadata->'purchaseUrlVerification'->>'failedUrl', '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url})
+        AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
+      RETURNING item.id
+    `) : []
+    return { updated, replaced: 0, updatedWorkflow: workflows.length }
   })
 }
 

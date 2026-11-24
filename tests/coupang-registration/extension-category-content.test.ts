@@ -10,7 +10,7 @@ type Listener = (message: unknown, sender: unknown, respond: (value: unknown) =>
 function content(fetcher = vi.fn(), pathname = '/qvt/registration') {
   let listener: Listener = () => {}
   const chrome = { runtime: { sendMessage: vi.fn(), onMessage: { addListener: (value: Listener) => { listener = value } } } }
-  const sandbox = { chrome, URL, document, location: { origin: 'https://supplier.coupang.com', pathname }, fetch: fetcher, setTimeout, clearTimeout, AbortController, Uint8Array, btoa }
+  const sandbox = { chrome, URL, document, location: { origin: 'https://supplier.coupang.com', pathname }, fetch: fetcher, setTimeout, clearTimeout, AbortController, Uint8Array, TypeError, btoa }
   vm.runInNewContext(readFileSync(path.join(directory, 'shared.js'), 'utf8'), sandbox)
   vm.runInNewContext(readFileSync(path.join(directory, 'supplier-content.js'), 'utf8'), sandbox)
   return { chrome, send: (message: object) => new Promise<unknown>(resolve => listener({ channel, ...message }, {}, resolve)) }
@@ -39,7 +39,7 @@ describe('Authenticated Supplier Hub category source', () => {
       { id: '99', name: '위험', path: '생활용품 > 위험', matchedQueries: ['옷걸이'] },
     ] })
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/qvt/kan-categories/search?keyword=%ED%96%89%EA%B1%B0', '/qvt/kan-categories/search?keyword=%EC%98%B7%EA%B1%B8%EC%9D%B4'])
-    expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'include', redirect: 'error', signal: expect.any(AbortSignal) })
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'include', redirect: 'manual', signal: expect.any(AbortSignal) })
     expect(instance.chrome.runtime.sendMessage).not.toHaveBeenCalled()
   })
   it('caps broad matches fairly while retaining precise supplementary matches and complete query evidence', async () => {
@@ -63,6 +63,27 @@ describe('Authenticated Supplier Hub category source', () => {
     }
     expect(document.body.children).toHaveLength(0)
   })
+  it('stops category search and template redirects before reading headers or consuming bodies', async () => {
+    for (const command of [{ type: 'CATEGORY_SEARCH', queries: ['선반'] }, { type: 'CATEGORY_TEMPLATE', categoryId: 1899 }]) {
+      const headers = { get: vi.fn() }
+      const json = vi.fn()
+      const arrayBuffer = vi.fn()
+      const fetcher = vi.fn().mockResolvedValue({ type: 'opaqueredirect', status: 0, ok: false, headers, json, arrayBuffer })
+      const instance = content(fetcher)
+      expect(await instance.send(command)).toEqual({ ok: false, error: '서플라이어허브 대량등록 화면에서 인증 상태를 확인한 뒤 다시 검색해주세요.' })
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'include', redirect: 'manual' })
+      expect(headers.get).not.toHaveBeenCalled()
+      expect(json).not.toHaveBeenCalled()
+      expect(arrayBuffer).not.toHaveBeenCalled()
+      expect(instance.chrome.runtime.sendMessage).not.toHaveBeenCalled()
+    }
+    expect(document.body.children).toHaveLength(0)
+  })
+  it('keeps network failures distinct from redirects requiring Hub authentication checks', async () => {
+    const fetcher = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    expect(await content(fetcher).send({ type: 'CATEGORY_SEARCH', queries: ['선반'] })).toEqual({ ok: false, error: '서플라이어허브에 연결하지 못했습니다. 네트워크와 허브 화면을 확인한 뒤 다시 시도해주세요.' })
+  })
   it('validates command input, fails on changed response contracts and aborts stalled requests', async () => {
     const fetcher = vi.fn()
     const instance = content(fetcher)
@@ -80,7 +101,7 @@ describe('Authenticated Supplier Hub category source', () => {
     const bytes = Uint8Array.from([80, 75, 3, 4, 5, 6])
     const fetcher = vi.fn().mockResolvedValue(fileResponse(bytes))
     expect(await content(fetcher).send({ type: 'CATEGORY_TEMPLATE', categoryId: 1899, url: 'https://evil.test' })).toEqual({ ok: true, file: { name: '옷걸이.zip', data: Buffer.from(bytes).toString('base64') } })
-    expect(fetcher).toHaveBeenCalledWith('/qvt/v3/kan-categories/download-quotation?leafKanCategoryIds=1899&locale=ko', expect.objectContaining({ credentials: 'include', redirect: 'error' }))
+    expect(fetcher).toHaveBeenCalledWith('/qvt/v3/kan-categories/download-quotation?leafKanCategoryIds=1899&locale=ko', expect.objectContaining({ credentials: 'include', redirect: 'manual' }))
     expect(await content(vi.fn().mockResolvedValue(fileResponse(bytes, 'attachment; filename="../../evil.exe"'))).send({ type: 'CATEGORY_TEMPLATE', categoryId: '1899' })).toMatchObject({ file: { name: '쿠팡_카테고리_1899.zip' } })
     expect(await content(vi.fn().mockResolvedValue(fileResponse(Uint8Array.from([1, 2, 3, 4])))).send({ type: 'CATEGORY_TEMPLATE', categoryId: '1899' })).toMatchObject({ ok: false, error: expect.stringContaining('파일을 확인하지 못') })
   })

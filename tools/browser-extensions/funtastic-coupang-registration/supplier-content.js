@@ -166,13 +166,14 @@
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 15000)
     try {
-      const response = await fetch(path, { credentials: 'include', redirect: 'error', signal: controller.signal })
+      const response = await fetch(path, { credentials: 'include', redirect: 'manual', signal: controller.signal })
+      if (response.type === 'opaqueredirect') throw new Error('서플라이어허브 대량등록 화면에서 인증 상태를 확인한 뒤 다시 검색해주세요.')
       if ([401, 403].includes(response.status) || response.redirected || /text\/html/i.test(response.headers.get('content-type') || '')) throw new Error(CATEGORY_LOGIN)
       if (!response.ok) throw new Error('쿠팡 카테고리 요청에 실패했습니다. (' + response.status + ')')
       return await consume(response)
     } catch (error) {
       if (controller.signal.aborted) throw new Error('쿠팡 카테고리 응답 시간이 초과되었습니다. 다시 시도해주세요.')
-      if (error instanceof TypeError) throw new Error('서플라이어허브 로그인 상태와 연결을 확인한 뒤 다시 시도해주세요.')
+      if (error instanceof TypeError) throw new Error('서플라이어허브에 연결하지 못했습니다. 네트워크와 허브 화면을 확인한 뒤 다시 시도해주세요.')
       throw error
     } finally { clearTimeout(timer) }
   }

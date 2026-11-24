@@ -9,6 +9,35 @@ export { canonicalize1688OfferUrl } from './purchase-url-values'
 
 const MAX_QUEUE_ROWS = 2_000
 
+// Use both flags, as older workbook imports only set the metadata flag.
+function eligibleUrlProduct() {
+  return sql`(COALESCE(${products.purchasingStatus}, 'active') <> 'discontinued'
+    AND (${products.metadata}->'purchasingOutgoingMetrics'->>'isDiscontinued') IS DISTINCT FROM 'true')`
+}
+
+/** Keep new/unregistered products and groups with any non-discontinued option.
+ * Only exact codes and explicit purchasing relations establish this identity.
+ * The outer workflow table must be aliased as item.
+ */
+function eligibleUrlWorkflow(userId: string) {
+  return sql`NOT EXISTS (
+    SELECT 1 FROM (
+      SELECT NULLIF(btrim(item.sabangnet_code), '') AS sku
+      UNION SELECT NULLIF(btrim(opt->>'sabangnetOptionCode'), '')
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(item.metadata->'optionDetails') = 'array'
+          THEN item.metadata->'optionDetails' ELSE '[]'::jsonb END) opt
+      UNION SELECT NULLIF(btrim(request.sku), '') FROM purchase_request_items request
+        WHERE request.user_id = ${userId}::uuid AND (
+          request.id::text = item.metadata->'purchaseLink'->>'requestId'
+          OR request.raw_data->'productWorkflow'->>'itemId' = item.id::text
+        )
+    ) related LEFT JOIN ${products} ON ${products.userId} = ${userId}::uuid
+      AND ${products.internalSku} = related.sku
+    WHERE related.sku IS NOT NULL
+    HAVING count(*) > 0 AND bool_and(${products.id} IS NOT NULL AND NOT ${eligibleUrlProduct()})
+  )`
+}
+
 export type PurchaseUrlQueueItem = {
   requestId: string
   productId: string
@@ -123,6 +152,7 @@ export async function getPurchaseUrlCollectionQueue(input: {
     ))
     .where(and(
       eq(purchaseRequestItems.userId, input.userId),
+      eligibleUrlProduct(),
       prefix
         ? sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) LIKE ${`${prefix}%`}`
         : undefined,
@@ -178,6 +208,7 @@ export async function getPurchaseUrlVerificationQueue(input: {
     .from(products)
     .where(and(
       eq(products.userId, input.userId),
+      eligibleUrlProduct(),
       sql`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '') IS NOT NULL`,
     ))
     .orderBy(asc(products.internalSku))
@@ -200,8 +231,9 @@ export async function getPurchaseUrlVerificationQueue(input: {
 
   const workflowRows = await db.execute<{ id: string; productName: string; sourceUrl: string }>(sql`
     SELECT id::text, COALESCE(NULLIF(registered_product_name, ''), product_name) AS "productName", source_url AS "sourceUrl"
-    FROM new_product_workflow_items WHERE user_id = ${input.userId}::uuid AND NULLIF(btrim(source_url), '') IS NOT NULL
-    ORDER BY id
+    FROM new_product_workflow_items item WHERE item.user_id = ${input.userId}::uuid AND NULLIF(btrim(item.source_url), '') IS NOT NULL
+      AND ${eligibleUrlWorkflow(input.userId)}
+    ORDER BY item.id
   `)
   for (const item of workflowRows) {
     const url = canonicalize1688OfferUrl(item.sourceUrl)
@@ -282,10 +314,13 @@ export async function applyPurchaseUrlCollectionResult(input: {
       .where(and(
         eq(products.userId, input.userId),
         inArray(products.internalSku, skus),
+        eligibleUrlProduct(),
       ))
       .orderBy(products.id).for('update')
 
+    const eligibleSkus = new Set(lockedProducts.map(product => product.internalSku))
     await syncWorkflowUrls(tx, input.userId, requests.flatMap(request => {
+      if (!eligibleSkus.has(request.sku)) return []
       const url = resolvedById.get(request.id)
       const itemId = recordValue(recordValue(request.rawData).productWorkflow).itemId
       return url ? [{ sku: request.sku, url, requestId: request.id, orderNumber,
@@ -386,12 +421,14 @@ export async function markPurchaseUrlsForVerification(input: {
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(item.metadata->'optionDetails') = 'array'
         THEN item.metadata->'optionDetails' ELSE '[]'::jsonb END) opt) codes
     WHERE item.user_id = ${input.userId}::uuid AND item.id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+      AND ${eligibleUrlWorkflow(input.userId)}
       AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
       AND NULLIF(btrim(sku), '') IS NOT NULL
     UNION SELECT request.sku FROM purchase_request_items request JOIN new_product_workflow_items item
       ON (item.metadata->'purchaseLink'->>'requestId' = request.id::text OR request.raw_data->'productWorkflow'->>'itemId' = item.id::text)
       AND item.user_id = request.user_id
     WHERE request.user_id = ${input.userId}::uuid AND item.id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+      AND ${eligibleUrlWorkflow(input.userId)}
       AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
   `) : []
   const lookupSkus = [...new Set([...skus.filter(sku => !sku.startsWith('new-product:')), ...relatedCodes.map(row => row.sku)])]
@@ -408,6 +445,7 @@ export async function markPurchaseUrlsForVerification(input: {
       .where(and(
         eq(products.userId, input.userId),
         inArray(products.internalSku, lookupSkus),
+        eligibleUrlProduct(),
       ))
       .orderBy(products.id)
       .for('update')
@@ -449,10 +487,11 @@ export async function markPurchaseUrlsForVerification(input: {
     // Preserve the failing link for review and future verification when no
     // unambiguous newer purchase is available.
     if (workflowIds.length) await tx.execute(sql`
-      UPDATE new_product_workflow_items SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+      UPDATE new_product_workflow_items item SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
         'purchaseUrlVerification', jsonb_build_object('status', 'confirm_required', 'failedUrl', ${url}::text,
           'reason', ${reason}::text, 'checkedAt', now())), updated_at = now()
       WHERE user_id = ${input.userId}::uuid AND id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+        AND ${eligibleUrlWorkflow(input.userId)}
         AND regexp_replace(rtrim(split_part(split_part(source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
     `)
     return { updated, replaced: replacements.length, updatedWorkflow }

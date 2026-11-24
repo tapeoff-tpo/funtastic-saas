@@ -15,10 +15,10 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
   const dimensions = { lengthCm: String(summary.pallet.lengthCm ?? ''), widthCm: String(summary.pallet.widthCm ?? ''), heightCm: String(summary.pallet.heightCm ?? '') }
   const dimensionCbm = calculateChinaOutboundBoxCbm(dimensions)
   const initial = { ...dimensions, loaded: dimensionCbm === null, cbm: String(measured ?? summary.cbm), volume: measured !== null && Math.abs(measured - (dimensionCbm ?? summary.cbm) - 0.3) < 0.000001,
+    customWeight: summary.pallet.tareWeightKg != null && palletTareWeightKg(summary.pallet.tareWeightKg) !== 5 && palletTareWeightKg(summary.pallet.tareWeightKg) > 0, tare: String(palletTareWeightKg(summary.pallet.tareWeightKg ?? 0)),
     weight: summary.pallet.tareWeightKg != null && palletTareWeightKg(summary.pallet.tareWeightKg) === 5 }
   const [baseline, setBaseline] = useState(initial)
   const [state, setState] = useState(initial)
-  const [saved, setSaved] = useState(initial)
   const [confirmed, setConfirmed] = useState(summary.pallet.completionStatus === 'completed')
   function changed() { setConfirmed(false); onConfirmationChange?.(false) }
   function patch(values: Partial<typeof state>) {
@@ -26,40 +26,45 @@ export function PalletFinalMeasurements({ shipmentId, summary, editable, isPendi
     setState((current) => {
       const next = { ...current, ...values }
       const base = next.loaded ? summary.cbm : calculateChinaOutboundBoxCbm({ lengthCm: next.lengthCm, widthCm: next.widthCm, heightCm: next.heightCm })
-      return { ...next, cbm: base == null ? '' : String(Math.round((base + (next.volume ? 0.3 : 0)) * 1000000) / 1000000) }
+      return { ...next, cbm: base == null ? '' : String(Math.round((base + (next.loaded && next.volume ? 0.3 : 0)) * 1000000) / 1000000) }
     })
   }
   const dirty = JSON.stringify(state) !== JSON.stringify(baseline)
   const draftId = `pallet-final:${summary.pallet.id}`
-  const weight = calculateChinaOutboundPalletWeight(summary.boxes, saved.weight ? 5 : 0)
+  const tare = state.customWeight ? Number(state.tare) : state.weight ? 5 : 0
+  const weight = calculateChinaOutboundPalletWeight(summary.boxes, tare)
   const busy = !editable || isPending || pending || guard.busy
   const disabled = busy || confirmed
   async function save() {
     if (confirmed && !dirty) return true
     if (!state.loaded && [state.lengthCm, state.widthCm, state.heightCm].some((value) => dimensionNumber(value) === null || Number(value) > 9999999.99)) { toast.error('가로·세로·높이를 모두 입력해주세요.'); return false }
+    if (!Number.isFinite(tare) || tare < 0 || tare > 999999999 || (state.customWeight && !state.tare.trim())) { toast.error('파렛트 추가 무게를 확인해주세요.'); return false }
     const cbm = Number(state.cbm)
     if (!state.cbm.trim() || !Number.isFinite(cbm) || cbm < 0.000001 || cbm > 999999999) { toast.error('최종 CBM을 확인해주세요.'); return false }
-    const result = await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: summary.pallet.id, lengthCm: state.loaded ? null : Number(state.lengthCm), widthCm: state.loaded ? null : Number(state.widthCm), heightCm: state.loaded ? null : Number(state.heightCm), manualCbm: cbm, tareWeightKg: state.weight ? 5 : 0, finalize: true, refresh: false })
+    const result = await saveChinaOutboundPalletDimensionsAction({ shipmentId, palletId: summary.pallet.id, lengthCm: state.loaded ? null : Number(state.lengthCm), widthCm: state.loaded ? null : Number(state.widthCm), heightCm: state.loaded ? null : Number(state.heightCm), manualCbm: cbm, tareWeightKg: tare, finalize: true, refresh: false })
     if (!result.ok) { toast.error(result.error); return false }
-    setConfirmed(true); onConfirmationChange?.(true); setBaseline({ ...state }); setSaved({ ...state }); guard.setDraft(draftId, null); if (result.savedPallet) onSaved?.(result.savedPallet); return true
+    setConfirmed(true); onConfirmationChange?.(true); setBaseline({ ...state }); guard.setDraft(draftId, null); if (result.savedPallet) onSaved?.(result.savedPallet); return true
   }
   useChinaWorkDraft(draftId, dirty ? { kind: 'pallet', label: `파렛트 ${summary.palletNo} 최종 규격`, snapshot: state, save, discard: () => setState({ ...baseline }) } : null)
   return <div aria-busy={pending} className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
     <div className="space-y-2">
-      <label className="flex items-center gap-2 text-xs"><input type="checkbox" aria-label="적재 CBM 사용" checked={state.loaded} disabled={disabled} onChange={(event) => patch({ loaded: event.target.checked })} />적재 CBM 사용: <strong>{formatChinaOutboundCbm(summary.cbm)} CBM</strong><span>전체 {summary.boxes.length}박스</span></label>
-      <div className="flex items-center gap-2 text-xs"><span>파렛트 전체 규격</span>{(['lengthCm', 'widthCm', 'heightCm'] as const).map((field, index) => <label key={field} className="flex items-center gap-1">{['가로', '세로', '높이'][index]}<input aria-label={`파렛트 ${summary.palletNo} ${['가로', '세로', '높이'][index]}`} type="number" min="0.01" step="0.01" value={state[field]} disabled={disabled} onChange={(event) => patch({ loaded: false, [field]: event.target.value })} className="h-7 w-20 rounded border border-blue-200 bg-blue-50 px-2" /></label>)}<span>cm</span></div>
-      <div className="flex flex-wrap gap-3 text-xs">
-        <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.volume} onChange={(event) => {
-          patch({ volume: event.target.checked })
-        }} />파렛트 부피 0.3CBM 포함</label>
-        <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.weight} onChange={(event) => { changed(); setState((current) => ({ ...current, weight: event.target.checked })) }} />파렛트 무게 5kg 포함</label>
+      <div role="radiogroup" aria-label={`파렛트 ${summary.palletNo} 부피 계산 방식`} className="flex flex-wrap gap-4 text-xs">
+        <label className="flex items-center gap-1"><input type="radio" name={`pallet-mode-${summary.pallet.id}`} checked={state.loaded} disabled={disabled} onChange={() => patch({ loaded: true })} />적재 CBM 사용</label>
+        <label className="flex items-center gap-1"><input type="radio" name={`pallet-mode-${summary.pallet.id}`} checked={!state.loaded} disabled={disabled} onChange={() => patch({ loaded: false, volume: false })} />직접 입력</label>
+      </div>
+      {state.loaded ? <div className="space-y-2 rounded border border-blue-100 bg-white/70 p-2 text-xs"><p>상품 적재 부피 <strong>{formatChinaOutboundCbm(summary.cbm)} CBM</strong> · 전체 {summary.boxes.length}박스</p><label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.volume} onChange={(event) => patch({ volume: event.target.checked })} />파렛트 부피 0.3CBM 포함</label></div> :
+        <div className="flex flex-wrap items-center gap-2 rounded border border-blue-100 bg-white/70 p-2 text-xs"><span>파렛트 전체 규격</span>{(['lengthCm', 'widthCm', 'heightCm'] as const).map((field, index) => <label key={field} className="flex items-center gap-1">{['가로', '세로', '높이'][index]}<input aria-label={`파렛트 ${summary.palletNo} ${['가로', '세로', '높이'][index]}`} type="number" min="0.01" step="0.01" value={state[field]} disabled={disabled} onChange={(event) => patch({ [field]: event.target.value })} className="h-7 w-20 rounded border border-blue-200 bg-blue-50 px-2" /></label>)}<span>cm</span></div>}
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.weight && !state.customWeight} onChange={(event) => patch({ weight: event.target.checked, customWeight: false })} />파렛트 무게 5kg 포함</label>
+        <label className="flex items-center gap-1"><input type="checkbox" disabled={disabled} checked={state.customWeight} onChange={(event) => patch({ customWeight: event.target.checked, weight: false })} />추가 무게 직접 입력</label>
+        {state.customWeight && <label className="flex items-center gap-1"><input aria-label={`파렛트 ${summary.palletNo} 추가 무게`} type="number" min="0" step="0.001" disabled={disabled} value={state.tare} onChange={(event) => patch({ tare: event.target.value })} className="h-7 w-20 rounded border border-blue-200 bg-blue-50 px-2" />kg</label>}
       </div>
       <div className="flex items-center gap-2 text-xs"><label>최종 CBM <input aria-label={`파렛트 ${summary.palletNo} 최종 CBM`} type="number" step="0.000001" value={state.cbm} readOnly className="h-7 w-28 rounded border bg-muted/30 px-2" /></label>
         <button type="button" disabled={busy} onClick={() => { if (confirmed) { changed(); return } start(async () => { await guard.runTask(save) }) }} className="h-7 rounded border px-2 disabled:opacity-40">{pending ? '저장 중…' : confirmed && !dirty ? '수정하기' : '최종 저장하기'}</button>
       </div>
     </div>
     <div className="ml-auto whitespace-nowrap rounded border bg-white px-3 py-2 text-right text-xs tabular-nums">
-      <p className="font-semibold">최종 CBM: {formatChinaOutboundCbm(Number(saved.cbm))} CBM</p>
+      <p className="font-semibold">최종 CBM: {formatChinaOutboundCbm(state.cbm ? Number(state.cbm) : null) ?? '미입력'} CBM</p>
       <p className="font-semibold">최종 무게: {weight.grossWeightKg == null ? '무게 미입력' : `${weight.grossWeightKg.toLocaleString('ko-KR')} kg`}</p>
       <p>박스 {summary.boxes.length}개 · 상품 {summary.quantity.toLocaleString('ko-KR')}개</p>
       {confirmed && !dirty && <p className="font-semibold text-amber-800">최종 확정</p>}

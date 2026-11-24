@@ -57,7 +57,7 @@ async function purchaseUrlSources(userId: string, skus?: string[], database: Pic
     orderNumber: purchaseRequestItems.supplierOrderNumber, rawData: purchaseRequestItems.rawData,
   }).from(purchaseRequestItems).where(and(eq(purchaseRequestItems.userId, userId),
     skus?.length ? inArray(purchaseRequestItems.sku, skus) : undefined,
-    sql`(${purchaseRequestItems.rawData}->'purchaseUrlLookup'->>'resolvedUrl' IS NOT NULL
+    sql`(${purchaseRequestItems.rawData}->'purchaseUrlLookup' IS NOT NULL
       OR ${purchaseRequestItems.rawData}->'productWorkflow'->>'purchaseUrl' IS NOT NULL)`,
   )).orderBy(sql`COALESCE(${purchaseRequestItems.outboundExpectedDate}, ${purchaseRequestItems.requestDate}, ${purchaseRequestItems.createdAt}::date) DESC`, desc(purchaseRequestItems.createdAt), desc(purchaseRequestItems.id))
   const sources = new Map<string, PurchaseUrlSource>()
@@ -133,7 +133,9 @@ export async function syncWorkflowUrls(tx: Transaction, userId: string, sources:
         NULLIF(btrim(item.source_url), '') IS NULL
         OR (item.metadata->'purchaseUrlVerification'->>'status' = 'confirm_required'
           AND c.url IS DISTINCT FROM item.metadata->'purchaseUrlVerification'->>'failedUrl')
-        OR EXISTS (SELECT 1 FROM replacements r WHERE r.sku = c.sku AND r.url = c.url)
+        OR EXISTS (SELECT 1 FROM replacements r WHERE r.sku = c.sku AND r.url = c.url
+          AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://')
+            = regexp_replace(rtrim(split_part(split_part(r."oldUrl", '?', 1), '#', 1), '/'), '^http://', 'https://'))
       ) AS eligible
       FROM new_product_workflow_items item JOIN candidates c ON (
         item.id::text = c."workflowItemId" OR item.sabangnet_code = c.sku

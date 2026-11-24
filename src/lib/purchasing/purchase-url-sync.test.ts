@@ -3,13 +3,13 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 import type { SQL } from 'drizzle-orm'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
 
-const mocks = vi.hoisted(() => ({ requests: [] as unknown[], masters: [] as unknown[], writes: [] as Array<{ table: unknown; values: Record<string, unknown> }>, execute: vi.fn(), ensure: vi.fn(), logs: vi.fn() }))
+const mocks = vi.hoisted(() => ({ requests: [] as unknown[], masters: [] as unknown[], writes: [] as Array<{ table: unknown; values: Record<string, unknown> }>, execute: vi.fn(), ensure: vi.fn(), logs: vi.fn(), clauses: [] as SQL[] }))
 vi.mock('@/lib/new-products/workflow', () => ({ ensureNewProductWorkflowTables: mocks.ensure }))
 vi.mock('@/lib/db', () => {
   const tx = {
     select: () => ({ from: (table: unknown) => {
       const result = () => table === purchaseRequestItems ? mocks.requests : mocks.masters
-      const builder = { where: () => builder, orderBy: () => builder, for: async () => result(), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result()).then(resolve) }
+      const builder = { where: (condition: SQL) => { mocks.clauses.push(condition); return builder }, orderBy: () => builder, for: async () => result(), then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result()).then(resolve) }
       return builder
     } }),
     update: (table: unknown) => ({ set: (values: Record<string, unknown>) => ({ where: async () => { mocks.writes.push({ table, values }) } }) }),
@@ -23,7 +23,7 @@ import { db } from '@/lib/db'
 const oldUrl = 'https://detail.1688.com/offer/111111111111.html'
 const newUrl = 'https://detail.1688.com/offer/222222222222.html'
 const request = { id: 'request-1', sku: '123456-0001', productName: '상품', orderNumber: '1234567890123', rawData: {} }
-beforeEach(() => { vi.clearAllMocks(); mocks.requests = []; mocks.masters = []; mocks.writes = []; mocks.execute.mockResolvedValue([{ count: 1 }]) })
+beforeEach(() => { vi.clearAllMocks(); mocks.requests = []; mocks.masters = []; mocks.writes = []; mocks.clauses = []; mocks.execute.mockResolvedValue([{ count: 1 }]) })
 
 describe('order product URL matching', () => {
   it('shares an unambiguous offer across options of the same product', () => {
@@ -68,6 +68,16 @@ describe('purchase URL history reuse', () => {
     mocks.requests = [{ ...request, rawData: { productWorkflow: { purchaseUrl: oldUrl } } }, { ...request, rawData: { productWorkflow: { purchaseUrl: newUrl } } }]
     expect(await getPurchaseUrlReplacementSources('owner', [request.sku], oldUrl)).toEqual([])
   })
+  it('blocks older fallback when the newest order has unresolved lookup evidence', async () => {
+    mocks.requests = [
+      { ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: null } } },
+      { ...request, rawData: { productWorkflow: { purchaseUrl: newUrl } } },
+    ]
+    expect(await getPurchaseUrlReplacementSources('owner', [request.sku], oldUrl)).toEqual([])
+    const query = new PgDialect().sqlToQuery(mocks.clauses[0])
+    expect(query.sql).toContain("->'purchaseUrlLookup' IS NOT NULL")
+    expect(query.sql).not.toContain("->'purchaseUrlLookup'->>'resolvedUrl' IS NOT NULL")
+  })
   it('ignores lookup evidence when its supplier order was changed', async () => {
     mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: '9999999999999', resolvedUrl: newUrl } } }]
     expect(await getPurchaseUrlReplacementSources('owner', [request.sku], oldUrl)).toEqual([])
@@ -91,6 +101,7 @@ describe('purchase URL history reuse', () => {
     expect(query.params).toContain('owner')
     expect(query.sql).toContain('count(DISTINCT c.url) = 1')
     expect(query.sql).toContain('sabangnetOptionCode')
+    expect(query.sql).toContain('split_part(r."oldUrl"')
     expect(query.sql).toContain('IS NOT DISTINCT FROM matches."previousUrl"')
     expect(query.sql).not.toContain('product_name =')
   })

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CategoryRecommendations } from '@/app/(auth)/operations/coupang-registration/category-recommendations'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
@@ -34,20 +34,21 @@ beforeEach(() => {
 })
 
 describe('B2B category based Supplier Hub recommendations', () => {
-  it('starts with the actual source category and shows only official returned candidates with their search evidence', async () => {
+  it('loads official candidates into the category dropdown immediately from the actual source category', async () => {
     render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
-    expect(await screen.findByText(category.path)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: category.path })).toHaveValue(category.id)
     expect(fetch).toHaveBeenCalledWith('/api/operations/coupang-registration/category-context?code=938')
     expect(bridge.search).toHaveBeenCalledExactlyOnceWith(context.queries)
     expect(screen.getByText(context.categoryPath)).toBeInTheDocument()
-    expect(screen.getByText('검색 근거: 바지걸이행거')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' })).getAllByRole('option')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: '이 분류 양식 연결' })).not.toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/templates'))).toBe(false)
   })
 
   it('keeps the source category first when the user adds a more precise product type', async () => {
     render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
-    await screen.findByText(category.path)
+    await screen.findByRole('option', { name: category.path })
     fireEvent.change(screen.getByLabelText('쿠팡 카테고리 보완 검색어'), { target: { value: '바지걸이' } })
     fireEvent.click(screen.getByRole('button', { name: '쿠팡 후보 다시 검색' }))
     await waitFor(() => expect(bridge.search).toHaveBeenCalledTimes(2))
@@ -59,7 +60,8 @@ describe('B2B category based Supplier Hub recommendations', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('/category-context?') ? json({ context }) : parsed.promise))
     const onConnect = vi.fn()
     render(<CategoryRecommendations sourceCode="938" onConnect={onConnect} />)
-    fireEvent.click(await screen.findByRole('button', { name: '이 분류 양식 연결' }))
+    await screen.findByRole('option', { name: category.path })
+    fireEvent.change(screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' }), { target: { value: category.id } })
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/operations/coupang-registration/category-template', expect.objectContaining({ method: 'POST', body: JSON.stringify({ categoryId: category.id, file }) })))
     expect(bridge.template).toHaveBeenCalledExactlyOnceWith(category.id)
     expect(onConnect).not.toHaveBeenCalled()
@@ -71,7 +73,8 @@ describe('B2B category based Supplier Hub recommendations', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('/category-context?') ? json({ context }) : json({ error: '선택한 분류와 양식이 다릅니다.' }, false)))
     const onConnect = vi.fn()
     render(<CategoryRecommendations sourceCode="938" onConnect={onConnect} />)
-    fireEvent.click(await screen.findByRole('button', { name: '이 분류 양식 연결' }))
+    await screen.findByRole('option', { name: category.path })
+    fireEvent.change(screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' }), { target: { value: category.id } })
     expect(await screen.findByRole('alert')).toHaveTextContent('선택한 분류와 양식이 다릅니다.')
     expect(onConnect).not.toHaveBeenCalled()
   })
@@ -83,10 +86,10 @@ describe('B2B category based Supplier Hub recommendations', () => {
     const view = render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
     await waitFor(() => expect(bridge.search).toHaveBeenCalledTimes(1))
     view.rerender(<CategoryRecommendations sourceCode="1000" onConnect={vi.fn()} />)
-    expect(await screen.findByRole('button', { name: '이 분류 양식 연결' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: '주방용품 > 수저' })).toHaveValue('5678')
     await act(async () => { firstSearch.resolve([category]) })
-    expect(screen.queryByText(category.path)).not.toBeInTheDocument()
-    expect(screen.getAllByText('주방용품 > 수저')).not.toHaveLength(0)
+    expect(screen.queryByRole('option', { name: category.path })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '주방용품 > 수저' })).toBeInTheDocument()
   })
 
   it('does not apply an official file after the editor unmounts', async () => {
@@ -94,7 +97,8 @@ describe('B2B category based Supplier Hub recommendations', () => {
     bridge.template.mockReturnValue(pendingFile.promise)
     const onConnect = vi.fn()
     const view = render(<CategoryRecommendations sourceCode="938" onConnect={onConnect} />)
-    fireEvent.click(await screen.findByRole('button', { name: '이 분류 양식 연결' }))
+    await screen.findByRole('option', { name: category.path })
+    fireEvent.change(screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' }), { target: { value: category.id } })
     view.unmount()
     await act(async () => { pendingFile.resolve(file) })
     expect(onConnect).not.toHaveBeenCalled()
@@ -105,28 +109,38 @@ describe('B2B category based Supplier Hub recommendations', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('code=938') ? json({ context }) : json({ error: '새 상품 분류 조회 실패' }, false)))
     const onConnect = vi.fn()
     const view = render(<CategoryRecommendations sourceCode="938" onConnect={onConnect} />)
-    await screen.findByText(category.path)
+    await screen.findByRole('option', { name: category.path })
     view.rerender(<CategoryRecommendations sourceCode="1000" onConnect={onConnect} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('새 상품 분류 조회 실패')
-    expect(screen.queryByText(category.path)).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: category.path })).not.toBeInTheDocument()
     expect(screen.queryByText(context.categoryPath)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '이 분류 양식 연결' })).not.toBeInTheDocument()
     expect(onConnect).not.toHaveBeenCalled()
   })
 
   it('requires the category-capable extension instead of substituting saved workbook categories', async () => {
     bridge.ping.mockResolvedValue({ connected: true, version: '1.0.0' })
     render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('쿠팡 등록 확장을 업데이트하면')
+    expect(await screen.findByRole('alert')).toHaveTextContent('설치된 쿠팡 등록 확장 1.0.0에는 카테고리 검색 기능이 없습니다.')
     expect(screen.getByRole('link', { name: '쿠팡 등록 확장 업데이트' })).toHaveAttribute('href', '/api/operations/coupang-registration/extension')
     expect(bridge.search).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: '이 분류 양식 연결' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: category.path })).not.toBeInTheDocument()
   })
 
   it('shows an empty result without inventing a category', async () => {
     bridge.search.mockResolvedValue([])
     render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
     expect(await screen.findByText('허브에서 일치하는 분류를 찾지 못했습니다. 보완 검색어를 바꿔 다시 검색해주세요.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '이 분류 양식 연결' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: category.path })).not.toBeInTheDocument()
+  })
+
+  it('keeps the saved selection in the category field when the extension cannot search', async () => {
+    bridge.ping.mockResolvedValue({ connected: false })
+    render(<CategoryRecommendations sourceCode="938" selectedSheetName="QF_1234_생활용품_옷걸이_치마-바지걸이" onConnect={vi.fn()} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('쿠팡 등록 확장과 이 페이지가 연결되지 않았습니다.')
+    const select = screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' })
+    expect(select).toHaveValue('1234')
+    expect(within(select).getByRole('option', { name: '생활용품 > 옷걸이 > 치마-바지걸이' })).toBeInTheDocument()
+    expect(bridge.search).not.toHaveBeenCalled()
+    expect(bridge.template).not.toHaveBeenCalled()
   })
 })

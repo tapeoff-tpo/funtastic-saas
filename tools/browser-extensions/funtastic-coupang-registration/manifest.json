@@ -2,13 +2,13 @@
   "manifest_version": 3,
   "name": "Funtastic Coupang Registration",
   "description": "SaaS의 쿠팡 견적서·품질표시를 로그인된 서플라이어허브에 연결하고 검수 결과를 확인합니다.",
-  "version": "1.1.0",
+  "version": "1.1.3",
   "permissions": ["storage", "tabs", "alarms"],
   "host_permissions": ["https://supplier.coupang.com/*", "https://funtastic-saas-vercel.vercel.app/*", "http://localhost:3000/*", "http://localhost:3001/*"],
   "background": { "service_worker": "background.js" },
   "action": { "default_title": "Funtastic 쿠팡 등록" },
   "content_scripts": [
-    { "matches": ["https://funtastic-saas-vercel.vercel.app/operations/coupang-registration*", "http://localhost:3000/operations/coupang-registration*", "http://localhost:3001/operations/coupang-registration*"], "js": ["saas-bridge.js"], "run_at": "document_start" },
+    { "matches": ["https://funtastic-saas-vercel.vercel.app/*", "http://localhost:3000/*", "http://localhost:3001/*"], "js": ["saas-bridge.js"], "run_at": "document_start" },
     { "matches": ["https://supplier.coupang.com/*"], "js": ["shared.js", "supplier-content.js"], "run_at": "document_idle" }
   ]
 }

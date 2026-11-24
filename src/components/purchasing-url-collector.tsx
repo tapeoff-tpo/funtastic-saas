@@ -34,7 +34,34 @@ type VerificationQueueResponse = {
   totalItems: number
   skippedInvalid: number
   hasMore: boolean
+  nextCursor?: string | null
+  totalLinks?: number
+  counts?: VerificationCounts
   error?: string
+}
+
+type VerificationMode = 'due' | 'issues' | 'all'
+type VerificationCounts = Record<VerificationMode, number>
+type VerificationBatch = {
+  runId: string
+  links: VerificationQueueResponse['links']
+  nextCursor: string | null
+  hasMore: boolean
+  progress: VerificationProgress
+  savedUrls: string[]
+  acknowledgedAt?: Record<string, number>
+  startedAt?: number
+  acknowledged?: boolean
+}
+type VerificationSession = {
+  version: 1
+  mode: VerificationMode
+  total: number
+  cursor: string | null
+  completed: VerificationProgress
+  batch: VerificationBatch | null
+  phase: 'running' | 'awaitingIdle' | 'paused' | 'loading'
+  previousRunId?: string | null
 }
 
 type Candidate = {
@@ -131,6 +158,41 @@ const EMPTY_VERIFICATION_PROGRESS: VerificationProgress = {
 }
 
 const VERIFICATION_ISSUE_LIMIT = 100
+const VERIFICATION_BATCH_SIZE = 200
+const VERIFICATION_SESSION_KEY = 'funtastic1688VerificationSessionV1'
+
+function readVerificationSession(): VerificationSession | null {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(VERIFICATION_SESSION_KEY) ?? 'null')
+    if (!value || value.version !== 1 || !['due', 'issues', 'all'].includes(value.mode)
+      || !['running', 'awaitingIdle', 'paused', 'loading'].includes(value.phase)
+      || !Number.isFinite(value.total) || !value.completed
+      || (value.cursor !== null && typeof value.cursor !== 'string')) return null
+    if (value.batch && (typeof value.batch.runId !== 'string' || !Array.isArray(value.batch.links)
+      || value.batch.links.length > VERIFICATION_BATCH_SIZE || !value.batch.progress || !Array.isArray(value.batch.savedUrls))) return null
+    return value as VerificationSession
+  } catch { return null }
+}
+
+function storeVerificationSession(session: VerificationSession | null) {
+  try {
+    if (session) window.sessionStorage.setItem(VERIFICATION_SESSION_KEY, JSON.stringify(session))
+    else window.sessionStorage.removeItem(VERIFICATION_SESSION_KEY)
+  } catch { /* A blocked browser store must not discard a saved verification result. */ }
+}
+
+function combinedVerificationProgress(session: VerificationSession, detail?: string): VerificationProgress {
+  const batch = session.batch?.progress ?? EMPTY_VERIFICATION_PROGRESS
+  return {
+    total: session.total,
+    processed: session.completed.processed + batch.processed,
+    open: session.completed.open + batch.open,
+    unavailable: session.completed.unavailable + batch.unavailable,
+    unknown: session.completed.unknown + batch.unknown,
+    message: detail ?? batch.message,
+    issues: [...batch.issues, ...session.completed.issues].slice(0, VERIFICATION_ISSUE_LIMIT),
+  }
+}
 
 export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () => void } = {}) {
   const router = useRouter()
@@ -140,6 +202,9 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
   const [verificationRunning, setVerificationRunning] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [verificationProgress, setVerificationProgress] = useState<VerificationProgress>(EMPTY_VERIFICATION_PROGRESS)
+  const [verificationCounts, setVerificationCounts] = useState<VerificationCounts | null>(null)
+  const [resumeAvailable, setResumeAvailable] = useState(false)
+  const [legacyVerification, setLegacyVerification] = useState(false)
   const runIdRef = useRef<string | null>(null)
   const verificationRunIdRef = useRef<string | null>(null)
   const pendingSavesRef = useRef(0)
@@ -147,10 +212,41 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
   const finalizedRef = useRef(false)
   const verificationUrlChangedRef = useRef(false)
   const cancelledVerificationRunIdRef = useRef<string | null>(null)
+  const verificationSessionRef = useRef<VerificationSession | null>(null)
+  const verificationActiveRef = useRef(false)
+  const verificationFetchIdRef = useRef(0)
+  const verificationIdleCountRef = useRef(0)
+  const verificationIdleAtRef = useRef(0)
+  const verificationSavesRef = useRef(new Map<string, Promise<void>>())
+  const legacySavedResultsRef = useRef(new Set<string>())
+  const verificationAcksRef = useRef(new Map<string, number>())
+  const verificationFetchBusyRef = useRef(false)
+  const verificationOperationRef = useRef(0)
+  const verificationCheckpointRef = useRef<CollectorMessage['verificationCheckpoint']>(null)
+
+  const refreshVerificationCounts = useCallback(async () => {
+    try {
+      const response = await fetch('/api/purchasing/purchase-url-verification?mode=due&limit=1', { cache: 'no-store' })
+      const body = await response.json() as VerificationQueueResponse
+      if (response.ok && body.counts) setVerificationCounts(body.counts)
+    } catch { /* Counts are refreshed again when a verification starts. */ }
+  }, [])
+
+  const persistVerificationSession = useCallback((session: VerificationSession | null) => {
+    verificationSessionRef.current = session
+    storeVerificationSession(session)
+    setResumeAvailable(Boolean(session && session.phase === 'paused'))
+  }, [])
 
   const finalizeVerification = useCallback(() => {
+    verificationActiveRef.current = false
+    verificationOperationRef.current += 1
+    verificationFetchBusyRef.current = false
+    cancelledVerificationRunIdRef.current = verificationRunIdRef.current
     verificationRunIdRef.current = null
+    persistVerificationSession(null)
     setVerificationRunning(false)
+    setLegacyVerification(false)
     setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
     if (verificationUrlChangedRef.current) {
       verificationUrlChangedRef.current = false
@@ -158,7 +254,121 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
       onUrlsChanged?.()
     }
     toast.success('1688 구매 URL 검증을 완료했습니다.')
-  }, [router, onUrlsChanged])
+    void refreshVerificationCounts()
+  }, [router, onUrlsChanged, persistVerificationSession, refreshVerificationCounts])
+
+  const pauseVerification = useCallback((detail: string) => {
+    verificationActiveRef.current = false
+    verificationOperationRef.current += 1
+    verificationFetchBusyRef.current = false
+    verificationFetchIdRef.current += 1
+    const session = verificationSessionRef.current
+    if (session) persistVerificationSession({ ...session, phase: 'paused' })
+    cancelledVerificationRunIdRef.current = verificationRunIdRef.current ?? cancelledVerificationRunIdRef.current
+    verificationRunIdRef.current = null
+    setVerificationRunning(false)
+    setVerificationProgress(current => ({ ...current, message: detail }))
+    void refreshVerificationCounts()
+  }, [persistVerificationSession, refreshVerificationCounts])
+
+  const launchVerificationBatch = useCallback(async () => {
+    const session = verificationSessionRef.current
+    if (!session || !verificationActiveRef.current) return
+    const fetchId = ++verificationFetchIdRef.current
+    verificationFetchBusyRef.current = true
+    persistVerificationSession({ ...session, phase: 'loading' })
+    const query = new URLSearchParams({ mode: session.mode, limit: String(VERIFICATION_BATCH_SIZE) })
+    if (session.cursor) query.set('cursor', session.cursor)
+    let response: Response
+    try { response = await fetch(`/api/purchasing/purchase-url-verification?${query}`, { cache: 'no-store' }) }
+    catch (error) {
+      if (fetchId !== verificationFetchIdRef.current || !verificationActiveRef.current) return
+      throw error
+    }
+    finally { if (fetchId === verificationFetchIdRef.current) verificationFetchBusyRef.current = false }
+    let body = await response.json() as VerificationQueueResponse
+    if (fetchId !== verificationFetchIdRef.current || !verificationActiveRef.current) return
+    if (!response.ok) throw new Error(body.error ?? '구매 URL 검증 목록을 불러오지 못했습니다.')
+    const checkpoint = verificationCheckpointRef.current
+    // An unrelated old partial queue with the same fingerprint must not make a
+    // fresh full run silently skip its first URLs. A different first batch size
+    // resets that legacy checkpoint; its omitted tail remains in the next page.
+    if (!session.total && !session.cursor && checkpoint && checkpoint.nextIndex > 0
+      && checkpoint.nextIndex < checkpoint.total && body.links.length === checkpoint.total) {
+      query.set('limit', String(body.links.length - 1))
+      verificationFetchBusyRef.current = true
+      try {
+        response = await fetch(`/api/purchasing/purchase-url-verification?${query}`, { cache: 'no-store' })
+        body = await response.json() as VerificationQueueResponse
+      } catch (error) {
+        if (fetchId !== verificationFetchIdRef.current || !verificationActiveRef.current) return
+        throw error
+      } finally { if (fetchId === verificationFetchIdRef.current) verificationFetchBusyRef.current = false }
+      if (fetchId !== verificationFetchIdRef.current || !verificationActiveRef.current) return
+      if (!response.ok) throw new Error(body.error ?? '구매 URL 검증 목록을 불러오지 못했습니다.')
+    }
+    if (body.counts) setVerificationCounts(body.counts)
+    if (!body.links.length) {
+      if (session.completed.processed) finalizeVerification()
+      else {
+        pauseVerification('현재 검증할 구매 URL이 없습니다.')
+        persistVerificationSession(null)
+        toast.info('현재 검증할 구매 URL이 없습니다.')
+      }
+      return
+    }
+    const runId = crypto.randomUUID()
+    const total = session.total || body.totalLinks || body.links.length
+    const batch: VerificationBatch = {
+      runId, links: body.links, nextCursor: body.nextCursor ?? body.links.at(-1)?.url ?? null,
+      hasMore: body.hasMore,
+      progress: { ...EMPTY_VERIFICATION_PROGRESS,
+        total: body.links.length,
+        message: `${total.toLocaleString('ko-KR')}개 링크를 순서대로 검증합니다.`,
+        issues: body.skippedInvalid > 0
+          ? [`1688 상품 주소 형식이 맞지 않는 URL ${body.skippedInvalid.toLocaleString('ko-KR')}개는 제외했습니다.`] : [],
+      },
+      savedUrls: [],
+      acknowledgedAt: {}, startedAt: Date.now(), acknowledged: false,
+    }
+    const next = { ...session, total, batch, phase: 'running' as const }
+    persistVerificationSession(next)
+    verificationRunIdRef.current = runId
+    cancelledVerificationRunIdRef.current = null
+    verificationIdleCountRef.current = 0
+    setVerificationProgress(combinedVerificationProgress(next))
+    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_VERIFY_START', runId, links: batch.links }, window.location.origin)
+  }, [finalizeVerification, pauseVerification, persistVerificationSession])
+
+  const completeVerificationBatch = useCallback((message: CollectorMessage) => {
+    const session = verificationSessionRef.current
+    const batch = session?.batch
+    if (!session || !batch || batch.runId !== message.runId || session.phase !== 'running') return
+    const progress = batch.progress
+    const finished: VerificationProgress = {
+      ...progress,
+      processed: batch.links.length,
+      open: Math.max(progress.open, message.summary?.open ?? 0),
+      unavailable: Math.max(progress.unavailable, message.summary?.unavailable ?? 0),
+      unknown: Math.max(progress.unknown, message.summary?.unknown ?? 0),
+    }
+    const completed = combinedVerificationProgress({ ...session, batch: { ...batch, progress: finished } }, '다음 검증 목록을 준비하고 있습니다.')
+    if (!batch.hasMore) { finalizeVerification(); return }
+    if (!batch.nextCursor || batch.nextCursor === session.cursor) {
+      pauseVerification('다음 검증 목록의 위치를 확인하지 못했습니다. 다시 시작해주세요.')
+      return
+    }
+    const next: VerificationSession = { ...session, cursor: batch.nextCursor, batch: null, completed,
+      phase: 'awaitingIdle', previousRunId: batch.runId }
+    persistVerificationSession(next)
+    verificationRunIdRef.current = null
+    verificationIdleCountRef.current = 0
+    verificationIdleAtRef.current = 0
+    setVerificationProgress(completed)
+    // Extension 1.14 sends COMPLETE before clearing its shared run/alarms.
+    // Wait for two separately polled idle observations before starting again.
+    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
+  }, [finalizeVerification, pauseVerification, persistVerificationSession])
 
   const finalizeRun = useCallback(() => {
     if (
@@ -267,28 +477,61 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
 
   const acknowledgeVerificationResult = useCallback(async (message: CollectorMessage) => {
     if (!message.url || !message.status) return
+    const key = `${message.runId}:${message.url}`
+    const pending = verificationSavesRef.current.get(key)
+    if (pending) return pending
+    const session = verificationSessionRef.current
+    const alreadySaved = session && session.batch && session.batch.runId === message.runId
+      ? session.batch.savedUrls.includes(message.url) : legacySavedResultsRef.current.has(key)
+    const acknowledgeSavedUrl = () => {
+      const current = verificationSessionRef.current
+      const batch = current && current.batch && current.batch.runId === message.runId ? current.batch : null
+      const lastAckAt = batch?.acknowledgedAt?.[message.url!] ?? verificationAcksRef.current.get(key)
+      const now = Date.now()
+      if (lastAckAt !== undefined && now - lastAckAt < 5_000) return
+      verificationAcksRef.current.set(key, now)
+      if (batch && current) persistVerificationSession({ ...current, batch: {
+        ...batch, acknowledgedAt: { ...batch.acknowledgedAt, [message.url!]: now },
+      } })
+      window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_VERIFY_RESULT_SAVED',
+        runId: message.runId, url: message.url, ok: true }, window.location.origin)
+    }
+    // A reload may happen after durable saving but before the ACK. Replay that
+    // ACK once in the restored page without re-posting or counting the result.
+    if (alreadySaved) {
+      acknowledgeSavedUrl()
+      return
+    }
 
+    const save = (async () => {
     const items = message.items ?? []
+    if (!items.length) throw new Error('검증한 URL의 품목 정보를 확인하지 못했습니다. 다시 시작해주세요.')
     let replaced = 0
-    if (message.status !== 'open' && items.length > 0) {
+    if (items.length > 0) {
       const response = await fetch('/api/purchasing/purchase-url-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: message.url,
           skus: items.map((item) => item.sku),
+          status: message.status,
           reason: message.message ?? null,
         }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(body.error ?? '확인 필요 URL을 반영하지 못했습니다.')
+        throw new Error(body.error ?? 'URL 검증 기록을 저장하지 못했습니다.')
       }
-      replaced = Number(body.replaced ?? 0) + Number(body.updatedWorkflow ?? 0)
-      if (body.updated > 0 || replaced > 0) verificationUrlChangedRef.current = true
+      replaced = Number(body.replaced ?? 0) + (message.status === 'open' ? 0 : Number(body.updatedWorkflow ?? 0))
+      if (message.status !== 'open' || body.updated > 0 || body.updatedWorkflow > 0 || replaced > 0) verificationUrlChangedRef.current = true
     }
 
-    setVerificationProgress((current) => {
+    // A result that finished saving during cancellation stays in history, but
+    // must not advance an old extension run or overwrite a new session.
+    if (message.runId !== verificationRunIdRef.current || !verificationActiveRef.current) return
+    const currentSession = verificationSessionRef.current
+    const currentBatch = currentSession?.batch ?? null
+    const updateProgress = (current: VerificationProgress): VerificationProgress => {
       const itemLabel = items
         .slice(0, 4)
         .map((item) => `${item.productName || '품목'} (${item.sku})`)
@@ -318,16 +561,40 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         message: itemLabel ? `${itemLabel} 검증 완료` : '구매 URL 검증 완료',
         issues: issues.slice(0, VERIFICATION_ISSUE_LIMIT),
       }
-    })
+    }
+    if (currentSession && currentBatch && currentBatch.runId === message.runId) {
+      const next = { ...currentSession, batch: { ...currentBatch,
+        savedUrls: [...currentBatch.savedUrls, message.url!], progress: updateProgress(currentBatch.progress) } }
+      persistVerificationSession(next)
+      setVerificationProgress(combinedVerificationProgress(next))
+    } else {
+      legacySavedResultsRef.current.add(key)
+      setVerificationProgress(updateProgress)
+    }
 
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: 'FUNTASTIC_1688_VERIFY_RESULT_SAVED',
-      runId: message.runId,
-      url: message.url,
-      ok: true,
-    }, window.location.origin)
-  }, [])
+    acknowledgeSavedUrl()
+    })()
+    verificationSavesRef.current.set(key, save)
+    try { await save }
+    finally { verificationSavesRef.current.delete(key) }
+  }, [persistVerificationSession])
+
+  useEffect(() => {
+    const restore = async () => {
+      const session = readVerificationSession()
+      if (session) {
+        verificationSessionRef.current = session
+        verificationRunIdRef.current = session.batch?.runId ?? null
+        verificationActiveRef.current = session.phase !== 'paused'
+        setResumeAvailable(session.phase === 'paused')
+        setVerificationRunning(session.phase !== 'paused')
+        setVerificationProgress(combinedVerificationProgress(session, session.phase === 'paused'
+          ? '중단된 검증을 이어서 진행할 수 있습니다.' : '진행 중인 URL 검증에 다시 연결하고 있습니다.'))
+      }
+      await refreshVerificationCounts()
+    }
+    void restore()
+  }, [refreshVerificationCounts])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -337,6 +604,75 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
 
       if (message.type === 'FUNTASTIC_1688_PONG') {
         setExtensionReady(true)
+        verificationCheckpointRef.current = message.verificationCheckpoint ?? null
+        const session = verificationSessionRef.current
+        if (session?.phase === 'paused') return
+        if (session) {
+          if (session.phase === 'awaitingIdle' && !session.batch && message.running
+            && message.runId === session.previousRunId) {
+            verificationIdleCountRef.current = 0
+            verificationIdleAtRef.current = 0
+            return
+          }
+          if (message.mode === 'verification' && message.running && message.runId && session.batch
+            && message.runId === session.batch.runId) {
+            if (session.phase !== 'running') return
+            verificationIdleCountRef.current = 0
+            verificationActiveRef.current = true
+            verificationRunIdRef.current = message.runId
+            const batch = session.batch
+            const old = batch.progress
+            const next = { ...session, batch: { ...batch, acknowledged: true, progress: {
+              ...old,
+              processed: Math.max(old.processed, message.summary?.processed ?? message.index ?? 0),
+              open: Math.max(old.open, message.summary?.open ?? 0),
+              unavailable: Math.max(old.unavailable, message.summary?.unavailable ?? 0),
+              unknown: Math.max(old.unknown, message.summary?.unknown ?? 0),
+            } } }
+            persistVerificationSession(next)
+            setVerificationRunning(true)
+            setVerificationProgress(combinedVerificationProgress(next, '진행 중인 URL 검증에 다시 연결했습니다.'))
+            return
+          }
+          if (!message.running && verificationActiveRef.current) {
+            if (verificationFetchBusyRef.current || (session.batch?.startedAt
+              && !session.batch.acknowledged && Date.now() - session.batch.startedAt < 10_000)) return
+            const now = Date.now()
+            if (!verificationIdleAtRef.current || now - verificationIdleAtRef.current >= 4_000) {
+              verificationIdleCountRef.current += 1
+              verificationIdleAtRef.current = now
+            }
+            if (verificationIdleCountRef.current >= 2) {
+              verificationIdleCountRef.current = 0
+              if (session.batch) {
+                if (session.batch.progress.processed >= session.batch.links.length) {
+                  completeVerificationBatch({ source: EXTENSION_SOURCE, type: 'FUNTASTIC_1688_VERIFY_COMPLETE', runId: session.batch.runId })
+                } else {
+                  // The worker stopped during a reload. Reuse the exact batch
+                  // so its existing extension checkpoint can resume.
+                  const resumed = { ...session, phase: 'running' as const }
+                  persistVerificationSession(resumed)
+                  verificationRunIdRef.current = session.batch.runId
+                  window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_VERIFY_START',
+                    runId: session.batch.runId, links: session.batch.links }, window.location.origin)
+                }
+              } else if (session.phase === 'awaitingIdle' || session.phase === 'loading') {
+                void launchVerificationBatch().catch(error => {
+                  const detail = error instanceof Error ? error.message : '다음 검증 목록을 불러오지 못했습니다.'
+                  pauseVerification(detail)
+                  toast.error(detail)
+                })
+              }
+            }
+            return
+          }
+          if (message.running) {
+            // A different/old worker must be stopped explicitly; never replace
+            // it automatically with this page's remaining batch.
+            pauseVerification('다른 URL 검증이 실행 중입니다. 기존 검증을 중단한 뒤 이어서 진행해주세요.')
+          }
+          return
+        }
         if (message.mode === 'verification') {
           if (
             message.running
@@ -344,7 +680,9 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
             && message.runId !== cancelledVerificationRunIdRef.current
           ) {
             verificationRunIdRef.current = message.runId
+            verificationActiveRef.current = true
             setVerificationRunning(true)
+            setLegacyVerification(true)
             setVerificationProgress((current) => ({
               ...current,
               total: message.total ?? current.total,
@@ -392,9 +730,11 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
       }
       if (message.runId && message.runId === verificationRunIdRef.current) {
         if (message.type === 'FUNTASTIC_1688_VERIFY_ACK') {
+          const session = verificationSessionRef.current
+          if (session?.batch) persistVerificationSession({ ...session, batch: { ...session.batch, acknowledged: true } })
           setVerificationProgress((current) => ({
             ...current,
-            total: message.total ?? current.total,
+            total: verificationSessionRef.current?.total ?? message.total ?? current.total,
             message: '1688 구매 URL 검증을 시작했습니다.',
           }))
           return
@@ -408,19 +748,21 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
           return
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_COMPLETE') {
-          finalizeVerification()
+          if (verificationSessionRef.current) completeVerificationBatch(message)
+          else finalizeVerification()
           return
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_CANCELLED') {
-          setVerificationRunning(false)
-          setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
+          pauseVerification('검증을 중단했습니다. 저장한 기록부터 이어서 진행할 수 있습니다.')
           toast.info('1688 구매 URL 검증을 중단했습니다.')
           return
         }
-        if (message.type === 'FUNTASTIC_1688_VERIFY_ERROR') {
-          verificationRunIdRef.current = null
-          setVerificationRunning(false)
-          setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
+        if (message.type === 'FUNTASTIC_1688_ERROR' && verificationSessionRef.current?.batch?.acknowledged) {
+          setVerificationProgress(current => ({ ...current, message: message.message ?? '확장프로그램 응답을 다시 확인하고 있습니다.' }))
+          return
+        }
+        if (message.type === 'FUNTASTIC_1688_VERIFY_ERROR' || message.type === 'FUNTASTIC_1688_ERROR') {
+          pauseVerification(message.message ?? '1688 URL 검증 중 오류가 발생했습니다.')
           toast.error(message.message ?? '1688 URL 검증 중 오류가 발생했습니다.')
           return
         }
@@ -476,7 +818,8 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
       window.removeEventListener('message', onMessage)
       window.clearInterval(timer)
     }
-  }, [acknowledgeVerificationResult, finalizeRun, finalizeVerification, saveResult])
+  }, [acknowledgeVerificationResult, completeVerificationBatch, finalizeRun, finalizeVerification,
+    launchVerificationBatch, pauseVerification, persistVerificationSession, saveResult])
 
   const startCollection = async () => {
     if (!extensionReady) {
@@ -533,48 +876,57 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
     }, window.location.origin)
   }
 
-  const startVerification = async () => {
+  const startVerification = async (mode: VerificationMode = 'due') => {
     if (!extensionReady) {
       toast.error('1688 수집 확장프로그램을 먼저 설치해주세요.')
       return
     }
 
     setVerificationRunning(true)
+    setLegacyVerification(false)
+    verificationActiveRef.current = true
     verificationUrlChangedRef.current = false
+    verificationIdleCountRef.current = 0
+    verificationIdleAtRef.current = 0
+    legacySavedResultsRef.current.clear()
+    verificationAcksRef.current.clear()
+    const operation = ++verificationOperationRef.current
+    verificationFetchBusyRef.current = true
+    const previousRunId = verificationSessionRef.current?.batch?.runId ?? cancelledVerificationRunIdRef.current
+    persistVerificationSession({ version: 1, mode, total: 0, cursor: null,
+      completed: EMPTY_VERIFICATION_PROGRESS, batch: null, phase: 'loading', previousRunId })
     setVerificationProgress({ ...EMPTY_VERIFICATION_PROGRESS, message: '검증할 구매 URL을 확인하고 있습니다.' })
     try {
       await syncSavedPurchaseUrls()
-      const response = await fetch('/api/purchasing/purchase-url-verification?limit=2000', {
-        cache: 'no-store',
-      })
-      const body = await response.json() as VerificationQueueResponse
-      if (!response.ok) throw new Error(body.error ?? '구매 URL 검증 목록을 불러오지 못했습니다.')
-      if (body.links.length === 0) throw new Error('검증할 1688 구매 URL이 없습니다.')
-
-      const runId = crypto.randomUUID()
-      verificationRunIdRef.current = runId
-      cancelledVerificationRunIdRef.current = null
-      setVerificationProgress({
-        ...EMPTY_VERIFICATION_PROGRESS,
-        total: body.links.length,
-        message: body.hasMore
-          ? `먼저 ${body.links.length.toLocaleString('ko-KR')}개 링크를 검증합니다.`
-          : `${body.links.length.toLocaleString('ko-KR')}개 링크를 검증합니다.`,
-        issues: body.skippedInvalid > 0
-          ? [`1688 상품 주소 형식이 맞지 않는 URL ${body.skippedInvalid.toLocaleString('ko-KR')}개는 제외했습니다.`]
-          : [],
-      })
-      window.postMessage({
-        source: PAGE_SOURCE,
-        type: 'FUNTASTIC_1688_VERIFY_START',
-        runId,
-        links: body.links,
-      }, window.location.origin)
+      if (operation !== verificationOperationRef.current || !verificationActiveRef.current) return
+      verificationFetchBusyRef.current = false
+      if (previousRunId) {
+        const session = verificationSessionRef.current
+        if (session) persistVerificationSession({ ...session, phase: 'awaitingIdle' })
+        window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
+      } else await launchVerificationBatch()
     } catch (error) {
-      setVerificationRunning(false)
-      setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
-      toast.error(error instanceof Error ? error.message : '구매 URL 검증을 시작하지 못했습니다.')
+      if (operation !== verificationOperationRef.current) return
+      verificationFetchBusyRef.current = false
+      const detail = error instanceof Error ? error.message : '구매 URL 검증을 시작하지 못했습니다.'
+      pauseVerification(detail)
+      toast.error(detail)
     }
+  }
+
+  const resumeVerification = () => {
+    const session = verificationSessionRef.current
+    if (!session || !extensionReady) return
+    verificationActiveRef.current = true
+    verificationIdleCountRef.current = 0
+    verificationIdleAtRef.current = 0
+    cancelledVerificationRunIdRef.current = null
+    const next = { ...session, phase: session.batch ? 'running' as const : 'awaitingIdle' as const }
+    persistVerificationSession(next)
+    verificationRunIdRef.current = session.batch?.runId ?? null
+    setVerificationRunning(true)
+    setVerificationProgress(combinedVerificationProgress(next, '저장한 검증 기록부터 이어서 진행하고 있습니다.'))
+    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
   }
 
   const syncSavedPurchaseUrls = async () => {
@@ -594,6 +946,7 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
     setSyncing(true)
     try {
       const result = await syncSavedPurchaseUrls()
+      void refreshVerificationCounts()
       toast.success(`발주 URL 연동 완료 · 품목 ${result.updatedProducts}건 · 상품관리 ${result.updatedWorkflow}건`)
     } catch (error) { toast.error(error instanceof Error ? error.message : '발주 URL 연동 실패') }
     finally { setSyncing(false) }
@@ -601,12 +954,10 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
 
   const cancelVerification = () => {
     const runId = verificationRunIdRef.current
-    if (!runId) return
     cancelledVerificationRunIdRef.current = runId
-    verificationRunIdRef.current = null
-    setVerificationRunning(false)
-    setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
-    window.postMessage({
+    pauseVerification('검증을 중단했습니다. 저장한 기록부터 이어서 진행할 수 있습니다.')
+    setLegacyVerification(false)
+    if (runId) window.postMessage({
       source: PAGE_SOURCE,
       type: 'FUNTASTIC_1688_VERIFY_CANCEL',
       runId,
@@ -656,7 +1007,7 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         ) : null}
         <button
           type="button"
-          onClick={() => void startVerification()}
+          onClick={() => void startVerification('due')}
           disabled={syncing || running || verificationRunning}
           className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
         >
@@ -664,9 +1015,23 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
             ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
             : <CheckCircle2 className="size-4" aria-hidden="true" />}
           {verificationRunning
-            ? `${verificationProgress.processed}/${verificationProgress.total} 검증 중`
-            : 'URL 검증'}
+            ? `${legacyVerification ? '기존 검증 ' : ''}${verificationProgress.processed}/${verificationProgress.total} 검증 중`
+            : `필요한 URL 검증${verificationCounts ? ` ${verificationCounts.due.toLocaleString('ko-KR')}개` : ''}`}
         </button>
+        {!verificationRunning ? <>
+          <button type="button" onClick={() => void startVerification('issues')} disabled={syncing || running}
+            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
+            문제 URL 재검증{verificationCounts ? ` ${verificationCounts.issues.toLocaleString('ko-KR')}개` : ''}
+          </button>
+          <button type="button" onClick={() => void startVerification('all')} disabled={syncing || running}
+            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
+            전체 URL 검증{verificationCounts ? ` ${verificationCounts.all.toLocaleString('ko-KR')}개` : ''}
+          </button>
+          {resumeAvailable ? <button type="button" onClick={resumeVerification} disabled={syncing || running || !extensionReady}
+            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
+            중단한 검증 이어서
+          </button> : null}
+        </> : null}
         {verificationRunning ? (
           <button
             type="button"
@@ -692,6 +1057,9 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         </span>
       </div>
 
+      <p className="text-xs text-muted-foreground">미검증·변경된 URL과 정상 확인 후 30일 지난 URL만 기본 검증합니다. 단종은 제외됩니다. 기존 정상 검증 기록이 없으면 처음에는 대상이 많을 수 있습니다.</p>
+      {legacyVerification ? <p className="text-xs text-amber-700">이전 방식의 검증이 실행 중입니다. 중단 후 필요한 URL 검증을 시작해주세요.</p> : null}
+
       {SHOW_COLLECTION_CONTROLS && progress.total > 0 ? (
         <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -714,7 +1082,7 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         </div>
       ) : null}
 
-      {verificationRunning && verificationProgress.total > 0 ? (
+      {(verificationRunning || resumeAvailable) && verificationProgress.total > 0 ? (
         <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium">{verificationProgress.message}</span>

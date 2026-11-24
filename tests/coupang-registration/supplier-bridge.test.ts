@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkSupplierRegistration, getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration, type SupplierRegistrationJob } from '@/lib/coupang-registration/supplier-bridge'
 
 const extension = 'funtastic-coupang-registration-extension'
@@ -6,6 +6,13 @@ const job: SupplierRegistrationJob = { jobId: 'bridge-job', token: '0123456789ab
 function response(data: Record<string, unknown>, origin = location.origin, source: Window | null = window) {
   window.dispatchEvent(new MessageEvent('message', { source, origin, data: { source: extension, ...data } }))
 }
+beforeEach(async () => {
+  const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+  const ping = pingSupplierExtension()
+  response({ type: 'RESPONSE', requestId: post.mock.calls[0][0].requestId, ok: true, version: '1.1.0', supportsCategories: true })
+  await ping
+  post.mockRestore()
+})
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('Supplier registration page bridge', () => {
@@ -18,7 +25,31 @@ describe('Supplier registration page bridge', () => {
     response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, version: 'wrong' }, location.origin, null)
     response({ type: 'RESPONSE', requestId: 'wrong', ok: true, version: 'wrong' })
     response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, version: '1.0.0' })
+    await vi.advanceTimersByTimeAsync(5000)
     expect(await ping).toEqual({ connected: true, version: '1.0.0' })
+  })
+  it('prefers a working category extension over an older or invalidated bridge response', async () => {
+    const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    const ping = pingSupplierExtension()
+    const sent = post.mock.calls[0][0]
+    response({ type: 'RESPONSE', requestId: sent.requestId, ok: false, error: 'Extension context invalidated' })
+    response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, version: '1.0.0' })
+    response({ type: 'RESPONSE', requestId: sent.requestId, ok: true, version: '1.1.1', supportsCategories: true, extensionId: 'working-extension' })
+    expect(await ping).toEqual({ connected: true, version: '1.1.1', supportsCategories: true })
+    const search = searchSupplierCategories(['선반'])
+    const requested = post.mock.calls.at(-1)![0]
+    expect(requested).toMatchObject({ type: 'CATEGORY_SEARCH', extensionId: 'working-extension' })
+    response({ type: 'RESPONSE', requestId: requested.requestId, ok: false, error: 'stale', extensionId: 'old-extension' })
+    response({ type: 'RESPONSE', requestId: requested.requestId, ok: true, categories: [], extensionId: 'working-extension' })
+    expect(await search).toEqual([])
+  })
+  it('does not consider an empty worker response a connected extension', async () => {
+    vi.useFakeTimers()
+    const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    const ping = pingSupplierExtension()
+    response({ type: 'RESPONSE', requestId: post.mock.calls[0][0].requestId })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await ping).toMatchObject({ connected: false })
   })
   it('accepts progress only for an explicitly started job token and unsubscribes', async () => {
     const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})

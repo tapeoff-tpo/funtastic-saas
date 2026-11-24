@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { productChangeLogs, products, purchaseRequestItems } from '@/lib/db/schema'
 import { ensureNewProductWorkflowTables } from '@/lib/new-products/workflow'
-import { canonicalize1688OfferUrl, metadataWithPurchaseUrl, purchaseUrlFromMetadata, recordValue } from './purchase-url-values'
+import { ALIBABA_ORDER_OR_CART_URL_PATTERN, canonicalize1688OfferUrl, is1688OrderOrCartUrl, metadataWithPurchaseUrl, purchaseUrlFromMetadata, recordValue } from './purchase-url-values'
 import { matchOrderPurchaseUrls, normalizeOrderProductLinks, type OrderProductLink } from './purchase-order-url-match'
 export { resolveOrderPurchaseUrls, type OrderProductLink } from './purchase-order-url-match'
 
@@ -94,7 +94,7 @@ async function purchaseUrlSources(userId: string, skus?: string[], database: Pic
   return [...sources.values()]
 }
 
-/** Fill blanks and previously failed masters. Existing working links stay in place. */
+/** Fill blanks, failed links and order/cart addresses with a matched real offer. */
 export async function syncPurchaseUrlsFromHistory(userId: string, skus?: string[]) {
   await ensureNewProductWorkflowTables(userId)
   const sources = await purchaseUrlSources(userId, skus)
@@ -109,7 +109,8 @@ export async function syncPurchaseUrlsFromHistory(userId: string, skus?: string[
     for (const row of rows) {
       const source = sourceBySku.get(row.sku)!
       const currentUrl = purchaseUrlFromMetadata(row.metadata)
-      if (currentUrl && recordValue(recordValue(row.metadata).purchaseUrlVerification).status !== 'confirm_required') continue
+      if (currentUrl && !is1688OrderOrCartUrl(currentUrl)
+        && recordValue(recordValue(row.metadata).purchaseUrlVerification).status !== 'confirm_required') continue
       if (canonicalize1688OfferUrl(currentUrl) === source.url) continue
       changes.push({ id: row.id, metadata: row.metadata, url: source.url })
       replacements.push({ sku: row.sku, url: source.url, oldUrl: currentUrl })
@@ -147,6 +148,7 @@ export async function syncWorkflowUrls(tx: Transaction, userId: string, sources:
     ), matches AS (
       SELECT item.id, item.source_url AS "previousUrl", min(c.url) AS url, bool_or(
         NULLIF(btrim(item.source_url), '') IS NULL
+        OR btrim(item.source_url) ~* ${ALIBABA_ORDER_OR_CART_URL_PATTERN}
         OR (item.metadata->'purchaseUrlVerification'->>'status' = 'confirm_required'
           AND c.url IS DISTINCT FROM item.metadata->'purchaseUrlVerification'->>'failedUrl')
         OR EXISTS (SELECT 1 FROM replacements r WHERE r.sku = c.sku AND r.url = c.url

@@ -19,6 +19,7 @@ vi.mock('@/lib/db', () => {
 })
 import { confirmPurchaseOrderProductUrl, getPurchaseUrlForNewProduct, getPurchaseUrlReplacementSources, resolveOrderPurchaseUrls, savePurchaseTrackingProductLinks, syncPurchaseUrlsFromHistory, syncWorkflowUrls } from './purchase-url-sync'
 import { db } from '@/lib/db'
+import { ALIBABA_ORDER_OR_CART_URL_PATTERN } from './purchase-url-values'
 
 const oldUrl = 'https://detail.1688.com/offer/111111111111.html'
 const newUrl = 'https://detail.1688.com/offer/222222222222.html'
@@ -41,6 +42,29 @@ describe('order product URL matching', () => {
 })
 
 describe('purchase URL history reuse', () => {
+  it('replaces an order/cart address in both item master and linked product management', async () => {
+    const orderUrl = 'https://trade.1688.com/order/new_step_order_detail.htm?orderId=1234567890123'
+    mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: newUrl } } }]
+    mocks.masters = [{ id: 'master1', sku: request.sku, metadata: { esa009m: { '구매 URL': orderUrl, '원가': '120' }, extra: 'keep' } }]
+    expect(await syncPurchaseUrlsFromHistory('owner')).toEqual({ updatedProducts: 1, updatedWorkflow: 1 })
+    const statement = new PgDialect().sqlToQuery(mocks.writes[0].values.metadata as SQL)
+    expect(JSON.parse(statement.params[1] as string)).toEqual({ esa009m: { '구매 URL': newUrl, '원가': '120' }, extra: 'keep' })
+    expect(mocks.logs).toHaveBeenCalledWith([expect.objectContaining({ oldValue: orderUrl, newValue: newUrl })])
+    const workflowQuery = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0] as SQL)
+    expect(workflowQuery.params).toContain(ALIBABA_ORDER_OR_CART_URL_PATTERN)
+    expect(workflowQuery.sql).toContain('btrim(item.source_url) ~*')
+    expect(workflowQuery.sql).toContain('count(DISTINCT c.url) = 1')
+  })
+
+  it('repairs a linked workflow order link even when the item master already has the real offer', async () => {
+    mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: newUrl } } }]
+    mocks.masters = [{ id: 'master1', sku: request.sku, metadata: { esa009m: { '구매 URL': newUrl } } }]
+    expect(await syncPurchaseUrlsFromHistory('owner')).toEqual({ updatedProducts: 0, updatedWorkflow: 1 })
+    expect(mocks.writes).toEqual([])
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0] as SQL)
+    expect(query.params).toContain(ALIBABA_ORDER_OR_CART_URL_PATTERN)
+  })
+
   it('reports a saved manual choice even when later item-master synchronization fails', async () => {
     mocks.requests = [{ ...request, rawData: { purchaseUrlLookup: { orderNumber: request.orderNumber, resolvedUrl: null, links: [{ url: newUrl }] } } }]
     mocks.ensure.mockRejectedValue(new Error('temporary database failure'))

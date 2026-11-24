@@ -4,10 +4,10 @@ import type { ChinaShipmentDetailView, SavedBoxSummary } from './china-shipments
 import { SavedBoxContentsPanel } from './saved-box-contents-panel'
 import { ChinaWorkGuardProvider } from './unsaved-china-work'
 
-const { saveDimensions, saveWeight, saveBulk, refresh, toastError } = vi.hoisted(() => ({ saveDimensions: vi.fn(), saveWeight: vi.fn(), saveBulk: vi.fn(), refresh: vi.fn(), toastError: vi.fn() }))
+const { saveDimensions, saveWeight, saveBulk, merge, refresh, toastError } = vi.hoisted(() => ({ saveDimensions: vi.fn(), saveWeight: vi.fn(), saveBulk: vi.fn(), merge: vi.fn(), refresh: vi.fn(), toastError: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastError } }))
-vi.mock('../saas-china-actions', () => ({ saveChinaOutboundBoxDimensionsAction: saveDimensions, saveChinaOutboundPackageWeightAction: saveWeight, saveChinaOutboundBoxesMeasurementsAction: saveBulk }))
+vi.mock('../saas-china-actions', () => ({ saveChinaOutboundBoxDimensionsAction: saveDimensions, saveChinaOutboundPackageWeightAction: saveWeight, saveChinaOutboundBoxesMeasurementsAction: saveBulk, mergeChinaOutboundBoxesAction: merge }))
 
 function item(id: string, sku = 'SKU-A', optionName = '대형'): ChinaShipmentDetailView['items'][number] {
   return { id, sku, productName: '컵', optionName, inventoryId: id, warehouseCode: '중국', reservedQuantity: 50, packedQuantity: 20, dispatchedQuantity: 0, boxSplitStatus: 'in_progress' }
@@ -41,18 +41,38 @@ describe('saved box list', () => {
     expect(summaries.map((summary) => summary.box.boxNo)).toEqual(['10', '3', '2', '1'])
   })
 
-  it('saves the actual box dimensions and total weight without sending allocation or quantity edits', async () => {
+  it('saves row dimensions and weight atomically from the rightmost save button', async () => {
     renderPanel([mixedBox('2')])
-    fireEvent.doubleClick(within(screen.getByRole('row', { name: '박스 2' })).getByRole('button'))
-    expect(screen.queryByRole('spinbutton', { name: /CBM/ })).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 가로(cm)' }), { target: { value: '50.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '박스 2 규격 저장' }))
-    await waitFor(() => expect(saveDimensions).toHaveBeenCalledWith({ shipmentId: 'shipment', boxId: '2', lengthCm: 50.5, widthCm: 20, heightCm: 30, manualCbm: null }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '박스 2 규격 저장' })).toBeDisabled())
     fireEvent.change(screen.getByRole('spinbutton', { name: '박스 2 총중량(kg)' }), { target: { value: '12.5' } })
-    fireEvent.click(screen.getByRole('button', { name: '중량 저장' }))
-    await waitFor(() => expect(saveWeight).toHaveBeenCalledWith({ shipmentId: 'shipment', packageId: '2', kind: 'box', grossWeightKg: 12.5 }))
-    expect(refresh).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: '박스 2 저장하기' }))
+    await waitFor(() => expect(saveBulk).toHaveBeenCalledWith({ shipmentId: 'shipment', boxIds: ['2'], lengthCm: 50.5, widthCm: 20, heightCm: 30, manualCbm: null, grossWeightKg: 12.5 }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '박스 2 저장하기' })).toBeDisabled())
+    expect(saveDimensions).not.toHaveBeenCalled()
+    expect(saveWeight).not.toHaveBeenCalled()
   })
+})
 
+it('shows boxed inputs, cancels edits with Escape and keeps save in the last cell', () => {
+  renderPanel([box('1')])
+  expect(screen.getAllByRole('spinbutton')).toHaveLength(4)
+  const input = screen.getByRole('spinbutton', { name: '박스 1 세로(cm)' })
+  fireEvent.change(input, { target: { value: '99' } })
+  fireEvent.keyDown(input, { key: 'Escape' })
+  expect(input).toHaveValue(20)
+  expect(saveBulk).not.toHaveBeenCalled()
+  const row = screen.getByRole('row', { name: '박스 1' })
+  expect(within(row.lastElementChild as HTMLElement).getByRole('button', { name: '박스 1 저장하기' })).toBeDisabled()
+})
+
+it('selects merge boxes beside their numbers and confirms only those boxes', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true }
+  HTMLDialogElement.prototype.close = function () { this.open = false }
+  merge.mockResolvedValue({ ok: true })
+  renderPanel([box('1'), box('2'), box('3')])
+  fireEvent.click(screen.getByRole('checkbox', { name: '박스 1 합치기 선택' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: '박스 3 합치기 선택' }))
+  fireEvent.click(screen.getByRole('button', { name: '선택 박스 합치기 (2)' }))
+  fireEvent.click(screen.getByRole('button', { name: '합치기 확인' }))
+  await waitFor(() => expect(merge).toHaveBeenCalledWith({ shipmentId: 'shipment', boxIds: ['1', '3'] }))
 })

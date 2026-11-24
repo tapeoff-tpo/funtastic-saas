@@ -1514,6 +1514,7 @@ export async function createNewProduct(input: {
       FROM new_product_workflow_items
       WHERE user_id = ${input.userId}::uuid
     `))
+    const sourceUrl = await resolveNewProductSourceUrl(tx, input.userId, input.values)
     const [created] = resultRows<{ id: string }>(await tx.execute(sql`
       INSERT INTO new_product_workflow_items (
         user_id, product_number, stage_id,
@@ -1537,7 +1538,7 @@ export async function createNewProduct(input: {
         ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.exchangeRateKrw}, ${calculatedCostKrw},
         ${input.values.domesticSaleUrl}, ${input.values.domesticSalePrice}, ${input.values.detailPageUrl}, ${input.values.memo1}, ${input.values.memo2},
         ${input.values.englishName},
-        ${input.values.sourceUrl}, ${input.values.requiredChecks}, ${estimatedCost},
+        ${sourceUrl}, ${input.values.requiredChecks}, ${estimatedCost},
         ${input.values.historyNotes}, ${input.values.referenceNotes}, ${input.values.chinaItemName},
         ${input.values.plannedSaleDate}::date, ${input.values.detailPageDueDate}::date,
         ${input.values.registeredProductName}, ${input.values.packageInfoUrl},
@@ -1601,6 +1602,7 @@ export async function updateNewProduct(input: {
       exchangeRateKrw: values.exchangeRateKrw,
     })
 
+    const sourceUrl = await resolveNewProductSourceUrl(tx, input.userId, input.values)
     await tx.execute(sql`
       UPDATE new_product_workflow_items SET
         stage_id = ${input.values.stageId}::uuid,
@@ -1617,7 +1619,7 @@ export async function updateNewProduct(input: {
         memo_1 = ${input.values.memo1},
         memo_2 = ${input.values.memo2},
         english_name = ${input.values.englishName},
-        source_url = ${input.values.sourceUrl},
+        source_url = ${sourceUrl},
         required_checks = ${input.values.requiredChecks},
         estimated_cost = ${input.values.estimatedCost},
         history_notes = ${input.values.historyNotes},
@@ -1655,12 +1657,12 @@ export async function updateNewProduct(input: {
         notice_food_safety = ${input.values.noticeFoodSafety},
         notice_components = ${input.values.noticeComponents},
         notice_special_notes = ${input.values.noticeSpecialNotes},
-        metadata = CASE
+        metadata = (CASE
           WHEN ${input.values.optionDetails === undefined} THEN metadata
           ELSE COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
             'optionDetails', ${JSON.stringify(input.values.optionDetails ?? [])}::jsonb
           )
-        END,
+        END) - CASE WHEN source_url IS DISTINCT FROM ${sourceUrl}::text THEN ARRAY['purchaseUrlVerification'] ELSE ARRAY[]::text[] END,
         updated_at = now()
       WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
     `)
@@ -1703,6 +1705,15 @@ async function assertNewProductSampleCodeAvailable(input: {
   if (!existing) return
 
   throw new Error(`상품번호 "${input.sampleCode?.trim()}"는 이미 ${existing.productName}에 등록되어 있습니다.`)
+}
+
+async function resolveNewProductSourceUrl(tx: WorkflowTransaction, userId: string, values: NewProductInput) {
+  if (values.sourceUrl?.trim()) return values.sourceUrl.trim()
+  const codes = [...new Set([values.sabangnetCode, ...(values.optionDetails ?? []).map(option => option.sabangnetOptionCode)]
+    .map(code => code?.trim()).filter((code): code is string => Boolean(code)))]
+  if (!codes.length) return null
+  const { getPurchaseUrlForNewProduct } = await import('@/lib/purchasing/purchase-url-sync')
+  return getPurchaseUrlForNewProduct(tx, userId, codes)
 }
 
 export async function deleteNewProduct(input: { userId: string; itemId: string }) {

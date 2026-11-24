@@ -1,3 +1,5 @@
+import type { ImportDocumentEditCells } from './china-import-editing'
+import { renderChinaImportPreview } from './china-import-preview'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
@@ -92,7 +94,7 @@ describe('China import documents', () => {
     [[10, 60, 20], 'P2'],
     [[10, 20, 60], 'P3'],
     [[40, 40, 10], 'P1'],
-  ] as const)('combines invoice quantities %j at %s while keeping actual packing rows', async (quantities, palletNo) => {
+  ] as const)('combines invoice quantities %j at %s with matching packing rows and all pallet locations', async (quantities, palletNo) => {
     const { shipment, overrides } = splitAcrossPallets([...quantities])
     const sheet = await exportedSheet(shipment, overrides)
     expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
@@ -104,8 +106,9 @@ describe('China import documents', () => {
     for (const row of [21, 22]) {
       for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
     }
-    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1', 'P2', 'P3'])
-    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([...quantities])
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1, P2, P3', null, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
+    expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
     expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)', result: 3 })
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
@@ -151,8 +154,8 @@ describe('China import documents', () => {
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
-    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([35, 35, 60])
-    expect(sheet.model.merges).toContain('O20:O21')
+    expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([130, null, null])
+    expect(sheet.model.merges).not.toContain('O20:O21')
     for (const conflicting of [{ englishName: 'Other', unitPriceCny: 1.25 }, { englishName: 'Glass', unitPriceCny: 2 }]) {
       await expect(exportChinaImportDocument(shipment, metadata, { ...overrides, items: { ...overrides.items, 'item-b': conflicting } })).rejects.toThrow('SKU-A: 동일 품목')
     }
@@ -223,7 +226,7 @@ describe('China import documents', () => {
     const sheet = await exportedSheet(shipment, overrides)
     expect(prepareImportDocument(shipment, metadata).pallets[0].tareWeightKg).toBe(tareWeightKg)
     expect(sheet.getCell('V20').value).toBe(12.25 + tareWeightKg)
-    expect(sheet.getCell('V21').value).toBeNull()
+    expect(sheet.getCell('V21').value).toBe(3)
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 15.25 + tareWeightKg })
   })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
@@ -244,8 +247,8 @@ describe('China import documents', () => {
     expect(sheet.getCell('D21').value).toBeNull()
     expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 335.16 })
     expect(sheet.getCell('V20').value).toBe(15)
-    expect(sheet.getCell('V21').value).toBeNull()
-    expect(sheet.getCell('V22').value).toBe(3)
+    expect(sheet.getCell('V21').value).toBe(3)
+    expect(sheet.getCell('V22').value).toBeNull()
     expect(sheet.getCell('V23').value).toBeNull()
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 345.16 })
@@ -260,7 +263,7 @@ describe('China import documents', () => {
     expect(sheet.pageSetup.scale).toBe(31)
     expect(sheet.getColumn('A').width).toBe(19.296875)
     expect(sheet.getColumn('N').width).toBe(28.59765625)
-    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'R18:S18', 'T18:U18', 'V18:W18', 'O20:O21']))
+    expect(sheet.model.merges).toEqual(expect.arrayContaining(['A1:J1', 'K1:S1', 'R18:S18', 'T18:U18', 'V18:W18']))
     expect(sheet.model.merges).not.toContain('C18:D18')
     const reference = new ExcelJS.Workbook()
     await reference.xlsx.load(await readFile(join(process.cwd(), 'src/lib/purchasing/templates/china-invoice-packing-list.xlsx')) as unknown as ExcelJS.Buffer)
@@ -343,4 +346,140 @@ describe('China import documents', () => {
     expect(existing.getCell('D2').value).toBe('0392.10-0000')
     expect(existing.getCell('D2').numFmt).toBe('@')
   })
+})
+
+it('renders the exported invoice and packing worksheet with merged cells and escaped text', async () => {
+  const html = await renderChinaImportPreview(await exportChinaImportDocument(detail, metadata, { ...options, exporter: '<script>alert(1)</script>' }))
+  expect(html).toContain('INVOICE')
+  expect(html).toContain('PACKING LIST')
+  expect(html).toContain('colspan="10"')
+  expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  expect(html).not.toContain('<script>')
+  expect(html).toContain('TAPE-1/ 2026-10-30')
+})
+it('shows a draft template even when prices and box measurements are missing without inventing totals', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, { ...options,
+    items: { 'item-a': { englishName: '', unitPriceCny: Number.NaN }, 'item-b': { englishName: '', unitPriceCny: Number.NaN } },
+    boxes: { 'box-a': { grossWeightKg: Number.NaN, cbm: null }, 'box-b': { grossWeightKg: Number.NaN, cbm: null } },
+  }, {}, true)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('G20').value).toBeNull()
+  expect(sheet.getCell('J112').value).toBeNull()
+  expect(sheet.getCell('V112').value).toBeNull()
+  expect(sheet.getCell('X112').value).toBeNull()
+  expect(await renderChinaImportPreview(buffer)).not.toContain('NaN')
+})
+it('exports the saved whole-pallet CBM when its internal boxes have no dimensions', async () => {
+  const shipment = { ...detail, pallets: [{ ...detail.pallets[0], manualCbm: 1.5, tareWeightKg: 5 }] }
+  const sheet = await exportedSheet(shipment, { ...options, boxes: { ...options.boxes, 'box-a': { grossWeightKg: 10, cbm: null } } })
+  expect(sheet.getCell('X112').value).toBeCloseTo(1.52)
+  expect(sheet.getCell('R112').value).toMatchObject({ result: 25 })
+})
+
+it('combines option suffixes by product on both documents while preserving option prices and physical totals', async () => {
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100457-0002' }] }
+  const trade = new Map([['100457-0001', { ...metadata.get('SKU-A')! }], ['100457-0002', { ...metadata.get('SKU-A')! }]])
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass red', unitPriceCny: 20 } } }
+  const buffer = await exportChinaImportDocument(shipment, trade, overrides)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('E20').value).toBe(25)
+  expect(sheet.getCell('G20').value).toBe(12)
+  expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 300 })
+  expect(sheet.getCell('C21').value).toBeNull()
+  expect(sheet.getCell('R20').value).toBe(25)
+  expect(sheet.getCell('R21').value).toBeNull()
+  expect(sheet.getCell('L20').value).toBe(2)
+  expect(sheet.getCell('L21').value).toBeNull()
+  expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
+  expect(sheet.getCell('M20').value).toBe('P1, box')
+  expect(sheet.getCell('O20').value).toBe(2)
+  expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
+  expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
+  expect(sheet.getCell('X112').value).toBeCloseTo(0.38)
+  expect(prepareImportDocument(shipment, trade).items).toHaveLength(2)
+})
+it('keeps different products separate even when the English name is identical', async () => {
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100458-0001' }] }
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass', unitPriceCny: 10 } } }
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(shipment, metadata, overrides) as unknown as ExcelJS.Buffer)
+  expect(workbook.worksheets[0].getCell('E20').value).toBe(20)
+  expect(workbook.worksheets[0].getCell('E21').value).toBe(5)
+})
+
+it('displays unit prices with exactly two decimal places while preserving calculation precision', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, options)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('G20').numFmt).toBe('#,##0.00')
+  expect(sheet.getCell('G20').value).toBe(16.758)
+  expect(sheet.getCell('J20').value).toMatchObject({ result: 335.16 })
+  const html = await renderChinaImportPreview(buffer)
+  expect(html).toContain('>16.76</td>')
+  expect(html).toContain('>2.00</td>')
+})
+
+it('aligns every invoice and packing product row without repeating mixed packages', async () => {
+  const sheet = await exportedSheet(detail, options)
+  for (const row of [20, 21]) {
+    expect(sheet.getCell(`K${row}`).value).toBe(sheet.getCell(`A${row}`).value)
+    expect(sheet.getCell(`R${row}`).value).toBe(sheet.getCell(`E${row}`).value)
+  }
+  expect(sheet.getCell('M21').value).toBe('P1, box')
+  expect(sheet.getCell('O20').value).toBe(1)
+  expect(sheet.getCell('O21').value).toBe(1)
+  expect(sheet.getCell('L20').value).toBe(1)
+  expect(sheet.getCell('L21').value).toBe(1)
+  expect(sheet.getCell('V20').value).toBe(15)
+  expect(sheet.getCell('V21').value).toBe(3)
+  expect(sheet.getCell('K22').value).toBeNull()
+})
+
+it('places safe editable inputs in the exported template and applies changed HS codes to download', async () => {
+  const cells: ImportDocumentEditCells = {}
+  const edited = { ...options, items: { ...options.items, 'item-a': { ...options.items['item-a'], hsCode: '0392.10' } } }
+  const buffer = await exportChinaImportDocument(detail, metadata, edited, {}, true, cells)
+  expect(cells.E3.map((field) => field.key)).toEqual(['invoiceNo', 'invoiceDate'])
+  expect(cells.G20[0]).toMatchObject({ key: 'product:SKU-A:unitPriceCny', value: '16.76' })
+  expect(cells.D20[0].value).toBe('0392.10')
+  const html = await renderChinaImportPreview(buffer, cells)
+  expect(html).toContain('data-edit-key="invoiceNo"')
+  expect(html).toContain('data-edit-key="product:SKU-A:hsCode"')
+  expect(html).not.toContain('<script')
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(detail, metadata, edited) as unknown as ExcelJS.Buffer)
+  expect(workbook.worksheets[0].getCell('D20').value).toBe('0392.10')
+})
+
+it('shows Korean product names to the right of the packing preview but keeps them visible in Excel outside the print area', async () => {
+  const buffer = await exportChinaImportDocument(detail, metadata, options)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getColumn('Y').hidden).toBe(false)
+  expect(sheet.getCell('Y18').value).toBe('상품명 (확인용)')
+  expect(sheet.getCell('Y20').value).toBe('상품A')
+  expect(sheet.pageSetup.printArea).toBe('A1:X113')
+  const html = await renderChinaImportPreview(buffer)
+  expect(html).toContain('상품명 (확인용)')
+  expect(html).toContain('상품A')
+  expect(html).toContain('상품B')
+})
+
+it('retains an available option image after grouping options into one product in the new-item sheet', async () => {
+  const sharp = (await import('sharp')).default
+  const png = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#ffffff' } }).png().toBuffer()
+  const shipment = { ...detail, items: [{ ...detail.items[0], sku: '100457-0001' }, { ...detail.items[1], sku: '100457-0002' }] }
+  const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 10 }, 'item-b': { englishName: 'Glass', unitPriceCny: 10 } } }
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(shipment, new Map(), overrides, { productImages: new Map([['100457-0001', { error: 'unavailable' }], ['100457-0002', { buffer: png, width: 10, height: 10 }]]) }) as unknown as ExcelJS.Buffer)
+  const sheet = workbook.getWorksheet('신상품_HS미등록')!
+  expect(sheet.getCell('B2').value).toBe('100457')
+  expect(sheet.getImages()).toHaveLength(1)
+  expect(sheet.getCell('A2').value).toBeNull()
 })

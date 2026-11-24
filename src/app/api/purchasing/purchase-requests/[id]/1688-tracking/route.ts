@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { applyPurchaseRequest1688TrackingLookup } from '@/lib/purchasing/purchase-requests'
 import { createClient } from '@/lib/auth/server'
+import { savePurchaseTrackingProductLinks } from '@/lib/purchasing/purchase-url-sync'
 
 const lookupResultSchema = z.object({
   orderNumber: z.string().trim().regex(/^\d{10,40}$/),
@@ -16,6 +17,7 @@ const lookupResultSchema = z.object({
     extractionVersion: z.literal(2),
   }).strict(),
   replaceUninspectedInspection: z.boolean().optional().default(false),
+  productLinks: z.array(z.object({ url: z.string().trim().url().max(2_000), title: z.string().max(1_000).nullable().optional() }).strict()).max(30).optional(),
 }).strict()
 
 /**
@@ -52,10 +54,11 @@ export async function POST(
   }
 
   const { id } = await params
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   let row: Awaited<ReturnType<typeof applyPurchaseRequest1688TrackingLookup>>
   try {
     row = await applyPurchaseRequest1688TrackingLookup({
-      userId: await getWorkspaceUserId(user.id),
+      userId: workspaceUserId,
       id,
       supplierOrderNumber: body.data.orderNumber,
       trackingNumbers: body.data.trackingNumbers,
@@ -69,8 +72,21 @@ export async function POST(
   }
 
   if (!row) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
+  let urlSyncWarning: string | undefined
+  if (body.data.productLinks?.length) {
+    try {
+      await savePurchaseTrackingProductLinks({ userId: workspaceUserId, requestId: id,
+        orderNumber: body.data.orderNumber, links: body.data.productLinks })
+      revalidatePath('/costs')
+      revalidatePath('/purchasing/items')
+      revalidatePath('/new-products')
+    } catch (error) {
+      console.error('[tracking-product-url-sync]', error)
+      urlSyncWarning = '송장은 저장했지만 구매 URL 연동에 실패했습니다. 발주 URL 연동을 다시 실행해주세요.'
+    }
+  }
   revalidatePath('/purchasing/overdue')
   revalidatePath('/purchasing/purchases')
   revalidatePath('/purchasing/orders')
-  return NextResponse.json({ id: row.id, trackingCount: body.data.trackingNumbers.length })
+  return NextResponse.json({ id: row.id, trackingCount: body.data.trackingNumbers.length, ...(urlSyncWarning ? { urlSyncWarning } : {}) })
 }

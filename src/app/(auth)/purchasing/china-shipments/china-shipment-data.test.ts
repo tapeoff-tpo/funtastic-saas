@@ -16,7 +16,7 @@ it('starts Chinese names without waiting for photo lookup and preserves measurem
       { id: 'item', sku: 'SKU1', chineseProductName: '已确认名称', packedQuantity: 1, reservedQuantity: 1 },
       { id: 'missing-name', sku: 'SKU2', chineseProductName: '', packedQuantity: 0, reservedQuantity: 1 },
     ],
-    pallets: [{ id: 'pallet', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150', manualCbm: '1.25' }],
+    pallets: [{ id: 'pallet', palletNo: '1', grossWeightKg: '20.125', lengthCm: '120', widthCm: '100', heightCm: '150', manualCbm: '1.25' }],
     boxes: [{ id: 'box', grossWeightKg: '5.125', manualCbm: '0.125', inventoryPackingGroupKey: 'mixed-source', inventoryPackingGroupBoxIndex: 0 }], boxItems: [{ id: 'allocation', boxId: 'box', shipmentItemId: 'item', quantity: 1, manualCbm: '0.125' }],
   })
   const pending = loadChinaShipmentDetailView('owner', 'shipment')
@@ -65,4 +65,17 @@ it('preserves each saved stock category without merging identical SKUs across lo
     { id: 'legacy-stock', sku: 'SKU2', itemCategory: null, availableQuantity: 1 },
   ])
   expect(mocks.images).not.toHaveBeenCalled()
+})
+
+it('shows legacy box-labelled pallets as loose boxes without changing source data', async () => {
+  const source = { shipment: { id: 'shipment', createdAt: new Date() }, items: [],
+    pallets: [{ id: 'numeric', palletNo: '1' }, { id: 'loose', palletNo: 'box' }],
+    boxes: [{ id: 'boxed', palletId: 'loose' }, { id: 'palletized', palletId: 'numeric' }], boxItems: [] }
+  mocks.detail.mockResolvedValue(source)
+  mocks.images.mockResolvedValue({})
+  const view = await loadChinaShipmentDetailView('owner', 'shipment')
+  expect(view!.pallets.map((p) => p.palletNo)).toEqual(['1'])
+  expect(view!.boxes.find((b) => b.id === 'boxed')!.palletId).toBeNull()
+  expect(view!.boxes.find((b) => b.id === 'palletized')!.palletId).toBe('numeric')
+  expect(source.boxes[0].palletId).toBe('loose')
 })

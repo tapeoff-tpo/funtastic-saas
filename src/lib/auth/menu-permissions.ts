@@ -96,7 +96,7 @@ const API_MENU_RULES: Array<[string, string[]]> = [
   ['/api/purchasing/purchase-requests', ['/purchasing/purchases', '/purchasing/orders', '/purchasing/overdue']],
   ['/api/purchasing/purchase-orders', ['/purchasing/purchases', '/purchasing/orders', '/purchasing/overdue']],
   ['/api/purchasing/items', ['/costs']], ['/api/purchasing/purchase-urls', ['/costs']],
-  ['/api/purchasing/purchase-url-verification', ['/costs']], ['/api/purchasing/discontinued-products', ['/costs']],
+    ['/api/purchasing/purchase-url-verification', ['/costs', '/new-products']], ['/api/purchasing/discontinued-products', ['/costs']],
   ['/api/products/mapping-codes', ['/products/mapping-codes', '/products/mapping']],
   ['/api/orders/apply-mappings', ['/orders', '/products/mapping']],
   ['/api/orders/unapply-mappings', ['/orders', '/products/mapping']],

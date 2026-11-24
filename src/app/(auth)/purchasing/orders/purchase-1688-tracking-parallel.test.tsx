@@ -57,6 +57,16 @@ describe('1688 tracking parallel worker pool', () => {
   beforeEach(() => { vi.useFakeTimers(); window.localStorage.clear() })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
+  it('carries order product links with their own tracking save', async () => {
+    const { fetcher } = await setup(1)
+    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }]
+    await send(() => message({ type: 'FUNTASTIC_1688_TRACKING_RESULT', runId: runId(0), orderNumber: order(0),
+      trackingNumbers: ['WAYBILL-0'], trackingSource: 'waybill_number', trackingEvidence: { label: '运单号码', extractionVersion: 2 }, productLinks }))
+    await advance()
+    const options = fetcher.mock.calls.find(([url]) => String(url).endsWith('/1688-tracking'))?.[1]
+    expect(JSON.parse(String(options?.body)).productLinks).toEqual(productLinks)
+  })
+
   it('negotiates three slots, saves an out-of-order completion against its own row, and immediately fills the free slot', async () => {
     const { post, fetcher } = await setup()
     expect(starts(post).map((data) => data.orderNumber)).toEqual([order(0)])

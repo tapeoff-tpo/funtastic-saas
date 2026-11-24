@@ -2,6 +2,10 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { productChangeLogs, products, purchaseRequestItems } from '@/lib/db/schema'
 import { PURCHASE_URL_HEADER } from './items'
+import { ensureNewProductWorkflowTables } from '@/lib/new-products/workflow'
+import { getPurchaseUrlReplacementSources, resolveOrderPurchaseUrls, syncWorkflowUrls } from './purchase-url-sync'
+import { canonicalize1688OfferUrl, metadataWithPurchaseUrl, purchaseUrlFromMetadata, recordValue } from './purchase-url-values'
+export { canonicalize1688OfferUrl } from './purchase-url-values'
 
 const MAX_QUEUE_ROWS = 2_000
 
@@ -50,19 +54,6 @@ export type PurchaseUrlAssignmentResolution =
     candidates: string[]
   }
 
-export function canonicalize1688OfferUrl(value: string | null | undefined) {
-  if (!value) return null
-  const decoded = safeDecodeURIComponent(value.trim())
-  try {
-    const url = new URL(decoded.startsWith('//') ? `https:${decoded}` : decoded)
-    if (!['http:', 'https:'].includes(url.protocol) || url.hostname !== 'detail.1688.com') return null
-    const match = url.pathname.match(/^\/offer\/(\d{6,30})\.html\/?$/i)
-    return match ? `https://detail.1688.com/offer/${match[1]}.html` : null
-  } catch {
-    return null
-  }
-}
-
 export function resolvePurchaseUrlAssignments(
   matchedProducts: PurchaseUrlAssignmentProduct[],
   candidateValues: Array<string | PurchaseUrlCandidate>,
@@ -78,6 +69,10 @@ export function resolvePurchaseUrlAssignments(
   }
 
   if (candidates.length === 1) {
+    const exactGroup = resolveOrderPurchaseUrls(matchedProducts.map(product => ({
+      id: product.productId, sku: product.sku, productName: product.productName, rawData: {},
+    })), [{ url: candidates[0]! }])
+    if (exactGroup.length !== matchedProducts.length) return { status: 'ambiguous', assignments: [], candidates }
     return {
       status: 'assign',
       assignments: missingProducts.map((product) => ({
@@ -172,6 +167,7 @@ export async function getPurchaseUrlVerificationQueue(input: {
   userId: string
   limit?: number
 }) {
+  await ensureNewProductWorkflowTables(input.userId)
   const limit = Math.min(Math.max(input.limit ?? 1_000, 1), MAX_QUEUE_ROWS)
   const rows = await db
     .select({
@@ -202,6 +198,19 @@ export async function getPurchaseUrlVerificationQueue(input: {
     linksByUrl.set(url, link)
   }
 
+  const workflowRows = await db.execute<{ id: string; productName: string; sourceUrl: string }>(sql`
+    SELECT id::text, COALESCE(NULLIF(registered_product_name, ''), product_name) AS "productName", source_url AS "sourceUrl"
+    FROM new_product_workflow_items WHERE user_id = ${input.userId}::uuid AND NULLIF(btrim(source_url), '') IS NOT NULL
+    ORDER BY id
+  `)
+  for (const item of workflowRows) {
+    const url = canonicalize1688OfferUrl(item.sourceUrl)
+    if (!url) { skippedInvalid += 1; continue }
+    const link = linksByUrl.get(url) ?? { url, items: [] }
+    link.items.push({ sku: `new-product:${item.id}`, productName: item.productName })
+    linksByUrl.set(url, link)
+  }
+
   const allLinks = Array.from(linksByUrl.values())
     .map((link) => ({
       ...link,
@@ -225,18 +234,30 @@ export async function applyPurchaseUrlCollectionResult(input: {
 }) {
   const orderNumber = input.orderNumber.trim()
   const canonicalCandidates = uniqueCanonicalUrls(input.candidates)
+  await ensureNewProductWorkflowTables(input.userId)
 
   return db.transaction(async (tx) => {
     const requests = await tx
       .select({
+        id: purchaseRequestItems.id,
         sku: purchaseRequestItems.sku,
+        productName: purchaseRequestItems.productName,
+        rawData: purchaseRequestItems.rawData,
       })
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
         sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) = ${orderNumber}`,
-      ))
+      )).orderBy(purchaseRequestItems.id).for('update')
 
+    const orderAssignments = resolveOrderPurchaseUrls(requests, input.candidates)
+    const resolvedById = new Map(orderAssignments.map(assignment => [assignment.requestId, assignment.url]))
+    for (const request of requests) {
+      await tx.update(purchaseRequestItems).set({ rawData: {
+        ...recordValue(request.rawData), purchaseUrlLookup: { orderNumber, links: input.candidates,
+          resolvedUrl: resolvedById.get(request.id) ?? null, observedAt: new Date().toISOString() },
+      } }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, request.id)))
+    }
     const skus = Array.from(new Set([
       ...requests.map((row) => row.sku.trim()),
       ...(input.skus ?? []).map((sku) => sku.trim()),
@@ -262,7 +283,14 @@ export async function applyPurchaseUrlCollectionResult(input: {
         eq(products.userId, input.userId),
         inArray(products.internalSku, skus),
       ))
-      .for('update')
+      .orderBy(products.id).for('update')
+
+    await syncWorkflowUrls(tx, input.userId, requests.flatMap(request => {
+      const url = resolvedById.get(request.id)
+      const itemId = recordValue(recordValue(request.rawData).productWorkflow).itemId
+      return url ? [{ sku: request.sku, url, requestId: request.id, orderNumber,
+        workflowItemId: typeof itemId === 'string' ? itemId : null }] : []
+    }))
 
     if (lockedProducts.length === 0) {
       return {
@@ -347,9 +375,27 @@ export async function markPurchaseUrlsForVerification(input: {
 }) {
   const url = canonicalize1688OfferUrl(input.url)
   const skus = Array.from(new Set(input.skus.map((sku) => sku.trim()).filter(Boolean)))
-  if (!url || skus.length === 0) return { updated: [] }
+  if (!url || skus.length === 0) return { updated: [], replaced: 0, updatedWorkflow: 0 }
 
   const reason = input.reason?.trim().slice(0, 1_000) || null
+  await ensureNewProductWorkflowTables(input.userId)
+  const workflowIds = skus.filter(sku => /^new-product:[0-9a-f-]{36}$/i.test(sku)).map(sku => sku.slice(12))
+  const relatedCodes = workflowIds.length ? await db.execute<{ sku: string }>(sql`
+    SELECT DISTINCT sku FROM new_product_workflow_items item
+    CROSS JOIN LATERAL (SELECT item.sabangnet_code AS sku UNION SELECT opt->>'sabangnetOptionCode'
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(item.metadata->'optionDetails') = 'array'
+        THEN item.metadata->'optionDetails' ELSE '[]'::jsonb END) opt) codes
+    WHERE item.user_id = ${input.userId}::uuid AND item.id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+      AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
+      AND NULLIF(btrim(sku), '') IS NOT NULL
+    UNION SELECT request.sku FROM purchase_request_items request JOIN new_product_workflow_items item
+      ON (item.metadata->'purchaseLink'->>'requestId' = request.id::text OR request.raw_data->'productWorkflow'->>'itemId' = item.id::text)
+      AND item.user_id = request.user_id
+    WHERE request.user_id = ${input.userId}::uuid AND item.id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+      AND regexp_replace(rtrim(split_part(split_part(item.source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
+  `) : []
+  const lookupSkus = [...new Set([...skus.filter(sku => !sku.startsWith('new-product:')), ...relatedCodes.map(row => row.sku)])]
+  const sources = lookupSkus.length ? await getPurchaseUrlReplacementSources(input.userId, lookupSkus, url) : []
   return db.transaction(async (tx) => {
     const candidates = await tx
       .select({
@@ -361,19 +407,23 @@ export async function markPurchaseUrlsForVerification(input: {
       .from(products)
       .where(and(
         eq(products.userId, input.userId),
-        inArray(products.internalSku, skus),
+        inArray(products.internalSku, lookupSkus),
       ))
+      .orderBy(products.id)
       .for('update')
 
     const updated: Array<{ id: string; sku: string; productName: string }> = []
+    const replacements: Array<{ sku: string; url: string; oldUrl: string | null }> = []
     for (const product of candidates) {
       const currentUrl = purchaseUrlFromMetadata(product.metadata)
       if (canonicalize1688OfferUrl(currentUrl) !== url) continue
+      const replacement = sources.find(source => source.sku === product.internalSku)
 
       await tx
         .update(products)
         .set({
-          metadata: metadataWithPurchaseUrlConfirmationRequired(product.metadata, reason),
+          metadata: replacement ? metadataWithPurchaseUrl(product.metadata, replacement.url)
+            : metadataWithPurchaseUrlConfirmationRequired(product.metadata, reason),
           updatedAt: new Date(),
         })
         .where(and(eq(products.userId, input.userId), eq(products.id, product.id)))
@@ -383,13 +433,29 @@ export async function markPurchaseUrlsForVerification(input: {
         userId: input.userId,
         fieldName: `metadata.esa009m.${PURCHASE_URL_HEADER}`,
         oldValue: currentUrl,
-        newValue: '확인 필요',
+        newValue: replacement?.url ?? '확인 필요',
       })
+      if (replacement) replacements.push({ sku: product.internalSku, url: replacement.url, oldUrl: currentUrl })
 
       updated.push({ id: product.id, sku: product.internalSku, productName: product.name })
     }
 
-    return { updated }
+    // A workflow may have a different (failed) URL from its master, or no
+    // master row at all. Its own checked URL still authorizes an exact replacement.
+    const checkedWorkflowSkus = new Set(relatedCodes.map(row => row.sku))
+    const eligibleSources = sources.filter(source => checkedWorkflowSkus.has(source.sku) || replacements.some(row => row.sku === source.sku))
+    const workflowReplacements = eligibleSources.map(source => ({ sku: source.sku, url: source.url, oldUrl: url }))
+    const updatedWorkflow = await syncWorkflowUrls(tx, input.userId, eligibleSources, [...replacements, ...workflowReplacements])
+    // Preserve the failing link for review and future verification when no
+    // unambiguous newer purchase is available.
+    if (workflowIds.length) await tx.execute(sql`
+      UPDATE new_product_workflow_items SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+        'purchaseUrlVerification', jsonb_build_object('status', 'confirm_required', 'failedUrl', ${url}::text,
+          'reason', ${reason}::text, 'checkedAt', now())), updated_at = now()
+      WHERE user_id = ${input.userId}::uuid AND id::text IN (${sql.join(workflowIds.map(id => sql`${id}`), sql`, `)})
+        AND regexp_replace(rtrim(split_part(split_part(source_url, '?', 1), '#', 1), '/'), '^http://', 'https://') = ${url}
+    `)
+    return { updated, replaced: replacements.length, updatedWorkflow }
   })
 }
 
@@ -400,27 +466,6 @@ function uniqueCanonicalUrls(values: Array<string | PurchaseUrlCandidate>) {
   })))
 }
 
-function purchaseUrlFromMetadata(metadata: unknown) {
-  const root = recordValue(metadata)
-  const esa009m = recordValue(root.esa009m)
-  const value = esa009m[PURCHASE_URL_HEADER]
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function metadataWithPurchaseUrl(metadata: unknown, url: string) {
-  const root = recordValue(metadata)
-  const esa009m = recordValue(root.esa009m)
-  const rest = { ...root }
-  delete rest.purchaseUrlVerification
-  return {
-    ...rest,
-    esa009m: {
-      ...esa009m,
-      [PURCHASE_URL_HEADER]: url,
-    },
-  }
-}
-
 function metadataWithPurchaseUrlConfirmationRequired(metadata: unknown, reason: string | null) {
   const root = recordValue(metadata)
   const esa009m = recordValue(root.esa009m)
@@ -428,26 +473,12 @@ function metadataWithPurchaseUrlConfirmationRequired(metadata: unknown, reason: 
     ...root,
     esa009m: {
       ...esa009m,
-      [PURCHASE_URL_HEADER]: null,
+      [PURCHASE_URL_HEADER]: esa009m[PURCHASE_URL_HEADER] ?? null,
     },
     purchaseUrlVerification: {
       status: 'confirm_required',
       checkedAt: new Date().toISOString(),
       reason,
     },
-  }
-}
-
-function recordValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-}
-
-function safeDecodeURIComponent(value: string) {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
   }
 }

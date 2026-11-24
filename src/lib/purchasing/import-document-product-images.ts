@@ -32,30 +32,22 @@ export async function getImportDocumentProductImages(input: {
   const items = [...unique.values()]
   for (let start = 0; start < items.length; start += 5) {
     await Promise.all(items.slice(start, start + 5).map(async (item) => {
-      const attachmentId = images[item.id]?.imageUrls
+      const attachmentIds = [...new Set(images[item.id]?.imageUrls
         .map((address) => attachmentPath.exec(address)?.[1])
-        .find((id): id is string => Boolean(id))
-      if (!attachmentId) return
-      try {
-        const attachment = await getNewProductAttachment({
-          userId: input.userId,
-          requestedByUserId: input.requestedByUserId,
-          attachmentId,
-        })
-        if (!attachment) return
-        if (!attachment.fileDataBase64 || !contentTypes.has(attachment.contentType)) {
-          result.set(item.sku, { error: 'unavailable' })
+        .filter((id): id is string => Boolean(id)) ?? [])]
+      let unavailable = false
+      for (const attachmentId of attachmentIds) {
+        try {
+          const attachment = await getNewProductAttachment({ userId: input.userId, requestedByUserId: input.requestedByUserId, attachmentId })
+          if (!attachment) continue
+          if (!attachment.fileDataBase64 || !contentTypes.has(attachment.contentType)) { unavailable = true; continue }
+          const { data, info } = await sharp(Buffer.from(attachment.fileDataBase64, 'base64'))
+            .rotate().resize({ width: 160, height: 120, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true })
+          result.set(item.sku, { buffer: data, width: info.width, height: info.height })
           return
-        }
-        const { data, info } = await sharp(Buffer.from(attachment.fileDataBase64, 'base64'))
-          .rotate()
-          .resize({ width: 160, height: 120, fit: 'inside', withoutEnlargement: true })
-          .png()
-          .toBuffer({ resolveWithObject: true })
-        result.set(item.sku, { buffer: data, width: info.width, height: info.height })
-      } catch {
-        result.set(item.sku, { error: 'unavailable' })
+        } catch { unavailable = true }
       }
+      if (unavailable) result.set(item.sku, { error: 'unavailable' })
     }))
   }
   return result

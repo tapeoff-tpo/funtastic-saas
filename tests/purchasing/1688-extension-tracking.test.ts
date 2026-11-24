@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const source = readFileSync(join(process.cwd(), 'tools/browser-extensions/funtastic-1688-url-collector/background.js'), 'utf8')
-type Snapshot = { trackingNumbers: string[]; orderState?: string; error?: string; sawLogisticsTab?: boolean }
+type Snapshot = { trackingNumbers: string[]; productLinks?: Array<{ url: string; title?: string | null }>; orderState?: string; error?: string; sawLogisticsTab?: boolean }
 
 function loadBackground() {
   const key = 'funtastic1688TrackingLookupRun'
@@ -23,7 +23,7 @@ function loadBackground() {
   const api = vm.runInNewContext(source + '\n({ collect1688TrackingInPage, collectTrackingLookupFromTab })', {
     chrome, window, document, ShadowRoot, Date, URL, setTimeout, clearTimeout,
   }) as {
-    collect1688TrackingInPage: (options?: { singlePass?: boolean; activateLogistics?: boolean }) => Promise<Snapshot>
+    collect1688TrackingInPage: (options?: { singlePass?: boolean; activateLogistics?: boolean; orderNumber?: string }) => Promise<Snapshot>
     collectTrackingLookupFromTab: (tabId: number) => Promise<void>
   }
   return { api, chrome }
@@ -32,6 +32,24 @@ function loadBackground() {
 afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('1688 extension tracking snapshots', () => {
+  it('keeps actual order product links and excludes recommendations and unrelated frames', async () => {
+    document.body.innerHTML = '<div>订单号 1234567890123</div><section class="order-product"><a href="https://detail.1688.com/offer/222222222222.html?spm=x">货品</a></section><aside class="recommend"><table><tr><td><a href="https://detail.1688.com/offer/999999999999.html">推荐</a></td></tr></table></aside><label>运单号码:</label><input value="S71268668516" />'
+    const { api, chrome } = loadBackground()
+    const result = await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })
+    expect(Array.from(result.productLinks ?? [])).toEqual([{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }])
+    chrome.scripting.executeScript.mockResolvedValue([
+      { frameId: 0, result }, { frameId: 1, result: { trackingNumbers: [], productLinks: [{ url: 'https://detail.1688.com/offer/999999999999.html' }] } },
+    ])
+    await api.collectTrackingLookupFromTab(2)
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(1, expect.objectContaining({ productLinks: [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }] }))
+  })
+
+  it('does not attribute an unrelated document product URL to the requested order', async () => {
+    document.body.innerHTML = '<section class="order-product"><a href="https://detail.1688.com/offer/222222222222.html">货品</a></section><label>运单号码:</label><input value="S71268668516" />'
+    const { api } = loadBackground()
+    expect((await api.collect1688TrackingInPage({ singlePass: true, orderNumber: '1234567890123' })).productLinks).toEqual([])
+  })
+
   it('extracts only the exact waybill field, including an input value, without the neighbouring logistics id', async () => {
     document.body.innerHTML = '<div>物流编号: LP00850611544129</div><label>运单号码:</label><input value="9823528519765" />'
     const { api } = loadBackground()

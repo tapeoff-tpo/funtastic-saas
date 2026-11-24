@@ -6,6 +6,10 @@ import {
   markPurchaseUrlsForVerification,
 } from '@/lib/purchasing/purchase-url-collector'
 import { createClient } from '@/lib/auth/server'
+import { revalidatePath } from 'next/cache'
+import { syncPurchaseUrlsFromHistory } from '@/lib/purchasing/purchase-url-sync'
+
+export const maxDuration = 60
 
 const verificationResultSchema = z.object({
   url: z.string().trim().url().max(2_000),
@@ -38,7 +42,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   }
 
-  const body = verificationResultSchema.safeParse(await request.json().catch(() => null))
+  const rawBody = await request.json().catch(() => null)
+  if (rawBody?.action === 'sync') {
+    try {
+      const result = await syncPurchaseUrlsFromHistory(workspaceUserId)
+      refreshUrlPages()
+      return NextResponse.json(result)
+    } catch (error) {
+      console.error('[purchase-url-sync]', error)
+      return NextResponse.json({ error: '발주 구매 URL을 연동하지 못했습니다.' }, { status: 500 })
+    }
+  }
+  const body = verificationResultSchema.safeParse(rawBody)
   if (!body.success) {
     return NextResponse.json({ error: 'URL 검증 결과가 올바르지 않습니다.' }, { status: 400 })
   }
@@ -48,11 +63,16 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       ...body.data,
     })
-    return NextResponse.json({ updated: result.updated.length })
+    refreshUrlPages()
+    return NextResponse.json({ updated: result.updated.length, replaced: result.replaced, updatedWorkflow: result.updatedWorkflow })
   } catch (error) {
     console.error('[purchase-url-verification-result]', error)
     return NextResponse.json({ error: '확인 필요 URL을 반영하지 못했습니다.' }, { status: 500 })
   }
+}
+
+function refreshUrlPages() {
+  for (const path of ['/costs', '/purchasing/items', '/new-products', '/purchasing/orders']) revalidatePath(path)
 }
 
 async function authenticatedWorkspaceUserId() {

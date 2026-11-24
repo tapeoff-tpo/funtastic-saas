@@ -536,7 +536,7 @@ function Purchase1688TrackingProgressRunner({
         orderNumber: lookup.job.orderNumber, background: true,
       }, window.location.origin)
     }
-    const saveLookup = async (lookup: ActiveLookup, trackingNumbers: string[]) => {
+    const saveLookup = async (lookup: ActiveLookup, trackingNumbers: string[], productLinks: Array<{ url: string; title?: string | null }>) => {
       const savedIds: string[] = [], failedIds: string[] = []
       let lastError = ''
       for (const id of lookup.job.ids) {
@@ -552,10 +552,12 @@ function Purchase1688TrackingProgressRunner({
                 body: JSON.stringify({
                   orderNumber: lookup.job.orderNumber, trackingNumbers, trackingSource: 'waybill_number',
                   trackingEvidence: EXACT_WAYBILL_EVIDENCE, replaceUninspectedInspection: isRecollectBatch,
+                  ...(productLinks.length ? { productLinks } : {}),
                 }),
               })
               const body = await response.json().catch(() => ({}))
               if (!response.ok) throw new Error(body.error ?? '1688 송장번호를 저장하지 못했습니다.')
+              if (body.urlSyncWarning) toast.warning(body.urlSyncWarning)
             })(),
             new Promise<never>((_, reject) => {
               saveTimer = schedule(() => {
@@ -598,7 +600,7 @@ function Purchase1688TrackingProgressRunner({
       if (!message || typeof message !== 'object') return
       const data = message as {
         source?: unknown; type?: unknown; runId?: unknown; orderNumber?: unknown; trackingNumbers?: unknown;
-        trackingSource?: unknown; trackingEvidence?: unknown; parallelVersion?: unknown; maxConcurrency?: unknown; message?: unknown
+        trackingSource?: unknown; trackingEvidence?: unknown; parallelVersion?: unknown; maxConcurrency?: unknown; message?: unknown; productLinks?: unknown
       }
       if (data.source !== EXTENSION_SOURCE || typeof data.type !== 'string' || typeof data.runId !== 'string') return
       const knownOrder = startedRuns.get(data.runId)
@@ -638,7 +640,11 @@ function Purchase1688TrackingProgressRunner({
       lookup.phase = 'saving'
       updateLookupRows(lookup.job.ids, 'saving', '송장번호 저장 중', trackingNumbers)
       updateProgress(`주문 ${lookup.index + 1}/${batch.jobs.length} 송장 저장 중`)
-      void saveLookup(lookup, trackingNumbers)
+      const productLinks = Array.isArray(data.productLinks) ? data.productLinks.slice(0, 30).flatMap(value => {
+        if (!value || typeof value !== 'object' || typeof value.url !== 'string' || value.url.length > 2_000) return []
+        return [{ url: value.url, title: typeof value.title === 'string' ? value.title.slice(0, 1_000) : null }]
+      }) : []
+      void saveLookup(lookup, trackingNumbers, productLinks)
     }
     window.addEventListener('message', onMessage)
     updateProgress(`${isRecollectBatch ? '1688 송장 다시 수집' : '1688 송장 일괄조회'} 준비 · ${batch.jobs.length.toLocaleString('ko-KR')}개 주문`)

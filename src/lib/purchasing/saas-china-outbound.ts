@@ -2534,8 +2534,9 @@ export async function addChinaOutboundSample(input: {
 
 export async function saveChinaOutboundPalletDimensions(input: {
   userId: string; shipmentId: string; palletId: string
-  lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null
+  lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null; manualCbm?: number | null; tareWeightKg?: number; finalize?: boolean
 }) {
+  if (input.tareWeightKg !== undefined && (!Number.isFinite(input.tareWeightKg) || input.tareWeightKg < 0 || input.tareWeightKg > 999999999)) throw new Error('파렛트 무게를 확인해주세요.')
   const manualCbm = normalizeOptionalChinaOutboundManualCbm(input.manualCbm)
   const hasDimensions = [input.lengthCm, input.widthCm, input.heightCm].some((value) => value !== undefined)
   const dimensions = hasDimensions ? normalizeChinaOutboundBoxDimensions({ lengthCm: input.lengthCm ?? null, widthCm: input.widthCm ?? null, heightCm: input.heightCm ?? null }) : null
@@ -2543,12 +2544,30 @@ export async function saveChinaOutboundPalletDimensions(input: {
   await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
     await lockSaasChinaOutboundWorkspace(tx, input.userId)
-    await getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId)
-    const current = await getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId)
+    // These scoped reads are independent once the workspace mutation lock is held.
+    // Fetch only IDs for the loaded-box check instead of every allocation payload.
+    const [, current, loadedBoxes] = await Promise.all([
+      getEditableChinaOutboundShipment(tx, input.userId, input.shipmentId),
+      getChinaOutboundPallet(tx, input.userId, input.shipmentId, input.palletId),
+      input.finalize ? tx.select({ id: chinaOutboundBoxes.id }).from(chinaOutboundBoxes)
+        .innerJoin(chinaOutboundBoxItems, and(
+          eq(chinaOutboundBoxItems.boxId, chinaOutboundBoxes.id),
+          eq(chinaOutboundBoxItems.userId, chinaOutboundBoxes.userId),
+          eq(chinaOutboundBoxItems.shipmentId, chinaOutboundBoxes.shipmentId),
+        ))
+        .where(and(eq(chinaOutboundBoxes.userId, input.userId), eq(chinaOutboundBoxes.shipmentId, input.shipmentId), eq(chinaOutboundBoxes.palletId, input.palletId)))
+        .limit(1) : Promise.resolve([]),
+    ])
     if (dimensions && dimensions.lengthCm == null && manualCbm === undefined && dimensionNumber(current.manualCbm) == null) throw new Error('파렛트 가로·세로·높이는 0보다 큰 숫자로 모두 입력해주세요.')
+    if (input.finalize) {
+      if (!(manualCbm != null && manualCbm > 0)) throw new Error('최종 CBM을 입력해주세요.')
+      if (!loadedBoxes.length) throw new Error('적재된 박스가 없어 확정할 수 없습니다.')
+    }
     const [pallet] = await tx.update(chinaOutboundPallets).set({
       ...(dimensions ? { lengthCm: dimensions.lengthCm == null ? null : String(dimensions.lengthCm), widthCm: dimensions.widthCm == null ? null : String(dimensions.widthCm), heightCm: dimensions.heightCm == null ? null : String(dimensions.heightCm) } : {}),
       ...(manualCbm !== undefined ? { manualCbm: manualCbm === null ? null : String(manualCbm) } : {}),
+      ...(input.tareWeightKg !== undefined ? { tareWeightKg: String(input.tareWeightKg) } : {}),
+      completionStatus: input.finalize ? 'completed' : 'in_progress',
       updatedAt: new Date(),
     }).where(and(eq(chinaOutboundPallets.userId, input.userId), eq(chinaOutboundPallets.shipmentId, input.shipmentId), eq(chinaOutboundPallets.id, input.palletId))).returning()
     return pallet

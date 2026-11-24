@@ -5,6 +5,13 @@ import { canAccessApi, canAccessPage, canUseMenu, MENU_PATHS, type MenuAccess } 
 
 const restricted: MenuAccess = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] }
 describe('menu authorization policy', () => {
+  it('lets product management verify and sync purchase links without granting unrelated cost editing', () => {
+    const access = { superAdmin: false, allowedMenus: ['/new-products'] }
+    expect(canAccessApi(access, '/api/purchasing/purchase-url-verification', 'GET')).toBe(true)
+    expect(canAccessApi(access, '/api/purchasing/purchase-url-verification', 'POST')).toBe(true)
+    expect(canAccessApi(access, '/api/purchasing/items', 'PATCH')).toBe(false)
+    expect(canAccessApi({ superAdmin: false, allowedMenus: ['/orders'] }, '/api/purchasing/purchase-url-verification', 'POST')).toBe(false)
+  })
   it('keeps client management independent while allowing quotes to read client choices', () => {
     const clients = { superAdmin: false, allowedMenus: ['/operations/clients'] }
     const quotes = { superAdmin: false, allowedMenus: ['/purchasing/quotes'] }

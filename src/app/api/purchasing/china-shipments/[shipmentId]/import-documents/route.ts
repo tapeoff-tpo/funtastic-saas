@@ -1,3 +1,6 @@
+import { getImportDocumentDraft, saveImportDocumentDraft } from '@/lib/purchasing/china-import-draft-store'
+import type { ImportDocumentEditCells } from '@/lib/purchasing/china-import-editing'
+import { renderChinaImportPreview } from '@/lib/purchasing/china-import-preview'
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -26,8 +29,14 @@ const schema = z.object({
   loadingPort: text, destinationPort: text, paymentTerms: text,
   palletTareKg: z.number().finite().min(0).max(10000),
   palletExtraCbm: z.number().finite().min(0).max(1000),
-  items: z.record(z.string().uuid(), z.object({ englishName: text, unitPriceCny: z.number().finite().min(0).max(100000000) })),
-  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000), cbm: z.number().finite().positive().max(10000) })),
+  items: z.record(z.string().uuid(), z.object({ englishName: text, hsCode: z.string().trim().max(100).optional(), unitPriceCny: z.number().finite().min(0).max(100000000) })),
+  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000), cbm: z.number().finite().positive().max(10000).nullable() })),
+})
+const previewSchema = schema.extend({
+  exporter: z.string().max(500), importer: z.string().max(500), importerAddress: z.string().max(500),
+  invoiceNo: z.string().max(500), loadingPort: z.string().max(500), destinationPort: z.string().max(500), paymentTerms: z.string().max(500),
+  items: z.record(z.string().uuid(), z.object({ englishName: z.string().max(500), hsCode: z.string().trim().max(100).optional(), unitPriceCny: z.number().finite().min(0).max(100000000).nullable() })),
+  boxes: z.record(z.string().uuid(), z.object({ grossWeightKg: z.number().finite().positive().max(1000000).nullable(), cbm: z.number().finite().positive().max(10000).nullable() })),
 })
 const costSchema = z.object({
   snapshot: z.string().length(64),
@@ -64,7 +73,9 @@ export async function GET(_request: Request, context: Context) {
   try {
     const loaded = await load(context)
     if (loaded.response) return loaded.response
-    return NextResponse.json({ ...loaded.prepared, snapshot: loaded.snapshot, costPacking: { shipment: loaded.detail.shipment, items: loaded.detail.items, boxes: loaded.detail.boxes, pallets: loaded.detail.pallets, boxItems: loaded.detail.boxItems } }, { headers: { 'Cache-Control': 'private, no-store' } })
+    const { shipmentId } = await context.params
+    const savedDocument = await getImportDocumentDraft(loaded.userId, shipmentId)
+    return NextResponse.json({ ...loaded.prepared, savedDocument, snapshot: loaded.snapshot, costPacking: { shipment: loaded.detail.shipment, items: loaded.detail.items, boxes: loaded.detail.boxes, pallets: loaded.detail.pallets, boxItems: loaded.detail.boxItems } }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('China import document preparation:', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : '인보이스·패킹리스트 정보를 불러오지 못했습니다.' }, { status: 400 })
@@ -87,8 +98,31 @@ export async function POST(request: Request, context: Context) {
       revalidatePath('/costs')
       return NextResponse.json({ saved: true })
     }
-    const parsed = schema.safeParse(body)
-    if (!parsed.success) return NextResponse.json({ error: '문서 기본정보·영문명·단가·박스 중량·CBM을 확인해주세요.' }, { status: 400 })
+    if (body?.intent === 'save-document') {
+      const parsed = previewSchema.safeParse(body)
+      const revision = z.number().int().nonnegative().safeParse(body.revision)
+      if (!parsed.success || !revision.success) return NextResponse.json({ error: '저장할 문서 입력값을 확인해주세요.' }, { status: 400 })
+      if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보가 변경되었습니다. 새로고침 후 저장해주세요.' }, { status: 409 })
+      const { snapshot, ...inputs } = parsed.data
+      const { shipmentId } = await context.params
+      const saved = await saveImportDocumentDraft({ userId: loaded.userId, shipmentId, actorId: loaded.requestedByUserId, snapshot, inputs, revision: revision.data })
+      if (!saved) return NextResponse.json({ error: '다른 사용자가 문서를 수정했습니다. 새로고침 후 확인해주세요.' }, { status: 409 })
+      return NextResponse.json(saved, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
+    if (body?.intent === 'preview') {
+      const parsed = previewSchema.safeParse(body)
+      if (!parsed.success) return NextResponse.json({ error: '문서 미리보기 입력값을 확인해주세요.' }, { status: 400 })
+      if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보가 변경되었습니다. 새로고침해주세요.' }, { status: 409 })
+      const options = { ...parsed.data,
+        items: Object.fromEntries(loaded.prepared.items.map((item) => [item.id, { englishName: parsed.data.items[item.id]?.englishName ?? '', hsCode: parsed.data.items[item.id]?.hsCode, unitPriceCny: parsed.data.items[item.id]?.unitPriceCny ?? Number.NaN }])),
+        boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
+      }
+      const editCells: ImportDocumentEditCells = {}
+      const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, {}, true, editCells)
+      return NextResponse.json({ html: await renderChinaImportPreview(buffer, editCells) }, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
+    const parsed = previewSchema.safeParse(body)
+    if (!parsed.success) return NextResponse.json({ error: '문서 입력값 형식을 확인해주세요.' }, { status: 400 })
     if (parsed.data.snapshot !== loaded.snapshot) return NextResponse.json({ error: '출고정보 또는 품목정보가 변경되었습니다. 인보이스·패킹리스트를 새로고침해주세요.' }, { status: 409 })
     const [productImages, allItems] = await Promise.all([
       getImportDocumentProductImages({
@@ -102,7 +136,11 @@ export async function POST(request: Request, context: Context) {
       sku: item.data['품목코드']!, productName: item.data['품목명']!,
       optionName: item.data['규격정보'], hsCode: item.data['HS CODE']!,
     }))
-    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, parsed.data, { productImages, existingHsItems })
+    const options = { ...parsed.data,
+      items: Object.fromEntries(loaded.prepared.items.map((item) => [item.id, { englishName: parsed.data.items[item.id]?.englishName ?? '', hsCode: parsed.data.items[item.id]?.hsCode, unitPriceCny: parsed.data.items[item.id]?.unitPriceCny ?? Number.NaN }])),
+      boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
+    }
+    const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, { productImages, existingHsItems }, true)
     const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

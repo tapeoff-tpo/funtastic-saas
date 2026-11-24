@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getWorkspaceUserId: vi.fn(),
   revalidatePath: vi.fn(),
   applyPurchaseRequest1688TrackingLookup: vi.fn(),
+  saveProductLinks: vi.fn(),
 }))
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
@@ -25,6 +26,7 @@ vi.mock('@/lib/admin-accounts/queries', () => ({
 vi.mock('@/lib/purchasing/purchase-requests', () => ({
   applyPurchaseRequest1688TrackingLookup: mocks.applyPurchaseRequest1688TrackingLookup,
 }))
+vi.mock('@/lib/purchasing/purchase-url-sync', () => ({ savePurchaseTrackingProductLinks: mocks.saveProductLinks }))
 
 function postRequest(body: unknown) {
   return { json: async () => body }
@@ -36,6 +38,18 @@ describe('POST /api/purchasing/purchase-requests/[id]/1688-tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getWorkspaceUserId.mockResolvedValue('workspace-user')
+  })
+
+  it('preserves order product links after the guarded tracking save and refreshes both product screens', async () => {
+    mocks.applyPurchaseRequest1688TrackingLookup.mockResolvedValue({ id: 'purchase-item' })
+    const { POST } = await import('./route')
+    const productLinks = [{ url: 'https://detail.1688.com/offer/222222222222.html', title: '货品' }]
+    const response = await POST(postRequest({ orderNumber: '3317159640039018761', trackingNumbers: ['S71268668516'], trackingSource: 'waybill_number', trackingEvidence: exactWaybillEvidence, productLinks }) as never,
+      { params: Promise.resolve({ id: 'purchase-item' }) })
+    expect(response.status).toBe(200)
+    expect(mocks.saveProductLinks).toHaveBeenCalledWith({ userId: 'workspace-user', requestId: 'purchase-item', orderNumber: '3317159640039018761', links: productLinks })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/costs')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/new-products')
   })
 
   it('applies the browser lookup result through the guarded purchasing service', async () => {

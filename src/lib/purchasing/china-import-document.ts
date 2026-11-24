@@ -1,3 +1,5 @@
+import { importDocumentProductCode, type ImportDocumentEditCells } from './china-import-editing'
+import { resolveChinaLooseBoxes } from './china-pallet-number'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
@@ -14,8 +16,8 @@ export type ImportDocumentOptions = {
   exporter: string; importer: string; importerAddress: string
   loadingPort: string; destinationPort: string; paymentTerms: string
   palletTareKg: number; palletExtraCbm: number
-  items: Record<string, { englishName: string; unitPriceCny: number }>
-  boxes: Record<string, { grossWeightKg: number; cbm: number }>
+  items: Record<string, { englishName: string; unitPriceCny: number; hsCode?: string }>
+  boxes: Record<string, { grossWeightKg: number; cbm: number | null }>
 }
 export type ImportDocumentDetail = Omit<ChinaOutboundPackingExportDetail, 'boxes'> & {
   boxes: Array<ChinaOutboundPackingExportDetail['boxes'][number] & { grossWeightKg?: string | number | null }>
@@ -28,6 +30,8 @@ export function importUnitPriceCny(data: Record<string, string | null>) {
   }
   return null
 }
+
+export { importDocumentProductCode } from './china-import-editing'
 
 /** Compress a consecutive sequence of numeric carton numbers for the invoice. */
 export function formatBoxMarks(marks: readonly string[]) {
@@ -55,7 +59,14 @@ export function formatBoxMarks(marks: readonly string[]) {
   return ranges.join(', ')
 }
 
+function documentBoxMarks(marks: string[]) {
+  const unique = [...new Set(marks)]
+  const text = formatBoxMarks(unique)
+  return text.length > 60 ? `MULTIPLE (${unique.length} CTN)` : text
+}
+
 export function prepareImportDocument(detail: ImportDocumentDetail, metadata: Map<string, ImportItemMetadata>) {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   if (detail.shipment.status === 'cancelled') throw new Error('취소된 출고작업은 인보이스·패킹리스트를 만들 수 없습니다.')
   if (!detail.items.length) throw new Error('출고상품을 먼저 등록해주세요.')
   const itemById = new Map(detail.items.map((item) => [item.id, item]))
@@ -104,18 +115,23 @@ export async function exportChinaImportDocument(
   metadata: Map<string, ImportItemMetadata>,
   options: ImportDocumentOptions,
   supplements: ImportDocumentSupplements = {},
+  preview = false,
+  editCells?: ImportDocumentEditCells,
 ) {
+  detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
   const prepared = prepareImportDocument(detail, metadata)
   for (const item of prepared.items) {
     const override = options.items[item.id]
-    if (!override?.englishName.trim() || !Number.isFinite(override.unitPriceCny) || override.unitPriceCny < 0) {
+    if (!preview && (!override?.englishName.trim() || !Number.isFinite(override.unitPriceCny) || override.unitPriceCny < 0)) {
       throw new Error(`${item.sku}: 영문명과 위안화 단가를 확인해주세요.`)
     }
   }
   for (const box of prepared.boxes) {
     const override = options.boxes[box.id]
-    if (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg < 0.001 || override.grossWeightKg > 999_999_999
-      || !Number.isFinite(override.cbm) || override.cbm <= 0) throw new Error(`${box.boxNo}: 총중량과 CBM을 입력해주세요.`)
+    const pallet = prepared.pallets.find((pallet) => pallet.id === box.palletId)
+    const needsBoxCbm = !pallet || calculateChinaOutboundBoxCbm(pallet) == null
+    if (!preview && (!override || !Number.isFinite(override.grossWeightKg) || override.grossWeightKg < 0.001 || override.grossWeightKg > 999_999_999
+      || (needsBoxCbm && (override.cbm == null || !Number.isFinite(override.cbm) || override.cbm <= 0)))) throw new Error(`${box.boxNo}: 총중량과 CBM을 입력해주세요.`)
   }
   // The supplied INV/PL workbook owns every header, merge, width, font and
   // print setting. Only shipment values and the variable packing groups change.
@@ -133,6 +149,26 @@ export async function exportChinaImportDocument(
   for (const range of [...sheet.model.merges]) {
     if (/^O\d+:O\d+$/.test(range) && Number(range.match(/\d+/)![0]) >= 20) sheet.unMergeCells(range)
   }
+  const exactProducts = new Map<string, { quantity: number; englishName: string; unitPriceCny: number }>()
+  const hsByProduct = new Map<string, string>()
+  for (const item of prepared.items) {
+    const sku = item.sku.trim(), source = options.items[item.id]
+    const previous = exactProducts.get(sku)
+    if (previous && !preview && (source.englishName.trim() !== previous.englishName.trim() || source.unitPriceCny !== previous.unitPriceCny)) throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
+    exactProducts.set(sku, { ...source, quantity: (previous?.quantity ?? 0) + item.quantity })
+    const product = importDocumentProductCode(sku), hs = (source.hsCode ?? item.hsCode).trim()
+    if (!preview && hs && hsByProduct.has(product) && hsByProduct.get(product) !== hs) throw new Error(`${product}: 옵션별 HS CODE가 다릅니다. 품목정보를 확인해주세요.`)
+    if (hs) hsByProduct.set(product, hs)
+  }
+  // Preserve the original option-level rounded amounts when combining options.
+  const amountByProduct = new Map<string, number>()
+  const pricesByProduct = new Map<string, Set<number>>()
+  for (const [sku, item] of exactProducts) {
+    const product = importDocumentProductCode(sku)
+    if (!pricesByProduct.has(product)) pricesByProduct.set(product, new Set())
+    pricesByProduct.get(product)!.add(item.unitPriceCny)
+    amountByProduct.set(product, (amountByProduct.get(product) ?? 0) + money(item.quantity * item.unitPriceCny))
+  }
   const itemById = new Map(prepared.items.map((item) => [item.id, item]))
   type TradeRow = { itemId: string; quantity: number; marks: string[]; boxCount: number; gross: number }
   const groups = [...prepared.pallets.map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
@@ -140,11 +176,12 @@ export async function exportChinaImportDocument(
       const rows = new Map<string, TradeRow>()
       for (const box of prepared.boxes.filter((box) => box.palletId === group.id)) {
         for (const [index, allocation] of detail.boxItems.filter((a) => a.boxId === box.id).entries()) {
-          const row = rows.get(allocation.shipmentItemId) ?? { itemId: allocation.shipmentItemId, quantity: 0, marks: [], boxCount: 0, gross: 0 }
+          const product = importDocumentProductCode(itemById.get(allocation.shipmentItemId)!.sku)
+          const row = rows.get(product) ?? { itemId: allocation.shipmentItemId, quantity: 0, marks: [], boxCount: 0, gross: 0 }
           row.quantity += allocation.quantity
           row.marks.push(box.boxNo)
           if (index === 0) { row.boxCount += 1; row.gross += options.boxes[box.id].grossWeightKg }
-          rows.set(row.itemId, row)
+          rows.set(product, row)
         }
       }
       const values = [...rows.values()]
@@ -165,15 +202,7 @@ export async function exportChinaImportDocument(
     const groupBySku = new Map<string, { itemId: string; quantity: number; marks: string[] }>()
     for (const trade of group.rows) {
       const item = itemById.get(trade.itemId)!
-      const sku = item.sku.trim()
-      const source = options.items[item.id]
-      const previous = groupBySku.get(sku) ?? invoiceBySku.get(sku)
-      if (previous) {
-        const previousSource = options.items[previous.itemId]
-        if (source.englishName.trim() !== previousSource.englishName.trim() || source.unitPriceCny !== previousSource.unitPriceCny) {
-          throw new Error(`${sku}: 동일 품목의 영문명과 위안화 단가를 같게 입력해주세요.`)
-        }
-      }
+      const sku = importDocumentProductCode(item.sku)
       const groupRow = groupBySku.get(sku) ?? { itemId: item.id, quantity: 0, marks: [] }
       groupRow.quantity += trade.quantity
       groupRow.marks.push(...trade.marks)
@@ -196,7 +225,21 @@ export async function exportChinaImportDocument(
     }
   }
   const invoiceRows = [...invoiceBySku.values()].sort((a, b) => a.groupIndex - b.groupIndex)
-  const count = groups.reduce((sum, group) => sum + group.rows.length, 0)
+  // The two documents share one product order. Keep all physical locations on
+  // that row rather than repeating a product once for every pallet it occupies.
+  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[] }>()
+  for (const group of groups) {
+    for (const [index, trade] of group.rows.entries()) {
+      const product = importDocumentProductCode(itemById.get(trade.itemId)!.sku)
+      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [] }
+      row.boxCount += trade.boxCount
+      row.packageCount += group.id ? (index === 0 ? 1 : 0) : trade.boxCount
+      row.gross += trade.gross
+      if (!row.locations.includes(group.no)) row.locations.push(group.no)
+      packingByProduct.set(product, row)
+    }
+  }
+  const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
   const totalRow = 112 + extra
@@ -206,7 +249,7 @@ export async function exportChinaImportDocument(
   for (let row = 20; row <= totalRow; row++) {
     sheet.getRow(row).hidden = false
     if (row < totalRow) {
-      for (let column = 1; column <= 10; column++) sheet.getRow(row).getCell(column).value = null
+      for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).value = null
     }
   }
   for (const [address, value] of Object.entries({
@@ -219,47 +262,59 @@ export async function exportChinaImportDocument(
     O15: options.destinationPort,
     R14: `${prepared.palletCount}plt + ${prepared.looseBoxCount}ctn`, W14: prepared.packageCount, X14: 'CTN',
   })) sheet.getCell(address).value = value
+  if (editCells) {
+    const field = (key: string, label: string, value: string, type: 'text' | 'date' = 'text') => ({ key, label, value, type })
+    for (const [addresses, key, label] of [
+      [['A3', 'K3'], 'exporter', '수출자'], [['A8', 'K8'], 'importer', '수입자'],
+      [['A15', 'K15'], 'loadingPort', '출발항'], [['O15'], 'destinationPort', '도착항'], [['E14'], 'paymentTerms', '결제조건'],
+    ] as const) for (const address of addresses) editCells[address] = [field(key, label, options[key])]
+    for (const address of ['E3', 'R3']) editCells[address] = [field('invoiceNo', '문서번호', options.invoiceNo), field('invoiceDate', '문서일자', options.invoiceDate, 'date')]
+    for (const address of ['C17', 'O17']) editCells[address] = [field('sailingDate', '선적일', options.sailingDate, 'date')]
+    for (const address of ['A9', 'K9']) editCells[address] = [field('importerAddress1', '수입자 주소 첫째 줄', options.importerAddress.split('\n')[0])]
+    for (const address of ['A10', 'K10']) editCells[address] = [field('importerAddress2', '수입자 주소 둘째 줄', options.importerAddress.split('\n').slice(1).join(' '))]
+  }
   for (const address of ['C17', 'O17']) sheet.getCell(address).value = new Date(`${options.sailingDate}T00:00:00Z`)
-  let nextRow = 20
-  for (const group of groups) {
-    const start = nextRow
-    for (const trade of group.rows) {
-      const row = nextRow++
-      const item = itemById.get(trade.itemId)!
-      const marks = [...new Set(trade.marks)]
-      const markText = formatBoxMarks(marks)
-      for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
-      sheet.getRow(row).height = 21
-      sheet.getCell(`K${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
-      sheet.getCell(`L${row}`).value = trade.boxCount || null
-      sheet.getCell(`M${row}`).value = group.no
-      sheet.getCell(`O${row}`).value = group.id ? (row === start ? 1 : null) : trade.boxCount || null
-      sheet.getCell(`R${row}`).value = trade.quantity
-      sheet.getCell(`S${row}`).value = 'ea'
-      sheet.getCell(`V${row}`).value = trade.gross || null
-      sheet.getCell(`W${row}`).value = 'kg'
-      sheet.getCell(`Y${row}`).value = item.productName
-    }
-    if (group.id && nextRow - start > 1) sheet.mergeCells(`O${start}:O${nextRow - 1}`)
+  for (const [index, invoice] of invoiceRows.entries()) {
+    const row = 20 + index
+    const item = itemById.get(invoice.itemId)!
+    const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
+    for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
+    sheet.getRow(row).height = 21
+    sheet.getCell(`K${row}`).value = documentBoxMarks(invoice.marks)
+    sheet.getCell(`L${row}`).value = packing.boxCount || null
+    sheet.getCell(`M${row}`).value = packing.locations.join(', ')
+    sheet.getCell(`O${row}`).value = packing.packageCount || null
+    sheet.getCell(`R${row}`).value = invoice.quantity
+    sheet.getCell(`S${row}`).value = 'ea'
+    sheet.getCell(`V${row}`).value = packing.gross || null
+    sheet.getCell(`W${row}`).value = 'kg'
+    sheet.getCell(`Y${row}`).value = item.productName
   }
   let totalAmount = 0
   for (const [index, invoice] of invoiceRows.entries()) {
     const row = 20 + index
     const item = itemById.get(invoice.itemId)!
     const source = options.items[item.id]
-    const marks = [...new Set(invoice.marks)]
-    const markText = formatBoxMarks(marks)
-    sheet.getCell(`A${row}`).value = markText.length > 60 ? `MULTIPLE (${marks.length} CTN)` : markText
+    sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
     sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
-    sheet.getCell(`D${row}`).value = item.hsCode || null
+    sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null
     sheet.getCell(`E${row}`).value = invoice.quantity
     sheet.getCell(`F${row}`).value = 'ea'
-    sheet.getCell(`G${row}`).value = source.unitPriceCny
-    const amount = money(invoice.quantity * source.unitPriceCny)
+    const amount = money(amountByProduct.get(importDocumentProductCode(item.sku)) ?? Number.NaN)
+    const mixedPrices = (pricesByProduct.get(importDocumentProductCode(item.sku))?.size ?? 0) > 1
+    const unitPrice = mixedPrices ? amount / invoice.quantity : source.unitPriceCny
+    sheet.getCell(`G${row}`).value = Number.isFinite(unitPrice) ? unitPrice : null
+    sheet.getCell(`G${row}`).numFmt = '#,##0.00'
+    if (editCells) {
+      const product = importDocumentProductCode(item.sku)
+      editCells[`C${row}`] = [{ key: `product:${product}:englishName`, label: `${product} 영문명`, value: source.englishName }]
+      editCells[`D${row}`] = [{ key: `product:${product}:hsCode`, label: `${product} HS CODE`, value: hsByProduct.get(product) ?? '' }]
+      editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
+    }
     totalAmount += amount
-    sheet.getCell(`J${row}`).value = { formula: `ROUND(G${row}*E${row},2)`, result: amount }
+    sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
   }
   const totalQuantity = prepared.items.reduce((sum, item) => sum + item.quantity, 0)
   const grossWeight = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].grossWeightKg, 0)
@@ -267,22 +322,33 @@ export async function exportChinaImportDocument(
       .map((box) => ({ id: box.id, grossWeightKg: options.boxes[box.id].grossWeightKg })), pallet.tareWeightKg).grossWeightKg!, 0)
   // A loaded pallet is one external package. Its dimensions are measured as
   // a whole; its weight is the boxes plus the saved pallet packaging tare.
-  const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + options.boxes[box.id].cbm, 0)
+  const totalCbm = prepared.boxes.filter((box) => !box.palletId).reduce((sum, box) => sum + (options.boxes[box.id].cbm ?? Number.NaN), 0)
     + prepared.pallets.reduce((sum, pallet) => sum + (calculateChinaOutboundBoxCbm(pallet)
-      ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + options.boxes[box.id].cbm, options.palletExtraCbm)), 0)
-  const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, V: grossWeight }
-  for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = { formula: `SUM(${column}20:${column}${totalRow - 1})`, result }
+      ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + (options.boxes[box.id].cbm ?? Number.NaN), options.palletExtraCbm)), 0)
+  const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, R: totalQuantity, V: grossWeight }
+  for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = Number.isFinite(result) ? { formula: `SUM(${column}20:${column}${totalRow - 1})`, result } : null
   sheet.getCell(`A${totalRow}`).value = 'TOTAL'
   sheet.getCell(`I${totalRow}`).value = 'RMB'
   sheet.getCell(`P${totalRow}`).value = 'CTN'
   sheet.getCell(`W${totalRow}`).value = 'KG'
-  sheet.getCell(`X${totalRow}`).value = totalCbm
+  sheet.getCell(`X${totalRow}`).value = Number.isFinite(totalCbm) ? totalCbm : null
+  if (prepared.boxes.some((box) => !Number.isFinite(options.boxes[box.id]?.grossWeightKg))) sheet.getCell(`V${totalRow}`).value = null
+  sheet.getCell('Y18').value = '상품명 (확인용)'
+  sheet.getColumn('Y').width = 36
+  sheet.getColumn('Y').hidden = false
   sheet.pageSetup.printArea = `A1:X${totalRow + 1}`
+  const productImages = new Map(supplements.productImages)
+  for (const item of prepared.items) {
+    const product = importDocumentProductCode(item.sku)
+    const candidate = supplements.productImages?.get(item.sku.trim())
+    const existing = productImages.get(product)
+    if (candidate && (!existing || ('error' in existing && 'buffer' in candidate))) productImages.set(product, candidate)
+  }
   addImportDocumentHsSheets(workbook, invoiceRows.map((invoice) => {
     const item = itemById.get(invoice.itemId)!
-    return { sku: item.sku, productName: item.productName, optionName: item.optionName,
-      englishName: options.items[item.id].englishName, quantity: invoice.quantity, hsCode: item.hsCode }
-  }), supplements)
+    return { sku: importDocumentProductCode(item.sku), productName: item.productName,
+      englishName: options.items[item.id].englishName, quantity: invoice.quantity, hsCode: hsByProduct.get(importDocumentProductCode(item.sku)) ?? '' }
+  }), { ...supplements, productImages })
   clearBlankExcelCells(workbook)
   // ExcelJS resets the Normal font to Calibri on write. Excel measures column
   // widths using that font, so restore the reference's Dotum font as well.

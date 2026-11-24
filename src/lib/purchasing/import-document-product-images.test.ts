@@ -86,4 +86,12 @@ describe('import document product images', () => {
     expect(maximum).toBe(5)
     expect(mocks.attachment).toHaveBeenCalledTimes(12)
   })
+  it('tries another saved attachment if the first read or decode fails', async () => {
+    const png = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#ffffff' } }).png().toBuffer()
+    mocks.find.mockResolvedValue({ 'SKU-A': imageMatch('SKU-A', [imageUrl, imageUrl.replace(/1$/, '2')]) })
+    mocks.attachment.mockRejectedValueOnce(new Error('missing object')).mockResolvedValueOnce({ contentType: 'image/png', fileDataBase64: png.toString('base64') })
+    expect((await getImportDocumentProductImages(input)).get('SKU-A')).toMatchObject({ width: 10, height: 10 })
+    expect(mocks.attachment).toHaveBeenCalledTimes(2)
+  })
+
 })

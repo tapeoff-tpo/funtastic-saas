@@ -968,6 +968,7 @@ async function collectTrackingLookupFromTab(tabId) {
     let lastError = '1688에서 송장번호를 찾지 못했습니다.'
     let stableOrderState = ''
     let sawLogisticsTab = false
+    let productLinks = []
     for (let attempt = 0; Date.now() - startedAt < TRACKING_LOOKUP_SCAN_TIMEOUT_MS; attempt += 1) {
       const current = await getTrackingLookupRun(run.runId)
       if (!isSameTrackingLookupRun(current, run) || trackingTerminalRunIds.has(run.runId)) return
@@ -979,7 +980,7 @@ async function collectTrackingLookupFromTab(tabId) {
         results = await chrome.scripting.executeScript({
           target: { tabId, allFrames: true },
           func: collect1688TrackingInPage,
-          args: [{ singlePass: true, activateLogistics: [0, 2, 5, 9, 13, 20].includes(attempt) }],
+          args: [{ singlePass: true, orderNumber: run.orderNumber, activateLogistics: [0, 2, 5, 9, 13, 20].includes(attempt) }],
         })
       } catch (error) {
         const tab = await chrome.tabs.get(tabId).catch(() => null)
@@ -992,13 +993,14 @@ async function collectTrackingLookupFromTab(tabId) {
       const latest = await getTrackingLookupRun(run.runId)
       if (!isSameTrackingLookupRun(latest, run) || trackingTerminalRunIds.has(run.runId)) return
       const topResult = results.find((result) => result.frameId === 0)?.result
+      productLinks = uniqueCandidateUrls([...productLinks, ...(topResult?.productLinks || [])]).slice(0, 30)
       if (topResult?.fatal) {
         await failTrackingLookupRun(run, topResult.error || '1688 로그인 또는 보안 확인이 필요합니다.', true)
         return
       }
       const trackingNumbers = uniqueTrackingNumbers(results.flatMap((result) => result.result?.trackingNumbers || []))
       if (trackingNumbers.length > 0) {
-        await completeTrackingLookupRun(run, trackingNumbers)
+        await completeTrackingLookupRun(run, trackingNumbers, productLinks)
         return
       }
       sawLogisticsTab ||= results.some((result) => result.result?.sawLogisticsTab)
@@ -1024,7 +1026,7 @@ async function collectTrackingLookupFromTab(tabId) {
   }
 }
 
-async function completeTrackingLookupRun(run, trackingNumbers) {
+async function completeTrackingLookupRun(run, trackingNumbers, productLinks = []) {
   if (!await claimTrackingLookupTerminal(run)) return
   try {
     await chrome.alarms.clear(trackingLookupAlarmName(run))
@@ -1036,6 +1038,7 @@ async function completeTrackingLookupRun(run, trackingNumbers) {
         // Keep the exact waybill evidence even when several orders finish together.
         trackingSource: 'waybill_number',
         trackingEvidence: { label: '运单号码', extractionVersion: 2 },
+        productLinks,
       })
     } catch (error) {
       await sendTrackingLookupToSaas(run, {
@@ -1326,6 +1329,35 @@ async function collect1688TrackingInPage(options = {}) {
   let consecutiveUnavailableOrder = 0
   let sawLogisticsTab = false
   const maxAttempts = options.singlePass ? 1 : 18
+  const productLinks = collectOrderProductLinks()
+  function collectOrderProductLinks() {
+    if (!/^\d{10,40}$/.test(options.orderNumber || '') || !textOf(document.body).includes(options.orderNumber)) return []
+    const scopes = new Set(document.querySelectorAll(
+      '[class*="order-item"], [class*="orderItem"], [class*="order-product"], [class*="orderProduct"], [class*="goods-info"], [class*="goodsInfo"], table',
+    ))
+    for (const element of document.querySelectorAll('h1,h2,h3,h4,legend,[class*="title"],[class*="Title"]')) {
+      if (!/^(商品信息|货品信息|商品明细|货品明细)$/.test(textOf(element))) continue
+      let parent = element.parentElement
+      for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
+        if (parent.querySelector('a[href*="detail.1688.com/offer/"]')) { scopes.add(parent); break }
+      }
+    }
+    const links = new Map()
+    for (const scope of scopes) {
+      if (scope.closest('[class*="recommend"],[class*="Recommend"],[class*="guess"],aside,nav,footer')) continue
+      for (const anchor of scope.querySelectorAll('a[href*="detail.1688.com/offer/"]')) {
+        if (anchor.closest('[class*="recommend"],[class*="Recommend"],[class*="guess"],aside,nav,footer')) continue
+        try {
+          const url = new URL(anchor.getAttribute('href'), 'https://detail.1688.com')
+          const match = url.pathname.match(/^\/offer\/(\d{6,30})\.html\/?$/i)
+          if (url.hostname !== 'detail.1688.com' || !match) continue
+          const canonical = `https://detail.1688.com/offer/${match[1]}.html`
+          if (!links.has(canonical)) links.set(canonical, { url: canonical, title: textOf(anchor).slice(0, 1_000) || anchor.getAttribute('title') || null })
+        } catch { /* Ignore non-product links. */ }
+      }
+    }
+    return Array.from(links.values()).slice(0, 30)
+  }
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     // The order-detail URL normally selects this tab itself, but some 1688 page
     // variants ignore the URL fragment until the tab is clicked once.
@@ -1344,11 +1376,11 @@ async function collect1688TrackingInPage(options = {}) {
       ? collectStructuredTracking()
       : []
     const trackingNumbers = mergeTrackingNumbers(collect(text), structuredTracking)
-    if (trackingNumbers.length > 0) return { trackingNumbers }
+    if (trackingNumbers.length > 0) return { trackingNumbers, productLinks }
     if (options.singlePass) {
       if (looksLikeNotShipped(text)) return { trackingNumbers: [], orderState: 'not_shipped', error: '1688에서 아직 발송 전으로 표시되어 송장번호가 없습니다.', sawLogisticsTab }
       if (looksLikeUnavailableOrder(text)) return { trackingNumbers: [], orderState: 'unavailable', error: '1688에서 해당 주문을 찾을 수 없거나 현재 계정으로 볼 수 없습니다. 주문번호와 로그인 계정을 확인해주세요.', sawLogisticsTab }
-      return { trackingNumbers: [], sawLogisticsTab }
+      return { trackingNumbers: [], sawLogisticsTab, productLinks }
     }
     consecutiveNotShipped = looksLikeNotShipped(text) ? consecutiveNotShipped + 1 : 0
     consecutiveUnavailableOrder = looksLikeUnavailableOrder(text) ? consecutiveUnavailableOrder + 1 : 0

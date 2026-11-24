@@ -75,6 +75,12 @@ function makeTransaction() {
     execute: vi.fn().mockResolvedValue(undefined),
     select: vi.fn().mockImplementation(() => ({
       from: (table: unknown) => ({
+        innerJoin: (joined: unknown) => ({
+          where: (condition: SQL) => ({
+            limit: async (count: number) => matchingRows(rowsFor(table), condition)
+              .filter((row) => rowsFor(joined).some((allocation) => allocation.boxId === row.id && allocation.userId === row.userId && allocation.shipmentId === row.shipmentId)).slice(0, count),
+          }),
+        }),
         where: (condition: SQL) => {
           const result = Promise.resolve(matchingRows(rowsFor(table), condition).map((row) => ({ ...row })))
           return Object.assign(result, {
@@ -497,6 +503,13 @@ describe('China outbound box and pallet completion', () => {
     await expect(saveChinaOutboundItemBoxSplits({ userId, shipmentId, shipmentItemId: 'item-1', allocations: [{ boxNo: '2', quantity: 10 }] })).rejects.toThrow('박스 합치기')
     expect(JSON.stringify(boxes)).toBe(beforeBoxes)
     expect(JSON.stringify(boxItems)).toBe(beforeItems)
+  })
+
+  it('persists final pallet confirmation with volume and weight and reopens after a later edit', async () => {
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', manualCbm: 1.5, tareWeightKg: 5, finalize: true })
+    expect(pallets[0]).toMatchObject({ manualCbm: '1.5', tareWeightKg: '5', completionStatus: 'completed' })
+    await saveChinaOutboundPalletDimensions({ userId, shipmentId, palletId: 'pallet-1', manualCbm: 1.8 })
+    expect(pallets[0]).toMatchObject({ manualCbm: '1.8', completionStatus: 'in_progress' })
   })
 
   it('saves and clears independent box and pallet CBM while preserving unknown dimensions and measured weight', async () => {

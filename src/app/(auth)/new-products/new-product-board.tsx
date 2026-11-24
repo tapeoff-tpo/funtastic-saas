@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { PurchasingUrlCollector } from '@/components/purchasing-url-collector'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
 import { cn } from '@/lib/utils'
@@ -333,6 +334,7 @@ export function NewProductBoard({ initialItemId, initialStages, initialLayout, c
           </ToolbarField>
 
           <div className="flex flex-1 flex-wrap justify-end gap-2">
+            <PurchasingUrlCollector onUrlsChanged={() => { detailLoader.clear(); setDataRevision(current => current + 1) }} />
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
             {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
             {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}

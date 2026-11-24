@@ -24,3 +24,9 @@ it('opens the selected shipment and requires confirmation before discarding docu
   fireEvent.change(screen.getByRole('combobox', { name: '중국출고 선택' }), { target: { value: 'two' } })
   expect(navigate).toHaveBeenCalledWith('/purchasing/import-documents?shipment=two')
 })
+
+it('keeps the standalone cost workspace when switching shipments', () => {
+  render(<ImportDocumentsWorkspace shipments={shipments} selectedShipmentId="one" invalidSelection={false} mode="cost" />)
+  fireEvent.change(screen.getByRole('combobox', { name: '중국출고 선택' }), { target: { value: 'two' } })
+  expect(navigate).toHaveBeenCalledWith('/purchasing/import-documents/costs?shipment=two')
+})

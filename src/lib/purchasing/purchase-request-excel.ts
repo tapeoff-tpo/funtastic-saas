@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from './purchase-costs'
+import { getRecommendationBasis } from './recommendation-basis'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
 import {
   getPurchaseReviewList,
@@ -80,6 +81,7 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
 // Keep legacy columns readable for round-trip uploads without showing them in new downloads.
 const PURCHASE_REQUEST_EXCEL_IMPORT_HEADERS = [
   ...PURCHASE_REQUEST_EXCEL_HEADERS,
+  '추천근거',
   '중국출고요청수량',
   '구매방법',
 ] as const
@@ -122,13 +124,16 @@ export async function exportPurchaseRequestsExcel(input: {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('발주')
 
-  sheet.columns = PURCHASE_REQUEST_EXCEL_HEADERS.map((header) => ({
+  const exportHeaders = reviewList
+    ? [PURCHASE_REQUEST_EXCEL_HEADERS[0], '추천근거', ...PURCHASE_REQUEST_EXCEL_HEADERS.slice(1)]
+    : [...PURCHASE_REQUEST_EXCEL_HEADERS]
+  sheet.columns = exportHeaders.map((header) => ({
     header,
     key: header,
-    width: header === 'ID' ? 38 : Math.max(14, Math.min(28, header.length + 8)),
+    width: header === 'ID' ? 38 : header === '추천근거' ? 72 : Math.max(14, Math.min(28, header.length + 8)),
   }))
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
-  sheet.autoFilter = { from: 'A1', to: { row: 1, column: PURCHASE_REQUEST_EXCEL_HEADERS.length } }
+  sheet.autoFilter = { from: 'A1', to: { row: 1, column: exportHeaders.length } }
 
   const headerRow = sheet.getRow(1)
   headerRow.height = 24
@@ -154,8 +159,13 @@ export async function exportPurchaseRequestsExcel(input: {
       newCostCny: row.newCostCny,
       exchangeRateKrw: row.costExchangeRateKrw ?? exchangeRateReference.rate,
     })
-    sheet.addRow({
+    const basis = reviewRow ? getRecommendationBasis(row.rawData, reviewMetrics) : null
+    const basisLines = basis?.notes
+      .filter(({ label }) => !label.startsWith('진행 중 발주 '))
+      .map(({ label }) => label) ?? []
+    const excelRow = sheet.addRow({
       ID: row.id ?? '',
+      '추천근거': basisLines.join('\n'),
       상태: reviewRow
         ? reviewRow.reviewStatus === 'review' ? '발주검토' : '발주불필요'
         : PURCHASE_REQUEST_STATUS_LABELS[row.status],
@@ -196,6 +206,14 @@ export async function exportPurchaseRequestsExcel(input: {
       '품목 발주상태': purchasingItemStatusLabel(row.purchasingStatus),
       메모: row.memo ?? '',
     })
+    if (reviewRow && basisLines.length > 0) {
+      excelRow.getCell('추천근거').alignment = { vertical: 'middle', wrapText: true }
+      const estimatedLines = basisLines.reduce((total, line) => {
+        const width = Array.from(line).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
+        return total + Math.max(1, Math.ceil(width / 70))
+      }, 0)
+      excelRow.height = Math.max(20, estimatedLines * 16)
+    }
   }
 
   sheet.getColumn('발주수량').numFmt = '#,##0'

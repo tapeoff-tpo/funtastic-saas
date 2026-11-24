@@ -154,14 +154,18 @@ async function categoryCommand(message, sender) {
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.channel !== CHANNEL) return
+  if (message.type === 'PING') {
+    if (!sender.tab || !rules.allowedSaas(sender.url || '')) respond({ ok: false, error: '쿠팡 상품등록 화면에서 시작해주세요.' })
+    else respond({ ok: true, version: chrome.runtime.getManifest().version, supportsCategories: true })
+    return true
+  }
   if (['CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(message.type)) {
     categoryCommand(message, sender).then(respond).catch(error => respond({ ok: false, error: error.message }))
     return true
   }
   exclusively(async () => {
-    if (['PING', 'START', 'CHECK'].includes(message.type)) {
+    if (['START', 'CHECK'].includes(message.type)) {
       if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
-      if (message.type === 'PING') return { ok: true, version: chrome.runtime.getManifest().version, supportsCategories: true }
       return openJob(message.job, sender, message.type === 'CHECK')
     }
     return fromSupplier(message, sender)

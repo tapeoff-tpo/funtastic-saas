@@ -35,7 +35,9 @@ function CategoryRecommendationPanel({ sourceCode, selectedSheetName = '', onCon
       if (session !== generation.current) return
       if (!extension.supportsCategories) {
         setNeedsExtension(true)
-        throw new Error('쿠팡 등록 확장을 업데이트하면 펀타 분류로 허브를 검색하고 공식 양식을 연결할 수 있습니다.')
+        throw new Error(extension.connected
+          ? `설치된 쿠팡 등록 확장 ${extension.version || ''}에는 카테고리 검색 기능이 없습니다. 최신 확장으로 업데이트해주세요.`
+          : '쿠팡 등록 확장과 이 페이지가 연결되지 않았습니다. 설치된 확장의 새로고침 버튼을 누른 뒤 SaaS 페이지도 새로고침하고 다시 검색해주세요.')
       }
       setNeedsExtension(false)
       // Always start from the source category. A user correction and source tags

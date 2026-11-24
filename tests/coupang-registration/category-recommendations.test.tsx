@@ -120,7 +120,7 @@ describe('B2B category based Supplier Hub recommendations', () => {
   it('requires the category-capable extension instead of substituting saved workbook categories', async () => {
     bridge.ping.mockResolvedValue({ connected: true, version: '1.0.0' })
     render(<CategoryRecommendations sourceCode="938" onConnect={vi.fn()} />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('쿠팡 등록 확장을 업데이트하면')
+    expect(await screen.findByRole('alert')).toHaveTextContent('설치된 쿠팡 등록 확장 1.0.0에는 카테고리 검색 기능이 없습니다.')
     expect(screen.getByRole('link', { name: '쿠팡 등록 확장 업데이트' })).toHaveAttribute('href', '/api/operations/coupang-registration/extension')
     expect(bridge.search).not.toHaveBeenCalled()
     expect(screen.queryByRole('option', { name: category.path })).not.toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('B2B category based Supplier Hub recommendations', () => {
   it('keeps the saved selection in the category field when the extension cannot search', async () => {
     bridge.ping.mockResolvedValue({ connected: false })
     render(<CategoryRecommendations sourceCode="938" selectedSheetName="QF_1234_생활용품_옷걸이_치마-바지걸이" onConnect={vi.fn()} />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('쿠팡 등록 확장을 업데이트하면')
+    expect(await screen.findByRole('alert')).toHaveTextContent('쿠팡 등록 확장과 이 페이지가 연결되지 않았습니다.')
     const select = screen.getByRole('combobox', { name: '쿠팡 카테고리 양식' })
     expect(select).toHaveValue('1234')
     expect(within(select).getByRole('option', { name: '생활용품 > 옷걸이 > 치마-바지걸이' })).toBeInTheDocument()

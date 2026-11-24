@@ -64,6 +64,7 @@ describe('Supplier category worker routing', () => {
     const instance = worker()
     instance.chrome.storage.local.get.mockImplementation(() => new Promise(() => {}))
     void instance.send({ type: 'START', job: { jobId: 'job', token: '0123456789abcdef', rows: [{ id: 'r', name: '상품' }], files: [{ name: 'job.xlsx', data: 'UEs=', kind: 'workbook' }] } })
+    expect(await instance.send({ type: 'PING' })).toEqual({ ok: true, version: '1.1.0', supportsCategories: true })
     expect(await instance.send({ type: 'CATEGORY_SEARCH', queries: ['행거'] })).toEqual({ ok: true, categories: [] })
     vi.useFakeTimers()
     const stalled = worker({ content: () => new Promise(() => {}) })
@@ -79,7 +80,7 @@ describe('Supplier category SaaS content bridge', () => {
     const page = { addEventListener: (_type: string, listener: typeof pageListener) => { pageListener = listener }, postMessage: vi.fn() }
     const chrome = { runtime: { sendMessage: vi.fn((_message, respond) => respond({ ok: true, categories: [] })), onMessage: { addListener: vi.fn() } } }
     const origin = 'https://funtastic-saas-vercel.vercel.app'
-    vm.runInNewContext(readFileSync(path.join(directory, 'saas-bridge.js'), 'utf8'), { window: page, location: { origin }, chrome })
+    vm.runInNewContext(readFileSync(path.join(directory, 'saas-bridge.js'), 'utf8'), { window: page, location: { origin, pathname: '/operations/coupang-registration' }, chrome })
     const data = { source: channel, type: 'CATEGORY_SEARCH', requestId: 'search', queries: ['행거'], url: 'https://evil.test', job: { token: 'unused' } }
     pageListener({ source: page, origin: 'https://evil.test', data })
     pageListener({ source: {}, origin, data })

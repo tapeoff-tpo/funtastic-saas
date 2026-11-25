@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition, type FormEvent } from 'react'
+import { useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { addChinaOutboundSampleAction } from '../saas-china-actions'
@@ -8,8 +8,9 @@ import { useChinaWorkDraft, useChinaWorkGuard } from './unsaved-china-work'
 
 const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm'
 
-export function ManualSamplePanel({ shipmentId, defaultWarehouseCode, warehouseCodes, editable, isPending }: {
+export function ManualSamplePanel({ shipmentId, defaultWarehouseCode, warehouseCodes, editable, isPending, children }: {
   shipmentId: string; defaultWarehouseCode: string; warehouseCodes: string[]; editable: boolean; isPending: boolean
+  children: (sampleButton?: ReactNode, sampleForm?: ReactNode) => ReactNode
 }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
@@ -48,10 +49,9 @@ export function ManualSamplePanel({ shipmentId, defaultWarehouseCode, warehouseC
     kind: 'items', label: '샘플 수기 추가', snapshot: null, save, discard: clear,
   } : null)
   function submit(event: FormEvent) { event.preventDefault(); start(async () => { await guard.runTask(save) }) }
-  if (!editable) return null
-  return <section className="rounded-lg border bg-background p-3">
-    <button type="button" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)} className="h-9 rounded-md border px-3 text-sm font-medium">샘플 수기 추가</button>
-    {open && <form onSubmit={submit} className="mt-3 grid gap-3 sm:grid-cols-3">
+  if (!editable) return children()
+  const button = <button type="button" aria-expanded={open} disabled={disabled} onClick={() => setOpen(!open)} className="h-8 whitespace-nowrap rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">샘플 수기 추가</button>
+  const form = open && <form onSubmit={submit} className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-3">
       <label className="text-sm">품목구분<input className={inputClass} value="샘플" readOnly /></label>
       <label className="text-sm">상품명<input required maxLength={1000} className={inputClass} value={productName} disabled={disabled || retrying} onChange={(event) => setProductName(event.target.value)} /></label>
       <label className="text-sm">상품명(중국어)<input data-no-translate maxLength={1000} className={inputClass} value={chineseProductName} disabled={disabled || retrying} onChange={(event) => setChineseProductName(event.target.value)} /></label>
@@ -60,6 +60,6 @@ export function ManualSamplePanel({ shipmentId, defaultWarehouseCode, warehouseC
       <label className="text-sm">출고창고<select className={inputClass} value={warehouseCode} disabled={disabled || retrying} onChange={(event) => setWarehouseCode(event.target.value)}>{[...new Set([initialWarehouse, ...warehouseCodes])].map((code) => <option key={code}>{code}</option>)}</select></label>
       <label className="text-sm">메모<input maxLength={2000} className={inputClass} value={note} disabled={disabled || retrying} onChange={(event) => setNote(event.target.value)} /></label>
       <div className="flex gap-2 sm:col-span-3"><button type="submit" disabled={disabled} className="h-9 rounded-md bg-primary px-3 text-sm text-primary-foreground">샘플 추가 저장</button><button type="button" disabled={disabled || retrying} onClick={clear} className="h-9 rounded-md border px-3 text-sm">입력 취소</button></div>
-    </form>}
-  </section>
+    </form>
+  return children(button, form)
 }

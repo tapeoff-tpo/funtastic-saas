@@ -406,7 +406,7 @@ export async function deleteOutboundReflectionBatch(userId: string, batchId: str
 export async function getOutboundReflectionLines(
   userId: string,
   batchId: string,
-  options: { status?: OutboundReflectionStatus | 'all'; limit?: number } = {},
+  options: { status?: OutboundReflectionStatus | 'all'; limit?: number; offset?: number } = {},
 ): Promise<OutboundReflectionLine[]> {
   const statusFilter = options.status && options.status !== 'all'
     ? sql`AND reflection_status = ${options.status}`
@@ -439,8 +439,8 @@ export async function getOutboundReflectionLines(
     WHERE user_id = ${userId}::uuid
       AND batch_id = ${batchId}::uuid
       ${statusFilter}
-    ORDER BY row_number ASC
-    LIMIT ${limit}
+    ORDER BY row_number ASC, id ASC
+    LIMIT ${limit} OFFSET ${Math.max(0, Math.floor(options.offset ?? 0))}
   `))
   return rows.map((row) => {
     const marketplace = normalizeOutboundReflectionMarketplace(row.marketplaceName, row.marketplaceId)

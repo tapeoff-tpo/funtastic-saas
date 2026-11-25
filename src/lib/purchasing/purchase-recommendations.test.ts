@@ -223,6 +223,26 @@ describe('purchase recommendation candidate coverage', () => {
 })
 
 describe('product-specific purchasing rules', () => {
+  it('recommends a 20-unit Lumen table shortage without a product-group MOQ', () => {
+    const rule = getProductGroupMoqRule('102314-0001', '루멘 철제 사이드 테이블')
+    expect(rule).toBeNull()
+
+    const calculation = calculatePurchaseRecommendation({
+      averageMonthlyOutgoing: 36.7,
+      availableStock: 28,
+      targetStockMonths: 1.3,
+    })
+    expect(shouldDeferNearTargetPurchaseRecommendation({
+      shortfallQuantity: calculation.recommendedQuantity,
+      effectiveMonthlyOutgoing: 36.7,
+      availableStockWithPipeline: 28,
+      targetStockMonths: 1.3,
+      isNewProduct: false,
+      hasProductGroupMoq: rule !== null,
+    })).toBe(false)
+    expect(applyPurchaseMinimumQuantity(calculation.recommendedQuantity, { unitCostKrw: 8473 })).toBe(20)
+  })
+
   it('applies the 300-unit MOQ only to the mini stepper SKU', () => {
     expect(getProductGroupMoqRule('101542-0001', '미니스텝퍼')).toMatchObject({
       minimumOrderQuantity: 300,

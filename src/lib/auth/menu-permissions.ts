@@ -20,7 +20,7 @@ export const MENU_PERMISSION_GROUPS = [
     ['/purchasing/raw-data', '발주 로우데이터'], ['/outbound-reflection', '출고반영'],
     ['/purchasing/china-inventory', '중국재고'], ['/purchasing/saas-china-inventory', '중국재고(SaaS)'],
     ['/purchasing/china-shipments', '중국출고'], ['/inventory', '재고관리'],
-    ['/purchasing/import-documents', '인보이스·패킹리스트'],
+    ['/purchasing/import-documents', '무역서류'],
     ['/inventory/adjustments', '입출고관리'], ['/purchasing/overdue', '구매/입고지연'],
   ] },
   { title: '상품등록·광고', items: [
@@ -77,6 +77,7 @@ export function canDeletePurchaseRequests(access: MenuAccess | null): boolean {
 export function canAccessPage(access: MenuAccess, href: string): boolean {
   const path = normalizeMenuPath(href)
   if (matches(path, '/admin/accounts')) return access.superAdmin
+  if (path === '/purchasing/inbound-board') return canUseMenu(access, '/purchasing/import-documents')
   if (path === PRODUCT_OPERATIONS_PATH) return PRODUCT_OPERATIONS_TABS.some((tab) => tab.menus.some((menu) => canUseMenu(access, menu)))
   if (['/', '/access-denied', '/settings', '/settings/account', '/settings/menu', '/change-password', '/manifest.webmanifest', '/favicon.ico', '/window.svg', '/vercel.svg', '/next.svg', '/globe.svg', '/file.svg'].includes(path)) return true
   if (matches(path, '/downloads')) {
@@ -89,6 +90,7 @@ export function canAccessPage(access: MenuAccess, href: string): boolean {
 
 /** Shared APIs list all legitimate consuming menus, never trust Referer. */
 const API_MENU_RULES: Array<[string, string[]]> = [
+  ['/api/purchasing/inbound-board', ['/purchasing/import-documents']],
   ['/api/purchasing/product-images', ['/purchasing/orders', '/purchasing/overdue', '/purchasing/china-shipments']],
   ['/api/purchasing/purchase-requests/recommendations', ['/purchasing/purchases']],
   ['/api/purchasing/purchase-requests/budget-comparison', ['/purchasing/purchases']],

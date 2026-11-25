@@ -52,3 +52,27 @@ it('shows cost calculation separately without requesting an invoice preview', as
   expect(screen.queryByRole('button', { name: '엑셀 다운로드' })).not.toBeInTheDocument()
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
+it('switches preview templates without mutating the base price', async () => {
+  const data = { ...prepared, items: [{ id: 'a', sku: '100457-0001', englishName: 'Glass', hsCode: '7013', quantity: 1, unitPriceCny: 10 }] }
+  const fetcher = vi.fn(async (_url: string, request?: RequestInit) => request?.method ? { ok: true, json: async () => ({ html: '<table><tbody><tr><td>preview</td></tr></tbody></table>' }) } : { ok: true, json: async () => data })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ImportDocumentEditor shipmentId="shipment" onDirtyChange={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('radio', { name: 'TAPEOFF용' }))
+  await waitFor(() => expect(fetcher.mock.calls.some(([, request]) => request?.body && JSON.parse(request.body as string).template === 'tapeoff')).toBe(true))
+  const body = JSON.parse(fetcher.mock.calls.find(([, request]) => request?.body && JSON.parse(request.body as string).template === 'tapeoff')![1]!.body as string)
+  expect(body.items.a.unitPriceCny).toBe(10)
+  expect(screen.getByRole('radio', { name: 'TAPEOFF용' })).toBeChecked()
+})
+it('offers a target choice when dragging TAPEOFF rows and sends the chosen merge without altering base items', async () => {
+  const data = { ...prepared, items: [{ id: 'a', sku: '100457-0001', productName: '컵', englishName: 'Cup', quantity: 2, unitPriceCny: 10 }, { id: 'b', sku: '100458-0001', productName: '샘플', englishName: 'Sample', quantity: 1, unitPriceCny: 2 }] }
+  const fetcher = vi.fn(async (_url: string, request?: RequestInit) => !request?.method ? { ok: true, json: async () => data } : { ok: true, json: async () => ({ html: '<table><tbody><tr><td><input aria-label="컵 영문명" data-edit-key="product:100457:englishName" value="Cup" /></td></tr><tr><td><input aria-label="샘플 영문명" data-edit-key="product:100458:englishName" value="Sample" /></td></tr></tbody></table>' }) })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ImportDocumentEditor shipmentId="shipment" onDirtyChange={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('radio', { name: 'TAPEOFF용' }))
+  const source = await screen.findByLabelText('샘플 영문명'), target = screen.getByLabelText('컵 영문명')
+  const dataTransfer = { setData: vi.fn(), effectAllowed: '' }
+  fireEvent.dragStart(source, { dataTransfer }); fireEvent.dragOver(target, { dataTransfer }); fireEvent.drop(target, { dataTransfer })
+  expect(screen.getByRole('dialog', { name: '병합 기준 상품 선택' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /100457 · 컵 기준/ }))
+  await waitFor(() => expect(fetcher.mock.calls.some(([, request]) => request?.body && JSON.parse(request.body as string).merges?.[0]?.target === '100457')).toBe(true))
+})

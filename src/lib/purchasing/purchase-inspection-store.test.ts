@@ -7,7 +7,7 @@ const fixture = vi.hoisted(() => ({
   receive: vi.fn(), adjust: vi.fn(), recordCompletion: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({ db: { transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
-  execute: vi.fn(), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
+  execute: vi.fn(async (query) => query.queryChunks.some((chunk: { value?: string[] }) => chunk.value?.join?.('').includes('RETURNING last_number')) ? [{ last_number: 1 }] : []), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
   update: () => ({ set: (values: Record<string, unknown>) => { fixture.writes.push(values); return { where: () => ({ returning: async () => [{ id: fixture.current.id }] }) } } }),
 }) } }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
@@ -162,7 +162,7 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.receive).not.toHaveBeenCalled()
   })
   it('receives exactly the inspected quantity and does not receive a duplicate completion twice', async () => {
-    fixture.current = { ...fixture.current, status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { ...inspection, checkedAt: '2026-10-30T00:00:00Z', checkedBy: 'staff-id', resolutionNote: '부족 확인' } }
+    fixture.current = { ...fixture.current, status: 'inspecting', rawData: {}, chinaReceivedQuantity: 90, purchaseInspection: { ...inspection, checkedAt: '2026-10-30T00:00:00Z', checkedBy: 'staff-id', resolutionNote: '부족 확인' } }
     await updatePurchaseRequestStatus({ userId: 'workspace-id', id: 'purchase-id', status: 'china_arrived' })
     expect(fixture.receive.mock.calls[0][1]).toMatchObject({ userId: 'workspace-id', purchaseRequestItemId: 'purchase-id', quantity: 90 })
     fixture.current.status = 'china_arrived'

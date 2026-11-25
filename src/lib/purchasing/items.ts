@@ -260,7 +260,7 @@ export async function getPurchasingItemTradeDataBySku(userId: string, skus: stri
       const data = purchasingItemData(row.metadata)
       result.set(row.internalSku, {
         englishName: data['영문명'] ?? '', chineseName: data[CHINESE_PRODUCT_NAME_HEADER] ?? '',
-        hsCode: data['HS CODE'] ?? '', material: data['재질'] ?? '', unitPriceCny: importUnitPriceCny(data),
+        hsCode: data['HS CODE'] ?? '', material: data['재질'] ?? '', unitPriceCny: importUnitPriceCny(data), quarantineText: data['검역대상 여부'] ?? '',
       })
     }
   }

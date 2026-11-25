@@ -143,6 +143,8 @@ const inputClass = 'h-9 w-full rounded-md border bg-background px-3 text-sm outl
 const compactInputClass = 'h-8 w-full rounded-md border bg-background px-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60'
 const editableStatuses = new Set(['draft', 'packing'])
 const BoxSplitSavedContext = createContext<(saved: ChinaOutboundBoxSplitSavedState) => void>(() => {})
+const canDeleteShipment = (status: string) => ['draft', 'packing', 'ready', 'cancelled'].includes(status)
+
 const statusLabels: Record<string, string> = {
   draft: '초안',
   packing: '포장중',
@@ -478,9 +480,9 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   const [deletedIds, setDeletedIds] = useState<string[]>([])
   const [deleteSummary, setDeleteSummary] = useState('')
   const [deleteFailures, setDeleteFailures] = useState<Array<{ id: string; name: string; error: string }>>([])
-  const listedShipments = shipments.filter((shipment) => shipment.status !== 'cancelled')
+  const listedShipments = shipments
   const visibleShipments = listedShipments.filter((shipment) => !deletedIds.includes(shipment.id))
-  const deletableShipments = visibleShipments.filter((shipment) => ['draft', 'packing', 'ready'].includes(shipment.status))
+  const deletableShipments = visibleShipments.filter((shipment) => canDeleteShipment(shipment.status))
   const selectedDeleteShipments = deletableShipments.filter((shipment) => selectedDeleteIds.includes(shipment.id))
   const allDeleteSelected = deletableShipments.length > 0 && selectedDeleteShipments.length === deletableShipments.length
 
@@ -570,7 +572,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
   }
 
   function deleteShipment() {
-    if (!selectedShipment) return
+    if (!selectedShipment || !canDeleteShipment(selectedShipment.status) || isPending || guard.busy) return
     guard.requestConfirmation({
       title: '출고작업 삭제',
       description: '이 출고작업을 삭제할까요? 예약 재고와 박스·파렛트·적재 기록도 함께 삭제되며 되돌릴 수 없습니다.',
@@ -609,7 +611,7 @@ function ShipmentSelector({ shipments, selectedShipment, showCreate, outboundWar
         </>}
         {selectedShipment ? <div className="flex shrink-0 gap-2">
           <button type="button" disabled={isPending} onClick={() => isEditing ? guard.requestNavigation(() => setIsEditing(false), ['details']) : setIsEditing(true)} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:flex-none">{isEditing ? '수정 닫기' : '이름·날짜 수정'}</button>
-          <button type="button" disabled={isPending || selectedShipment.status === 'dispatched'} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
+          <button type="button" disabled={isPending || guard.busy || !canDeleteShipment(selectedShipment.status)} onClick={deleteShipment} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"><Trash2 className="size-4" /> 삭제</button>
         </div> : null}
       </div>
       {!selectedShipment && !showCreate && <>
@@ -717,7 +719,9 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
   const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
-  const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
+  const looseBoxes = boxesWithItems.filter((box) => !box.palletId || !palletById.has(box.palletId))
+  const hasUnassignedPalletBox = looseBoxes.length > 0
+  const packageSummary = `${palletSummaries.length} PLT + ${looseBoxes.length} BOX, ${palletSummaries.length + looseBoxes.length} CTN`
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
@@ -762,14 +766,16 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 
       <nav className="grid gap-1 rounded-lg border bg-muted/20 p-1 sm:grid-cols-2 xl:grid-cols-4" aria-label="중국출고 작업 단계">
         <StageButton active={stage === 'items'} step="1단계" title="출고품목·박스분할" detail={`${items.length.toLocaleString('ko-KR')}종 · ${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('items')} />
-        <StageButton active={stage === 'boxes'} step="2단계" title="저장된 박스현황" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('boxes')} />
-        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트 배정" detail={`${palletSummaries.length} PLT + ${boxesWithItems.filter((box) => !box.palletId).length} BOX`} onClick={() => onStageChange('pallets')} />
-        <StageButton active={stage === 'summary'} step="4단계" title="파렛트 최종 리스트" detail={`${palletSummaries.length} PLT · ${boxesWithItems.length.toLocaleString('ko-KR')} BOX`} onClick={() => onStageChange('summary')} />
+        <StageButton active={stage === 'boxes'} step="2단계" title="저장된 박스현황" detail="" onClick={() => onStageChange('boxes')} />
+        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트 배정" detail="" onClick={() => onStageChange('pallets')} />
+        <StageButton active={stage === 'summary'} step="4단계" title="파렛트 최종 리스트" detail={packageSummary} onClick={() => onStageChange('summary')} />
       </nav>
 
       {stage === 'items' ? <section className="space-y-3">
-        <ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems} warehouseCodes={warehouseCodes} editable={editable} isPending={isPending} />
-        <ManualSamplePanel shipmentId={shipment.id} defaultWarehouseCode={shipment.originWarehouseCode} warehouseCodes={[...new Set([...warehouseCodes, ...inventoryItems.map((item) => item.warehouseCode)])]} editable={editable} isPending={isPending} />
+        <ManualSamplePanel shipmentId={shipment.id} defaultWarehouseCode={shipment.originWarehouseCode} warehouseCodes={[...new Set([...warehouseCodes, ...inventoryItems.map((item) => item.warehouseCode)])]} editable={editable} isPending={isPending}>
+          {(sampleButton, sampleForm) => <ShipmentItemAdditionPanel shipmentId={shipment.id} inventoryItems={inventoryItems}
+            warehouseCodes={warehouseCodes} editable={editable} isPending={isPending} sampleButton={sampleButton} sampleForm={sampleForm} />}
+        </ManualSamplePanel>
         {editable && hasIncompleteBoxSplit && <ApplyInventoryPackingButton shipmentId={shipment.id} isPending={isPending} />}
         <OutboundItemsPanel detail={detail} editable={editable} isPending={isPending} boxItemsByItem={boxItemsByItem} />
         <div className="flex justify-end"><button type="button" disabled={isPending || guard.busy || !boxesWithItems.length} onClick={() => onStageChange('boxes')} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">다음: 저장된 박스현황</button></div>
@@ -825,7 +831,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             {hasUnassignedPalletBox && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p>}
           </StageHelp>
         </div></div>
-        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
+        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={looseBoxes} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
         {(editable || shipment.status === 'ready') && <div className="flex items-center justify-between gap-4 border-t pt-4"><p className="text-xs text-muted-foreground">적재 내역과 서류를 모두 확인한 뒤 마지막에 출고완료를 눌러주세요. 재고가 차감됩니다.</p><button type="button" disabled={isPending || guard.busy || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60"><Send className="size-4" />출고완료</button></div>}
 
       </section> : null}
@@ -958,12 +964,14 @@ function StockCategoryFilter({ items, value, onChange, disabled = false }: {
   </div>
 }
 
-function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes, editable, isPending }: {
+function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes, editable, isPending, sampleButton, sampleForm }: {
   shipmentId: string
   inventoryItems: ChinaShipmentStockItem[]
   warehouseCodes: string[]
   editable: boolean
   isPending: boolean
+  sampleButton?: ReactNode
+  sampleForm?: ReactNode
 }) {
   const router = useRouter()
   const guard = useChinaWorkGuard()
@@ -1055,7 +1063,7 @@ function ShipmentItemAdditionPanel({ shipmentId, inventoryItems, warehouseCodes,
     })
   }
 
-  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가<TitleHelp title="출고품목 추가">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</TitleHelp></h3></div><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : void openItems()} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button></div>{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3">
+  return <section className="rounded-lg border bg-muted/20 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">출고품목 추가<TitleHelp title="출고품목 추가">선정 후에도 품목이나 추가 수량을 같은 중국출고작업에 예약할 수 있습니다.</TitleHelp></h3></div><div className="flex flex-wrap items-center gap-2"><button type="button" disabled={disabled} onClick={() => isOpen ? guard.requestNavigation(() => setIsOpen(false), ['items']) : void openItems()} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted disabled:opacity-60"><Plus className="size-3.5" /> {isOpen ? '추가 닫기' : '품목 추가'}</button>{sampleButton}</div></div>{sampleForm}{!editable ? <p className="mt-3 text-xs text-muted-foreground">포장완료 또는 출고완료 상태에서는 출고품목을 추가할 수 없습니다.</p> : null}{isOpen ? <form onSubmit={addItems} className="mt-3 space-y-3 border-t pt-3">
 {loadingStock && <p>재고 불러오는 중</p>}{stockError && <p role="alert">{stockError}</p>}
     <section className="rounded-md border bg-background p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

@@ -12,9 +12,11 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { getUserMenuAccess } from '@/lib/auth/menu-access'
 import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { exportChinaImportDocument, prepareImportDocument } from '@/lib/purchasing/china-import-document'
-import { getAllPurchasingItems, getPurchasingItemTradeDataBySku } from '@/lib/purchasing/items'
+import { getAllPurchasingItems, getPurchasingItemTradeDataBySku, getPurchasingItemLocationsBySku } from '@/lib/purchasing/items'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
 import { getImportDocumentProductImages } from '@/lib/purchasing/import-document-product-images'
+
+import { exportKoreaShippingDocument } from '@/lib/purchasing/korea-shipping-document'
 
 export const runtime = 'nodejs'
 const text = z.string().trim().min(1).max(500)
@@ -23,6 +25,8 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 })
 const schema = z.object({
+  template: z.enum(['ssj', 'tapeoff']).default('ssj'),
+  merges: z.array(z.object({ source: z.string().trim().min(1).max(200), target: z.string().trim().min(1).max(200) })).max(500).optional(),
   snapshot: z.string().length(64),
   invoiceNo: text, invoiceDate: date, sailingDate: date,
   exporter: text, importer: text, importerAddress: text,
@@ -73,6 +77,14 @@ export async function GET(_request: Request, context: Context) {
   try {
     const loaded = await load(context)
     if (loaded.response) return loaded.response
+    const query = new URL(_request.url).searchParams
+    if (query.get('document') === 'korea') {
+      const locations = await getPurchasingItemLocationsBySku(loaded.userId, loaded.detail.items.map((item) => item.sku))
+      const detail = { ...loaded.detail, items: loaded.detail.items.map((item) => ({ ...item, location: locations.get(item.sku) || item.location || '' })) }
+      const buffer = await exportKoreaShippingDocument(detail, query.get('group') === 'box' ? 'box' : 'pallet')
+      if (query.get('format') === 'preview') return NextResponse.json({ html: await renderChinaImportPreview(buffer) }, { headers: { 'Cache-Control': 'private, no-store' } })
+      return new NextResponse(new Uint8Array(buffer), { headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(loaded.prepared.shipmentNo + '_한국출고서류.xlsx')}`, 'Cache-Control': 'private, no-store' } })
+    }
     const { shipmentId } = await context.params
     const savedDocument = await getImportDocumentDraft(loaded.userId, shipmentId)
     return NextResponse.json({ ...loaded.prepared, savedDocument, snapshot: loaded.snapshot, costPacking: { shipment: loaded.detail.shipment, items: loaded.detail.items, boxes: loaded.detail.boxes, pallets: loaded.detail.pallets, boxItems: loaded.detail.boxItems } }, { headers: { 'Cache-Control': 'private, no-store' } })
@@ -141,7 +153,7 @@ export async function POST(request: Request, context: Context) {
       boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
     }
     const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, { productImages, existingHsItems }, true)
-    const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
+    const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL_${parsed.data.template.toUpperCase()}.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

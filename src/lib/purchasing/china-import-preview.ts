@@ -55,7 +55,7 @@ export async function renderChinaImportPreview(buffer: Buffer, editCells: Import
       else if (value && typeof value === 'object' && 'text' in value) value = value.text
       if (value instanceof Date) value = value.toISOString().slice(0, 10)
       else if (typeof value === 'number') {
-        const decimals = cell.numFmt?.match(/\.([0#]+)/)?.[1].length ?? (Number.isInteger(value) ? 0 : 4)
+        const decimals = cell.numFmt?.match(/\.([0#]+)/)?.[1].length ?? (cell.numFmt === '#,##0' || cell.numFmt === '0' || Number.isInteger(value) ? 0 : 4)
         value = Number.isFinite(value) ? value.toLocaleString('en-US', { minimumFractionDigits: Math.min(decimals, 6), maximumFractionDigits: Math.min(decimals, 6) }) : ''
       } else if (value && typeof value === 'object') value = ''
       const editors = editCells[cell.address]

@@ -17,7 +17,7 @@ import { OutboundReflectionActions } from './outbound-reflection-actions'
 import { OutboundReflectionBatchList } from './outbound-reflection-batch-list'
 import { OutboundReflectionLineEdit } from './outbound-reflection-line-edit'
 
-const DISPLAY_LIMIT = 300
+const PAGE_SIZES = [10, 30, 50, 100]
 
 export const metadata: Metadata = {
   title: '출고반영',
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 export default async function OutboundReflectionPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ batch?: string; status?: string }>
+  searchParams?: Promise<{ batch?: string; status?: string; size?: string; page?: string }>
 }) {
   const user = await getCurrentUser()
   if (!user) return null
@@ -55,18 +55,23 @@ export default async function OutboundReflectionPage({
 
   const selectedBatchId = params?.batch ?? batches[0]?.id
   const selectedBatch = batches.find((batch) => batch.id === selectedBatchId)
-  const lines = selectedBatchId
-    ? await getOutboundReflectionLines(workspaceUserId, selectedBatchId, { status: selectedStatus, limit: DISPLAY_LIMIT }).catch((error) => {
-      console.error('outbound reflection lines error:', error)
-      return []
-    })
-    : []
-
   const totalRows = selectedBatch?.totalRows ?? 0
   const readyRows = selectedBatch?.readyRows ?? 0
   const blockedRows = selectedBatch?.blockedRows ?? 0
   const appliedRows = selectedBatch?.appliedRows ?? 0
   const excludedRows = selectedBatch?.excludedRows ?? 0
+  const counts = { all: totalRows, ready: readyRows, blocked: blockedRows, applied: appliedRows, excluded: excludedRows }
+  const size = PAGE_SIZES.find((value) => String(value) === params?.size) ?? 30
+  const pageCount = Math.max(1, Math.ceil(counts[selectedStatus] / size))
+  const requestedPage = Number(params?.page)
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, Math.min(pageCount, requestedPage)) : 1
+  const lines = selectedBatchId
+    ? await getOutboundReflectionLines(workspaceUserId, selectedBatchId, { status: selectedStatus, limit: size, offset: (page - 1) * size }).catch((error) => {
+      console.error('outbound reflection lines error:', error)
+      return []
+    })
+    : []
+
   const templates = [
     ...DEFAULT_ORDER_IMPORT_TEMPLATES
       .filter((template) => template.id === 'default:sabangnet-sales-confirmation')
@@ -119,9 +124,33 @@ export default async function OutboundReflectionPage({
           <StatusFilter
             batchId={selectedBatchId}
             selectedStatus={selectedStatus}
-            counts={{ all: totalRows, ready: readyRows, blocked: blockedRows, applied: appliedRows, excluded: excludedRows }}
+            counts={counts}
+            size={size}
           />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <nav aria-label="페이지당 표시 건수" className="flex gap-1">
+              {PAGE_SIZES.map((value) => <Link key={value} href={reflectionHref(selectedBatchId, selectedStatus, value)}
+                aria-current={size === value ? 'true' : undefined}
+                className={size === value ? 'rounded border bg-muted px-3 py-1 font-semibold' : 'rounded border px-3 py-1 hover:bg-muted'}>{value}개</Link>)}
+            </nav>
+            <span className="text-muted-foreground">{counts[selectedStatus].toLocaleString('ko-KR')}건</span>
+          </div>
           <OutboundLineTable lines={lines} />
+          {pageCount > 1 && <nav aria-label="출고반영 결과 페이지" className="flex flex-wrap items-center justify-end gap-1 text-sm">
+            {[
+              { target: Math.max(1, page - 10), label: '« 10페이지' },
+              { target: Math.max(1, page - 1), label: '이전' },
+              { target: Math.min(pageCount, page + 1), label: '다음' },
+              { target: Math.min(pageCount, page + 10), label: '10페이지 »' },
+            ].map(({ target, label }, index) => (
+              <div key={label} className="contents">
+                {index === 2 && <span className="px-3 tabular-nums">{page} / {pageCount}</span>}
+                {target === page
+                  ? <span aria-disabled="true" className="rounded border px-3 py-1 text-muted-foreground opacity-50">{label}</span>
+                  : <Link href={reflectionHref(selectedBatchId, selectedStatus, size, target)} className="rounded border px-3 py-1 hover:bg-muted">{label}</Link>}
+              </div>
+            ))}
+          </nav>}
         </div>
       </div>
     </div>
@@ -149,9 +178,11 @@ function StatusFilter({
   batchId,
   selectedStatus,
   counts,
+  size,
 }: {
   batchId?: string
   selectedStatus: OutboundReflectionStatus | 'all'
+  size: number
   counts: Record<OutboundReflectionStatus | 'all', number>
 }) {
   const filters: Array<{ status: OutboundReflectionStatus | 'all'; label: string }> = [
@@ -166,7 +197,7 @@ function StatusFilter({
       {filters.map((filter) => (
         <Link
           key={filter.status}
-          href={reflectionHref(batchId, filter.status)}
+          href={reflectionHref(batchId, filter.status, size)}
           className={`rounded-md border px-3 py-1.5 text-sm font-medium ${selectedStatus === filter.status ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}
         >
           {filter.label} {counts[filter.status].toLocaleString('ko-KR')}
@@ -176,10 +207,12 @@ function StatusFilter({
   )
 }
 
-function reflectionHref(batchId: string | undefined, status: OutboundReflectionStatus | 'all') {
+function reflectionHref(batchId: string | undefined, status: OutboundReflectionStatus | 'all', size = 30, page = 1) {
   const params = new URLSearchParams()
   if (batchId) params.set('batch', batchId)
   if (status !== 'all') params.set('status', status)
+  if (size !== 30) params.set('size', String(size))
+  if (page > 1) params.set('page', String(page))
   const query = params.toString()
   return query ? `/outbound-reflection?${query}` : '/outbound-reflection'
 }

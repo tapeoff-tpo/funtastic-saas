@@ -2000,6 +2000,32 @@ export async function getPurchaseInspection(userId: string, id: string) {
   }
 }
 
+async function assignInspectionBoxNumbers(tx: DbTransaction, userId: string, boxes: string[], previous: Record<string, string>) {
+  const numbers = Object.fromEntries(boxes.filter((id) => previous[id]).map((id) => [id, previous[id]]))
+  const missing = boxes.filter((id) => !numbers[id])
+  if (!missing.length) return numbers
+
+  const date = formatSeoulDateKey(new Date()).slice(2)
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('purchase_inspection_box_counters_schema'))`)
+  await tx.execute(sql`CREATE TABLE IF NOT EXISTS purchase_inspection_box_counters (
+    user_id uuid NOT NULL, date_key text NOT NULL, last_number integer NOT NULL,
+    PRIMARY KEY (user_id, date_key)
+  )`)
+  await tx.execute(sql`ALTER TABLE purchase_inspection_box_counters ENABLE ROW LEVEL SECURITY`)
+  await tx.execute(sql`REVOKE ALL ON purchase_inspection_box_counters FROM PUBLIC`)
+  const [counter] = resultRows<{ last_number: number }>(await tx.execute(sql`
+    INSERT INTO purchase_inspection_box_counters (user_id, date_key, last_number)
+    VALUES (${userId}::uuid, ${date}, ${missing.length})
+    ON CONFLICT (user_id, date_key) DO UPDATE
+      SET last_number = purchase_inspection_box_counters.last_number + excluded.last_number
+    RETURNING last_number`))
+  if (!counter) throw new Error('검수 박스번호를 발급하지 못했습니다.')
+  missing.forEach((id, index) => {
+    numbers[id] = `${date}-${String(counter.last_number - missing.length + index + 1).padStart(3, '0')}`
+  })
+  return numbers
+}
+
 export async function savePurchaseInspection(input: { userId: string; actorId: string; id: string; data: unknown }) {
   const parsed = purchaseInspectionInputSchema.parse(input.data)
   await ensurePurchasePaymentTrackingSchema()
@@ -2021,6 +2047,10 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
     }
     const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : validateInspectionSave(inspection)
     if (parsed.complete && !stickerStatus) throw new Error('스티커 부착 상태를 선택해주세요.')
+    inspection.boxNumbers = await assignInspectionBoxNumbers(
+      tx, input.userId, inspection.parcels.flatMap((parcel) => parcel.boxes.map((box) => box.id)),
+      current.purchaseInspection?.boxNumbers ?? {},
+    )
     await tx.update(purchaseRequestItems).set({
       status: 'inspecting', purchaseInspection: inspection,
       trackingNumber: inspection.parcels[0].trackingNumber,
@@ -2066,7 +2096,7 @@ export async function updatePurchaseRequestStatus(input: {
       if (current.chinaReceivedQuantity !== inspectionSummary(current.purchaseInspection).receivedQuantity) throw new Error('검수 수량이 변경되었습니다. 다시 확인해주세요.')
     }
 
-    const saasChinaMode = usesSaasChinaInventory(current.rawData)
+    const saasChinaMode = input.status === 'china_arrived' || usesSaasChinaInventory(current.rawData)
     if (saasChinaMode) {
       const hasSaasChinaLink = await hasSaasChinaPurchaseLinkInTransaction({
         tx,
@@ -2082,7 +2112,7 @@ export async function updatePurchaseRequestStatus(input: {
     }
 
     if (input.status === 'china_arrived') {
-      if (saasChinaMode && purchaseQuantity(current) > 0) {
+      if (purchaseQuantity(current) > 0) {
         await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
           userId: input.userId,
           createdBy: input.userId,
@@ -2093,8 +2123,6 @@ export async function updatePurchaseRequestStatus(input: {
           quantity: purchaseQuantity(current),
           warehouseCode: purchaseArrivalWarehouse(current.rawData),
         })
-      } else {
-        await addChinaWarehouseStock(tx, current)
       }
     }
     if (input.status === 'outbound_requested') {
@@ -2136,7 +2164,11 @@ export async function updatePurchaseRequestStatus(input: {
     if (input.status === 'china_arrived') {
       values.chinaReceivedAt = current.chinaReceivedAt ?? new Date()
       values.chinaReceivedQuantity = current.chinaReceivedQuantity ?? purchaseQuantity(current)
-      if (current.outboundExpectedDate) values.rawData = { ...current.rawData, purchaseDate: current.outboundExpectedDate }
+      values.rawData = {
+        ...current.rawData,
+        saasChinaMode: true,
+        ...(current.outboundExpectedDate ? { purchaseDate: current.outboundExpectedDate } : {}),
+      }
     }
 
     const [row] = await tx

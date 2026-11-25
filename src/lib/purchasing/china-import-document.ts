@@ -1,4 +1,5 @@
 import { importDocumentProductCode, type ImportDocumentEditCells } from './china-import-editing'
+import { allocatePalletMeasure } from './china-pallet-product-allocation'
 import { resolveChinaLooseBoxes } from './china-pallet-number'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
@@ -10,8 +11,10 @@ import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from './china-
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 import { addImportDocumentHsSheets, type ImportDocumentSupplements } from './china-import-hs-sheets'
 
-export type ImportItemMetadata = { englishName: string; chineseName: string; hsCode: string; material: string; unitPriceCny: number | null }
+export type ImportItemMetadata = { englishName: string; chineseName: string; hsCode: string; material: string; unitPriceCny: number | null; quarantineText?: string }
 export type ImportDocumentOptions = {
+  template?: 'ssj' | 'tapeoff'
+  merges?: Array<{ source: string; target: string }>
   invoiceNo: string; invoiceDate: string; sailingDate: string
   exporter: string; importer: string; importerAddress: string
   loadingPort: string; destinationPort: string; paymentTerms: string
@@ -119,6 +122,9 @@ export async function exportChinaImportDocument(
   editCells?: ImportDocumentEditCells,
 ) {
   detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
+  const template = options.template ?? 'ssj'
+  // Template adjustments are output-only; never compound or persist the surcharge.
+  options = { ...options, items: Object.fromEntries(Object.entries(options.items).map(([id, item]) => [id, { ...item, unitPriceCny: template === 'tapeoff' ? money(item.unitPriceCny * 1.3) : item.unitPriceCny }])) }
   const prepared = prepareImportDocument(detail, metadata)
   for (const item of prepared.items) {
     const override = options.items[item.id]
@@ -144,6 +150,9 @@ export async function exportChinaImportDocument(
   sheet.unMergeCells('C18:D18')
   sheet.getCell('C18').value = 'NAME'
   sheet.getCell('D18').value = 'HS CODE'
+  sheet.getCell('B18').value = 'pallet / BOX'
+  sheet.getCell('M18').value = 'pallet / BOX'
+  sheet.getCell('X18').value = 'Measurement'
   sheet.getCell('D18').style = structuredClone(sheet.getCell('C18').style)
   const rowStyle = Array.from({ length: 25 }, (_, index) => structuredClone(sheet.getRow(20).getCell(index + 1).style))
   for (const range of [...sheet.model.merges]) {
@@ -171,7 +180,7 @@ export async function exportChinaImportDocument(
   }
   const itemById = new Map(prepared.items.map((item) => [item.id, item]))
   type TradeRow = { itemId: string; quantity: number; marks: string[]; boxCount: number; gross: number }
-  const groups = [...prepared.pallets.map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
+  const groups = [...[...prepared.pallets].sort((a, b) => a.palletNo.localeCompare(b.palletNo, 'ko-KR', { numeric: true })).map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
     .map((group) => {
       const rows = new Map<string, TradeRow>()
       for (const box of prepared.boxes.filter((box) => box.palletId === group.id)) {
@@ -189,8 +198,24 @@ export async function exportChinaImportDocument(
         const pallet = prepared.pallets.find((pallet) => pallet.id === group.id)!
         const weight = calculateChinaOutboundPalletWeight(prepared.boxes.filter((box) => box.palletId === group.id)
           .map((box) => ({ id: box.id, grossWeightKg: options.boxes[box.id].grossWeightKg })), pallet.tareWeightKg)
-        for (const row of values) row.gross = 0
-        values[0].gross = weight.grossWeightKg!
+        // A mixed carton is split by its product quantities; pallet tare is
+        // then apportioned by the resulting product CBM, preserving total kg.
+        const volume = new Map<string, number>(), mass = new Map<string, number>()
+        for (const box of prepared.boxes.filter((box) => box.palletId === group.id)) {
+          const lines = detail.boxItems.filter((line) => line.boxId === box.id && line.quantity > 0)
+          const total = lines.reduce((sum, line) => sum + line.quantity, 0)
+          for (const line of lines) {
+            const product = importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku)
+            volume.set(product, (volume.get(product) ?? 0) + (options.boxes[box.id].cbm ?? 0) * line.quantity / total)
+            mass.set(product, (mass.get(product) ?? 0) + options.boxes[box.id].grossWeightKg * line.quantity / total)
+          }
+        }
+        const bases = values.map((row) => volume.get(importDocumentProductCode(itemById.get(row.itemId)!.sku)) ?? 0)
+        if (bases.reduce((sum, value) => sum + value, 0) <= 0) values.forEach((row, index) => { bases[index] = row.quantity })
+        const tare = allocatePalletMeasure(weight.tareWeightKg, bases, 3) ?? bases.map(() => 0)
+        const gross = values.map((row, index) => (mass.get(importDocumentProductCode(itemById.get(row.itemId)!.sku)) ?? 0) + tare[index])
+        const rounded = allocatePalletMeasure(weight.grossWeightKg!, gross, 3)
+        values.forEach((row, index) => { row.gross = rounded?.[index] ?? gross[index] })
       }
       return { ...group, rows: values }
     }).filter((group) => group.rows.length)
@@ -224,21 +249,58 @@ export async function exportChinaImportDocument(
       }
     }
   }
+  const members = new Map([...invoiceBySku.keys()].map((product) => [product, new Set([product])]))
+  const merges = template === 'tapeoff' ? options.merges ?? [] : []
+  const usedSources = new Set<string>()
+  for (const merge of merges) {
+    if (merge.source === merge.target || usedSources.has(merge.source)) throw new Error('중복되거나 잘못된 병합 요청입니다.')
+    const source = invoiceBySku.get(merge.source), target = invoiceBySku.get(merge.target)
+    if (!source || !target) throw new Error('병합할 상품을 찾을 수 없습니다. 병합 내역을 확인해주세요.')
+    target.quantity += source.quantity
+    target.marks.push(...source.marks)
+    for (const member of members.get(merge.source)!) members.get(merge.target)!.add(member)
+    usedSources.add(merge.source)
+    invoiceBySku.delete(merge.source)
+    const targetPrice = options.items[target.itemId].unitPriceCny
+    amountByProduct.set(merge.target, money(target.quantity * targetPrice))
+    pricesByProduct.set(merge.target, new Set([targetPrice]))
+  }
   const invoiceRows = [...invoiceBySku.values()].sort((a, b) => a.groupIndex - b.groupIndex)
   // The two documents share one product order. Keep all physical locations on
   // that row rather than repeating a product once for every pallet it occupies.
-  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[] }>()
+  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[]; looseBoxCount: number }>()
   for (const group of groups) {
     for (const [index, trade] of group.rows.entries()) {
       const product = importDocumentProductCode(itemById.get(trade.itemId)!.sku)
-      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [] }
+      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [], looseBoxCount: 0 }
       row.boxCount += trade.boxCount
+      if (!group.id) row.looseBoxCount += trade.boxCount
       row.packageCount += group.id ? (index === 0 ? 1 : 0) : trade.boxCount
       row.gross += trade.gross
       if (!row.locations.includes(group.no)) row.locations.push(group.no)
       packingByProduct.set(product, row)
     }
   }
+  for (const merge of merges) {
+    const source = packingByProduct.get(merge.source)!, target = packingByProduct.get(merge.target)!
+    target.boxCount += source.boxCount
+    target.packageCount += source.packageCount
+    target.gross += source.gross
+    target.locations = [...new Set([...target.locations, ...source.locations])]
+    packingByProduct.delete(merge.source)
+  }
+  const matchesProduct = (itemId: string, product: string) => members.get(product)?.has(importDocumentProductCode(itemById.get(itemId)!.sku)) ?? false
+  for (const [product, packing] of packingByProduct) {
+    packing.looseBoxCount = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && matchesProduct(line.shipmentItemId, product))).length
+  }
+  const packingLocation = (packing: { looseBoxCount: number }, invoice: InvoiceRow) => packing.looseBoxCount ? 'BOX' : groups[invoice.groupIndex].no
+  // Both sides use the same row order: representative pallet number first,
+  // then every product with loose cartons, even when most units are palletized.
+  invoiceRows.sort((a, b) => {
+    const left = packingByProduct.get(importDocumentProductCode(itemById.get(a.itemId)!.sku))!
+    const right = packingByProduct.get(importDocumentProductCode(itemById.get(b.itemId)!.sku))!
+    return Number(left.looseBoxCount > 0) - Number(right.looseBoxCount > 0) || a.groupIndex - b.groupIndex
+  })
   const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
@@ -260,7 +322,7 @@ export async function exportChinaImportDocument(
     A10: options.importerAddress.split('\n').slice(1).join(' '), K10: options.importerAddress.split('\n').slice(1).join(' '),
     E14: options.paymentTerms, A15: options.loadingPort, K15: options.loadingPort,
     O15: options.destinationPort,
-    R14: `${prepared.palletCount}plt + ${prepared.looseBoxCount}ctn`, W14: prepared.packageCount, X14: 'CTN',
+    R14: `${prepared.palletCount} PLT + ${prepared.looseBoxCount} BOX`, W14: prepared.packageCount, X14: 'CTN',
   })) sheet.getCell(address).value = value
   if (editCells) {
     const field = (key: string, label: string, value: string, type: 'text' | 'date' = 'text') => ({ key, label, value, type })
@@ -280,15 +342,42 @@ export async function exportChinaImportDocument(
     const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
     for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
     sheet.getRow(row).height = 21
-    sheet.getCell(`K${row}`).value = documentBoxMarks(invoice.marks)
-    sheet.getCell(`L${row}`).value = packing.boxCount || null
-    sheet.getCell(`M${row}`).value = packing.locations.join(', ')
+    const looseMarks = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && matchesProduct(line.shipmentItemId, importDocumentProductCode(item.sku)))).map((box) => box.boxNo)
+    sheet.getCell(`K${row}`).value = documentBoxMarks(packing.looseBoxCount ? looseMarks : invoice.marks)
+    sheet.getCell(`L${row}`).value = (packing.looseBoxCount || packing.boxCount) || null
+    sheet.getCell(`M${row}`).value = packingLocation(packing, invoice) || null
     sheet.getCell(`O${row}`).value = packing.packageCount || null
     sheet.getCell(`R${row}`).value = invoice.quantity
     sheet.getCell(`S${row}`).value = 'ea'
     sheet.getCell(`V${row}`).value = packing.gross || null
     sheet.getCell(`W${row}`).value = 'kg'
     sheet.getCell(`Y${row}`).value = item.productName
+    if (template === 'tapeoff') {
+      const texts = prepared.items.filter((candidate) => members.get(importDocumentProductCode(item.sku))!.has(importDocumentProductCode(candidate.sku)))
+        .map((candidate) => candidate.quarantineText?.trim()).filter(Boolean)
+      sheet.getCell(`X${row}`).value = [...new Set(texts)].join(', ') || null
+      sheet.getCell(`X${row}`).alignment = { ...sheet.getCell(`X${row}`).alignment, wrapText: true }
+    }
+  }
+  const palletCtnRuns = new Map<string, number[]>()
+  for (const [index, invoice] of invoiceRows.entries()) {
+    const row = 20 + index
+    const packing = packingByProduct.get(importDocumentProductCode(itemById.get(invoice.itemId)!.sku))!
+    if (packing.looseBoxCount) {
+      const loose = groups.find((group) => group.id === null)?.rows.filter((trade) => matchesProduct(trade.itemId, importDocumentProductCode(itemById.get(invoice.itemId)!.sku)))
+      sheet.getCell(`O${row}`).value = loose?.reduce((sum, row) => sum + row.boxCount, 0) || null
+    } else {
+      const key = groups[invoice.groupIndex].id!
+      const rows = palletCtnRuns.get(key) ?? []
+      rows.push(row)
+      palletCtnRuns.set(key, rows)
+      sheet.getCell(`O${row}`).value = null
+    }
+  }
+  for (const rows of palletCtnRuns.values()) {
+    if (rows.length > 1) sheet.mergeCells(`O${rows[0]}:O${rows[rows.length - 1]}`)
+    sheet.getCell(`O${rows[0]}`).value = 1
+    sheet.getCell(`O${rows[0]}`).alignment = { horizontal: 'center', vertical: 'middle' }
   }
   let totalAmount = 0
   for (const [index, invoice] of invoiceRows.entries()) {
@@ -296,7 +385,8 @@ export async function exportChinaImportDocument(
     const item = itemById.get(invoice.itemId)!
     const source = options.items[item.id]
     sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
-    sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
+    const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
+    sheet.getCell(`B${row}`).value = packingLocation(packing, invoice) || null
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
     sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null
@@ -311,7 +401,7 @@ export async function exportChinaImportDocument(
       const product = importDocumentProductCode(item.sku)
       editCells[`C${row}`] = [{ key: `product:${product}:englishName`, label: `${product} 영문명`, value: source.englishName }]
       editCells[`D${row}`] = [{ key: `product:${product}:hsCode`, label: `${product} HS CODE`, value: hsByProduct.get(product) ?? '' }]
-      editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
+      if (template !== 'tapeoff') editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
     }
     totalAmount += amount
     sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null
@@ -327,6 +417,9 @@ export async function exportChinaImportDocument(
       ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + (options.boxes[box.id].cbm ?? Number.NaN), options.palletExtraCbm)), 0)
   const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, R: totalQuantity, V: grossWeight }
   for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = Number.isFinite(result) ? { formula: `SUM(${column}20:${column}${totalRow - 1})`, result } : null
+  const representedPackages = palletCtnRuns.size + groups.filter((group) => group.id === null).reduce((sum, group) => sum + group.rows.reduce((n, row) => n + row.boxCount, 0), 0)
+  const unrepresentedPallets = prepared.packageCount - representedPackages
+  if (unrepresentedPallets > 0) sheet.getCell(`O${totalRow}`).value = { formula: `SUM(O20:O${totalRow - 1})+${unrepresentedPallets}`, result: prepared.packageCount }
   sheet.getCell(`A${totalRow}`).value = 'TOTAL'
   sheet.getCell(`I${totalRow}`).value = 'RMB'
   sheet.getCell(`P${totalRow}`).value = 'CTN'

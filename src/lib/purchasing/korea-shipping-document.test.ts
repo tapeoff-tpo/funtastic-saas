@@ -70,12 +70,32 @@ it('shows box dimensions and reconciles mixed-box weights without double countin
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(await exportKoreaShippingDocument(source) as unknown as ExcelJS.Buffer)
   for (const sheet of workbook.worksheets) {
-    expect(sheet.getCell('L3').value).toBe('50 × 1박스')
-    expect(sheet.getCell('M3').value).toBe('40 × 1박스')
-    expect(sheet.getCell('N3').value).toBe('30 × 1박스')
+    expect(sheet.getCell('L3').value).toBe('50')
+    expect(sheet.getCell('M3').value).toBe('40')
+    expect(sheet.getCell('N3').value).toBe('30')
     expect(sheet.getCell('O3').value).toBe(9)
     expect(sheet.getCell('O4').value).toBe(3)
     expect(sheet.getCell('O6').value).toMatchObject({ result: 17 })
     expect(sheet.pageSetup.printArea).toContain('O6')
   }
+})
+
+
+it('renders whole-number measurements without changing underlying weight precision', async () => {
+  const source: ImportDocumentDetail = { ...detail, boxes: [{ ...detail.boxes[0], lengthCm: 46.42, widthCm: 56.7, heightCm: 30.05, grossWeightKg: 12.345 }, detail.boxes[1]] }
+  const buffer = await exportKoreaShippingDocument(source)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('L3').value).toBe('46')
+  expect(sheet.getCell('M3').value).toBe('57')
+  expect(sheet.getCell('N3').value).toBe('30')
+  expect(sheet.getCell('O3').value).toBe(9.25875)
+  expect((sheet.getCell('O6').value as ExcelJS.CellFormulaValue).result).toBeCloseTo(12.345, 6)
+  const { renderChinaImportPreview } = await import('./china-import-preview')
+  const html = await renderChinaImportPreview(buffer)
+  expect(html).not.toContain('박스</td>')
+  expect(html).not.toContain('9.258')
+  expect(html).toMatch(/>9<\/td>/)
+  expect(html).toMatch(/>12<\/td>/)
 })

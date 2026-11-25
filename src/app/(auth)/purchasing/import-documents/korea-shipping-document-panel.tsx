@@ -7,7 +7,7 @@ export function KoreaShippingDocumentPanel({ shipmentId, group, onGroupChange, o
   const [revision, setRevision] = useState(0)
   const [html, setHtml] = useState('')
   const [error, setError] = useState('')
-  const url = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/import-documents?document=korea&group=${group}&layout=dimensions-v1`
+  const url = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/import-documents?document=korea&group=${group}&layout=dimensions-v2`
   useEffect(() => {
     const controller = new AbortController()
     setHtml(''); setError('')

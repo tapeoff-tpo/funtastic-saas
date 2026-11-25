@@ -18,9 +18,9 @@ export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, 
     for (const row of koreaShippingRows(detail, by)) {
       const physical = row.boxes.filter((box) => !counted.has(box))
       physical.forEach((box) => counted.add(box))
-      sheet.addRow([row.pallet, formatKoreaBoxNumbers(row.boxes), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location, ...(['length', 'width', 'height'] as const).map((axis) => [...row.dimensions.values()].map((size) => size[axis] ? `${size[axis]} × ${size.boxes.size}박스` : '').filter(Boolean).join('\n')), Math.round(row.weight * 1000000) / 1000000 || null])
+      sheet.addRow([row.pallet, formatKoreaBoxNumbers(row.boxes), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location, ...(['length', 'width', 'height'] as const).map((axis) => [...new Set([...row.dimensions.values()].map((size) => size[axis] && Number.isFinite(Number(size[axis])) ? String(Math.round(Number(size[axis]))) : '').filter(Boolean))].join('\n')), Math.round(row.weight * 1000000) / 1000000 || null])
     }
-    sheet.getColumn('O').numFmt = '#,##0.000'
+    sheet.getColumn('O').numFmt = '#,##0'
     const last = sheet.rowCount
     // Preserve each physical pallet as one vertically merged group in both views.
     let start = 3

@@ -62,7 +62,7 @@ describe('purchase inspection issue UI', () => {
       purchaseFields: { requestedQuantity: 100, actualPurchaseQuantity: 100, supplierOrderNumber: '3317159640039018761', outboundExpectedDate: '2026-11-12', purchaseMethod: '개인' },
     }) })))
     render(<PurchaseInspectionIssueButton purchaseItemId={id} issueCount={1} />)
-    fireEvent.click(screen.getByRole('button', { name: '오류 1건' }))
+    fireEvent.click(screen.getByRole('button', { name: '검수 오류 1건' }))
     expect(await screen.findByText('수량 10개 부족')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '주문서번호' })).toHaveValue('3317159640039018761')
     expect(screen.getByLabelText('정정 구매수량')).toHaveValue(100)

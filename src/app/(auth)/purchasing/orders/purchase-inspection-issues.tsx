@@ -197,7 +197,7 @@ export function PurchaseInspectionIssueButton({ purchaseItemId, issueCount }: { 
   const [open, setOpen] = useState(false)
   return <>
     <Button type="button" size="sm" variant="outline" className="border-red-300 bg-red-50 text-red-800 hover:bg-red-100" onClick={() => setOpen(true)}>
-      <AlertTriangle />오류 {issueCount}건
+      <AlertTriangle />검수 오류 {issueCount}건
     </Button>
     {open ? <PurchaseInspectionIssueDialog purchaseItemId={purchaseItemId} onClose={() => setOpen(false)} /> : null}
   </>

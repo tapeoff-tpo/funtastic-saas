@@ -257,7 +257,7 @@ export async function PurchasingOrdersView({
       ...(!isRequestedStatus ? [{ id: 'total-krw', label: '총 원가(₩)', initiallyHidden: !showCosts }] : []),
     ] : []),
     ...(showBasisColumn ? [{ id: 'basis', label: '추천근거', initiallyHidden: !showRecommendationBasis }] : []),
-    ...(!isRequestedStatus ? [{ id: 'management', label: '구입관리코드' }, { id: 'inspection-issues', label: '검수 오류' }, { id: 'purchase-info', label: '구매 정보' }] : []),
+    ...(!isRequestedStatus ? [{ id: 'management', label: '구입관리코드' }, { id: 'purchase-info', label: '구매 정보' }] : []),
     ...(showPurchaseDateColumn ? [{ id: 'purchase-date', label: '구매날짜' }] : []),
     ...(isMainOrders && (status === 'purchase_completed' || status === 'inspecting') ? [{ id: 'purchase-date', label: '구매날짜', field: true }] : []),
     ...(showPriceComparison ? [{ id: 'price', label: '구매가격' }] : []),
@@ -653,7 +653,6 @@ export async function PurchasingOrdersView({
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th data-purchase-column="inspection-issues" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">검수 오류</th>}
                   {isRequestedStatus ? null : <th data-purchase-column="purchase-info" className="min-w-[450px] whitespace-nowrap px-3 py-2 font-medium">구매 정보</th>}
                   {showPurchaseDateColumn && <th data-purchase-column="purchase-date" className="whitespace-nowrap px-3 py-2 text-center font-medium">구매날짜</th>}
                   {showPriceComparison && <th data-purchase-column="price" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">구매가격</th>}
@@ -733,6 +732,9 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
+                        {item.id && inspectionIssueCount > 0 && <div className="mt-1">
+                          <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
+                        </div>}
                         {item.status === 'inspecting' && receiptSummary?.hasError && <div className="mt-1"><Badge className="border-red-300 bg-red-100 text-red-800">입고오류 · {receiptSummary.difference < 0 ? '부족' : '초과'} {Math.abs(receiptSummary.difference)}개</Badge></div>}
                         {purchaseUrgencyStatus ? (
                           <div className="mt-1">
@@ -867,13 +869,6 @@ export async function PurchasingOrdersView({
                       ) : null}
                       {isRequestedStatus ? null : (
                         <td data-purchase-column="management" className="whitespace-nowrap px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
-                      )}
-                      {isRequestedStatus ? null : (
-                        <td data-purchase-column="inspection-issues" className="px-2 py-2 text-center align-middle">
-                          {item.id && inspectionIssueCount > 0 ? (
-                            <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
-                          ) : <span className="text-xs text-muted-foreground">-</span>}
-                        </td>
                       )}
                       {isRequestedStatus ? null : (
                         <td data-purchase-column="purchase-info" data-purchase-plan className="px-3 py-2 align-middle">

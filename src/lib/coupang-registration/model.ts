@@ -212,6 +212,19 @@ export function getEditableRegistrationColumns(columns: TemplateColumn[]) {
   return columns.filter((column) => !isAutomaticTemplateColumn(column))
 }
 
+/** Duplicate headers belong to independent columns in one immutable official file. */
+export function registrationFieldKey(row: Pick<RegistrationRow, 'templateId'>, sheet: TemplateSheet, column: TemplateColumn): string {
+  return sheet.columns.some((other) => other.column !== column.column && other.label === column.label)
+    ? `@qf:${JSON.stringify([row.templateId, sheet.name, column.column])}`
+    : column.label
+}
+
+/** An explicit column value, including a clear, takes precedence over legacy label keys. */
+export function registrationFieldValue(row: Pick<RegistrationRow, 'templateId' | 'fields'>, sheet: TemplateSheet, column: TemplateColumn): string | undefined {
+  const key = registrationFieldKey(row, sheet, column)
+  return Object.hasOwn(row.fields, key) ? row.fields[key] : row.fields[column.label]
+}
+
 export function isImageUrl(value: string): boolean {
   try {
     const url = new URL(value)
@@ -324,12 +337,17 @@ export function applyRegistrationDefaults(row: RegistrationRow, sheet: TemplateS
   const fields = { ...row.fields }
   const defaultedFields = { ...(row.defaultedFields ?? {}) }
   let changed = false
-  for (const { label } of getEditableRegistrationColumns(sheet.columns)) {
-    const suggested = defaults[label]
-    if (!suggested?.trim() || !shouldApplyDefault(fields[label], defaultedFields[label])) continue
-    if (fields[label] === suggested && defaultedFields[label] === suggested) continue
-    fields[label] = suggested
-    defaultedFields[label] = suggested
+  for (const column of getEditableRegistrationColumns(sheet.columns)) {
+    const suggested = defaults[column.label]
+    const key = registrationFieldKey(row, sheet, column)
+    const current = registrationFieldValue({ ...row, fields }, sheet, column)
+    const previousDefault = registrationFieldValue({ ...row, fields: defaultedFields }, sheet, column)
+    // A scoped blank is a deliberate value, even when an old shared label remains.
+    if (key !== column.label && Object.hasOwn(fields, key) && fields[key] === '') continue
+    if (!suggested?.trim() || !shouldApplyDefault(current, previousDefault)) continue
+    if (current === suggested && previousDefault === suggested) continue
+    fields[key] = suggested
+    defaultedFields[key] = suggested
     changed = true
   }
   return changed ? { ...row, fields, defaultedFields } : row
@@ -369,8 +387,10 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
     if (column.requirement !== '필수') continue
     if (isAutomaticTemplateColumn(column)) continue
     if (column.label === '상세이미지 파일명' && html) continue
-    if (!fields[column.label]?.trim()) issues.push(`${column.label} 누락`)
-    else if (column.label === '카테고리' && column.choices?.length && !column.choices.includes(fields[column.label])) issues.push('카테고리는 공식 양식의 세부 분류에서 선택해주세요.')
+    const value = registrationFieldValue({ ...row, fields }, sheet, column)
+    const label = registrationFieldKey(row, sheet, column) === column.label ? column.label : `${column.label} (${column.column}열)`
+    if (!value?.trim()) issues.push(`${label} 누락`)
+    else if (column.label === '카테고리' && column.choices?.length && !column.choices.includes(value)) issues.push('카테고리는 공식 양식의 세부 분류에서 선택해주세요.')
   }
   issues.push(...priceIssues(row, draft.rounding))
   if (!row.bundleComponents && /[2-9]\d*개입/.test(row.name) && !row.bundleReviewed) issues.push('묶음 구성과 등록단위 가격 확인 필요')

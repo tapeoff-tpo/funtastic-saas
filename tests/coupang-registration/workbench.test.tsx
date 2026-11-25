@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CoupangRegistrationWorkbench } from '@/app/(auth)/operations/coupang-registration/workbench'
-import { blankDraft, confirmPricing, createRegistrationRow, type RegistrationDraft, type RegistrationRow } from '@/lib/coupang-registration/model'
+import { blankDraft, confirmPricing, createRegistrationRow, registrationFieldKey, type RegistrationDraft, type RegistrationRow, type TemplateSheet } from '@/lib/coupang-registration/model'
 import { getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -299,6 +299,64 @@ describe('registration pricing workbench', () => {
       expect(draft.labels).toEqual(initial.labels)
       expect(draft.templates[0].sheets[0].columns).toEqual(sheet.columns)
     })
+  })
+
+  it('edits repeated official labels independently and preserves an explicit cleared column after saving and loading', async () => {
+    const sheet: TemplateSheet = { name: 'QF_42_선반', columns: [
+      { column: 1, label: '상품명', requirement: '필수', guide: '' },
+      { column: 7, label: '색상', requirement: '필수', guide: '', choices: ['검정', '흰색'] },
+      { column: 15, label: '설치지원방식', requirement: '선택', guide: '', choices: ['완전 조립', '조립 필요'] },
+      { column: 53, label: '설치지원방식', requirement: '조건부 필수', guide: '', choices: ['고객직접설치', '방문설치'] },
+      { column: 62, label: '색상', requirement: '필수', guide: '', choices: ['검정', '흰색'] },
+    ] }
+    const base = { ...confirmPricing(createRegistrationRow(source, '베이지')), templateId: 'duplicate-label-template', sheetName: sheet.name, fields: { 색상: '검정', 브랜드: '직접 입력 브랜드' } }
+    const row = { ...base, fields: { ...base.fields,
+      [registrationFieldKey(base, sheet, sheet.columns[2])]: '완전 조립',
+      [registrationFieldKey(base, sheet, sheet.columns[3])]: '고객직접설치',
+    } }
+    const initial = { ...blankDraft(), name: '중복 항목 저장 작업', rows: [row], templates: [{ id: row.templateId, name: '공식선반.xlsx', file: { name: '공식선반.xlsx', data: '' }, sheets: [sheet] }] }
+    const saved = mockSavedDraft(initial)
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: `${row.name} 등록정보 입력` }))
+    await within(screen.getByRole('region', { name: '상품등록정보 입력' })).findByRole('alert')
+    const assembly = screen.getByLabelText('설치지원방식', { exact: true })
+    const installation = screen.getByLabelText('설치지원방식 (조건부)')
+    expect(assembly).toHaveValue('완전 조립')
+    expect(installation).toHaveValue('고객직접설치')
+    const colors = screen.getAllByLabelText('색상 *')
+    expect(colors).toHaveLength(2)
+    expect(colors[0]).toHaveValue('검정')
+    expect(colors[1]).toHaveValue('검정')
+    fireEvent.change(assembly, { target: { value: '조립 필요' } })
+    expect(installation).toHaveValue('고객직접설치')
+    fireEvent.change(installation, { target: { value: '방문설치' } })
+    expect(assembly).toHaveValue('조립 필요')
+    fireEvent.change(colors[0], { target: { value: '' } })
+    fireEvent.change(colors[1], { target: { value: '흰색' } })
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => {
+      const save = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(save).toBeDefined()
+      const stored = JSON.parse(String(save![1]!.body)).draft
+      expect(stored.rows[0].fields).toEqual({ ...row.fields,
+        [registrationFieldKey(row, sheet, sheet.columns[1])]: '',
+        [registrationFieldKey(row, sheet, sheet.columns[2])]: '조립 필요',
+        [registrationFieldKey(row, sheet, sheet.columns[3])]: '방문설치',
+        [registrationFieldKey(row, sheet, sheet.columns[4])]: '흰색',
+      })
+      expect(stored.rows[0].fields.색상).toBe('검정')
+      expect(stored.name).toBe(initial.name)
+    })
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    fireEvent.click(await screen.findByRole('button', { name: `${row.name} 등록정보 입력` }))
+    await within(screen.getByRole('region', { name: '상품등록정보 입력' })).findByRole('alert')
+    expect(screen.getByLabelText('설치지원방식', { exact: true })).toHaveValue('조립 필요')
+    expect(screen.getByLabelText('설치지원방식 (조건부)')).toHaveValue('방문설치')
+    expect(screen.getAllByLabelText('색상 *')[0]).toHaveValue('')
+    expect(screen.getAllByLabelText('색상 *')[1]).toHaveValue('흰색')
   })
 
   it('connects an empty category list without importing the workbook example products', async () => {

@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { createHash, randomUUID } from 'node:crypto'
-import { createRegistrationRow, imageStem, isAutomaticTemplateColumn, LABEL_FIELD, money, rowFields, rowIssues, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateInfo } from './model'
+import { createRegistrationRow, imageStem, isAutomaticTemplateColumn, LABEL_FIELD, money, registrationFieldKey, registrationFieldValue, rowFields, rowIssues, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateInfo } from './model'
 
 function cellText(cell: ExcelJS.Cell): string {
   const value = cell.value
@@ -110,7 +110,7 @@ export async function readTemplate(buffer: Buffer, name: string) {
     for (let index = 9; index <= sheet.rowCount; index++) {
       const productName = cellText(sheet.getCell(index, nameColumn)).trim()
       if (!productName) continue
-      const fields = Object.fromEntries(definition.columns.map((column) => [column.label, cellText(sheet.getCell(index, column.column))]))
+      const fields = Object.fromEntries(definition.columns.map((column) => [registrationFieldKey({ templateId: id }, definition, column), cellText(sheet.getCell(index, column.column))]))
       rows.push({
         ...createRegistrationRow(), id: randomUUID(), templateId: id, sheetName: definition.name, name: productName,
         priceMode: 'manual', manualSupplyPrice: money(fields['공급가']),
@@ -178,7 +178,7 @@ export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?
       for (const [index, entry] of entries.entries()) {
         const fields = rowFields(entry, draft.rounding, draft.labels)
         for (const column of definition.columns) {
-          const value = fields[column.label] ?? ''
+          const value = registrationFieldValue({ ...entry, fields }, definition, column) ?? ''
           const cell = sheet.getCell(index + 9, column.column)
           if (isAutomaticTemplateColumn(column)) {
             // Never replace a category-derived formula with an imported cached value.

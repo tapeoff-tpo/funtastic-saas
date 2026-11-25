@@ -41,10 +41,10 @@ export const rowSchema = z.object({
     internalSku: z.string().max(100), quantity: z.number().int().min(1).max(BUNDLE_QUANTITY_LIMIT),
     unitCost: amount, unitWholesale: amount,
   })).max(BUNDLE_COMPONENT_LIMIT).optional(),
-  thumbnails: z.array(z.string().max(4000)).max(30), detailImages: z.array(z.string().max(4000)).max(100), label: z.string().max(4000), fields: z.record(z.string().max(200), text),
+  thumbnails: z.array(z.string().max(4000)).max(30), detailImages: z.array(z.string().max(4000)).max(100), label: z.string().max(4000), fields: z.record(z.string().max(500), text),
   autoQualityLabel: z.object({ sourcePdfId: z.uuid(), value: z.string().max(4000) }).optional(),
   qualityLabelIssue: z.string().max(500).optional(),
-  defaultedFields: z.record(z.string().max(200), text).optional(),
+  defaultedFields: z.record(z.string().max(500), text).optional(),
   productMaster: productMaster.optional(),
 })
 export const draftSchema = z.object({

@@ -315,34 +315,34 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
             <label className="block text-sm">수량 차이 오류 설명<textarea ref={quantityReasonRef} aria-label="수량 차이 오류 설명" aria-required={summary.hasError} value={inspection.resolutionNote} maxLength={2_000} placeholder="예: 공급처 출고 누락 10개, 다음 출고에 보충 예정" className="mt-1 block w-full rounded border bg-background p-2" onChange={(event) => { setData({ ...data, inspection: { ...inspection, resolutionNote: event.target.value } }); setDirty(true) }} /></label>
           </div>}
         </fieldset>
-        <section className="space-y-3 rounded-lg border p-3">
+        {!!data.inspectionIssues?.length && <section className="space-y-3 rounded-lg border p-3">
           <div>
             <h3 className="text-sm font-semibold">등록된 검수 오류</h3>
             <p className="mt-1 text-xs text-muted-foreground">구매 담당자는 구매 목록의 구매 정보에서 내용을 수정한 뒤 저장할 수 있습니다.</p>
           </div>
-          <PurchaseInspectionIssueList purchaseItemId={id} issues={data.inspectionIssues ?? []} />
-          {editable ? <PurchaseInspectionIssueRegister
-            purchaseItemId={id}
-            disabled={pending}
-            onRegistered={(saved) => {
-              setData((current) => current ? {
-                ...current,
-                status: 'inspecting',
-                // Registering an issue is persisted immediately, but the
-                // inspector may still have unsaved box measurements in this
-                // dialog. Do not silently rebase that draft onto a server
-                // revision; a true concurrent parcel edit must still fail the
-                // normal optimistic revision check on the later save.
-                inspection: {
-                  ...current.inspection,
-                  hasReportedIssue: saved.inspection.hasReportedIssue,
-                },
-                inspectionIssues: [...(current.inspectionIssues ?? []), saved.issue],
-              } : current)
-              router.refresh()
-            }}
-          /> : null}
-        </section>
+          <PurchaseInspectionIssueList purchaseItemId={id} issues={data.inspectionIssues} />
+        </section>}
+        {editable ? <PurchaseInspectionIssueRegister
+          purchaseItemId={id}
+          disabled={pending}
+          onRegistered={(saved) => {
+            setData((current) => current ? {
+              ...current,
+              status: 'inspecting',
+              // Registering an issue is persisted immediately, but the
+              // inspector may still have unsaved box measurements in this
+              // dialog. Do not silently rebase that draft onto a server
+              // revision; a true concurrent parcel edit must still fail the
+              // normal optimistic revision check on the later save.
+              inspection: {
+                ...current.inspection,
+                hasReportedIssue: saved.inspection.hasReportedIssue,
+              },
+              inspectionIssues: [...(current.inspectionIssues ?? []), saved.issue],
+            } : current)
+            router.refresh()
+          }}
+        /> : null}
       </>}
     </div>
     {inspection && summary && <div className="sticky bottom-0 z-10 space-y-2 border-t bg-background p-4">

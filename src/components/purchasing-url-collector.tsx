@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Link2,
   LoaderCircle,
   Square,
@@ -205,6 +206,7 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
   const [verificationCounts, setVerificationCounts] = useState<VerificationCounts | null>(null)
   const [resumeAvailable, setResumeAvailable] = useState(false)
   const [legacyVerification, setLegacyVerification] = useState(false)
+  const verificationMenuRef = useRef<HTMLDetailsElement | null>(null)
   const runIdRef = useRef<string | null>(null)
   const verificationRunIdRef = useRef<string | null>(null)
   const pendingSavesRef = useRef(0)
@@ -223,6 +225,30 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
   const verificationFetchBusyRef = useRef(false)
   const verificationOperationRef = useRef(0)
   const verificationCheckpointRef = useRef<CollectorMessage['verificationCheckpoint']>(null)
+
+  useEffect(() => {
+    const closeOutsideMenu = (event: PointerEvent) => {
+      const menu = verificationMenuRef.current
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      const menu = verificationMenuRef.current
+      if (event.key === 'Escape' && menu?.open) {
+        menu.open = false
+        menu.querySelector('summary')?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOutsideMenu)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutsideMenu)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [])
+
+  const closeVerificationMenu = () => {
+    if (verificationMenuRef.current) verificationMenuRef.current.open = false
+  }
 
   const refreshVerificationCounts = useCallback(async () => {
     try {
@@ -974,11 +1000,7 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
 
   return (
     <div className="flex max-w-2xl flex-col items-end gap-2">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-      <button type="button" onClick={() => void syncPurchaseUrls()} disabled={syncing || running || verificationRunning}
-        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium disabled:opacity-50">
-        {syncing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}발주 URL 연동
-      </button>
+      <div className="flex items-center justify-end gap-2">
         {SHOW_COLLECTION_CONTROLS ? (
           <>
             <button
@@ -1005,33 +1027,48 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
             ) : null}
           </>
         ) : null}
+        <div className="inline-flex items-center">
         <button
           type="button"
           onClick={() => void startVerification('due')}
           disabled={syncing || running || verificationRunning}
-          className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
+          className={`inline-flex h-9 items-center gap-2 border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55 ${verificationRunning ? 'rounded-md' : 'rounded-l-md'}`}
         >
           {verificationRunning
             ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
             : <CheckCircle2 className="size-4" aria-hidden="true" />}
           {verificationRunning
             ? `${legacyVerification ? '기존 검증 ' : ''}${verificationProgress.processed}/${verificationProgress.total} 검증 중`
-            : `필요한 URL 검증${verificationCounts ? ` ${verificationCounts.due.toLocaleString('ko-KR')}개` : ''}`}
+            : `URL 검증${verificationCounts ? ` ${verificationCounts.due.toLocaleString('ko-KR')}개` : ''}`}
         </button>
-        {!verificationRunning ? <>
-          <button type="button" onClick={() => void startVerification('issues')} disabled={syncing || running}
-            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
-            문제 URL 재검증{verificationCounts ? ` ${verificationCounts.issues.toLocaleString('ko-KR')}개` : ''}
-          </button>
-          <button type="button" onClick={() => void startVerification('all')} disabled={syncing || running}
-            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
-            전체 URL 검증{verificationCounts ? ` ${verificationCounts.all.toLocaleString('ko-KR')}개` : ''}
-          </button>
-          {resumeAvailable ? <button type="button" onClick={resumeVerification} disabled={syncing || running || !extensionReady}
-            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium disabled:opacity-55">
-            중단한 검증 이어서
-          </button> : null}
-        </> : null}
+        {!verificationRunning ? <details ref={verificationMenuRef} className="group relative shrink-0">
+          <summary role="button" aria-label="URL 검증 메뉴" title="URL 검증 메뉴"
+            className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-r-md border border-l-0 bg-background hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 [&::-webkit-details-marker]:hidden">
+            <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border bg-background p-1 text-left shadow-lg">
+            {resumeAvailable ? <button type="button" onClick={() => { closeVerificationMenu(); resumeVerification() }}
+              disabled={syncing || running || !extensionReady}
+              className="flex min-h-9 w-full items-center rounded-sm px-3 py-2 text-left text-sm font-medium hover:bg-muted disabled:opacity-50">
+              중단한 검증 이어서
+            </button> : null}
+            <button type="button" onClick={() => { closeVerificationMenu(); void startVerification('issues') }} disabled={syncing || running}
+              className="flex min-h-9 w-full items-center justify-between gap-3 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-50">
+              <span>문제 URL 재검증</span><span className="text-muted-foreground tabular-nums">{verificationCounts ? `${verificationCounts.issues.toLocaleString('ko-KR')}개` : ''}</span>
+            </button>
+            <button type="button" onClick={() => { closeVerificationMenu(); void startVerification('all') }} disabled={syncing || running}
+              className="flex min-h-9 w-full items-center justify-between gap-3 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-50">
+              <span>전체 URL 검증</span><span className="text-muted-foreground tabular-nums">{verificationCounts ? `${verificationCounts.all.toLocaleString('ko-KR')}개` : ''}</span>
+            </button>
+            <div className="my-1 border-t" />
+            <button type="button" onClick={() => { closeVerificationMenu(); void syncPurchaseUrls() }} disabled={syncing || running}
+              className="flex min-h-9 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-50">
+              {syncing ? <LoaderCircle className="size-4 animate-spin" /> : <Link2 className="size-4" />}발주 URL 연동
+            </button>
+            <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground">기본 검증은 미검증·변경된 URL과 정상 확인 후 30일 지난 URL만 확인합니다. 단종은 제외됩니다.</p>
+          </div>
+        </details> : null}
+        </div>
         {verificationRunning ? (
           <button
             type="button"
@@ -1057,7 +1094,6 @@ export function PurchasingUrlCollector({ onUrlsChanged }: { onUrlsChanged?: () =
         </span>
       </div>
 
-      <p className="text-xs text-muted-foreground">미검증·변경된 URL과 정상 확인 후 30일 지난 URL만 기본 검증합니다. 단종은 제외됩니다. 기존 정상 검증 기록이 없으면 처음에는 대상이 많을 수 있습니다.</p>
       {legacyVerification ? <p className="text-xs text-amber-700">이전 방식의 검증이 실행 중입니다. 중단 후 필요한 URL 검증을 시작해주세요.</p> : null}
 
       {SHOW_COLLECTION_CONTROLS && progress.total > 0 ? (

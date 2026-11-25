@@ -59,8 +59,12 @@ function setupQueue(all: Link[]) {
 }
 async function startNeeded() {
   act(() => message({ type: 'FUNTASTIC_1688_PONG', running: false }))
-  fireEvent.click(screen.getByRole('button', { name: /^필요한 URL 검증/ }))
+  fireEvent.click(screen.getByRole('button', { name: /^URL 검증(?: \d|$)/ }))
   await act(async () => {})
+}
+function openVerificationMenu() {
+  const trigger = screen.getByRole('button', { name: 'URL 검증 메뉴' })
+  if (!trigger.closest('details')?.open) fireEvent.click(trigger)
 }
 async function idleTwice() {
   now += 5_000
@@ -75,6 +79,23 @@ function finish(start: Start) {
 }
 
 describe('incremental URL verification batch lifecycle', () => {
+  it('shows one default verification action and keeps advanced actions inside the menu', async () => {
+    setupQueue(links(3))
+    render(<PurchasingUrlCollector />)
+    act(() => message({ type: 'FUNTASTIC_1688_PONG', running: false }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'URL 검증 3개' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'URL 검증 메뉴' }).closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('문제 URL 재검증')).not.toBeVisible()
+    expect(screen.getByText('전체 URL 검증')).not.toBeVisible()
+    expect(screen.getByText('발주 URL 연동')).not.toBeVisible()
+    expect(screen.queryByRole('button', { name: '중단한 검증 이어서' })).not.toBeInTheDocument()
+    openVerificationMenu()
+    expect(screen.getByRole('button', { name: /^문제 URL 재검증\s*0개$/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /^전체 URL 검증\s*3개$/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: '발주 URL 연동' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '중단한 검증 이어서' })).not.toBeInTheDocument()
+  })
+
   it.each(['open', 'unavailable', 'unknown'])('saves %s before acknowledging it and deduplicates parallel results', async status => {
     const queue = setupQueue(links(1)), gate = deferred<Response>()
     queue.setResultResponse(gate.promise)
@@ -145,6 +166,7 @@ describe('incremental URL verification batch lifecycle', () => {
     await act(async () => gate.resolve(response({ links: all.slice(200), totalLinks: 1, totalItems: 1,
       skippedInvalid: 0, hasMore: false, nextCursor: all[200].url })))
     expect(queue.starts()).toHaveLength(1)
+    openVerificationMenu()
     expect(screen.getByRole('button', { name: '중단한 검증 이어서' })).toBeInTheDocument()
     expect(JSON.parse(window.sessionStorage.getItem(SESSION_KEY) ?? '{}').phase).toBe('paused')
   })
@@ -199,7 +221,7 @@ describe('incremental URL verification batch lifecycle', () => {
     expect(screen.getByText(/이전 방식의 검증이 실행 중/)).toBeInTheDocument()
     expect(queue.starts()).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: '구매 URL 검증 중단' }))
-    expect(screen.getByRole('button', { name: /^필요한 URL 검증/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^URL 검증(?: \d|$)/ })).toBeInTheDocument()
   })
 
   it('handles a START rejection reported through the legacy generic ERROR', async () => {
@@ -207,6 +229,7 @@ describe('incremental URL verification batch lifecycle', () => {
     render(<PurchasingUrlCollector />)
     await startNeeded()
     act(() => message({ type: 'FUNTASTIC_1688_ERROR', runId: queue.starts()[0].runId, message: '기존 작업이 실행 중입니다.' }))
+    openVerificationMenu()
     expect(screen.getByRole('button', { name: '중단한 검증 이어서' })).toBeInTheDocument()
     expect(mocks.error).toHaveBeenCalledWith('기존 작업이 실행 중입니다.')
   })
@@ -217,7 +240,7 @@ describe('incremental URL verification batch lifecycle', () => {
     act(() => message({ type: 'FUNTASTIC_1688_PONG', mode: 'verification', running: true,
       runId: 'old-run', total: 2_000, index: 12 }))
     fireEvent.click(screen.getByRole('button', { name: '구매 URL 검증 중단' }))
-    fireEvent.click(screen.getByRole('button', { name: /^필요한 URL 검증/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^URL 검증(?: \d|$)/ }))
     await act(async () => {})
     act(() => message({ type: 'FUNTASTIC_1688_PONG', mode: 'verification', running: true, runId: 'old-run', total: 2_000 }))
     expect(queue.starts()).toHaveLength(0)
@@ -230,8 +253,9 @@ describe('incremental URL verification batch lifecycle', () => {
     const queue = setupQueue(links(3))
     render(<PurchasingUrlCollector />)
     act(() => message({ type: 'FUNTASTIC_1688_PONG', running: false }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '전체 URL 검증 3개' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '문제 URL 재검증 0개' }))
+    openVerificationMenu()
+    await waitFor(() => expect(screen.getByRole('button', { name: /^전체 URL 검증\s*3개$/ })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^문제 URL 재검증\s*0개$/ }))
     await waitFor(() => expect(queue.starts()).toHaveLength(1))
     expect(queue.requested.some(query => query.searchParams.get('mode') === 'issues')).toBe(true)
     const requests = queue.requested.length

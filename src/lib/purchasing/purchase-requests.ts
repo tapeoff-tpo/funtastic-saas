@@ -2096,7 +2096,7 @@ export async function updatePurchaseRequestStatus(input: {
       if (current.chinaReceivedQuantity !== inspectionSummary(current.purchaseInspection).receivedQuantity) throw new Error('검수 수량이 변경되었습니다. 다시 확인해주세요.')
     }
 
-    const saasChinaMode = usesSaasChinaInventory(current.rawData)
+    const saasChinaMode = input.status === 'china_arrived' || usesSaasChinaInventory(current.rawData)
     if (saasChinaMode) {
       const hasSaasChinaLink = await hasSaasChinaPurchaseLinkInTransaction({
         tx,
@@ -2112,7 +2112,7 @@ export async function updatePurchaseRequestStatus(input: {
     }
 
     if (input.status === 'china_arrived') {
-      if (saasChinaMode && purchaseQuantity(current) > 0) {
+      if (purchaseQuantity(current) > 0) {
         await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
           userId: input.userId,
           createdBy: input.userId,
@@ -2123,8 +2123,6 @@ export async function updatePurchaseRequestStatus(input: {
           quantity: purchaseQuantity(current),
           warehouseCode: purchaseArrivalWarehouse(current.rawData),
         })
-      } else {
-        await addChinaWarehouseStock(tx, current)
       }
     }
     if (input.status === 'outbound_requested') {
@@ -2166,7 +2164,11 @@ export async function updatePurchaseRequestStatus(input: {
     if (input.status === 'china_arrived') {
       values.chinaReceivedAt = current.chinaReceivedAt ?? new Date()
       values.chinaReceivedQuantity = current.chinaReceivedQuantity ?? purchaseQuantity(current)
-      if (current.outboundExpectedDate) values.rawData = { ...current.rawData, purchaseDate: current.outboundExpectedDate }
+      values.rawData = {
+        ...current.rawData,
+        saasChinaMode: true,
+        ...(current.outboundExpectedDate ? { purchaseDate: current.outboundExpectedDate } : {}),
+      }
     }
 
     const [row] = await tx

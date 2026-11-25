@@ -162,7 +162,7 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.receive).not.toHaveBeenCalled()
   })
   it('receives exactly the inspected quantity and does not receive a duplicate completion twice', async () => {
-    fixture.current = { ...fixture.current, status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { ...inspection, checkedAt: '2026-10-30T00:00:00Z', checkedBy: 'staff-id', resolutionNote: '부족 확인' } }
+    fixture.current = { ...fixture.current, status: 'inspecting', rawData: {}, chinaReceivedQuantity: 90, purchaseInspection: { ...inspection, checkedAt: '2026-10-30T00:00:00Z', checkedBy: 'staff-id', resolutionNote: '부족 확인' } }
     await updatePurchaseRequestStatus({ userId: 'workspace-id', id: 'purchase-id', status: 'china_arrived' })
     expect(fixture.receive.mock.calls[0][1]).toMatchObject({ userId: 'workspace-id', purchaseRequestItemId: 'purchase-id', quantity: 90 })
     fixture.current.status = 'china_arrived'

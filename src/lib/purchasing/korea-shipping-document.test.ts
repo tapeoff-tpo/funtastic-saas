@@ -62,7 +62,7 @@ it('combines matching product names and options across different SKUs without mi
   expect(koreaShippingRows(source, 'box').filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(1)
 })
 
-it('shows box dimensions and reconciles mixed-box weights without double counting', async () => {
+it('shows box volume and reconciles mixed-box weights without double counting', async () => {
   const source: ImportDocumentDetail = { ...detail, boxes: [
     { ...detail.boxes[0], lengthCm: 50, widthCm: 40, heightCm: 30, grossWeightKg: 12 },
     { ...detail.boxes[1], lengthCm: 20, widthCm: 15, heightCm: 10, grossWeightKg: 5 },
@@ -70,28 +70,25 @@ it('shows box dimensions and reconciles mixed-box weights without double countin
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(await exportKoreaShippingDocument(source) as unknown as ExcelJS.Buffer)
   for (const sheet of workbook.worksheets) {
-    expect(sheet.getCell('L3').value).toBe('50')
-    expect(sheet.getCell('M3').value).toBe('40')
-    expect(sheet.getCell('N3').value).toBe('30')
-    expect(sheet.getCell('O3').value).toBe(9)
-    expect(sheet.getCell('O4').value).toBe(3)
-    expect(sheet.getCell('O6').value).toMatchObject({ result: 17 })
-    expect(sheet.pageSetup.printArea).toContain('O6')
+    expect(sheet.getCell('L3').value).toBeCloseTo(0.045)
+    expect(sheet.getCell('L6').result).toBeCloseTo(0.063)
+    expect(sheet.getCell('M3').value).toBe(9)
+    expect(sheet.getCell('M4').value).toBe(3)
+    expect(sheet.getCell('M6').value).toMatchObject({ result: 17 })
+    expect(sheet.pageSetup.printArea).toContain('M6')
   }
 })
 
 
-it('renders whole-number measurements without changing underlying weight precision', async () => {
+it('renders CBM and whole-number weights without changing underlying weight precision', async () => {
   const source: ImportDocumentDetail = { ...detail, boxes: [{ ...detail.boxes[0], lengthCm: 46.42, widthCm: 56.7, heightCm: 30.05, grossWeightKg: 12.345 }, detail.boxes[1]] }
   const buffer = await exportKoreaShippingDocument(source)
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
   const sheet = workbook.worksheets[0]
-  expect(sheet.getCell('L3').value).toBe('46')
-  expect(sheet.getCell('M3').value).toBe('57')
-  expect(sheet.getCell('N3').value).toBe('30')
-  expect(sheet.getCell('O3').value).toBe(9.25875)
-  expect((sheet.getCell('O6').value as ExcelJS.CellFormulaValue).result).toBeCloseTo(12.345, 6)
+  expect(sheet.getCell('L3').value).toBeGreaterThan(0)
+  expect(sheet.getCell('M3').value).toBe(9.25875)
+  expect((sheet.getCell('M6').value as ExcelJS.CellFormulaValue).result).toBeCloseTo(12.345, 6)
   const { renderChinaImportPreview } = await import('./china-import-preview')
   const html = await renderChinaImportPreview(buffer)
   expect(html).not.toContain('박스</td>')

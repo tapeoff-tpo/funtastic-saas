@@ -316,6 +316,26 @@ export async function exportChinaImportDocument(
       sheet.getCell(`X${row}`).alignment = { ...sheet.getCell(`X${row}`).alignment, wrapText: true }
     }
   }
+  const palletCtnRuns = new Map<string, number[]>()
+  for (const [index, invoice] of invoiceRows.entries()) {
+    const row = 20 + index
+    const packing = packingByProduct.get(importDocumentProductCode(itemById.get(invoice.itemId)!.sku))!
+    if (packing.looseBoxCount) {
+      const loose = groups.find((group) => group.id === null)?.rows.find((trade) => importDocumentProductCode(itemById.get(trade.itemId)!.sku) === importDocumentProductCode(itemById.get(invoice.itemId)!.sku))
+      sheet.getCell(`O${row}`).value = loose?.boxCount || null
+    } else {
+      const key = groups[invoice.groupIndex].id!
+      const rows = palletCtnRuns.get(key) ?? []
+      rows.push(row)
+      palletCtnRuns.set(key, rows)
+      sheet.getCell(`O${row}`).value = null
+    }
+  }
+  for (const rows of palletCtnRuns.values()) {
+    if (rows.length > 1) sheet.mergeCells(`O${rows[0]}:O${rows[rows.length - 1]}`)
+    sheet.getCell(`O${rows[0]}`).value = 1
+    sheet.getCell(`O${rows[0]}`).alignment = { horizontal: 'center', vertical: 'middle' }
+  }
   let totalAmount = 0
   for (const [index, invoice] of invoiceRows.entries()) {
     const row = 20 + index
@@ -354,6 +374,9 @@ export async function exportChinaImportDocument(
       ?? prepared.boxes.filter((box) => box.palletId === pallet.id).reduce((boxSum, box) => boxSum + (options.boxes[box.id].cbm ?? Number.NaN), options.palletExtraCbm)), 0)
   const totals: Record<string, number> = { E: totalQuantity, J: money(totalAmount), O: prepared.packageCount, R: totalQuantity, V: grossWeight }
   for (const [column, result] of Object.entries(totals)) sheet.getCell(`${column}${totalRow}`).value = Number.isFinite(result) ? { formula: `SUM(${column}20:${column}${totalRow - 1})`, result } : null
+  const representedPackages = palletCtnRuns.size + groups.filter((group) => group.id === null).reduce((sum, group) => sum + group.rows.reduce((n, row) => n + row.boxCount, 0), 0)
+  const unrepresentedPallets = prepared.packageCount - representedPackages
+  if (unrepresentedPallets > 0) sheet.getCell(`O${totalRow}`).value = { formula: `SUM(O20:O${totalRow - 1})+${unrepresentedPallets}`, result: prepared.packageCount }
   sheet.getCell(`A${totalRow}`).value = 'TOTAL'
   sheet.getCell(`I${totalRow}`).value = 'RMB'
   sheet.getCell(`P${totalRow}`).value = 'CTN'

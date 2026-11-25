@@ -110,7 +110,7 @@ describe('China import documents', () => {
     expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
     expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
-    expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)', result: 3 })
+    expect(sheet.getCell('O112').value).toEqual({ formula: 'SUM(O20:O111)+2', result: 3 })
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
   })
   it('writes one numeric carton range for an item packed across consecutive boxes', async () => {
@@ -396,7 +396,7 @@ it('combines option suffixes by product on both documents while preserving optio
   expect(sheet.getCell('L21').value).toBeNull()
   expect(sheet.getCell('K20').value).toBe('2')
   expect(sheet.getCell('M20').value).toBe('BOX')
-  expect(sheet.getCell('O20').value).toBe(2)
+  expect(sheet.getCell('O20').value).toBe(1)
   expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
   expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
   expect(sheet.getCell('X112').value).toBeCloseTo(0.38)
@@ -516,7 +516,7 @@ it.each(['ssj', 'tapeoff'] as const)('shows only loose-box counts for a product 
   expect(sheet.getCell('K20').value).toBe('BOX-3')
   expect(sheet.getCell('E20').value).toBe(60)
   expect(sheet.getCell('R20').value).toBe(60)
-  expect(sheet.getCell('O20').value).toBe(3)
+  expect(sheet.getCell('O20').value).toBe(1)
   expect(sheet.getCell('R14').value).toBe('2plt + 1ctn')
   expect(sheet.getCell('W14').value).toBe(3)
 })
@@ -549,4 +549,15 @@ it('chooses the smallest pallet number when quantities tie regardless of source 
   const sheet = await exportedSheet(shipment, overrides)
   expect(sheet.getCell('B20').value).toBe('P1')
   expect(sheet.getCell('M20').value).toBe('P1')
+})
+
+it.each(['ssj', 'tapeoff'] as const)('merges CTN cells for each representative pallet and keeps BOX counts separate in %s', async (template) => {
+  const shipment = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: 'pallet-a' })) }
+  const sheet = await exportedSheet(shipment, { ...options, template })
+  expect(sheet.model.merges).toContain('O20:O21')
+  expect(sheet.getCell('O20').value).toBe(1)
+  expect(sheet.getCell('O21').master.address).toBe('O20')
+  expect(sheet.getCell('O112').value).toMatchObject({ result: 1 })
+  expect(sheet.getCell('M20').value).toBe('P1')
+  expect(sheet.getCell('M21').value).toBe('P1')
 })

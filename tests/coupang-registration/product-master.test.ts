@@ -34,6 +34,16 @@ describe('Coupang registration Product Management lookup', () => {
     expect(result.has('1471')).toBe(false)
   })
 
+  it('carries stored contents and capacity only when provided by the matching product', async () => {
+    mocks.execute.mockResolvedValue([{ ...base, noticeComponents: ' 본체 1개, 조립 나사 4개 ', noticeCapacity: ' 2L ' }])
+    const result = await findRegistrationProductMasters('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+    expect(result.get('1471')).toMatchObject({ noticeComponents: '본체 1개, 조립 나사 4개', noticeCapacity: '2L' })
+    mocks.execute.mockResolvedValue([{ ...base, noticeComponents: null, noticeCapacity: ' ' }])
+    const missing = await findRegistrationProductMasters('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+    expect(missing.get('1471')).not.toHaveProperty('noticeComponents')
+    expect(missing.get('1471')).not.toHaveProperty('noticeCapacity')
+  })
+
   it('uses a normalized exact product name only when no SKU match exists and it is unique', async () => {
     mocks.execute.mockResolvedValue([{ ...base, requestId: 'legacy', skuMatch: false, qualityPdfId: null, qualityPdfFileName: null, qualityPdfContentType: null }])
     const result = await findRegistrationProductMasters('workspace-owner', [{ id: 'legacy', name: '마미백 플러스', skus: [] }])

@@ -12,6 +12,8 @@ type MasterMatchRow = {
   noticeMaterial: string | null
   noticeManufacturer: string | null
   noticeCountry: string | null
+  noticeComponents?: string | null
+  noticeCapacity?: string | null
   qualityPdfId: string | null
   qualityPdfFileName: string | null
   qualityPdfContentType: string | null
@@ -25,7 +27,7 @@ function isMissingProductManagementTable(error: unknown) {
   return candidate.code === '42P01' || candidate.cause?.code === '42P01'
 }
 
-function text(value: string | null) {
+function text(value: string | null | undefined) {
   return value?.trim() ?? ''
 }
 
@@ -38,6 +40,8 @@ function toMaster(row: MasterMatchRow, match: RegistrationProductMaster['match']
     noticeMaterial: text(row.noticeMaterial),
     noticeManufacturer: text(row.noticeManufacturer),
     noticeCountry: text(row.noticeCountry),
+    ...(text(row.noticeComponents) ? { noticeComponents: text(row.noticeComponents) } : {}),
+    ...(text(row.noticeCapacity) ? { noticeCapacity: text(row.noticeCapacity) } : {}),
     ...(row.qualityPdfId && row.qualityPdfFileName && row.qualityPdfContentType
       ? { qualityPdf: { id: row.qualityPdfId, fileName: row.qualityPdfFileName, contentType: row.qualityPdfContentType } }
       : {}),
@@ -77,6 +81,8 @@ export async function findRegistrationProductMasters(userId: string, products: M
           item.notice_material AS "noticeMaterial",
           item.notice_manufacturer AS "noticeManufacturer",
           item.notice_country AS "noticeCountry",
+          item.notice_components AS "noticeComponents",
+          item.notice_capacity AS "noticeCapacity",
           attachment.id::text AS "qualityPdfId",
           attachment.file_name AS "qualityPdfFileName",
           attachment.content_type AS "qualityPdfContentType"
@@ -115,6 +121,8 @@ export async function findRegistrationProductMasters(userId: string, products: M
         source."noticeMaterial",
         source."noticeManufacturer",
         source."noticeCountry",
+        source."noticeComponents",
+        source."noticeCapacity",
         source."qualityPdfId",
         source."qualityPdfFileName",
         source."qualityPdfContentType"

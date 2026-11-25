@@ -1,12 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
+import { Check, ChevronRight, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, createRegistrationRow, detailHtml, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationFieldKey, registrationFieldValue, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, createRegistrationRow, detailHtml, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
-import { checkSupplierRegistration, pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
-import { CategoryRecommendations } from './category-recommendations'
 import { useWorkbenchNavigation, type RegistrationStage } from './use-workbench-navigation'
 
 const API = '/api/operations/coupang-registration'
@@ -22,13 +20,13 @@ type ConnectedTemplate = RegistrationDraft['templates'][number]
 type CatalogSelection = { product: CatalogProduct; optionName: string }
 const steps: Array<{ stage: RegistrationStage; title: string; note: string }> = [
   { stage: 'pricing', title: '판매가설정', note: '상품 검색 · 세트 구성 · 가격 확정' },
-  { stage: 'information', title: '상품등록정보', note: '필수정보 입력 · 엑셀 출력 · 상품등록' },
-  { stage: 'registered', title: '등록완료', note: '서플라이어허브 등록 결과 확인' },
+  { stage: 'information', title: '상품등록정보', note: '카테고리 엑셀 업로드 · 상품별 정보 입력·저장' },
+  { stage: 'registered', title: '등록완료 이력', note: '이전에 확인된 등록 내역' },
 ]
 const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '') || getRegistrationStage(row) === 'registered'
 function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
   const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
-  return sheet ? applyRegistrationDefaults(row, sheet) : row
+  return applyRegistrationDefaults(row, sheet ?? registrationCommonSheet)
 }
 function OfficialColumnInput({ column, value, listId, onChange }: { column: TemplateColumn; value: string; listId: string; onChange: (value: string) => void }) {
   const className = `${inputClass} ${column.requirement === '필수' && !value.trim() ? 'border-amber-400 bg-amber-50/40' : ''}`
@@ -106,14 +104,12 @@ export function CoupangRegistrationWorkbench() {
   const [templateChoice, setTemplateChoice] = useState('')
   const [templateLibrary, setTemplateLibrary] = useState<CategoryTemplate[]>([])
   const [onlyIssues, setOnlyIssues] = useState(false)
-  const [extensionConnected, setExtensionConnected] = useState<boolean | null>(null)
+  const [informationLimit, setInformationLimit] = useState(20)
   const submissionEvents = useRef<Promise<void>>(Promise.resolve())
   const draftSession = useRef(0)
   const templateInput = useRef<HTMLInputElement>(null)
-  const templateImportMode = useRef<'registration' | 'category'>('registration')
   const labelInput = useRef<HTMLInputElement>(null)
   const bundleEditor = useRef<HTMLDivElement>(null)
-  const informationEditor = useRef<HTMLDivElement>(null)
   const stageRows = draft.rows.filter((row) => getRegistrationStage(row) === stage)
   const active = stageRows.find((row) => row.id === activeId)
   const issueMap = new Map(draft.rows.map((row) => [row.id, rowIssues(row, draft)]))
@@ -133,7 +129,7 @@ export function CoupangRegistrationWorkbench() {
         : ''
   const selectedCatalogOptionKeys = new Set(catalogSelections.map((item) => catalogOptionKey(item.product.code, item.optionName)))
   const categoryTemplates = Array.from(new Map([...templateLibrary, ...draft.templates].map((template) => [template.id, template])).values())
-  const hasCategories = categoryTemplates.some((template) => template.sheets.length > 0)
+  const visibleSteps = steps.filter((step) => step.stage !== 'registered' || draft.rows.some((row) => getRegistrationStage(row) === 'registered'))
 
   function update(change: (value: RegistrationDraft) => RegistrationDraft) { setDraft(change); setDirty(true) }
   function setRevision(value: number | undefined) { revision.current = value }
@@ -147,7 +143,7 @@ export function CoupangRegistrationWorkbench() {
   }
   function setActiveId(activeId: string) { navigate({ activeId }) }
   function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
-  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch('') }
+  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch(''); setInformationLimit(20) }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   async function refreshDrafts() { const response = await jsonRequest('/drafts'); setSaved(response.drafts) }
   useEffect(() => {
@@ -162,46 +158,18 @@ export function CoupangRegistrationWorkbench() {
     })
     return () => { cancelled = true }
   }, [])
-  useEffect(() => { void pingSupplierExtension().then((result) => setExtensionConnected(result.connected)).catch(() => setExtensionConnected(false)) }, [])
-  useEffect(() => {
-    if (!currentId) return
-    const session = draftSession.current
-    let subscribed = true
-    const unsubscribe = subscribeSupplierRegistration((event) => {
-      void queueServerWrite(async () => {
-        const response = await postJson('/submissions', { draftId: currentId, ...event })
-        if (!subscribed || session !== draftSession.current) return
-        setRevision(response.revision)
-        // Progress is authoritative only for registration state. An event may
-        // finish after the user edits another product, so never replace fields.
-        setDraft((value) => ({ ...value, rows: value.rows.map((row) => {
-          const remote = (response.payload as RegistrationDraft).rows.find((item) => item.id === row.id)
-          return remote ? { ...row, stage: remote.stage, registeredAt: remote.registeredAt, submission: remote.submission } : row
-        }) }))
-        if (event.status === 'succeeded') toast.success('서플라이어허브 상품 검수 완료를 확인했습니다.')
-        else if (event.status === 'failed' || event.status === 'login_required') toast.error(event.message)
-      }).catch((error) => { toast.error(error.message) })
-    })
-    return () => { subscribed = false; unsubscribe() }
-  }, [currentId])
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault() }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
   }, [dirty])
-  useEffect(() => {
-    if (stage === 'information' && activeId) informationEditor.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-  }, [activeId, stage])
   async function run(label: string, action: () => Promise<void>) {
     if (busy) return
     setBusy(label)
     try { await action() } catch (error) { toast.error(error instanceof Error ? error.message : '처리하지 못했습니다.') } finally { setBusy('') }
   }
 
-  function openTemplateInput(mode: 'registration' | 'category') {
-    templateImportMode.current = mode
-    templateInput.current?.click()
-  }
+  function openTemplateInput() { templateInput.current?.click() }
   async function chooseCategory(choice: string, rowIds?: string[]) {
     if (!choice) {
       if (rowIds) update((value) => ({ ...value, rows: value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? { ...row, templateId: '', sheetName: '' } : row) }))
@@ -230,44 +198,33 @@ export function CoupangRegistrationWorkbench() {
       if (!rowIds) setTemplateChoice(choice)
     })
   }
-  function connectRecommendedCategory(rowId: string, template: ConnectedTemplate, categoryId: string) {
-    const sheet = template.sheets.find((item) => item.name.startsWith(`QF_${categoryId}_`))
-    if (!sheet || !template.file) { toast.error('선택한 쿠팡 분류와 공식 양식이 일치하지 않습니다.'); return }
-    if (!draft.templates.some((item) => item.id === template.id) && draft.templates.length >= 6) { toast.error('작업당 카테고리 양식은 6개까지 연결할 수 있습니다. 새 작업으로 나눠주세요.'); return }
-    update((value) => {
-      const existing = value.templates.some((item) => item.id === template.id)
-      const target = value.rows.find((row) => row.id === rowId)
-      if (!target || submissionLocked(target) || !existing && value.templates.length >= 6) return value
-      return {
-        ...value,
-        templates: existing ? value.templates : [...value.templates, template],
-        rows: value.rows.map((row) => row.id === rowId ? applyRegistrationDefaults({ ...row, templateId: template.id, sheetName: sheet.name }, sheet) : row),
-      }
-    })
-  }
-  async function importTemplates(files: FileList | null) {
+  async function importTemplates(files: FileList | null, rowId?: string) {
     if (!files?.length) return
-    const mode = templateImportMode.current
-    templateImportMode.current = 'registration'
+    const chosenFiles = Array.from(files)
+    if (rowId && chosenFiles.length !== 1) { toast.error('상품별 카테고리 엑셀은 한 파일씩 선택해주세요.'); return }
     const session = draftSession.current
-    await run(mode === 'category' ? '카테고리 양식 연결 중' : '견적서 불러오는 중', async () => {
-      let next = draft
-      for (const file of Array.from(files)) {
+    await run('카테고리 엑셀 읽는 중', async () => {
+      let templates = draft.templates
+      let uploaded: ConnectedTemplate | undefined
+      for (const file of chosenFiles) {
         const form = new FormData(); form.set('file', file)
         const response = await jsonRequest('/template', { method: 'POST', body: form })
-        if (next.templates.some((template) => template.id === response.template.id)) continue
-        if (next.templates.length >= 6 || (mode === 'registration' && next.rows.length + response.rows.length > 500)) throw new Error('작업당 견적서 6개, 등록행 500개까지 사용할 수 있습니다.')
-        next = { ...next, templates: [...next.templates, response.template], rows: mode === 'registration' ? [...next.rows, ...response.rows] : next.rows }
+        const template = response.template as ConnectedTemplate
+        if (!template?.file || !template.sheets?.length) throw new Error('카테고리 엑셀의 입력항목을 확인하지 못했습니다.')
+        if (!templates.some((item) => item.id === template.id) && templates.length >= 6) throw new Error('작업당 카테고리 엑셀은 6개까지 연결할 수 있습니다. 새 작업으로 나눠주세요.')
+        templates = [...templates.filter((item) => item.id !== template.id), template]
+        uploaded = template
       }
-      if (mode === 'category') {
-        if (session !== draftSession.current) return
-        update((value) => ({ ...value, templates: [...value.templates, ...next.templates.filter((template) => !value.templates.some((item) => item.id === template.id))] }))
-        toast.success('카테고리 양식을 연결했습니다. 상품에 적용할 카테고리를 선택해주세요.')
-        return
-      }
-      const costs = await fillMissingCostsOnOpen(next.rows)
-      setDraft({ ...next, rows: costs.rows.map((row) => connectedDefaults(row, next.templates)) }); setDirty(true)
-      toast.success(`견적서 ${next.templates.length}개 · 등록행 ${next.rows.length}개를 불러왔습니다.`)
+      if (session !== draftSession.current) return
+      const selectedIds = rowId ? new Set([rowId]) : selected
+      const singleSheet = chosenFiles.length === 1 && uploaded?.sheets.length === 1 ? uploaded : undefined
+      update((value) => ({
+        ...value, templates,
+        rows: singleSheet ? value.rows.map((row) => selectedIds.has(row.id) && !submissionLocked(row)
+          ? applyRegistrationDefaults({ ...row, templateId: singleSheet.id, sheetName: singleSheet.sheets[0].name }, singleSheet.sheets[0]) : row) : value.rows,
+      }))
+      if (singleSheet) setTemplateChoice(singleSheet.id + ':' + singleSheet.sheets[0].name)
+      toast.success(rowId && singleSheet ? '상품에 카테고리 엑셀을 연결했습니다.' : '카테고리 엑셀을 읽었습니다. 상품에 맞는 양식을 선택해주세요.')
     })
     if (templateInput.current) templateInput.current.value = ''
   }
@@ -381,7 +338,7 @@ export function CoupangRegistrationWorkbench() {
     if (!ids.length) return
     await run('가격 확정 저장 중', async () => {
       const chosenIds = new Set(ids)
-      const next = { ...draft, rows: draft.rows.map((row) => chosenIds.has(row.id) ? confirmPricing(row, draft.rounding) : row) }
+      const next = { ...draft, rows: draft.rows.map((row) => chosenIds.has(row.id) ? connectedDefaults(confirmPricing(row, draft.rounding), draft.templates) : row) }
       await persist(next)
       changeStage('information')
       toast.success(`${ids.length}개 상품을 상품등록정보 단계로 이동했습니다.`)
@@ -392,51 +349,6 @@ export function CoupangRegistrationWorkbench() {
       const next = { ...draft, rows: draft.rows.map((item) => item.id === row.id ? returnToPricing(item) : item) }
       await persist(next)
       changeStage('pricing')
-    })
-  }
-  async function checkExtension() {
-    await run('등록 확장 연결 확인 중', async () => {
-      const result = await pingSupplierExtension()
-      setExtensionConnected(result.connected)
-      if (!result.connected) toast.error('쿠팡 등록 확장 프로그램을 설치한 뒤 연결을 확인해주세요.')
-    })
-  }
-  async function submitProducts() {
-    const rows = stageRows.filter((row) => !selected.size || selected.has(row.id))
-    if (stage !== 'information' || !rows.length) return
-    if (rows.some((row) => submissionLocked(row))) { toast.error('등록 진행 중인 상품은 결과를 먼저 확인해주세요.'); return }
-    const errors = rows.flatMap((row) => issueMap.get(row.id) ?? [])
-    if (errors.length) { setOnlyIssues(true); toast.error(`필수항목 ${errors.length}건을 먼저 확인해주세요.`); return }
-    await run('서플라이어허브 등록 준비 중', async () => {
-      const extension = await pingSupplierExtension()
-      setExtensionConnected(extension.connected)
-      if (!extension.connected) throw new Error('쿠팡 등록 확장 프로그램을 연결해주세요.')
-      const savedDraft = await persist()
-      const response = await queueServerWrite(async () => {
-        const submitted = await postJson('/submit', { draftId: savedDraft.id, revision: revision.current, rowIds: rows.map((row) => row.id) })
-        setDraft(submitted.payload); setRevision(submitted.revision); setSelected(new Set()); setDirty(false)
-        return submitted
-      })
-      try { await startSupplierRegistration(response.transfer) } catch {
-        // A missing START response does not prove the extension did not start.
-        // Keep the server's active-job lock until CHECK yields a real result.
-        throw new Error('확장 응답을 확인하지 못했습니다. 등록이 진행 중일 수 있으니 등록 상태 확인을 눌러 결과를 확인해주세요.')
-      }
-      toast.success('서플라이어허브 등록을 시작했습니다. 허브에서 필수 확인사항을 확인해주세요.')
-    })
-  }
-  async function refreshRegistration() {
-    if (!currentId) return
-    await run('등록 상태 확인 중', async () => {
-      const savedDraft = dirty ? await persist() : { id: currentId }
-      const response = await queueServerWrite(async () => {
-        const latest = await jsonRequest(`/submissions?draftId=${encodeURIComponent(savedDraft.id)}`)
-        setDraft(latest.payload); setRevision(latest.revision); setDirty(false)
-        return latest
-      })
-      const extension = await pingSupplierExtension()
-      setExtensionConnected(extension.connected)
-      if (extension.connected) for (const transfer of response.transfers ?? []) await checkSupplierRegistration(transfer)
     })
   }
   async function load(id: string) {
@@ -455,22 +367,6 @@ export function CoupangRegistrationWorkbench() {
     if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')) return
     draftSession.current++
     setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setTemplateChoice(''); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
-  }
-  async function download() {
-    const rows = stageRows.filter((row) => !selected.size || selected.has(row.id))
-    if (stage !== 'information' || !rows.length) return
-    const errors = rows.flatMap((row) => issueMap.get(row.id) ?? [])
-    if (errors.length) { setOnlyIssues(true); toast.error(`필수항목 ${errors.length}건을 먼저 확인해주세요.`); return }
-    await run('견적서 만드는 중', async () => {
-      const body = JSON.stringify({ ...draft, rows })
-      if (new TextEncoder().encode(body).length > 4_000_000) throw new Error('작업 용량이 4MB를 초과했습니다. 견적서를 나눠주세요.')
-      const response = await fetch(`${API}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-      if (!response.ok) throw new Error((await response.json()).error)
-      const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a')
-      link.href = url; link.download = `쿠팡상품등록_${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' })}.zip`; link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      toast.success('등록용 엑셀과 품질표시 파일을 다운로드했습니다.')
-    })
   }
   function closeCatalog() {
     if (busy) return
@@ -620,7 +516,7 @@ export function CoupangRegistrationWorkbench() {
   return <fieldset disabled={!!busy} className="min-w-0 space-y-4 pb-8">
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div><div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground"><span>상품등록·광고</span><ChevronRight className="size-3" /><span>로켓배송</span></div><h1 className="text-2xl font-semibold tracking-tight">쿠팡상품등록</h1></div>
-      <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><button className={buttonClass} disabled={!!busy} onClick={newDraft}><Plus className="size-3.5" />새 작업</button><button className={buttonClass} disabled={!!busy} onClick={() => void save()}><Save className="size-3.5" />임시저장</button>{stage === 'information' && <button className={`${buttonClass} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`} disabled={!!busy || !stageRows.length} onClick={() => void download()}><Download className="size-3.5" />{selected.size ? `선택 ${selected.size}개 ` : ''}엑셀로 출력</button>}</div>
+      <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><button className={buttonClass} disabled={!!busy} onClick={newDraft}><Plus className="size-3.5" />새 작업</button><button className={buttonClass} disabled={!!busy} onClick={() => void save()}><Save className="size-3.5" />임시저장</button></div>
     </header>
 
     <section aria-label="작업 불러오기" className="rounded-lg border bg-card px-4 py-3">
@@ -628,16 +524,16 @@ export function CoupangRegistrationWorkbench() {
         <input aria-label="작업 이름" className={`${inputClass} w-52 shrink-0 font-medium`} value={draft.name} onChange={(event) => update((value) => ({ ...value, name: event.target.value }))} />
         <select aria-label="저장된 작업 불러오기" className={`${inputClass} w-60 shrink-0`} value={currentId ?? ''} onChange={(event) => void load(event.target.value)}><option value="">저장된 작업 불러오기</option>{saved.map((item) => <option key={item.id} value={item.id}>{item.name} · {new Date(item.updatedAt).toLocaleDateString('ko-KR')}</option>)}</select>
         {currentId && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => void save(true)}>새 작업으로 저장</button>}
-        {stage !== 'registered' && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => openTemplateInput('registration')}><FileSpreadsheet className="size-3.5" />쿠팡 견적서 불러오기</button>}
+        {stage !== 'registered' && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => openTemplateInput()}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button>}
         {stage === 'information' && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button>}
         <a className="ml-auto inline-flex shrink-0 items-center gap-1 pl-2 text-xs text-blue-700 hover:underline" href="https://supplier.coupang.com/qvt/registration" target="_blank" rel="noreferrer">쿠팡 최신 양식 받기<ExternalLink className="size-3" /></a>
       </div></div>
-      <input ref={templateInput} aria-label="쿠팡 견적서 파일" type="file" multiple accept=".xlsx" hidden onChange={(event) => void importTemplates(event.target.files)} /><input ref={labelInput} type="file" multiple accept="image/jpeg,image/png" hidden onChange={(event) => void importLabels(event.target.files)} />
+      <input ref={templateInput} aria-label="카테고리 엑셀 파일" type="file" multiple accept=".xlsx" hidden onChange={(event) => void importTemplates(event.target.files)} /><input ref={labelInput} type="file" multiple accept="image/jpeg,image/png" hidden onChange={(event) => void importLabels(event.target.files)} />
       {draft.templates.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{draft.templates.map((template) => <span key={template.id} className="max-w-full truncate rounded bg-muted px-2 py-1 text-[11px]" title={template.name}>{template.name} · {template.sheets.length}개 카테고리</span>)}</div>}
     </section>
 
-    <nav role="tablist" aria-label="쿠팡 상품등록 단계" className="grid gap-3 sm:grid-cols-3">{steps.map((step, index) => <button key={step.stage} role="tab" aria-selected={stage === step.stage} aria-controls={`coupang-step-${step.stage}`} className={`rounded-lg border px-4 py-3 text-left ${stage === step.stage ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'bg-card hover:bg-muted/40'}`} onClick={() => changeStage(step.stage)}><span className="flex items-center justify-between gap-3"><span className={`text-sm font-semibold ${stage === step.stage ? 'text-blue-800' : ''}`}>{index + 1}단계 {step.title}</span><span className="rounded-full bg-background px-2 py-0.5 text-xs tabular-nums">{draft.rows.filter((row) => getRegistrationStage(row) === step.stage).length}개</span></span><span className="mt-1 block text-[11px] text-muted-foreground">{step.note}</span></button>)}</nav>
-    <div className="grid gap-3 sm:grid-cols-3"><Summary label={stage === 'pricing' ? '판매가설정 상품' : stage === 'information' ? '상품등록정보 작성' : '등록완료 상품'} value={`${stageRows.length}개`} note={steps.find((step) => step.stage === stage)!.note} /><Summary label={stage === 'pricing' ? '가격 확정 가능' : '필수정보 입력 완료'} value={`${stageRows.length - needsInfo.length}개`} note={stage === 'pricing' ? '공급가·판매가 기준' : '불러온 쿠팡 양식의 필수항목 기준'} /><Summary label={stage === 'registered' ? '보관 자료' : '확인이 필요한 상품'} value={stage === 'registered' ? `${draft.templates.length}개 양식` : `${needsInfo.length}개`} note={stage === 'registered' ? `품질표시 ${draft.labels.length}개` : stage === 'pricing' ? '가격을 확정하면 2단계로 이동합니다.' : '필수정보 입력 후 저장·엑셀 출력·등록하세요.'} warning={stage !== 'registered' && needsInfo.length > 0} /></div>
+    <nav role="tablist" aria-label="쿠팡 상품등록 단계" className={`grid gap-3 ${visibleSteps.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>{visibleSteps.map((step, index) => <button key={step.stage} role="tab" aria-selected={stage === step.stage} aria-controls={`coupang-step-${step.stage}`} className={`rounded-lg border px-4 py-3 text-left ${stage === step.stage ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'bg-card hover:bg-muted/40'}`} onClick={() => changeStage(step.stage)}><span className="flex items-center justify-between gap-3"><span className={`text-sm font-semibold ${stage === step.stage ? 'text-blue-800' : ''}`}>{index + 1}단계 {step.title}</span><span className="rounded-full bg-background px-2 py-0.5 text-xs tabular-nums">{draft.rows.filter((row) => getRegistrationStage(row) === step.stage).length}개</span></span><span className="mt-1 block text-[11px] text-muted-foreground">{step.note}</span></button>)}</nav>
+    <div className="grid gap-3 sm:grid-cols-3"><Summary label={stage === 'pricing' ? '판매가설정 상품' : stage === 'information' ? '상품등록정보 작성' : '등록완료 상품'} value={`${stageRows.length}개`} note={steps.find((step) => step.stage === stage)!.note} /><Summary label={stage === 'pricing' ? '가격 확정 가능' : '필수정보 입력 완료'} value={`${stageRows.length - needsInfo.length}개`} note={stage === 'pricing' ? '공급가·판매가 기준' : '불러온 쿠팡 양식의 필수항목 기준'} /><Summary label={stage === 'registered' ? '보관 자료' : '확인이 필요한 상품'} value={stage === 'registered' ? `${draft.templates.length}개 양식` : `${needsInfo.length}개`} note={stage === 'registered' ? `품질표시 ${draft.labels.length}개` : stage === 'pricing' ? '가격을 확정하면 2단계로 이동합니다.' : '상품별 입력항목을 확인하고 저장하세요.'} warning={stage !== 'registered' && needsInfo.length > 0} /></div>
 
     {stage === 'pricing' && <section id="coupang-step-pricing" role="tabpanel" aria-label="판매가설정" className="overflow-hidden rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3"><div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" /><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-48 pl-7`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} /></div><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label></div><div className="flex gap-2"><button className={buttonClass} disabled={!!busy || !draft.rows.some((row) => !row.bundleComponents && (!selected.size || selected.has(row.id)))} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />{selected.size ? '선택 상품' : '전체 상품'} 정보 연결</button><button className={buttonClass} disabled={!!busy} onClick={() => setCatalogTarget({})}><Plus className="size-3.5" />상품 추가</button><button className={buttonClass} onClick={createBundle}><Plus className="size-3.5" />새 빈 세트 만들기</button></div></div>
@@ -698,29 +594,25 @@ export function CoupangRegistrationWorkbench() {
             <td><button aria-label={`${row.name} 삭제`} className="rounded p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600" disabled={!!busy} onClick={() => { update((value) => ({ ...value, rows: value.rows.filter((item) => item.id !== row.id) })); setSelected((value) => { const next = new Set(value); next.delete(row.id); return next }) }}><Trash2 className="size-3.5" /></button></td>
           </tr>
         })}</tbody>
-      </table>{!visible.length && <div className="flex flex-col items-center gap-3 py-16 text-center"><FileSpreadsheet className="size-8 text-muted-foreground/50" /><div><p className="text-sm font-medium">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '등록할 상품을 준비하세요'}</p><p className="mt-1 text-xs text-muted-foreground">{draft.rows.length ? '검색어나 확인 필요 필터를 변경해주세요.' : '작성한 쿠팡 견적서를 불러오거나 B2B 상품을 검색해 추가하세요.'}</p></div>{!draft.rows.length && <button className={buttonClass} onClick={() => setCatalogTarget({})}><Plus className="size-3.5" />B2B 상품 검색</button>}</div>}</div>
+      </table>{!visible.length && <div className="flex flex-col items-center gap-3 py-16 text-center"><FileSpreadsheet className="size-8 text-muted-foreground/50" /><div><p className="text-sm font-medium">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '등록할 상품을 준비하세요'}</p><p className="mt-1 text-xs text-muted-foreground">{draft.rows.length ? '검색어나 확인 필요 필터를 변경해주세요.' : 'B2B 상품을 검색해 추가하고 가격을 설정하세요.'}</p></div>{!draft.rows.length && <button className={buttonClass} onClick={() => setCatalogTarget({})}><Plus className="size-3.5" />B2B 상품 검색</button>}</div>}</div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"><span>순수익 = 공급가 − 원가 − 매출부가세 − 추가 차감</span><span>자동 판매가 = 공급가 ÷ 0.6 · 직접 수정 시 실제 쿠팡 비중을 표시합니다.</span></div>
     </section>}
 
-    {stage !== 'pricing' && <section id={`coupang-step-${stage}`} role="tabpanel" aria-label={stage === 'information' ? '상품등록정보' : '등록완료'} className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b p-3"><div className="flex flex-wrap items-center gap-3"><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={`${inputClass} w-52`} value={rowSearch} onChange={(event) => setRowSearch(event.target.value)} />{stage === 'information' && <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => setOnlyIssues(event.target.checked)} />확인 필요만 보기</label>}</div><div className="flex flex-wrap gap-2">{stage === 'information' && <><button className={buttonClass} disabled={!stageRows.some((row) => !submissionLocked(row) && !row.bundleComponents)} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />상품 정보 연결</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={`${buttonClass} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`} disabled={!stageRows.length || extensionConnected !== true} onClick={() => void submitProducts()}>{selectedRows.length ? `선택 ${selectedRows.length}개 ` : ''}상품등록<ExternalLink className="size-3.5" /></button></>}<button className={buttonClass} disabled={!currentId} onClick={() => void refreshRegistration()}><RefreshCw className="size-3.5" />등록 상태 확인</button></div></div>
-      {stage === 'information' && <>
-        <div className="space-y-2 border-b bg-muted/20 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2"><span className="text-xs">선택 {selectedRows.length}개</span><CategorySelect label="일괄 카테고리" value={templateChoice} templates={categoryTemplates} onChange={(choice) => void chooseCategory(choice)} /><button className={buttonClass} disabled={!selectedRows.length || !templateChoice || selectedRows.some(submissionLocked)} onClick={() => void chooseCategory(templateChoice, selectedRows.map((row) => row.id))}>카테고리 적용</button></div>
-          <CategoryConnection empty={!hasCategories} onConnect={() => openTemplateInput('category')} />
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-blue-50/50 px-3 py-3 text-xs"><div><p className="font-medium">쿠팡 등록 확장 {extensionConnected === null ? '확인 중' : extensionConnected ? '연결됨' : '연결 필요'}</p><p className="mt-1 text-[11px] text-muted-foreground">등록 버튼을 누르면 허브에 파일을 채웁니다. 허브의 필수 확인사항 확인 후 상품 검수가 완료되면 3단계로 이동합니다.</p></div><div className="flex gap-2"><a className={buttonClass} href={`${API}/extension`} download>등록 확장 다운로드</a><button className={buttonClass} onClick={() => void checkExtension()}>확장 연결 확인</button></div></div>
-      </>}
-      <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-xs"><thead className="border-b bg-muted/30 text-muted-foreground"><tr>{stage === 'information' && <th className="w-10 p-3"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} /></th>}<th className="min-w-64 p-3 text-left">상품 · 옵션</th><th className="p-3 text-left">쿠팡 카테고리</th><th className="p-3 text-right">확정 공급가 / 판매가</th><th className="p-3 text-left">{stage === 'information' ? '필수정보 · 등록 상태' : '등록 결과'}</th><th className="p-3 text-right">작업</th></tr></thead><tbody>{visible.map((row) => {
-        const issues = issueMap.get(row.id)!
-        const prices = calculatePrice(row, draft.rounding)
-        const locked = submissionLocked(row)
-        return <tr key={row.id} className="border-b last:border-0 [&>td]:p-3"><>{stage === 'information' && <td><input aria-label={`${row.name} 선택`} type="checkbox" disabled={locked} checked={selected.has(row.id)} onChange={() => toggle(row.id)} /></td>}</><td className="font-medium leading-5">{row.name}<span className="mt-1 block text-[10px] text-muted-foreground">{row.internalSku || (row.bundleComponents ? `세트 · 구성품 ${row.bundleComponents.length}종` : '원가 SKU 미연결')}</span></td><td className="max-w-64"><span className="line-clamp-2">{row.sheetName.replace(/^QF_\d+_/, '') || '카테고리 선택 필요'}</span></td><td className="whitespace-nowrap text-right tabular-nums">{won(prices.supply)} / {won(prices.sale)}</td><td><p className={row.submission?.status === 'failed' ? 'text-red-700' : row.submission?.status === 'succeeded' ? 'text-emerald-700' : 'text-blue-800'}>{row.submission ? submissionText(row) : issues.length ? `필수정보 ${issues.length}건 확인` : '필수정보 입력 완료'}</p>{row.submission?.message && <p className="mt-1 max-w-80 text-[11px] text-muted-foreground">{row.submission.message}</p>}{stage === 'registered' && <p className="mt-1 text-[11px] text-muted-foreground">{row.submission?.receiptId && `견적서 ID · ${row.submission.receiptId}`}{row.registeredAt && ` · ${new Date(row.registeredAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`}</p>}</td><td><div className="flex justify-end gap-2">{stage === 'information' ? <><button className={buttonClass} disabled={locked} aria-label={`${row.name} 등록정보 입력`} onClick={() => setActiveId(row.id)}>등록정보 입력</button><button className={buttonClass} disabled={locked} aria-label={`${row.name} 판매가 다시 설정`} onClick={() => void reopenPricing(row)}>가격 수정</button></> : row.submission?.receiptUrl ? <a className={buttonClass} href={row.submission.receiptUrl} target="_blank" rel="noreferrer">허브 결과<ExternalLink className="size-3" /></a> : <span className="text-[11px] text-muted-foreground">검수 완료</span>}</div></td></tr>
-      })}</tbody></table>{!visible.length && <div className="px-5 py-14 text-center text-sm text-muted-foreground">{stage === 'information' ? '가격설정을 완료한 상품이 이곳에 표시됩니다.' : '서플라이어허브에서 상품 검수가 완료된 상품이 이곳에 표시됩니다.'}</div>}</div>
+    {stage === 'information' && <section id="coupang-step-information" role="tabpanel" aria-label="상품등록정보" className="space-y-4">
+      <div className="space-y-3 rounded-lg border bg-card p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3"><input aria-label="등록목록 검색" placeholder="상품명·SKU 검색" className={inputClass + ' w-52'} value={rowSearch} onChange={(event) => { setRowSearch(event.target.value); setInformationLimit(20) }} /><label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => { setOnlyIssues(event.target.checked); setInformationLimit(20) }} />확인 필요만 보기</label></div><div className="flex flex-wrap gap-2"><button className={buttonClass} disabled={!stageRows.some((row) => !submissionLocked(row) && !row.bundleComponents)} onClick={() => void syncImages()}><RefreshCw className="size-3.5" />상품 정보 연결</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button></div></div>
+        <p className="text-xs text-muted-foreground">상품별 카테고리 엑셀을 올리면 원본 양식의 필수·조건부 항목을 펼쳐 보여줍니다. 상품관리 정보와 합의한 기본값을 미리 채우며, 확인되지 않은 값은 직접 입력해주세요.</p>
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3"><label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span><CategorySelect label="일괄 카테고리" value={templateChoice} templates={categoryTemplates} onChange={setTemplateChoice} /><button className={buttonClass} disabled={!selectedRows.length || !templateChoice} onClick={() => void chooseCategory(templateChoice, selectedRows.map((row) => row.id))}>카테고리 적용</button><button className={buttonClass} onClick={openTemplateInput}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button></div>
+      </div>
+      {!visible.length && <p className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '1단계에서 상품을 추가하고 가격설정을 완료해주세요.'}</p>}
+      {visible.slice(0, informationLimit).map((row) => <div key={row.id} className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2 px-1"><label className="flex items-center gap-2 text-xs"><input aria-label={row.name + ' 선택'} type="checkbox" checked={selected.has(row.id)} disabled={submissionLocked(row)} onChange={() => toggle(row.id)} />{row.internalSku || 'SKU 미연결'}</label><button className={buttonClass} disabled={submissionLocked(row)} aria-label={row.name + ' 판매가 다시 설정'} onClick={() => void reopenPricing(row)}>가격 수정</button></div>{submissionLocked(row) ? <div className="rounded-lg border bg-card p-4"><h2 className="font-medium">{row.name}</h2><p className="mt-2 text-xs text-muted-foreground">기존 등록 처리 이력이 있는 상품입니다. {submissionText(row)} · 저장된 자료를 보존합니다.</p></div> : <RowEditor row={row} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap.get(row.id)!} onPatch={(patch) => patchRow(row.id, patch)} onCategory={(choice) => void chooseCategory(choice, [row.id])} onUpload={(files) => void importTemplates(files, row.id)} onAddComponent={() => setCatalogTarget({ bundleId: row.id })} />}</div>)}
+      {visible.length > informationLimit && <button className={buttonClass} onClick={() => setInformationLimit((value) => value + 20)}>다음 상품 20개 더 보기 ({informationLimit}/{visible.length})</button>}
     </section>}
+    {stage === 'registered' && <section id="coupang-step-registered" role="tabpanel" aria-label="등록완료 이력" className="rounded-lg border bg-card"><div className="border-b p-4 text-xs text-muted-foreground">이전에 확인된 등록완료 자료입니다.</div>{visible.map((row) => <div key={row.id} className="flex flex-wrap justify-between gap-3 border-b p-4 text-xs last:border-0"><div className="font-medium">{row.name}<span className="ml-2 text-muted-foreground">{row.internalSku}</span></div><span>{row.sheetName.replace(/^QF_\d+_/, '')}</span><span>{won(calculatePrice(row, draft.rounding).supply)} / {won(calculatePrice(row, draft.rounding).sale)}</span>{row.submission?.receiptUrl && <a className="text-blue-700 underline" href={row.submission.receiptUrl} target="_blank" rel="noreferrer">기존 허브 결과</a>}</div>)}</section>}
+
     {active && stage === 'pricing' && <div ref={active.bundleComponents ? bundleEditor : undefined} className="scroll-mt-4"><PricingEditor key={active.id} row={active} draft={draft} onPatch={(patch) => patchRow(active.id, patch)} onClose={() => setActiveId('')} onAddComponent={() => setCatalogTarget({ bundleId: active.id })} /></div>}
-    {active && stage === 'information' && !submissionLocked(active) && <div ref={informationEditor} className="scroll-mt-4"><RowEditor key={active.id} row={active} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap.get(active.id)!} onPatch={(patch) => patchRow(active.id, patch)} onCategory={(choice) => void chooseCategory(choice, [active.id])} onRecommendedCategory={(template, categoryId) => connectRecommendedCategory(active.id, template, categoryId)} onConnectCategory={() => openTemplateInput('category')} onClose={() => setActiveId('')} onAddComponent={() => setCatalogTarget({ bundleId: active.id })} /></div>}
-    {stage === 'information' && <p className="text-xs text-muted-foreground">입력 중인 내용은 저장할 수 있습니다. 필수정보가 모두 갖춰지면 엑셀 출력과 상품등록을 진행하세요.</p>}
+
+    {stage === 'information' && <p className="text-xs text-muted-foreground">입력 중인 내용은 저장할 수 있습니다. 입력한 값은 상품별로 저장되며, 업로드한 카테고리 엑셀 원본은 그대로 보관합니다.</p>}
     {busy && <div role="status" className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"><Loader2 className="size-4 animate-spin" />{busy}</div>}
 
     {catalogTarget && <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/35 p-4 pt-16" onClick={closeCatalog}><section role="dialog" aria-modal="true" aria-label={catalogTarget.bundleId ? '세트 구성품 검색' : 'B2B 상품 검색'} className="w-full max-w-3xl rounded-xl bg-background shadow-xl" onClick={(event) => event.stopPropagation()}><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">{catalogTarget.bundleId ? '세트 구성품 추가' : 'B2B 상품 추가'}</h2><p className="mt-1 text-xs text-muted-foreground">{catalogTarget.bundleId ? '옵션을 누르면 세트 구성품으로 바로 추가됩니다.' : '상품·옵션을 여러 개 체크한 뒤 한 번에 추가할 수 있습니다.'}</p></div><button aria-label="상품 검색 닫기" className="rounded p-2 hover:bg-muted" onClick={closeCatalog}><X className="size-4" /></button></header><form className="flex gap-2 p-4" onSubmit={(event) => { event.preventDefault(); void run('상품 검색 중', async () => { const response = await jsonRequest(`/catalog?q=${encodeURIComponent(query)}`); setCatalog(response.products); setSearched(true) }) }}><input autoFocus aria-label="B2B 상품명 또는 코드" className={`${inputClass} h-9 flex-1`} placeholder="상품명 또는 B2B 상품코드" value={query} onChange={(event) => setQuery(event.target.value)} /><button className={`${buttonClass} h-9`} disabled={!!busy || !query.trim()}><Search className="size-4" />검색</button></form><div className="max-h-[60vh] overflow-y-auto px-4 pb-4">{catalog.map((product) => <div key={product.code} className="flex gap-3 border-t py-3"><div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted">{product.thumbnails[0] && <img className="size-full object-contain" src={product.thumbnails[0]} alt="" />}</div><div className="min-w-0 flex-1"><div className="font-medium">{product.name}</div><div className="mt-1 text-xs text-muted-foreground">코드 {product.code} · 도매가 {won(product.price)} · 상세 {product.detailImages.length}장</div><div className="mt-2 flex flex-wrap gap-1.5">{(product.options.length ? product.options : [{ name: '', addPrice: 0 }]).map((option) => { const optionLabel = option.name || '기본 상품'; const key = catalogOptionKey(product.code, option.name); const alreadyAdded = !catalogTarget.bundleId && draft.rows.some((row) => !row.bundleComponents && row.sourceCode === product.code && row.optionName === option.name); return catalogTarget.bundleId ? <button key={key} className={buttonClass} onClick={() => void addProduct(product, option.name)}><Plus className="size-3" />{optionLabel}{option.addPrice > 0 ? ` (+${option.addPrice.toLocaleString()}원)` : ''}</button> : <label key={key} className={`flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs ${alreadyAdded ? 'cursor-not-allowed bg-muted text-muted-foreground' : 'cursor-pointer hover:bg-muted'}`}><input aria-label={`${product.name} ${optionLabel} 선택`} type="checkbox" checked={selectedCatalogOptionKeys.has(key)} disabled={alreadyAdded} onChange={() => toggleCatalogSelection(product, option.name)} />{optionLabel}{option.addPrice > 0 ? ` (+${option.addPrice.toLocaleString()}원)` : ''}{alreadyAdded && <span className="text-[10px]">등록됨</span>}</label> })}</div></div></div>)}{searched && !catalog.length && <p className="py-10 text-center text-sm text-muted-foreground">검색된 공개 상품이 없습니다.</p>}</div><footer className="flex items-center justify-between gap-2 border-t px-4 py-3 text-xs">{catalogTarget.bundleId ? <><span>구성품 {active?.bundleComponents?.length ?? 0}종 추가</span><button className={buttonClass} onClick={closeCatalog}>구성 확인</button></> : <><span>선택한 상품·옵션 {catalogSelections.length}개</span><div className="flex gap-2"><button className={buttonClass} disabled={!catalogSelections.length} onClick={() => void addSelectedProducts()}>선택 상품 {catalogSelections.length}개 추가</button><button className={buttonClass} onClick={closeCatalog}>닫기</button></div></>}</footer></section></div>}
@@ -791,47 +683,41 @@ function BundleEditor({ components, prices, onAdd, onChange, readOnly = false }:
 function CategorySelect({ label, value, templates, onChange }: { label: string; value: string; templates: CategoryTemplate[]; onChange: (value: string) => void }) {
   const hasCategories = templates.some((template) => template.sheets.length > 0)
   return <select className={`${inputClass} max-w-full`} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-    <option value="" disabled={!hasCategories}>{hasCategories ? '저장된 견적서 양식 선택' : '저장된 견적서 양식 없음'}</option>
-    {templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')}</option>))}
+    <option value="" disabled={!hasCategories}>{hasCategories ? '업로드한 양식 선택' : '카테고리 엑셀 업로드 필요'}</option>
+    {templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{template.name} · {sheet.name.replace(/^QF_\d+_/, '')}</option>))}
   </select>
 }
 
-function CategoryConnection({ empty, onConnect }: { empty: boolean; onConnect: () => void }) {
-  return <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-    <span>{empty ? '저장된 견적서 양식이 없습니다. ' : ''}목록에는 저장한 견적서의 카테고리만 표시됩니다. 상품에 맞는 양식은 서플라이어허브에서 찾아 연결해주세요.</span>
-    <button type="button" className={buttonClass} onClick={onConnect}><FileSpreadsheet className="size-3.5" />카테고리 양식 연결</button>
-    <a className="inline-flex items-center gap-1 text-blue-700 hover:underline" href="https://supplier.coupang.com/qvt/registration" target="_blank" rel="noreferrer">서플라이어허브에서 양식 받기<ExternalLink className="size-3" /></a>
-  </div>
-}
-
-function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory, onRecommendedCategory, onConnectCategory, onClose, onAddComponent }: { row: RegistrationRow; draft: RegistrationDraft; categoryTemplates: CategoryTemplate[]; issues: string[]; onPatch: (patch: Partial<RegistrationRow>) => void; onCategory: (choice: string) => void; onRecommendedCategory: (template: ConnectedTemplate, categoryId: string) => void; onConnectCategory: () => void; onClose: () => void; onAddComponent: () => void }) {
+function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory, onUpload, onAddComponent }: { row: RegistrationRow; draft: RegistrationDraft; categoryTemplates: CategoryTemplate[]; issues: string[]; onPatch: (patch: Partial<RegistrationRow>) => void; onCategory: (choice: string) => void; onUpload: (files: FileList | null) => void; onAddComponent: () => void }) {
   const [costQuery, setCostQuery] = useState('')
   const [costs, setCosts] = useState<CatalogProduct['costCandidates']>([])
   const [finding, setFinding] = useState(false)
   const [preview, setPreview] = useState(false)
+  const categoryFileInput = useRef<HTMLInputElement>(null)
   const sheet = draft.templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
+  const displayedSheet = sheet ?? registrationCommonSheet
   const computed = rowFields(row, draft.rounding, draft.labels)
   const prices = calculatePrice(row, draft.rounding)
   const automatic = new Set(['상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD])
   const fieldValue = (column: TemplateColumn, value: string) => {
-    if (sheet) onPatch({ fields: { ...row.fields, [registrationFieldKey(row, sheet, column)]: value } })
+    onPatch({ fields: { ...row.fields, [registrationFieldKey(row, displayedSheet, column)]: value } })
   }
   const labelFiles = row.label.split(',').map((name) => name.trim()).filter(Boolean).map((name) => draft.labels.find((label) => imageStem(label.name) === imageStem(name))).filter((file): file is SavedFile => !!file)
   const autoPdfLinked = !!row.productMaster?.qualityPdf && row.autoQualityLabel?.sourcePdfId === row.productMaster.qualityPdf.id && row.autoQualityLabel.value === row.label
-  return <section className="rounded-lg border bg-card" aria-label="상품등록정보 입력">
-    <header className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">상품등록정보 입력</h2><p className="mt-1 text-xs text-muted-foreground">{row.name} · 별표(*) 항목은 선택한 쿠팡 엑셀 양식의 필수정보입니다.</p></div><button aria-label="상품 상세 닫기" onClick={onClose} className="rounded p-2 hover:bg-muted"><X className="size-4" /></button></header>
+  return <section className="rounded-lg border bg-card" aria-label={row.name + ' 상품등록정보'}>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b p-4"><div><h2 className="font-semibold">{row.name}</h2><p className="mt-1 text-xs text-muted-foreground">{sheet ? '별표(*)는 업로드한 원본 양식의 필수항목입니다.' : '공통 정보를 먼저 준비하세요. 카테고리 엑셀을 올리면 정확한 필수항목이 표시됩니다.'}</p></div><span className="text-xs tabular-nums">공급가 {won(prices.supply)} / 판매가 {won(prices.sale)}</span></header>
     {issues.length > 0 && <div className="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-900">입력 확인 {issues.length}건</p><ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-amber-800">{issues.map((issue) => <li key={issue}>· {issue}</li>)}</ul></div>}
     <div className="grid gap-5 p-4 lg:grid-cols-[1fr_360px]"><div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2"><Field label="등록 상품명"><input className={inputClass} value={row.name} placeholder={row.bundleComponents ? '쿠팡에 등록할 세트 상품명' : undefined} onChange={(event) => onPatch({ name: event.target.value, bundleReviewed: false })} /></Field><div className="space-y-3"><CategoryRecommendations sourceCode={row.sourceCode} selectedSheetName={row.sheetName} onConnect={onRecommendedCategory} /><details className="rounded-md border p-2 text-xs"><summary className="cursor-pointer text-muted-foreground">저장된 양식 직접 선택</summary><div className="mt-2 space-y-2"><Field label="저장된 견적서 양식"><CategorySelect label="저장된 견적서 양식" value={row.templateId && row.sheetName ? `${row.templateId}:${row.sheetName}` : ''} templates={categoryTemplates} onChange={onCategory} /></Field><CategoryConnection empty={!categoryTemplates.some((template) => template.sheets.length > 0)} onConnect={onConnectCategory} /></div></details></div></div>
+      <div className="grid gap-3 sm:grid-cols-2"><Field label="등록 상품명"><input className={inputClass} value={row.name} placeholder={row.bundleComponents ? '등록할 세트 상품명' : undefined} onChange={(event) => onPatch({ name: event.target.value, bundleReviewed: false })} /></Field><div className="space-y-2"><Field label="업로드한 카테고리 양식"><CategorySelect label="업로드한 카테고리 양식" value={row.templateId && row.sheetName ? row.templateId + ':' + row.sheetName : ''} templates={categoryTemplates} onChange={onCategory} /></Field><button className={buttonClass} onClick={() => categoryFileInput.current?.click()}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button><input ref={categoryFileInput} aria-label={row.name + ' 카테고리 엑셀 파일'} type="file" accept=".xlsx" hidden onChange={(event) => { onUpload(event.target.files); event.target.value = '' }} /><p className="text-[11px] text-muted-foreground">올린 파일의 입력항목과 선택지만 읽습니다. 원본 파일은 변경하지 않습니다.</p></div></div>
       {row.bundleComponents ? <BundleEditor readOnly components={row.bundleComponents} prices={prices} onAdd={onAddComponent} onChange={(bundleComponents) => onPatch({ bundleComponents, bundleReviewed: false })} /> : <div className="rounded-md border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">원가 SKU 연결 · {row.internalSku || '미연결'}</span><form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); setFinding(true); void jsonRequest(`/catalog?cost=1&q=${encodeURIComponent(costQuery)}`).then((response) => setCosts(response.costs)).catch((error) => toast.error(error.message)).finally(() => setFinding(false)) }}><input aria-label="원가 SKU 검색" className={`${inputClass} w-40`} placeholder="품목코드·상품명" value={costQuery} onChange={(event) => setCostQuery(event.target.value)} /><button className={buttonClass} disabled={finding || !costQuery.trim()}>{finding ? <Loader2 className="size-3 animate-spin" /> : '조회'}</button></form></div>{costs.length > 0 && <div className="mt-2 max-h-36 overflow-y-auto">{costs.map((cost) => <button key={cost.sku} className="flex w-full justify-between gap-2 border-t p-2 text-left text-xs hover:bg-muted" onClick={() => { onPatch({ internalSku: cost.sku, costPrice: cost.costPrice }); setCosts([]) }}><span>{cost.sku} · {cost.name} {cost.optionName}</span><span>{won(cost.costPrice)}</span></button>)}</div>}<p className="mt-2 text-[11px] text-muted-foreground">원가는 품목의 works 신규 원가(원화)에서 가져옵니다. 신규원가가 없으면 비워둡니다. </p></div>}
       {(row.bundleComponents?.length || /[2-9]\d*개입/.test(row.name)) ? <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs"><input type="checkbox" checked={row.bundleReviewed} onChange={(event) => onPatch({ bundleReviewed: event.target.checked })} />묶음 구성, 세트 원가·도매가·공급가 및 라벨을 확인했습니다.</label> : null}
-      <div className="grid gap-3 sm:grid-cols-2"><Field label="품질표시 파일명 또는 공개 URL" hint="추가한 라벨 파일명과 일치해야 합니다. 여러 장은 쉼표로 구분합니다."><input className={inputClass} list="coupang-label-files" value={row.label} onChange={(event) => onPatch({ label: event.target.value })} /><datalist id="coupang-label-files">{draft.labels.map((label) => <option key={label.name} value={label.name} />)}</datalist></Field><div className="flex items-end gap-2"><button className={buttonClass} onClick={() => setPreview((value) => !value)}>상세 HTML {preview ? '닫기' : '미리보기'}</button>{row.sourceCode && <a className={buttonClass} href={`https://funtasticb2b.com/goods/view?no=${encodeURIComponent(row.sourceCode)}`} target="_blank" rel="noreferrer">원본 상세페이지<ExternalLink className="size-3" /></a>}</div></div>
+      <div className="grid gap-3 sm:grid-cols-2"><Field label="품질표시 파일명 또는 공개 URL" hint="추가한 라벨 파일명과 일치해야 합니다. 여러 장은 쉼표로 구분합니다."><input className={inputClass} list={'coupang-label-files-' + row.id} value={row.label} onChange={(event) => onPatch({ label: event.target.value })} /><datalist id={'coupang-label-files-' + row.id}>{draft.labels.map((label) => <option key={label.name} value={label.name} />)}</datalist></Field><div className="flex items-end gap-2"><button className={buttonClass} onClick={() => setPreview((value) => !value)}>상세 HTML {preview ? '닫기' : '미리보기'}</button>{row.sourceCode && <a className={buttonClass} href={`https://funtasticb2b.com/goods/view?no=${encodeURIComponent(row.sourceCode)}`} target="_blank" rel="noreferrer">원본 상세페이지<ExternalLink className="size-3" /></a>}</div></div>
       {row.productMaster && <div className="rounded-md border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-950"><p className="font-medium">상품관리 정보 연결됨 · {row.productMaster.match === 'sku' ? 'SKU 일치' : '상품명 일치'}</p><p className="mt-1">포장 기본값: {row.fields['한 개 단품 포장 사이즈'] || '크기 확인 필요'} mm · {row.fields['한 개 단품 포장 무게'] || '무게 확인 필요'} g <span className="text-blue-700">(상품 크기 각 변 +2cm 기준)</span></p>{row.productMaster.qualityPdf && <p className="mt-1">품질표시 PDF: <a className="underline" href={`/api/new-products/attachments/${encodeURIComponent(row.productMaster.qualityPdf.id)}`} target="_blank" rel="noreferrer">{row.productMaster.qualityPdf.fileName}</a> <span className="text-blue-700">· {autoPdfLinked ? `JPG ${labelFiles.length}장 자동 변환·연결됨` : '정보 연결 시 JPG로 자동 변환됩니다.'}</span></p>}</div>}
       {labelFiles.length > 0 && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">품질표시 미리보기 {labelFiles.length}장</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">{labelFiles.map((file) => <img key={file.name} className="max-h-96 max-w-full border" src={`data:image/${/\.png$/i.test(file.name) ? 'png' : 'jpeg'};base64,${file.data}`} alt={`${file.name} 품질표시 스티커`} />)}</div></details>}
       <Field label="추가이미지 URL" hint="대표이미지를 포함한 후보 목록입니다. JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다."><textarea className={`${inputClass} h-16 py-2 font-mono text-[11px]`} value={row.thumbnails.join('\n')} onChange={(event) => onPatch({ thumbnails: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></Field>
       <Field label="상세이미지 URL" hint="JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다. HTML은 자동 생성됩니다."><textarea className={`${inputClass} h-20 py-2 font-mono text-[11px]`} value={row.detailImages.join('\n')} onChange={(event) => onPatch({ detailImages: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) })} /></Field>
       {preview && <iframe title="쿠팡 상세 HTML 미리보기" sandbox="" className="h-[560px] w-full rounded border bg-white" srcDoc={`<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>${detailHtml(row.detailImages, row.name)}</body></html>`} />}
-      <details open className="rounded-md border"><summary className="cursor-pointer px-3 py-2 text-xs font-medium">카테고리 필수정보 · 상품 사이즈·포장·인증</summary><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{sheet ? sheet.columns.filter((column) => !automatic.has(column.label) && !isAutomaticTemplateColumn(column) && (column.requirement === '필수' || column.requirement.includes('조건부') || !!registrationFieldValue(row, sheet, column))).map((column) => <Field key={column.column} label={`${column.label}${column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : ''}`} hint={column.guide.slice(0, 120)}><OfficialColumnInput column={column} value={registrationFieldValue(row, sheet, column) ?? ''} listId={`official-${row.id}-${column.column}`} onChange={(value) => fieldValue(column, value)} /></Field>) : <p className="text-xs text-muted-foreground">카테고리 양식을 연결하고 선택하면 필수 입력항목이 표시됩니다.</p>}</div></details>
+      <div className="rounded-md border"><h3 className="px-3 py-2 text-xs font-medium">{sheet ? '원본 양식 필수·조건부 정보' : '미리 채운 공통 정보'}</h3><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{displayedSheet.columns.filter((column) => !automatic.has(column.label) && !isAutomaticTemplateColumn(column) && (!sheet || column.requirement === '필수' || column.requirement.includes('조건부') || !!registrationFieldValue(row, displayedSheet, column))).map((column) => <Field key={column.column} label={column.label + (column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : '')} hint={column.guide.slice(0, 120)}><OfficialColumnInput column={column} value={registrationFieldValue(row, displayedSheet, column) ?? ''} listId={'official-' + row.id + '-' + column.column} onChange={(value) => fieldValue(column, value)} /></Field>)}</div></div>
       <fieldset disabled className="rounded-md border p-3">
         <h3 className="text-xs font-medium">수익 계산 상세</h3>
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -847,6 +733,6 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
           </div>
         </div>
       </fieldset>
-    </div><aside className="space-y-3"><div><h3 className="text-xs font-medium">대표이미지 선택</h3><div className="mt-2 grid grid-cols-4 gap-2">{row.thumbnails.filter(isImageUrl).map((url, index) => <button key={url} aria-label={`대표이미지 ${index + 1} 선택`} className={`relative aspect-square overflow-hidden rounded border bg-white ${row.primaryImage === url ? 'border-blue-600 ring-2 ring-blue-200' : ''}`} onClick={() => onPatch({ primaryImage: url })}><img className="size-full object-contain" src={url} alt={`상품 이미지 ${index + 1}`} />{row.primaryImage === url && <Check className="absolute bottom-1 right-1 size-4 rounded-full bg-blue-600 text-white" />}</button>)}</div></div><Field label="대표이미지 URL"><input className={inputClass} value={row.primaryImage} onChange={(event) => onPatch({ primaryImage: event.target.value })} /></Field><div className="rounded-md bg-muted/40 p-3 text-xs leading-6"><p>상품관리 크기가 연결되면 <strong>각 변 +2cm</strong>를 포장 사이즈 기본값으로 넣습니다.</p><p className="mt-2">쿠팡 물류용 <strong>포장 사이즈·무게</strong>는 수정값을 우선 보존합니다.</p><p className="mt-2 text-muted-foreground">원본 고시정보와 라벨의 내용이 일치하는지도 확인해주세요.</p></div><div className="rounded-md border p-3 text-xs"><div className="font-medium">견적서 반영 가격</div><p className="mt-2 text-muted-foreground">가격 변경은 목록의 가격 수정에서 진행하세요.</p><div className="mt-2 flex justify-between"><span className="text-muted-foreground">공급가</span><span>{computed['공급가'] ? inputWon(Number(computed['공급가'])) : '—'}</span></div><div className="mt-1 flex justify-between"><span className="text-muted-foreground">판매가</span><span className="font-semibold text-blue-700">{computed['쿠팡 판매가'] ? inputWon(Number(computed['쿠팡 판매가'])) : '—'}</span></div></div></aside></div>
+    </div><aside className="space-y-3"><div><h3 className="text-xs font-medium">대표이미지 선택</h3><div className="mt-2 grid grid-cols-4 gap-2">{row.thumbnails.filter(isImageUrl).map((url, index) => <button key={url} aria-label={`대표이미지 ${index + 1} 선택`} className={`relative aspect-square overflow-hidden rounded border bg-white ${row.primaryImage === url ? 'border-blue-600 ring-2 ring-blue-200' : ''}`} onClick={() => onPatch({ primaryImage: url })}><img className="size-full object-contain" src={url} alt={`상품 이미지 ${index + 1}`} />{row.primaryImage === url && <Check className="absolute bottom-1 right-1 size-4 rounded-full bg-blue-600 text-white" />}</button>)}</div></div><Field label="대표이미지 URL"><input className={inputClass} value={row.primaryImage} onChange={(event) => onPatch({ primaryImage: event.target.value })} /></Field><div className="rounded-md bg-muted/40 p-3 text-xs leading-6"><p>상품관리 크기가 연결되면 <strong>각 변 +2cm</strong>를 포장 사이즈 기본값으로 넣습니다.</p><p className="mt-2">쿠팡 물류용 <strong>포장 사이즈·무게</strong>는 수정값을 우선 보존합니다.</p><p className="mt-2 text-muted-foreground">원본 고시정보와 라벨의 내용이 일치하는지도 확인해주세요.</p></div><div className="rounded-md border p-3 text-xs"><div className="font-medium">확정 가격</div><p className="mt-2 text-muted-foreground">가격 변경은 목록의 가격 수정에서 진행하세요.</p><div className="mt-2 flex justify-between"><span className="text-muted-foreground">공급가</span><span>{computed['공급가'] ? inputWon(Number(computed['공급가'])) : '—'}</span></div><div className="mt-1 flex justify-between"><span className="text-muted-foreground">판매가</span><span className="font-semibold text-blue-700">{computed['쿠팡 판매가'] ? inputWon(Number(computed['쿠팡 판매가'])) : '—'}</span></div></div></aside></div>
   </section>
 }

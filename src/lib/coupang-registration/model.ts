@@ -31,6 +31,8 @@ export type RegistrationProductMaster = {
   noticeMaterial: string
   noticeManufacturer: string
   noticeCountry: string
+  noticeComponents?: string
+  noticeCapacity?: string
   qualityPdf?: { id: string; fileName: string; contentType: string }
 }
 export type AutoQualityLabel = { sourcePdfId: string; value: string }
@@ -102,6 +104,13 @@ export const MONEY_LIMIT = 1_000_000_000
 export const BUNDLE_COMPONENT_LIMIT = 50
 export const BUNDLE_QUANTITY_LIMIT = 9999
 export const blankDraft = (): RegistrationDraft => ({ name: '쿠팡 등록 준비', rounding: 1, rows: [], templates: [], labels: [] })
+
+/** Common editable information before an official file defines its required columns. */
+export const registrationCommonSheet: TemplateSheet = {
+  name: '공통 상품등록정보',
+  columns: ['품명', '브랜드', '상품 바코드', '수입여부', '수입자', '제조사', '제조자(수입자)', '제조국', '주요 소재', '크기', '구성품', '용량', PACKAGING_SIZE_FIELD, PACKAGING_WEIGHT_FIELD, '박스 내 SKU 수량']
+    .map((label, index) => ({ column: index + 1, label, requirement: '공통정보', guide: '' })),
+}
 
 export function money(value: unknown): number | null {
   if (value === '' || value === null || value === undefined) return null
@@ -283,17 +292,25 @@ function shouldApplyDefault(current: string | undefined, previousDefault: string
  * refreshed when the source record changes.
  */
 export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRow {
-  const master = row.productMaster
-  if (!master) return row
+  if (row.stage === 'registered' || ['queued', 'running', 'login_required', 'succeeded'].includes(row.submission?.status ?? '')) return row
+  // A component's measurements or contents do not describe the assembled set.
+  const master = row.bundleComponents ? undefined : row.productMaster
   const defaults: Record<string, string> = {
-    [PACKAGING_SIZE_FIELD]: packedSizeFromNoticeSize(master.noticeSize),
-    [PACKAGING_WEIGHT_FIELD]: packedWeightFromNoticeWeight(master.noticeWeight),
-    제조국: master.noticeCountry,
-    제조자: master.noticeManufacturer,
-    제조사: master.noticeManufacturer,
-    재질: master.noticeMaterial,
-    소재: master.noticeMaterial,
-    '개당 중량': master.noticeWeight,
+    품명: row.bundleComponents ? row.name : row.sourceName || row.name,
+    ...(master ? {
+      [PACKAGING_SIZE_FIELD]: packedSizeFromNoticeSize(master.noticeSize),
+      [PACKAGING_WEIGHT_FIELD]: packedWeightFromNoticeWeight(master.noticeWeight),
+      제조국: master.noticeCountry,
+      제조자: master.noticeManufacturer,
+      제조사: master.noticeManufacturer,
+      재질: master.noticeMaterial,
+      소재: master.noticeMaterial,
+      '주요 소재': master.noticeMaterial,
+      크기: master.noticeSize,
+      구성품: master.noticeComponents ?? '',
+      용량: master.noticeCapacity ?? '',
+      '개당 중량': master.noticeWeight,
+    } : {}),
   }
   const fields = { ...row.fields }
   const defaultedFields = { ...(row.defaultedFields ?? {}) }
@@ -380,7 +397,7 @@ export function rowIssues(row: RegistrationRow, draft: RegistrationDraft): strin
   }
   const template = draft.templates.find((item) => item.id === row.templateId)
   const sheet = template?.sheets.find((item) => item.name === row.sheetName)
-  if (!sheet) return [...issues, '쿠팡 견적서 카테고리를 선택해주세요.']
+  if (!sheet) return [...issues, '카테고리 엑셀을 업로드하고 해당 양식을 선택해주세요.']
   const fields = rowFields(row, draft.rounding, draft.labels)
   const html = fields['HTML 상품 상세 컨텐츠']?.trim()
   for (const column of sheet.columns) {

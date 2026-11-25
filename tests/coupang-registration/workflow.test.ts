@@ -26,7 +26,7 @@ describe('Coupang three-stage registration workflow', () => {
   it('confirms prices before category, labels and registration fields are complete', () => {
     const row = pricedRow()
     expect(priceIssues(row)).toEqual([])
-    expect(rowIssues(row, blankDraft())).toContain('쿠팡 견적서 카테고리를 선택해주세요.')
+    expect(rowIssues(row, blankDraft())).toContain('카테고리 엑셀을 업로드하고 해당 양식을 선택해주세요.')
     const confirmed = confirmPricing(row, 1, now)
     expect(confirmed).toMatchObject({ stage: 'information', priceConfirmedAt: now, fields: row.fields })
     expect(getRegistrationStage(confirmed)).toBe('information')

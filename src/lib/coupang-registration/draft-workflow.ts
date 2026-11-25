@@ -1,4 +1,4 @@
-import { calculatePrice, confirmPricing, getRegistrationStage, imageStem, isRegistrationSubmissionActive, priceIssues, type RegistrationDraft } from './model'
+import { calculatePrice, confirmPricing, confirmRegistration, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isRegistrationDate, isRegistrationSubmissionActive, priceIssues, type RegistrationDraft } from './model'
 
 /** Browser saves may edit preparation, but may never manufacture a Hub receipt. */
 export function prepareDraftSave(incoming: RegistrationDraft, existing?: RegistrationDraft): RegistrationDraft {
@@ -6,29 +6,39 @@ export function prepareDraftSave(incoming: RegistrationDraft, existing?: Registr
   if (new Set(incoming.templates.map((template) => template.id)).size !== incoming.templates.length) throw new Error('견적서가 중복되었습니다. 작업을 다시 불러와주세요.')
   if (new Set(incoming.labels.map((label) => imageStem(label.name))).size !== incoming.labels.length) throw new Error('품질표시 파일명이 중복되었습니다.')
   const previous = new Map(existing?.rows.map((row) => [row.id, row]) ?? [])
-  const locked = (row: RegistrationDraft['rows'][number]) => getRegistrationStage(row) === 'registered'
-    || isRegistrationSubmissionActive(row) || row.submission?.status === 'login_required'
+  const inFlight = (row: RegistrationDraft['rows'][number]) => isRegistrationSubmissionActive(row) || row.submission?.status === 'login_required'
+  const locked = (row: RegistrationDraft['rows'][number]) => getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row) || inFlight(row)
   const rows = incoming.rows.map((row) => {
     const old = previous.get(row.id)
-    if (old && locked(old)) return old
+    if (old && inFlight(old)) return old
     const { submission: _submission, registeredAt: _registeredAt, ...editable } = row
     void _submission; void _registeredAt
-    if (row.stage === 'information') {
+    const completionDate = row.registrationCompletedAt
+    if (completionDate && (row.stage !== 'registered' || !isRegistrationDate(completionDate))) throw new Error('등록완료 날짜를 확인해주세요.')
+    if (old && hasVerifiedSupplierRegistration(old) && !completionDate && row.stage !== 'information') return old
+    if (old && getRegistrationStage(old) === 'registered' && row.stage === 'pricing') throw new Error('등록완료 체크를 해제한 뒤 가격을 수정해주세요.')
+    const oldProtected = !!old && (getRegistrationStage(old) === 'registered' || hasVerifiedSupplierRegistration(old))
+    const source: RegistrationDraft['rows'][number] = oldProtected && old ? old : { ...editable, addedAt: old?.addedAt ?? row.addedAt }
+    if (row.stage === 'information' || completionDate || old && hasVerifiedSupplierRegistration(old)) {
       const issues = priceIssues(row, incoming.rounding)
       if (issues.length) throw new Error(`${row.name}: ${issues.join(' ')}`)
-      if (old && getRegistrationStage(old) === 'information') {
+      let prepared: RegistrationDraft['rows'][number]
+      if (old && getRegistrationStage(old) !== 'pricing') {
         const previousPrices = calculatePrice(old, existing!.rounding)
         const incomingPrices = calculatePrice(row, incoming.rounding)
         if (incomingPrices.supply !== previousPrices.supply || incomingPrices.sale !== previousPrices.sale) throw new Error(`${row.name}: 가격을 변경하려면 판매가설정으로 되돌려주세요.`)
-        return {
-          ...editable, stage: 'information' as const, priceConfirmedAt: old.priceConfirmedAt ?? new Date().toISOString(),
+        prepared = {
+          ...source, stage: 'information' as const, priceConfirmedAt: old.priceConfirmedAt ?? new Date().toISOString(), registrationCompletedAt: undefined,
           priceMode: 'manual' as const, manualSupplyPrice: previousPrices.supply, saleMode: 'manual' as const, manualSalePrice: previousPrices.sale,
-          submission: old.submission?.status === 'failed' ? old.submission : undefined,
+          submission: old.submission, registeredAt: old.registeredAt,
         }
+      } else {
+        if (completionDate && (old && getRegistrationStage(old) === 'pricing' || !row.priceConfirmedAt)) throw new Error('판매가설정을 먼저 완료해주세요.')
+        prepared = confirmPricing({ ...source, stage: 'pricing', priceConfirmedAt: undefined, registrationCompletedAt: undefined }, incoming.rounding)
       }
-      return confirmPricing({ ...editable, stage: 'pricing', priceConfirmedAt: undefined }, incoming.rounding)
+      return completionDate ? confirmRegistration(prepared, completionDate) : prepared
     }
-    return { ...editable, stage: 'pricing' as const, priceConfirmedAt: undefined }
+    return { ...source, stage: 'pricing' as const, priceConfirmedAt: undefined, registrationCompletedAt: undefined }
   })
   for (const old of previous.values()) {
     if (locked(old) && !rows.some((row) => row.id === old.id)) rows.push(old)

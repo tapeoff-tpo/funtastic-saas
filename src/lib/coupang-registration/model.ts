@@ -39,7 +39,10 @@ export type AutoQualityLabel = { sourcePdfId: string; value: string }
 export type RegistrationRow = {
   id: string
   stage?: RegistrationStage
+  addedAt?: string
   priceConfirmedAt?: string
+  /** The date the user manually checked this product as registered. */
+  registrationCompletedAt?: string
   registeredAt?: string
   submission?: RegistrationSubmission
   templateId: string
@@ -165,12 +168,52 @@ function hasSubmissionReceipt(submission: RegistrationSubmission | undefined) {
   return !!submission?.completedAt && !!(submission.receiptId?.trim() || submission.receiptUrl?.trim())
 }
 
+export function isRegistrationDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function seoulDate(value: string | undefined): string {
+  if (!value) return ''
+  if (isRegistrationDate(value)) return value
+  const parsed = new Date(value)
+  if (!Number.isFinite(parsed.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(parsed)
+  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)?.value).join('-')
+}
+
+/** Legacy receipts stay preserved; only a user's check adds a row to stage 3. */
+export function hasVerifiedSupplierRegistration(row: RegistrationRow) {
+  return row.submission?.status === 'succeeded' && hasSubmissionReceipt(row.submission)
+}
+
 /** Legacy drafts stay in price setting until the user explicitly confirms them. */
 export function getRegistrationStage(row: RegistrationRow): RegistrationStage {
-  if (row.stage === 'registered' && row.submission?.status === 'succeeded' && hasSubmissionReceipt(row.submission)) return 'registered'
+  if (row.stage === 'registered' && row.registrationCompletedAt && isRegistrationDate(row.registrationCompletedAt)) return 'registered'
   if (row.stage === 'pricing') return 'pricing'
-  if (row.stage === 'information' || row.priceConfirmedAt) return 'information'
+  if (row.stage === 'information' || row.priceConfirmedAt || hasVerifiedSupplierRegistration(row)) return 'information'
   return 'pricing'
+}
+
+/** Dates are assigned to the current step without guessing dates for old rows. */
+export function getRegistrationDate(row: RegistrationRow): string {
+  const stage = getRegistrationStage(row)
+  return stage === 'registered' ? seoulDate(row.registrationCompletedAt)
+    : stage === 'information' ? seoulDate(row.priceConfirmedAt)
+      : seoulDate(row.addedAt)
+}
+
+export function confirmRegistration(row: RegistrationRow, date: string): RegistrationRow {
+  if (!isRegistrationDate(date)) throw new Error('등록완료 날짜를 확인해주세요.')
+  if (getRegistrationStage(row) === 'pricing' || !row.priceConfirmedAt) throw new Error('판매가설정을 먼저 완료해주세요.')
+  if (isRegistrationSubmissionActive(row) || row.submission?.status === 'login_required') throw new Error('상품등록이 진행 중입니다. 처리 결과를 기다려주세요.')
+  return { ...row, stage: 'registered', registrationCompletedAt: date }
+}
+
+export function reopenRegistration(row: RegistrationRow): RegistrationRow {
+  if (getRegistrationStage(row) !== 'registered') throw new Error('등록완료 상품을 선택해주세요.')
+  return { ...row, stage: 'information', registrationCompletedAt: undefined }
 }
 
 export function isRegistrationSubmissionActive(row: RegistrationRow) {
@@ -178,27 +221,31 @@ export function isRegistrationSubmissionActive(row: RegistrationRow) {
 }
 
 export function confirmPricing(row: RegistrationRow, rounding = 1, confirmedAt = new Date().toISOString()): RegistrationRow {
-  if (getRegistrationStage(row) === 'registered') throw new Error('등록완료 상품의 가격은 변경할 수 없습니다.')
+  if (getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row)) throw new Error('등록완료 상품의 가격은 변경할 수 없습니다.')
   if (isRegistrationSubmissionActive(row)) throw new Error('상품등록이 진행 중입니다. 처리 결과를 기다려주세요.')
   const issues = priceIssues(row, rounding)
   if (issues.length) throw new Error(issues.join(' '))
   const prices = calculatePrice(row, rounding)
   return {
-    ...row, stage: 'information', priceConfirmedAt: confirmedAt, registeredAt: undefined, submission: undefined,
+    ...row, stage: 'information', priceConfirmedAt: confirmedAt, registrationCompletedAt: undefined, registeredAt: undefined, submission: undefined,
     priceMode: 'manual', manualSupplyPrice: prices.supply, saleMode: 'manual', manualSalePrice: prices.sale,
   }
 }
 
 export function returnToPricing(row: RegistrationRow): RegistrationRow {
-  if (getRegistrationStage(row) === 'registered') throw new Error('등록완료 상품은 판매가설정으로 되돌릴 수 없습니다.')
+  if (getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row)) throw new Error('등록완료 상품은 판매가설정으로 되돌릴 수 없습니다.')
   if (isRegistrationSubmissionActive(row)) throw new Error('상품등록이 진행 중입니다. 처리 결과를 기다려주세요.')
-  return { ...row, stage: 'pricing', priceConfirmedAt: undefined, registeredAt: undefined, submission: undefined }
+  return { ...row, stage: 'pricing', priceConfirmedAt: undefined, registrationCompletedAt: undefined, registeredAt: undefined, submission: undefined }
 }
 
 /** Use only with a server-verified Supplier Hub result, never a manual completion toggle. */
 export function applyRegistrationSubmission(row: RegistrationRow, result: RegistrationSubmission): RegistrationRow {
   if (getRegistrationStage(row) === 'pricing') throw new Error('판매가설정을 먼저 완료해주세요.')
   if (!result.jobId?.trim()) throw new Error('상품등록 작업 번호를 확인하지 못했습니다.')
+  if (hasVerifiedSupplierRegistration(row)) {
+    if (result.status === 'succeeded' && result.jobId === row.submission?.jobId && hasSubmissionReceipt(result)) return row
+    throw new Error('기존 서플라이어허브 처리 결과는 변경할 수 없습니다.')
+  }
   if (getRegistrationStage(row) === 'registered') {
     if (result.status === 'succeeded' && result.jobId === row.submission?.jobId && hasSubmissionReceipt(result)) return row
     throw new Error('이미 등록완료된 상품입니다.')
@@ -427,7 +474,7 @@ export function createRegistrationRow(product?: CatalogProduct, optionName = '')
   const option = product?.options.find((item) => item.name === optionName)
   const cost = product && resolveItemCost({ name: product.name, sourceName: product.name, optionName, internalSku: '' }, product.costCandidates)
   const row: RegistrationRow = {
-    id: crypto.randomUUID(), stage: 'pricing', templateId: '', sheetName: '', name: [product?.name ?? '', optionName].filter(Boolean).join(' '), optionName,
+    id: crypto.randomUUID(), stage: 'pricing', addedAt: new Date().toISOString(), templateId: '', sheetName: '', name: [product?.name ?? '', optionName].filter(Boolean).join(' '), optionName,
     internalSku: cost?.sku ?? '', costPrice: cost?.costPrice ?? null, wholesalePrice: product?.price === null || product?.price === undefined ? null : product.price + (option?.addPrice ?? 0),
     priceMode: 'wholesale', markupPercent: 20, manualSupplyPrice: null, saleMode: 'auto', manualSalePrice: null,
     sourceCode: product?.code ?? '', sourceName: product?.name ?? '', sourceStatus: product?.status ?? '', bundleReviewed: false,

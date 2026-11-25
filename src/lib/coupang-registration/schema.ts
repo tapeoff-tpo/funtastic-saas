@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, MONEY_LIMIT } from './model'
+import { BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, isRegistrationDate, MONEY_LIMIT } from './model'
 
 const amount = z.number().finite().min(0).max(MONEY_LIMIT).nullable()
 const text = z.string().max(32767)
@@ -32,7 +32,8 @@ const productMaster = z.object({
 export const rowSchema = z.object({
   id: z.string().min(1).max(100), templateId: z.string().max(100), sheetName: z.string().max(100), name: z.string().max(500), optionName: z.string().max(300), internalSku: z.string().max(100),
   stage: z.enum(['pricing', 'information', 'registered']).default('pricing'),
-  priceConfirmedAt: timestamp.optional(), registeredAt: timestamp.optional(), submission: submissionSchema.optional(),
+  addedAt: timestamp.optional(), priceConfirmedAt: timestamp.optional(), registeredAt: timestamp.optional(), submission: submissionSchema.optional(),
+  registrationCompletedAt: z.string().max(10).refine(isRegistrationDate, '등록완료 날짜를 확인해주세요.').optional(),
   costPrice: amount, wholesalePrice: amount, priceMode: z.enum(['wholesale', 'markup', 'manual']), markupPercent: z.number().finite().min(0).max(1000), manualSupplyPrice: amount,
   saleMode: z.enum(['auto', 'manual']).default('auto'), manualSalePrice: amount.default(null),
   supplyDeductionPercent: z.union([z.literal(0), z.literal(10)]).default(0),

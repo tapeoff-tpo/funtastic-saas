@@ -105,6 +105,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const saved = await savePurchaseInspection({ userId: await getWorkspaceUserId(user.id), actorId: user.id, id: id.data, data: body.data })
     if (!saved) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
     for (const path of ['/purchasing/orders', '/purchasing/payment-flow', '/purchasing/overdue']) revalidatePath(path)
+    if (saved.status === 'china_arrived') {
+      revalidatePath('/purchasing/saas-china-inventory')
+      revalidatePath('/purchasing/china-shipments')
+    }
     return NextResponse.json(saved, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : '검수 저장에 실패했습니다.' }, { status: 409 })

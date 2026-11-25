@@ -123,14 +123,10 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || '검수 저장에 실패했습니다.')
-      setData((current) => current ? { ...current, status: 'inspecting', inspection: body.inspection } : current)
+      setData((current) => current ? { ...current, status: body.status ?? 'inspecting', inspection: body.inspection } : current)
       setDirty(false)
       setBoxNumberError('')
       if (complete) {
-        const moved = await fetch(`/api/purchasing/purchase-requests/${id}/status`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'china_arrived' }),
-        })
-        if (!moved.ok) { const detail = await moved.json(); throw new Error(detail.error || '중국창고도착 처리에 실패했습니다.') }
         toast.success('검수를 완료하고 실제 입고수량을 반영했습니다.')
         ref.current?.close()
       } else toast.success('송장·박스를 임시저장했습니다.')
@@ -310,7 +306,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
               void recordPrint()
             }}>박스 스티커 인쇄</Button>
         </>}
-        {editable && <Button type="button" disabled={pending} onClick={() => void save(true)}>검수완료</Button>}
+        {editable && <Button type="button" disabled={pending} onClick={() => void save(true)}>{pending ? '처리 중…' : '검수완료'}</Button>}
       </div>
     </div>}
   </dialog>

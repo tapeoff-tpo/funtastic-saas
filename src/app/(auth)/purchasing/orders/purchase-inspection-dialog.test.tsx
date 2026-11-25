@@ -169,8 +169,8 @@ describe('purchase tracking and inspection editor', () => {
     expect(screen.getByRole('button', { name: '박스 스티커 인쇄' })).toBeEnabled()
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
-  it('shows the shortage in inspection and completes in save-then-arrival order', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ inspection: { ...inspection, revision: 1 } })).mockResolvedValueOnce(json({ id, status: 'china_arrived' }))
+  it('shows the shortage in inspection and completes inspection and arrival in one request', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ inspection: { ...inspection, revision: 1 }, status: 'china_arrived' }))
     stubInspectionFetch(fetcher)
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
@@ -178,9 +178,8 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '구매수량과 실제 입고수량의 차이를 확인했습니다.' }))
     fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '공급처와 부족수량 확인' } })
     fireEvent.click(screen.getByRole('button', { name: '검수완료' }))
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
     expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ complete: true, acknowledgeMismatch: true, resolutionNote: '공급처와 부족수량 확인' })
-    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ status: 'china_arrived' }) })
     expect(mocks.refresh).toHaveBeenCalled()
   })
   it('does not advance to arrival when verification is rejected', async () => {

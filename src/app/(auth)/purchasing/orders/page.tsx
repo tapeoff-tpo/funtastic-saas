@@ -227,7 +227,7 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
-  const showPriceComparison = isMainOrders && (status === 'purchase_completed' || status === 'inspecting')
+  const showPriceComparison = isMainOrders && status === 'purchase_completed'
   const isSsj = authorization?.email?.trim().toLowerCase().split('@')[0] === 'ssj'
   const showPaymentControls = !isSsj && (status === 'purchased' || status === 'purchase_completed')
   const showPurchaseDateColumn = isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status)

@@ -187,7 +187,24 @@ describe('inspection persistence and arrival safety', () => {
     const context = { userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id' }
     await savePurchaseInspection({ ...context, data })
     expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { checkedBy: 'staff-id', resolutionNote: '부족 10개 공급처 확인', expectedQuantity: 100 } })
-    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.writes[0]).toMatchObject({ status: 'china_arrived', chinaReceivedQuantity: 90 })
+    expect(fixture.receive).toHaveBeenCalledOnce()
+    expect(fixture.receive).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      userId: 'workspace-id', createdBy: 'staff-id', purchaseRequestItemId: 'purchase-id', quantity: 90,
+    }))
+  })
+  it('leaves the inspection in place if SaaS inventory receipt fails', async () => {
+    fixture.current.status = 'inspecting'
+    fixture.receive.mockRejectedValueOnce(new Error('입고 실패'))
+
+    await expect(savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id',
+      data: {
+        revision: 0, parcels: [parcel], complete: true,
+        acknowledgeMismatch: true, resolutionNote: '부족 10개 확인',
+      },
+    })).rejects.toThrow('입고 실패')
+    expect(fixture.writes).toHaveLength(0)
   })
   it('preserves the recorded sticker status when another entry point only edits tracking', async () => {
     fixture.current.purchaseInspection = { ...inspection, stickerStatus: 'quality' }

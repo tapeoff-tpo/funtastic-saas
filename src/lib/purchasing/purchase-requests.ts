@@ -2047,6 +2047,7 @@ export async function issueSavedInspectionBoxNumbers(userId: string, id: string)
 export async function savePurchaseInspection(input: { userId: string; actorId: string; id: string; data: unknown }) {
   const parsed = purchaseInspectionInputSchema.parse(input.data)
   await ensurePurchasePaymentTrackingSchema()
+  if (parsed.complete) await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
     const [current] = await tx.select().from(purchaseRequestItems)
@@ -2068,12 +2069,33 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
       tx, input.userId, inspection.parcels.flatMap((parcel) => parcel.boxes.map((box) => box.id)),
       current.purchaseInspection?.boxNumbers ?? {},
     )
+    if (parsed.complete && summary.receivedQuantity > 0) {
+      await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
+        userId: input.userId,
+        createdBy: input.actorId,
+        purchaseRequestItemId: current.id,
+        sku: current.sku,
+        productName: current.productName,
+        optionName: current.optionName,
+        quantity: summary.receivedQuantity,
+        warehouseCode: purchaseArrivalWarehouse(current.rawData),
+      })
+    }
+    const status = parsed.complete ? 'china_arrived' : 'inspecting'
     await tx.update(purchaseRequestItems).set({
-      status: 'inspecting', purchaseInspection: inspection,
+      status, purchaseInspection: inspection,
+      ...(parsed.complete ? {
+        chinaReceivedAt: current.chinaReceivedAt ?? new Date(),
+        rawData: {
+          ...current.rawData,
+          saasChinaMode: true,
+          ...(current.outboundExpectedDate ? { purchaseDate: current.outboundExpectedDate } : {}),
+        },
+      } : {}),
       trackingNumber: inspection.parcels[0].trackingNumber,
       chinaReceivedQuantity: summary.quantityPending ? null : summary.receivedQuantity, updatedAt: new Date(),
     }).where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
-    return { inspection, summary }
+    return { inspection, summary, status }
   })
 }
 

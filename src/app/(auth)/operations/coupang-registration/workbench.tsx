@@ -443,11 +443,13 @@ export function CoupangRegistrationWorkbench() {
     })
   }
   async function searchProducts() {
-    if (!rowSearch.trim()) return
-    setQuery(rowSearch)
+    const searchQuery = rowSearch.trim()
+    if (!searchQuery) return
+    setQuery(searchQuery)
+    setRowSearch('')
     setCatalogTarget({})
     await run('상품 검색 중', async () => {
-      const response = await jsonRequest(`/catalog?q=${encodeURIComponent(rowSearch)}`)
+      const response = await jsonRequest(`/catalog?q=${encodeURIComponent(searchQuery)}`)
       setCatalog(response.products); setSearched(true)
     })
   }

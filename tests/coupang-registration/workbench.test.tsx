@@ -266,7 +266,7 @@ describe('registration pricing workbench', () => {
     expect(screen.queryByRole('button', { name: /엑셀.*출력|엑셀.*생성|엑셀.*다운로드/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
     for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-context|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
   })
 
   it('saves editable common information before an official file and renders only actual headers after upload', async () => {
@@ -290,6 +290,7 @@ describe('registration pricing workbench', () => {
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0].fields).toMatchObject({ 브랜드: '직접 입력한 브랜드', 제조국: '미국' }))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     fireEvent.change(within(card).getByLabelText(`${row.name} 카테고리 엑셀 파일`), { target: { files: [new File(['official'], template.name)] } })
+    await chooseUploadedSheet(row.name, template)
     expect(await screen.findByLabelText('인증정보 *')).toHaveValue('')
     card = screen.getByRole('row', { name: `${row.name} 상품등록정보` })
     expect(within(card).queryByLabelText('제조국 *')).not.toBeInTheDocument()
@@ -538,11 +539,13 @@ describe('registration pricing workbench', () => {
     let firstCard = await screen.findByRole('row', { name: `${first.name} 상품등록정보` })
     let otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
     fireEvent.change(within(firstCard).getByLabelText(`${first.name} 카테고리 엑셀 파일`), { target: { files: [new File(['first'], firstTemplate.name)] } })
+    await chooseUploadedSheet(first.name, firstTemplate)
     expect(await screen.findByLabelText('가방종류 *')).toHaveValue('')
     firstCard = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
     otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
     expect(within(otherCard).queryByLabelText('가방종류 *')).not.toBeInTheDocument()
     fireEvent.change(within(otherCard).getByLabelText(`${other.name} 카테고리 엑셀 파일`), { target: { files: [new File(['other'], otherTemplate.name)] } })
+    await chooseUploadedSheet(other.name, otherTemplate)
     expect(await screen.findByLabelText('가구재질 *')).toHaveValue('')
     firstCard = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
     otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
@@ -642,6 +645,65 @@ describe('registration pricing workbench', () => {
     })
   })
 
+  it('automatically connects only the precise Funtastic category and remembers a manual ambiguous choice for the next draft', async () => {
+    const shelf = 'QF_2379_가구_수납가구_선반'
+    const cabinet = 'QF_2380_가구_수납가구_서랍장'
+    const template = { ...manualTemplate('category-hash', '여러분류.xlsx', shelf, [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '선반단수', requirement: '필수', guide: '' }]), sheets: [
+      { name: shelf, columns: [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '선반단수', requirement: '필수', guide: '' }] },
+      { name: cabinet, columns: [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '서랍단수', requirement: '필수', guide: '' }] },
+    ] }
+    const first = confirmPricing(createRegistrationRow(source, '베이지'))
+    const other = confirmPricing(createRegistrationRow(second, '블랙'))
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [first, other], templates: [template] })
+    const fallback = vi.mocked(fetch)
+    let mappings: Array<{ sourceCode: string; sourceCategoryName: string; sourceCategoryPath: string; targetSheetName: string }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sheet-mappings')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body))
+          mappings = body.sourceCodes.map((code: string) => ({ sourceCode: code, sourceCategoryName: '수납가구', sourceCategoryPath: '가구 > 수납가구', targetSheetName: body.targetSheetName }))
+        }
+        return { ok: true, json: async () => ({ mappings, failures: [] }) }
+      }
+      if (url.includes('/category-context?')) {
+        const code = new URL(url, 'http://localhost').searchParams.get('code')!
+        return { ok: true, json: async () => ({ context: { sourceCode: code, productName: '', categoryName: code === source.code ? '선반' : '수납가구', categoryPath: code === source.code ? '가구 > 수납가구 > 선반' : '가구 > 수납가구', keywords: [], queries: [] } }) }
+      }
+      return fallback(url, init)
+    }))
+    const rendered = render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    await screen.findByLabelText('선반단수 *')
+    const automatic = screen.getByRole('row', { name: first.name + ' 상품등록정보' })
+    expect(within(automatic).getByLabelText('업로드한 카테고리 양식')).toHaveValue(template.id + ':' + shelf)
+    const ambiguous = screen.getByRole('row', { name: other.name + ' 상품등록정보' })
+    expect(within(ambiguous).getByLabelText('업로드한 카테고리 양식')).toHaveValue('')
+    expect(within(ambiguous).getByText(/후보 여러 개/)).toBeInTheDocument()
+    fireEvent.change(within(ambiguous).getByLabelText('업로드한 카테고리 양식'), { target: { value: template.id + ':' + cabinet } })
+    await waitFor(() => expect(mappings).toHaveLength(1))
+    expect(mappings[0]).toMatchObject({ sourceCode: other.sourceCode, targetSheetName: cabinet })
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('서랍단수 *'), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[1].fields).toMatchObject({ 서랍단수: '3' }))
+    rendered.unmount()
+
+    const fresh = mockSavedDraft({ ...blankDraft(), rows: [confirmPricing(createRegistrationRow(second, '블랙'))], templates: [{ ...template, id: 'new-download-hash' }] })
+    const freshFallback = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sheet-mappings')) return { ok: true, json: async () => ({ mappings }) }
+      if (url.includes('/category-context?')) return { ok: true, json: async () => ({ context: { sourceCode: second.code, productName: '', categoryName: '수납가구', categoryPath: '가구 > 수납가구', keywords: [], queries: [] } }) }
+      return freshFallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: fresh.id } })
+    await screen.findByLabelText('서랍단수 *')
+    expect(screen.getByLabelText('업로드한 카테고리 양식')).toHaveValue('new-download-hash:' + cabinet)
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/sheet-mappings') && init?.method === 'POST')).toHaveLength(0)
+  })
+
   it('keeps a selected row file snapshot when the native input clears its live FileList before parsing completes', async () => {
     const row = confirmPricing(createRegistrationRow(source, '베이지'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [row] })
@@ -659,6 +721,7 @@ describe('registration pricing workbench', () => {
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/template'))).toBe(true))
     liveFiles.length = 0
     finish({ ok: true, json: async () => ({ template, rows: [] }) })
+    await chooseUploadedSheet(row.name, template)
     expect(await screen.findByLabelText('공식필수값 *')).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: row.id, templateId: template.id, sheetName: template.sheets[0].name }))
@@ -723,6 +786,13 @@ async function openCatalogSearch(query: string) {
   return screen.findByRole('dialog', { name: 'B2B 상품 검색' })
 }
 
+async function chooseUploadedSheet(name: string, template: RegistrationDraft['templates'][number]) {
+  await screen.findAllByRole('option', { name: new RegExp(template.name.replace('.', '\\.')) })
+  await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+  fireEvent.change(within(screen.getByRole('row', { name: name + ' 상품등록정보' })).getByLabelText('업로드한 카테고리 양식'), { target: { value: template.id + ':' + template.sheets[0].name } })
+  await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+}
+
 function mockSavedDraft(initial: RegistrationDraft) {
   const saved = { id: 'draft-1', name: '단계 작업', revision: 1, updatedAt: '2026-11-23' }
   let payload = initial
@@ -731,6 +801,8 @@ function mockSavedDraft(initial: RegistrationDraft) {
     json: async () => {
       if (url.endsWith('/drafts') && init?.method === 'POST') { payload = JSON.parse(String(init.body)).draft; return { ...saved, payload } }
       if (url.includes('?id=') || url.includes('/submissions?')) return { ...saved, payload, submissions: [], transfers: [] }
+      if (url.endsWith('/sheet-mappings')) return { mappings: [] }
+      if (url.includes('/category-context?')) return { context: { sourceCode: new URL(url, 'http://localhost').searchParams.get('code'), productName: '', categoryName: '', categoryPath: '', keywords: [], queries: [] } }
       if (url.endsWith('/costs')) return { costs: [] }
       if (url.endsWith('/catalog') && init?.method === 'POST') return { products: [source, second] }
       if (url.includes('/catalog?code=')) return { product: url.includes(second.code) ? second : source }

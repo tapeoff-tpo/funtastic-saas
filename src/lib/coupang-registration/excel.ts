@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRegistrationRow, imageStem, isAutomaticTemplateColumn, LABEL_FIELD, money, registrationFieldKey, registrationFieldValue, rowFields, rowIssues, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateInfo } from './model'
+import { loadRegistrationWorkbook } from './xlsx-compat'
 
 function cellText(cell: ExcelJS.Cell): string {
   const value = cell.value
@@ -99,8 +100,7 @@ function templateInfo(workbook: ExcelJS.Workbook, id: string, name: string): Tem
 export async function readTemplate(buffer: Buffer, name: string) {
   if (buffer.length > 3_000_000) throw new Error('견적서는 파일당 3MB까지 불러올 수 있습니다.')
   const id = createHash('sha256').update(buffer).digest('hex')
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const workbook = await loadRegistrationWorkbook(buffer)
   const info = templateInfo(workbook, id, name)
   const rows: RegistrationRow[] = []
   for (const definition of info.sheets) {
@@ -143,8 +143,7 @@ export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?
   for (const template of usedTemplates) {
     const buffer = Buffer.from(template.file.data, 'base64')
     if (createHash('sha256').update(buffer).digest('hex') !== template.id) throw new Error('견적서 파일이 변경되었습니다. 다시 불러와주세요.')
-    const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    const workbook = await loadRegistrationWorkbook(buffer)
     verified.templates.push({ ...templateInfo(workbook, template.id, template.name), file: template.file })
     workbooks.set(template.id, workbook)
   }

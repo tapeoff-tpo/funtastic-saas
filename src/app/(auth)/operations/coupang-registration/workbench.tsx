@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { Check, ChevronRight, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -33,13 +33,21 @@ function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['t
   const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
   return applyRegistrationDefaults(row, sheet ?? registrationCommonSheet)
 }
-function OfficialColumnInput({ column, value, listId, onChange }: { column: TemplateColumn; value: string; listId: string; onChange: (value: string) => void }) {
+const gridTextStyle: CSSProperties = { fieldSizing: 'content', height: 'auto', minHeight: 32, maxHeight: 46, lineHeight: '16px', paddingBlock: 6, resize: 'none', overflowY: 'auto', overflowWrap: 'anywhere' }
+function GridTextInput({ singleLine = true, onChange, ...props }: ComponentProps<'textarea'> & { singleLine?: boolean }) {
+  return <textarea {...props} rows={1} data-grid-single-line={singleLine || undefined} style={gridTextStyle} onChange={(event) => {
+    if (singleLine) event.target.value = event.target.value.replace(/[\r\n]/g, '')
+    onChange?.(event)
+  }} />
+}
+function OfficialColumnInput({ column, value, listId, onChange, expandText = false }: { column: TemplateColumn; value: string; listId: string; onChange: (value: string) => void; expandText?: boolean }) {
   const className = `${inputClass} ${column.requirement === '필수' && !value.trim() ? 'border-amber-400 bg-amber-50/40' : ''}`
   if (column.choices?.length && (column.label === '카테고리' || !column.allowCustom)) return <select className={className} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide}>
     <option value="">선택해주세요</option>
     {value && !column.choices.includes(value) && <option value={value}>{value}</option>}
     {column.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
   </select>
+  if (expandText && !column.choices?.length) return <GridTextInput className={`${className} block w-full min-w-0`} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />
   return <><input className={className} list={column.choices?.length ? listId : undefined} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />{column.choices?.length ? <datalist id={listId}>{column.choices.map((choice) => <option key={choice} value={choice} />)}</datalist> : null}</>
 }
 const submissionText = (row: RegistrationRow) => row.submission ? { queued: '등록 대기', running: '등록 중', login_required: '로그인 필요', failed: '등록 실패', succeeded: '등록 완료' }[row.submission.status] : '미등록'
@@ -789,8 +797,11 @@ function InformationGrid({ expanded = false, sheetStatus, rows, columnRows, draf
 
   return <div className={`${expanded ? 'flex min-h-0 flex-1 flex-col' : ''} overflow-hidden rounded-lg border bg-card`}>
     <div role="region" aria-label="상품등록정보 가로 스크롤" tabIndex={0} className={`${expanded ? 'min-h-0 flex-1' : 'max-h-[65vh]'} overflow-auto overscroll-contain`} onKeyDown={(event) => {
-      if (event.key !== 'Enter' || event.nativeEvent.isComposing || !(event.target instanceof HTMLInputElement) || ['checkbox', 'file'].includes(event.target.type)) return
-      const cell = event.target.closest('td')
+      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+      const target = event.target
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement && target.hasAttribute('data-grid-single-line')) || target instanceof HTMLInputElement && ['checkbox', 'file'].includes(target.type)) return
+      if (target instanceof HTMLTextAreaElement) event.preventDefault()
+      const cell = target.closest('td')
       const nextRow = cell?.parentElement?.nextElementSibling as HTMLTableRowElement | null
       const next = cell && nextRow?.cells[cell.cellIndex]?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input:not([type="file"]):not([type="checkbox"]), select, textarea')
       if (next && !next.matches(':disabled')) { event.preventDefault(); next.focus() }
@@ -818,7 +829,7 @@ function InformationGrid({ expanded = false, sheetStatus, rows, columnRows, draf
           return <tr key={row.id} aria-label={row.name + ' 상품등록정보'} className="group bg-card hover:bg-blue-50/30">
             <td className={`${cellClass} sticky left-0 z-10 w-10 min-w-10 bg-card text-center`}><input aria-label={row.name + ' 선택'} type="checkbox" checked={selected.has(row.id)} disabled={locked} onChange={() => onToggle(row.id)} /></td>
             <td className={`${cellClass} sticky left-10 z-10 bg-card shadow-[2px_0_3px_-2px_#94a3b8]`}>
-              <input aria-label="등록 상품명" className={`${gridInput} font-medium`} value={row.name} disabled={locked} onChange={(event) => onPatch(row.id, { name: event.target.value, bundleReviewed: false })} />
+              <GridTextInput aria-label="등록 상품명" className={`${gridInput} block font-medium`} value={row.name} disabled={locked} onChange={(event) => onPatch(row.id, { name: event.target.value, bundleReviewed: false })} />
               <div className="mt-1 flex items-center justify-between gap-2 text-[10px]"><span className="truncate text-muted-foreground">{row.internalSku || 'SKU 미연결'}</span><div className="flex shrink-0 gap-2"><button className="text-blue-700 hover:underline disabled:opacity-40" aria-label={row.name + ' 상세정보'} disabled={locked} onClick={() => onOpen(row.id)}>상세정보</button><button className="text-muted-foreground hover:underline disabled:opacity-40" aria-label={row.name + ' 판매가 다시 설정'} disabled={locked} onClick={() => onPrice(row)}>가격 수정</button></div></div>
               <div className="mt-1">{locked ? <span className="text-muted-foreground">{submissionText(row)} · 저장된 자료 보존</span> : rowIssues.length ? <><button className="text-[10px] text-amber-700 hover:underline" title={rowIssues.join('\n')} aria-describedby={'information-issues-' + row.id} onClick={() => onOpen(row.id)}>입력 확인 {rowIssues.length}건</button><ul id={'information-issues-' + row.id} className="sr-only">{rowIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></> : <span className="text-[10px] text-emerald-700">필수정보 입력 완료</span>}</div>
               {(row.bundleComponents?.length || /[2-9]\d*개입/.test(row.name)) ? <label className="mt-1 flex items-center gap-1 text-[10px]"><input type="checkbox" checked={row.bundleReviewed} disabled={locked} onChange={(event) => onPatch(row.id, { bundleReviewed: event.target.checked })} />세트 구성·가격·라벨 확인</label> : null}
@@ -830,14 +841,14 @@ function InformationGrid({ expanded = false, sheetStatus, rows, columnRows, draf
               if (!cell) return <td key={header.key} className={`${cellClass} bg-muted/30 text-center text-muted-foreground`} title="이 상품의 양식에 없는 항목입니다.">—</td>
               const { column, fieldKey, value } = cell
               const label = column.label + (column.requirement === '필수' ? ' *' : column.requirement.includes('조건부') ? ' (조건부)' : '')
-              return <td key={header.key} title={column.guide || undefined} className={`${cellClass} ${column.requirement === '필수' && !value.trim() ? 'bg-amber-50/50' : ''}`}><fieldset disabled={locked} className="min-w-0"><label className="block [&_input]:min-w-0 [&_input]:w-full [&_select]:min-w-0 [&_select]:w-full"><span className="sr-only">{label}</span><OfficialColumnInput column={column} value={value} listId={'grid-' + row.id + '-' + column.column} onChange={(value) => onPatch(row.id, { fields: { ...row.fields, [fieldKey]: value } })} /></label></fieldset></td>
+              return <td key={header.key} title={column.guide || undefined} className={`${cellClass} ${column.requirement === '필수' && !value.trim() ? 'bg-amber-50/50' : ''}`}><fieldset disabled={locked} className="min-w-0"><label className="block [&_input]:min-w-0 [&_input]:w-full [&_select]:min-w-0 [&_select]:w-full"><span className="sr-only">{label}</span><OfficialColumnInput expandText column={column} value={value} listId={'grid-' + row.id + '-' + column.column} onChange={(value) => onPatch(row.id, { fields: { ...row.fields, [fieldKey]: value } })} /></label></fieldset></td>
             })}
             <td className={cellClass}><input aria-label="품질표시 파일명 또는 공개 URL" className={gridInput} list={'grid-labels-' + row.id} value={row.label} disabled={locked} onChange={(event) => onPatch(row.id, { label: event.target.value })} /><datalist id={'grid-labels-' + row.id}>{draft.labels.map((label) => <option key={label.name} value={label.name} />)}</datalist></td>
             <td className={`${cellClass} text-right tabular-nums`}>{won(prices.supply)}</td>
             <td className={`${cellClass} text-right tabular-nums`}>{won(prices.sale)}</td>
-            <td className={cellClass}><input aria-label="대표이미지 URL" className={gridInput} value={row.primaryImage} disabled={locked} onChange={(event) => onPatch(row.id, { primaryImage: event.target.value })} /></td>
-            <td className={cellClass}><textarea aria-label="추가이미지 URL" className={`${gridInput} h-8 resize-y py-1.5`} value={row.thumbnails.join('\n')} disabled={locked} onChange={(event) => onPatch(row.id, { thumbnails: imageLines(event.target.value), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></td>
-            <td className={cellClass}><textarea aria-label="상세이미지 URL" className={`${gridInput} h-8 resize-y py-1.5`} value={row.detailImages.join('\n')} disabled={locked} onChange={(event) => onPatch(row.id, { detailImages: imageLines(event.target.value) })} /></td>
+            <td className={cellClass}><GridTextInput aria-label="대표이미지 URL" className={`${gridInput} block`} value={row.primaryImage} disabled={locked} onChange={(event) => onPatch(row.id, { primaryImage: event.target.value })} /></td>
+            <td className={cellClass}><GridTextInput singleLine={false} aria-label="추가이미지 URL" className={`${gridInput} block`} value={row.thumbnails.join('\n')} disabled={locked} onChange={(event) => onPatch(row.id, { thumbnails: imageLines(event.target.value), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></td>
+            <td className={cellClass}><GridTextInput singleLine={false} aria-label="상세이미지 URL" className={`${gridInput} block`} value={row.detailImages.join('\n')} disabled={locked} onChange={(event) => onPatch(row.id, { detailImages: imageLines(event.target.value) })} /></td>
           </tr>
         })}</tbody>
       </table>

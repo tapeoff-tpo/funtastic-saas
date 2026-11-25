@@ -7,10 +7,13 @@ const allowedServerActionOrigins = process.env.NEXT_SERVER_ACTIONS_ALLOWED_ORIGI
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
-  // The quality-PDF renderer loads a platform-specific native canvas binary at runtime.
-  serverExternalPackages: ['@napi-rs/canvas'],
+  // The quality-PDF renderer loads platform-specific native code and its own
+  // module-relative fake worker at runtime. Keeping both packages external
+  // preserves the worker's `import.meta.url` resolution in the Vercel function.
+  serverExternalPackages: ['@napi-rs/canvas', 'pdfjs-dist'],
   outputFileTracingIncludes: {
     '/api/operations/coupang-registration/extension': ['./tools/browser-extensions/funtastic-coupang-registration/**/*'],
+    '/api/operations/coupang-registration/quality-label': ['./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'],
   },
   turbopack: {
     root: process.cwd(),

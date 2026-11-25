@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PurchaseInspectionButton } from './purchase-inspection-dialog'
 
 const mocks = vi.hoisted(() => ({ refresh: vi.fn(), toast: vi.fn() }))
@@ -42,7 +42,7 @@ describe('purchase tracking and inspection editor', () => {
     expect(await screen.findByLabelText('1번 송장 1번 박스 quantity')).toHaveValue(100)
     expect(screen.queryByText(/임시 기본값/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '박스 추가' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '송장 추가' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '새 송장 추가' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
 
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
@@ -83,97 +83,44 @@ describe('purchase tracking and inspection editor', () => {
     expect(fetcher.mock.calls[1][0]).toBe(`/api/purchasing/purchase-requests/${id}/inspection`)
     expect(fetcher.mock.calls[1][1].method).toBe('POST')
   })
-  it('copies a completed box under the same tracking number with sequential box numbers and editable values', async () => {
-    stubInspectionFetch(vi.fn(async () => json(detail)))
-    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
-    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
-
-    fireEvent.click(await screen.findByRole('button', { name: '박스 복사' }))
-    fireEvent.change(screen.getByLabelText('1번 송장 1번 박스 복사 개수'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: '복사 추가' }))
-
-    expect(screen.getByLabelText('1번 송장 6번 박스 quantity')).toHaveValue(90)
-    expect(screen.getByLabelText('1번 송장 6번 박스 lengthCm')).toHaveValue(50)
-    expect(screen.getByLabelText('1번 송장 6번 박스 widthCm')).toHaveValue(40)
-    expect(screen.getByLabelText('1번 송장 6번 박스 heightCm')).toHaveValue(30)
-    expect(screen.getByLabelText('1번 송장 6번 박스 weightKg')).toHaveValue(10)
-
-    fireEvent.change(screen.getByLabelText('1번 송장 4번 박스 lengthCm'), { target: { value: '60' } })
-    expect(screen.getByLabelText('1번 송장 1번 박스 lengthCm')).toHaveValue(50)
-    expect(screen.getByLabelText('1번 송장 4번 박스 lengthCm')).toHaveValue(60)
-    expect(screen.getByLabelText('1번 송장 6번 박스 lengthCm')).toHaveValue(50)
-  })
-  it('copies boxes from an existing parcel header without adding boxes to another tracking number', async () => {
-    const sourceBox = { ...box, id: '00000000-0000-4000-8000-000000000006', quantity: 12, lengthCm: 60, widthCm: 50, heightCm: 40, weightKg: 11 }
-    const existingInspection = {
+  it('adds exactly one copy of the first box to its own tracking number', async () => {
+    const first = { ...box, id: '00000000-0000-4000-8000-000000000005', quantity: 12, lengthCm: 60 }
+    const second = { ...box, id: '00000000-0000-4000-8000-000000000006', quantity: 3 }
+    const savedInspection = {
       ...inspection,
+      revision: 1,
+      boxNumbers: { [box.id]: '261125-001', [first.id]: '261125-002', [second.id]: '261125-003' },
       parcels: [inspection.parcels[0], {
         id: '00000000-0000-4000-8000-000000000004',
-        trackingNumber: 'SF002',
-        boxes: [{ ...box, id: '00000000-0000-4000-8000-000000000005', lengthCm: null }, sourceBox],
+        trackingNumber: 'SF002', boxes: [first, second],
       }],
     }
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({ ...detail, status: 'inspecting', inspection: existingInspection }))
-      .mockResolvedValueOnce(json({ inspection: { ...existingInspection, revision: 1 } }))
+      .mockResolvedValueOnce(json({ ...detail, status: 'inspecting', inspection: savedInspection }))
+      .mockResolvedValueOnce(json({ inspection: { ...savedInspection, revision: 2 } }))
     stubInspectionFetch(fetcher)
     render(<PurchaseInspectionButton id={id} productName="유리컵" />)
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
 
     const copy = await screen.findByRole('button', { name: '2번 송장 박스 복사' })
-    expect(copy).toBeEnabled()
-    expect(copy.closest('.overflow-x-auto')).toBeNull()
-    const parcel = copy.closest('section')!
-    expect(within(parcel).getByLabelText('운송장번호 2')).toHaveValue('SF002')
-    expect(copy.compareDocumentPosition(parcel.querySelector('table')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(copy)
-    const source = within(parcel).getByLabelText('복사할 박스')
-    expect(within(source).getAllByRole('option').map((option) => option.textContent)).toEqual(['2번 송장 2번 박스 복사'])
-    fireEvent.change(screen.getByLabelText('2번 송장 2번 박스 복사 개수'), { target: { value: '2' } })
-    fireEvent.click(screen.getByRole('button', { name: '복사 추가' }))
-
-    expect(screen.queryByLabelText('1번 송장 2번 박스 quantity')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('운송장번호 1')).toHaveValue('SF001')
-    expect(screen.getByLabelText('운송장번호 2')).toHaveValue('SF002')
     expect(screen.getByLabelText('2번 송장 3번 박스 quantity')).toHaveValue(12)
-    expect(screen.getByLabelText('2번 송장 4번 박스 weightKg')).toHaveValue(11)
-    fireEvent.change(screen.getByLabelText('2번 송장 3번 박스 quantity'), { target: { value: '9' } })
-    fireEvent.change(screen.getByLabelText('2번 송장 3번 박스 lengthCm'), { target: { value: '77' } })
-    expect(screen.getByLabelText('2번 송장 2번 박스 quantity')).toHaveValue(12)
-    expect(screen.getByLabelText('2번 송장 2번 박스 lengthCm')).toHaveValue(60)
-    expect(screen.getByLabelText('2번 송장 4번 박스 lengthCm')).toHaveValue(60)
-    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '추가 포장 수량을 공급처에 확인했습니다.' } })
-    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    expect(screen.getByLabelText('2번 송장 3번 박스 lengthCm')).toHaveValue(60)
+    expect(screen.queryByLabelText('2번 송장 4번 박스 quantity')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('1번 송장 2번 박스 quantity')).not.toBeInTheDocument()
+    expect(screen.getByText('261125-002')).toBeInTheDocument()
+    expect(screen.getByText('미발급')).toBeInTheDocument()
 
+    fireEvent.change(screen.getByLabelText('2번 송장 3번 박스 lengthCm'), { target: { value: '77' } })
+    expect(screen.getByLabelText('2번 송장 1번 박스 lengthCm')).toHaveValue(60)
+    fireEvent.change(screen.getByLabelText('수량 차이 오류 설명'), { target: { value: '공급처 포장 수량 확인' } })
+    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
     const saved = JSON.parse(fetcher.mock.calls[1][1].body)
-    expect(saved.complete).toBe(false)
-    expect(saved.parcels[0]).toEqual(existingInspection.parcels[0])
     expect(saved.parcels[1].trackingNumber).toBe('SF002')
-    expect(saved.parcels[1].boxes).toHaveLength(4)
-    expect(saved.parcels[1].boxes[1]).toEqual(sourceBox)
-    expect(saved.parcels[1].boxes[2]).toMatchObject({ quantity: 9, lengthCm: 77, widthCm: 50, heightCm: 40, weightKg: 11 })
-    expect(saved.parcels[1].boxes[3]).toMatchObject({ quantity: 12, lengthCm: 60, widthCm: 50, heightCm: 40, weightKg: 11 })
-    const savedBoxIds = saved.parcels.flatMap((entry: { boxes: Array<{ id: string }> }) => entry.boxes.map((entryBox) => entryBox.id))
-    expect(new Set(savedBoxIds).size).toBe(5)
-  })
-  it('keeps the parcel copy button outside the table while incomplete dimensions disable copying', async () => {
-    stubInspectionFetch(vi.fn(async () => json({
-      ...detail,
-      status: 'inspecting',
-      inspection: { ...inspection, parcels: [{ ...inspection.parcels[0], boxes: [{ ...box, lengthCm: null, widthCm: null, heightCm: null }] }] },
-    })))
-    render(<PurchaseInspectionButton id={id} productName="유리컵" />)
-    fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
-
-    const copy = await screen.findByRole('button', { name: '1번 송장 박스 복사' })
-    expect(copy).toBeVisible()
-    expect(copy).toBeDisabled()
-    expect(copy.closest('.overflow-x-auto')).toBeNull()
-    for (const field of ['lengthCm', 'widthCm', 'heightCm']) {
-      fireEvent.change(screen.getByLabelText(`1번 송장 1번 박스 ${field}`), { target: { value: '10' } })
-    }
-    expect(copy).toBeEnabled()
+    expect(saved.parcels[1].boxes).toHaveLength(3)
+    expect(saved.parcels[1].boxes[2]).toEqual({ ...first, id: expect.any(String), lengthCm: 77 })
+    expect(saved.parcels[1].boxes[2].id).not.toBe(first.id)
   })
   it('keeps an unsaved box draft and its original revision after registering a description-only inspection issue', async () => {
     // A response with a newer revision must not silently rebase local boxes:

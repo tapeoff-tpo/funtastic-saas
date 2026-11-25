@@ -4,10 +4,10 @@ import { type PurchaseInspection } from './purchase-inspection'
 
 const fixture = vi.hoisted(() => ({
   current: {} as Record<string, unknown>, writes: [] as Array<Record<string, unknown>>,
-  receive: vi.fn(), adjust: vi.fn(), recordCompletion: vi.fn(),
+  lastBoxNumber: 1, receive: vi.fn(), adjust: vi.fn(), recordCompletion: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({ db: { transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
-  execute: vi.fn(async (query) => query.queryChunks.some((chunk: { value?: string[] }) => chunk.value?.join?.('').includes('RETURNING last_number')) ? [{ last_number: 1 }] : []), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
+  execute: vi.fn(async (query) => query.queryChunks.some((chunk: { value?: string[] }) => chunk.value?.join?.('').includes('RETURNING last_number')) ? [{ last_number: fixture.lastBoxNumber }] : []), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
   update: () => ({ set: (values: Record<string, unknown>) => { fixture.writes.push(values); return { where: () => ({ returning: async () => [{ id: fixture.current.id }] }) } } }),
 }) } }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
@@ -21,7 +21,7 @@ const parcel = { id: '00000000-0000-4000-8000-000000000001', trackingNumber: 'SF
 const inspection: PurchaseInspection = { version: 1, revision: 1, expectedQuantity: 100, parcels: [parcel], checkedAt: null, checkedBy: null, resolutionNote: '' }
 describe('inspection persistence and arrival safety', () => {
   beforeEach(() => {
-    vi.clearAllMocks(); fixture.writes = []
+    vi.clearAllMocks(); fixture.writes = []; fixture.lastBoxNumber = 1
     fixture.current = { id: 'purchase-id', userId: 'workspace-id', status: 'purchase_completed', requestedQuantity: 100, actualPurchaseQuantity: 100, chinaReceivedQuantity: null, supplierOrderNumber: '3317159640039018761', trackingNumber: null, rawData: { saasChinaMode: true }, purchaseInspection: null, costExchangeRateKrw: '200', sku: 'SKU-A', productName: '상품A' }
   })
   it('records one fund debit only when the purchase request moves to purchase completed', async () => {
@@ -96,6 +96,23 @@ describe('inspection persistence and arrival safety', () => {
     expect(fixture.writes).toHaveLength(1)
     expect(fixture.receive).not.toHaveBeenCalled()
     expect(fixture.adjust).not.toHaveBeenCalled()
+  })
+  it('keeps an issued carton number and gives its copy the next daily number', async () => {
+    const original = parcel.boxes[0]!
+    const copy = { ...original, id: '00000000-0000-4000-8000-000000000005', quantity: 10 }
+    fixture.current.status = 'inspecting'
+    fixture.current.purchaseInspection = { ...inspection, boxNumbers: { [original.id]: '261125-001' } }
+    fixture.lastBoxNumber = 3
+
+    const result = await savePurchaseInspection({
+      userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id',
+      data: { revision: 1, parcels: [{ ...parcel, boxes: [original, copy] }] },
+    })
+
+    expect(result?.inspection.boxNumbers).toEqual({
+      [original.id]: '261125-001',
+      [copy.id]: expect.stringMatching(/^\d{6}-003$/),
+    })
   })
   it('preserves the reported-issue protection marker on later inspection saves', async () => {
     fixture.current.purchaseInspection = { ...inspection, hasReportedIssue: true }

@@ -1,3 +1,4 @@
+import { readBoardNotices, writeBoardNotice } from '@/lib/purchasing/board-notices'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -15,6 +16,7 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const parsed = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0,10) === value
 })
+const noticeCategory = z.enum(['sold-out', 'inbound-info'])
 const dates = z.object({ expectedDate: date, receivedDate: date.nullable() })
 async function authorize() {
   const user = await getCurrentUser()
@@ -28,6 +30,18 @@ export async function GET(request: Request) {
     const auth = await authorize()
     if (auth.response) return auth.response
     const params = new URL(request.url).searchParams
+    const category = noticeCategory.safeParse(params.get('category'))
+    if (category.success) {
+      const attachmentId = params.get('attachment')
+      if (attachmentId && !z.string().uuid().safeParse(attachmentId).success) return new NextResponse(null, { status: 404 })
+      const result = await readBoardNotices(auth.userId, category.data, (params.get('q') ?? '').slice(0, 200), attachmentId)
+      if (!attachmentId) return NextResponse.json({ posts: result.posts }, { headers })
+      if (!result.attachment) return new NextResponse(null, { status: 404 })
+      return new NextResponse(new Uint8Array(Buffer.from(result.attachment.attachment, 'base64')), {
+        headers: { ...headers, 'Content-Type': 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
+          'Content-Disposition': "attachment; filename*=UTF-8''" + encodeURIComponent(result.attachment.filename) },
+      })
+    }
     const id = params.get('id')
     if (!id) return NextResponse.json({ posts: await listInboundPosts(auth.userId, (params.get('q') ?? '').slice(0,200)) }, { headers })
     if (!z.string().uuid().safeParse(id).success) return NextResponse.json({ error: '게시글을 찾을 수 없습니다.' }, { status: 404 })
@@ -50,6 +64,21 @@ export async function POST(request: Request) {
   try {
     const auth = await authorize()
     if (auth.response) return auth.response
+    if (request.headers.get('content-type')?.startsWith('multipart/form-data')) {
+      if (Number(request.headers.get('content-length')) > 2_200_000) return NextResponse.json({ error: '첨부파일은 2MB까지 가능합니다.' }, { status: 413 })
+      const form = await request.formData()
+      const parsed = z.object({ category: noticeCategory, title: z.string().trim().min(1).max(200), body: z.string().trim().max(15000) })
+        .safeParse({ category: form.get('category'), title: form.get('title'), body: form.get('body') })
+      const uploaded = form.get('attachment')
+      const file = uploaded instanceof File && uploaded.size ? uploaded : null
+      if (!parsed.success || (!parsed.data.body && !file)) return NextResponse.json({ error: '제목과 내용 또는 첨부파일을 입력해주세요.' }, { status: 400 })
+      if (file && (file.size > 2_000_000 || !/\.(xlsx|xls|csv|pdf|txt)$/i.test(file.name))) {
+        return NextResponse.json({ error: '엑셀, CSV, PDF, 텍스트 파일을 2MB까지 첨부할 수 있습니다.' }, { status: 400 })
+      }
+      const id = await writeBoardNotice({ ...parsed.data, owner: auth.userId, actor: auth.actorId,
+        filename: file?.name.slice(-180) ?? null, attachment: file ? Buffer.from(await file.arrayBuffer()) : null })
+      return NextResponse.json({ id }, { status: 201, headers })
+    }
     const parsed = dates.extend({ shipmentId: z.string().uuid(), title: z.string().trim().min(1).max(200), note: z.string().trim().max(3000).default('') }).safeParse(await request.json().catch(() => null))
     if (!parsed.success) return NextResponse.json({ error: '제목과 입고 날짜를 확인해주세요.' }, { status: 400 })
     const detail = await getChinaOutboundShipmentDetail({ userId: auth.userId, shipmentId: parsed.data.shipmentId })

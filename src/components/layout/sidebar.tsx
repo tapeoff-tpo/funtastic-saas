@@ -155,7 +155,7 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/saas-china-inventory', label: '중국재고(SaaS)', icon: Boxes },
       { href: '/purchasing/china-shipments', label: '중국출고', icon: Truck },
       { href: '/purchasing/import-documents', label: '무역서류', icon: FileSpreadsheet },
-      { href: '/purchasing/inbound-board', label: '입고리스트 게시판', icon: ClipboardList },
+      { href: '/purchasing/inbound-board', label: '게시판', icon: ClipboardList },
       { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
     ],
   },

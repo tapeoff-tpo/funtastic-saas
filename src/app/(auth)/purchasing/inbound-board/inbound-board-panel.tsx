@@ -1,5 +1,7 @@
 'use client'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
+import { BoardNoticesPanel } from './board-notices-panel'
 import { useEffect, useState } from 'react'
 import type { InboundPost, InboundPostSummary } from '@/lib/purchasing/inbound-board-store'
 import { koreaShippingRows, formatKoreaBoxNumbers } from '@/lib/purchasing/korea-shipping-rows'
@@ -96,7 +98,21 @@ export function InboundBoardPanel({ postId, onSelect }: { postId: string; onSele
 export function InboundBoardWorkspace() {
   const router = useRouter()
   const params = useSearchParams()
-  return <InboundBoardPanel postId={params.get('post') ?? ''} onSelect={(id) => {
-    router.replace('/purchasing/inbound-board?post=' + encodeURIComponent(id), { scroll: false })
-  }} />
+  const category = params.get('category')
+  const active = category === 'sold-out' || category === 'inbound-info' ? category : 'inbound-list'
+  const groups = [
+    { id: 'inbound-list', name: '입고리스트' },
+    { id: 'sold-out', name: '품절리스트' },
+    { id: 'inbound-info', name: '입고정보 공유' },
+  ]
+  return <>
+    <nav aria-label="게시판 분류" className="flex flex-wrap gap-2 border-b">
+      {groups.map(({ id, name }) => <Link key={id} href={'/purchasing/inbound-board?category=' + id}
+        aria-current={active === id ? 'page' : undefined}
+        className={active === id ? 'border-b-2 border-teal-700 px-4 py-2 text-sm font-medium text-teal-800' : 'px-4 py-2 text-sm text-muted-foreground hover:text-foreground'}>{name}</Link>)}
+    </nav>
+    {active === 'inbound-list' ? <InboundBoardPanel postId={params.get('post') ?? ''} onSelect={(id) => {
+      router.replace('/purchasing/inbound-board?post=' + encodeURIComponent(id), { scroll: false })
+    }} /> : <BoardNoticesPanel key={active} category={active} />}
+  </>
 }

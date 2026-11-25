@@ -28,7 +28,7 @@ export function koreaShippingRows(source: ImportDocumentDetail, by: 'pallet' | '
       const item = items.get(line.shipmentItemId)
       if (!item) continue
       const pallet = box.palletId ? pallets.get(box.palletId) ?? 'BOX' : 'BOX'
-      const key = JSON.stringify([by === 'box' ? box.id : pallet, item.productName.trim(), (item.optionName ?? '').trim()])
+      const key = JSON.stringify([pallet, item.productName.trim(), (item.optionName ?? '').trim()])
       const row = rows.get(key) ?? { pallet, boxes: new Set<string>(), sku: item.sku, name: item.productName, option: item.optionName ?? '', quantity: 0, warehouse: 0, coupang: 0, bulk: 0, location: item.location ?? '' }
       row.sku = [...new Set([...row.sku.split(', '), item.sku])].join(', ')
       row.location = [...new Set([row.location, item.location ?? ''].flatMap((value) => value.split(', ')).filter(Boolean))].join(', ')
@@ -40,7 +40,7 @@ export function koreaShippingRows(source: ImportDocumentDetail, by: 'pallet' | '
     }
   }
   const collator = new Intl.Collator('ko-KR', { numeric: true })
-  return [...rows.values()].sort((a, b) => Number(a.pallet === 'BOX') - Number(b.pallet === 'BOX') || collator.compare(a.pallet, b.pallet) || collator.compare([...a.boxes][0], [...b.boxes][0]) || collator.compare(a.sku, b.sku))
+  return [...rows.values()].sort((a, b) => Number(a.pallet === 'BOX') - Number(b.pallet === 'BOX') || (by === 'box' ? collator.compare([...a.boxes].sort(collator.compare)[0], [...b.boxes].sort(collator.compare)[0]) : 0) || collator.compare(a.pallet, b.pallet) || collator.compare([...a.boxes][0], [...b.boxes][0]) || collator.compare(a.sku, b.sku))
     .map((row) => ({ ...row, boxes: [...row.boxes].sort(collator.compare) }))
 }
 

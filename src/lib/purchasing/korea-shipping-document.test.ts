@@ -59,5 +59,5 @@ it('combines matching product names and options across different SKUs without mi
   expect(rows.filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(1)
   expect(rows.find((row) => row.option === '흰색')).toMatchObject({ quantity: 5, sku: '100-0001, 999-0001', boxes: ['1', '3'], location: 'A-01' })
   expect(rows.find((row) => row.option === '검정')?.quantity).toBe(4)
-  expect(koreaShippingRows(source, 'box').filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(2)
+  expect(koreaShippingRows(source, 'box').filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(1)
 })

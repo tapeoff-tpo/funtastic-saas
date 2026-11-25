@@ -16,6 +16,9 @@ const ImportDocumentTable = memo(function ImportDocumentTable({ html, zoom }: { 
 })
 
 export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'document' }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void; mode?: 'document' | 'cost' }) {
+  const [merges, setMerges] = useState<Array<{ source: string; target: string }>>([])
+  const [mergeChoice, setMergeChoice] = useState<{ source: string; target: string } | null>(null)
+  const dragProduct = useRef<string | null>(null)
   const [template, setTemplate] = useState<'ssj' | 'tapeoff'>('ssj')
   const [data, setData] = useState<Prepared | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -61,6 +64,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
         invoiceNo: next.shipmentNo, invoiceDate: today, sailingDate: next.plannedOutboundDate ?? today,
       })
       const saved = next.savedDocument?.inputs
+      setMerges(saved?.merges ?? [])
       if (saved) setSettings((current) => ({ ...current, ...Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) }))
       setItems(Object.fromEntries(next.items.map((item) => {
         const override = saved?.items[item.id]
@@ -90,7 +94,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
   }, [load])
 
   const payload = JSON.stringify({
-    ...settings, template, snapshot: data?.snapshot,
+    ...settings, template, merges, snapshot: data?.snapshot,
     palletTareKg: 5,
     palletExtraCbm: data?.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
     items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: value.unitPriceCny.trim() ? Number(value.unitPriceCny) : null }])),
@@ -132,6 +136,34 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       setSettings((current) => { const lines = (current.importerAddress ?? '').split('\n'); lines[key === 'importerAddress1' ? 0 : 1] = value; return { ...current, importerAddress: lines.join('\n') } })
     } else if (['invoiceNo', 'invoiceDate', 'sailingDate', 'exporter', 'importer', 'loadingPort', 'destinationPort', 'paymentTerms'].includes(key)) setSettings((current) => ({ ...current, [key]: value }))
   }
+  function productFromRow(target: EventTarget) {
+    const row = (target as HTMLElement).closest('tr')
+    return row?.querySelector<HTMLInputElement>('input[data-edit-key^="product:"]')?.dataset.editKey?.match(/^product:(.+):(englishName|hsCode|unitPriceCny)$/)?.[1] ?? null
+  }
+  function mergeSummary(target: string) {
+    if (!data || !mergeChoice) return ''
+    const groups = new Map<string, { quantity: number; price: number; amount: number }>()
+    for (const item of data.items) {
+      const code = importDocumentProductCode(item.sku), quantity = item.quantity
+      const price = Math.round(Number(items[item.id]?.unitPriceCny ?? 0) * 1.3 * 100) / 100
+      const group = groups.get(code) ?? { quantity: 0, price, amount: 0 }
+      group.quantity += quantity; group.amount += quantity * price; groups.set(code, group)
+    }
+    for (const merge of merges) {
+      const source = groups.get(merge.source), current = groups.get(merge.target)
+      if (source && current) { current.quantity += source.quantity; current.amount = current.quantity * current.price; groups.delete(merge.source) }
+    }
+    const source = groups.get(target === mergeChoice.target ? mergeChoice.source : mergeChoice.target), current = groups.get(target)
+    if (!source || !current) return ''
+    const quantity = source.quantity + current.quantity, amount = quantity * current.price
+    return `수량 ${quantity}개 · 단가 ¥${current.price.toFixed(2)} · 금액 ¥${amount.toFixed(2)} (변경 ¥${(amount - source.amount - current.amount).toFixed(2)})`
+  }
+  function confirmMerge(target: string) {
+    if (!mergeChoice) return
+    const source = target === mergeChoice.target ? mergeChoice.source : mergeChoice.target
+    setMerges((current) => [...current, { source, target }])
+    setUnsaved(true); onDirtyChange(true); setMergeChoice(null)
+  }
   async function saveDocument() {
     const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...JSON.parse(payload), intent: 'save-document', revision }) })
     const result = await response.json()
@@ -145,6 +177,12 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
     finally { setBusy(false) }
   }
 
+  useEffect(() => {
+    if (template !== 'tapeoff') return
+    for (const row of document.querySelectorAll<HTMLTableRowElement>('[aria-label="인보이스·패킹리스트 엑셀 양식"] tr')) {
+      if (row.querySelector('input[data-edit-key^="product:"]')) { row.draggable = true; row.title = '다른 상품 행으로 드래그해 합치기' }
+    }
+  }, [previewHtml, template])
   async function download() {
     if (!data) return
     setBusy(true)
@@ -175,11 +213,13 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
       {data && <section aria-label="인보이스·패킹리스트 미리보기" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><div role="group" aria-label="문서 양식" className="my-2 flex gap-4">{(['ssj', 'tapeoff'] as const).map((value) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name="import-template" value={value} checked={template === value} disabled={busy} onChange={() => { setPreviewHtml(''); setTemplate(value) }} />{value.toUpperCase()}용</label>)}</div><p className="text-xs text-muted-foreground">{template === 'tapeoff' ? 'TAPEOFF: 기준 단가 × 1.3 (현지 수수료 포함) · Measurement에 검역 문구 표시. 단가 수정은 SSJ용에서 하세요.' : 'SSJ: 기존 기준 단가 사용'}</p><p className="text-xs text-muted-foreground">파란 칸을 클릭해 수정 후 저장하세요. 수량·박스번호·합계는 자동 계산됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm disabled:opacity-50"><Save className="size-4" />{busy ? '처리 중…' : '저장'}</button><button type="button" disabled={busy || previewBusy} onClick={() => void download()} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
+        {template === 'tapeoff' && <div className="flex items-center gap-3 text-xs"><span>상품 행을 다른 행으로 드래그하면 기준 상품을 선택해 합칠 수 있습니다.</span>{merges.length > 0 && <button type="button" className="rounded border px-2 py-1" onClick={() => { setMerges([]); setUnsaved(true); onDirtyChange(true) }}>병합 {merges.length}건 모두 해제</button>}</div>}
+        {mergeChoice && <div role="dialog" aria-modal="true" aria-label="병합 기준 상품 선택" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="max-w-xl space-y-4 rounded-lg bg-background p-5 shadow-xl"><h3 className="font-semibold">어느 상품을 기준으로 합칠까요?</h3><p className="text-sm">선택한 상품의 이름·단가를 유지합니다. 수량·무게는 합산하고 금액은 기준 단가로 다시 계산합니다. 원본 출고 품목은 유지됩니다.</p><div className="flex gap-2">{[mergeChoice.target, mergeChoice.source].map((code) => <button key={code} type="button" className="rounded border px-3 py-2 text-sm" onClick={() => confirmMerge(code)}>{code} · {data.items.find((item) => importDocumentProductCode(item.sku) === code)?.productName ?? code} 기준<span className="mt-1 block text-xs text-muted-foreground">{mergeSummary(code)}</span></button>)}</div><button type="button" className="text-sm underline" onClick={() => setMergeChoice(null)}>취소</button></div></div>}
         {previewBusy && <p role="status" className="text-sm text-muted-foreground">양식 미리보기 불러오는 중…</p>}
         {previewError && <p role="alert" className="text-sm text-red-700">{previewError}</p>}
         {saveNotice && <p role="status" className="text-sm text-emerald-700">{saveNotice}</p>}
         {unsaved && <p className="text-xs text-amber-700">저장하지 않은 변경사항이 있습니다.</p>}
-        {previewHtml && <fieldset disabled={busy} className="min-w-0"><div aria-label="인보이스·패킹리스트 엑셀 양식" className="max-h-[72vh] overflow-auto rounded border bg-slate-100 p-4 text-black" onFocusCapture={() => { editingRef.current = true; setEditing(true) }} onBlurCapture={(event) => { editCell(event); if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { editingRef.current = false; setEditing(false) } }}>
+        {previewHtml && <fieldset disabled={busy} className="min-w-0"><div aria-label="인보이스·패킹리스트 엑셀 양식" className="max-h-[72vh] overflow-auto rounded border bg-slate-100 p-4 text-black" onDragStartCapture={(event) => { if (template !== 'tapeoff') return; const product = productFromRow(event.target); if (!product) return; dragProduct.current = product; event.dataTransfer.setData('text/plain', product); event.dataTransfer.effectAllowed = 'move' }} onDragEndCapture={() => { dragProduct.current = null }} onDragOver={(event) => { if (template === 'tapeoff' && dragProduct.current && productFromRow(event.target)) event.preventDefault() }} onDrop={(event) => { event.preventDefault(); const target = productFromRow(event.target), source = dragProduct.current; dragProduct.current = null; if (source && target && source !== target) setMergeChoice({ source, target }) }} onFocusCapture={() => { editingRef.current = true; setEditing(true) }} onBlurCapture={(event) => { editCell(event); if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { editingRef.current = false; setEditing(false) } }}>
           <ImportDocumentTable html={previewHtml} zoom={previewZoom} />
         </div></fieldset>}
 

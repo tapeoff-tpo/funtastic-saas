@@ -4,7 +4,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { listChinaOutboundShipments } from '@/lib/purchasing/saas-china-outbound'
 import { ImportDocumentsWorkspace } from './import-documents-workspace'
 
-export const metadata: Metadata = { title: '인보이스·패킹리스트' }
+export const metadata: Metadata = { title: '무역서류' }
 
 export default async function ImportDocumentsPage({
   searchParams,
@@ -19,7 +19,7 @@ export default async function ImportDocumentsPage({
   const selected = shipments.find((shipment) => shipment.id === selectedId)
 
   return <div className="min-w-0 space-y-4">
-    <h1 className="text-2xl font-semibold">인보이스·패킹리스트</h1>
+    <h1 className="text-2xl font-semibold">무역서류</h1>
     <ImportDocumentsWorkspace
       key={selected?.id ?? 'none'}
       selectedShipmentId={selected?.id ?? ''}

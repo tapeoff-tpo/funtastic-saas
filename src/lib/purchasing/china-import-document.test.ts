@@ -217,7 +217,7 @@ describe('China import documents', () => {
     const buffer = await exportChinaImportDocument(measured, metadata, options)
     const workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
-    expect(workbook.getWorksheet('sheet')!.getCell('V20').value).toBe(15)
+    expect(workbook.getWorksheet('sheet')!.getCell('V20').value).toBe(13.636)
     expect(workbook.getWorksheet('sheet')!.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
   })
   it.each([0, 7.125])('uses per-pallet tare %s once for a mixed box and recalculates edited document box weights', async (tareWeightKg) => {
@@ -225,8 +225,7 @@ describe('China import documents', () => {
     const overrides = { ...options, palletTareKg: 123, boxes: { ...options.boxes, 'box-a': { grossWeightKg: 12.25, cbm: 0.06 } } }
     const sheet = await exportedSheet(shipment, overrides)
     expect(prepareImportDocument(shipment, metadata).pallets[0].tareWeightKg).toBe(tareWeightKg)
-    expect(sheet.getCell('V20').value).toBe(12.25 + tareWeightKg)
-    expect(sheet.getCell('V21').value).toBe(3)
+    expect(Number(sheet.getCell('V20').value) + Number(sheet.getCell('V21').value)).toBeCloseTo(15.25 + tareWeightKg, 3)
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 15.25 + tareWeightKg })
   })
   it('rejects incomplete packing instead of writing reserved stock as actual quantity', () => {
@@ -246,8 +245,8 @@ describe('China import documents', () => {
     expect(sheet.getCell('D20').value).toBe('7013')
     expect(sheet.getCell('D21').value).toBeNull()
     expect(sheet.getCell('J20').value).toEqual({ formula: 'ROUND(G20*E20,2)', result: 335.16 })
-    expect(sheet.getCell('V20').value).toBe(15)
-    expect(sheet.getCell('V21').value).toBe(3)
+    expect(sheet.getCell('V20').value).toBe(13.636)
+    expect(sheet.getCell('V21').value).toBe(4.364)
     expect(sheet.getCell('V22').value).toBeNull()
     expect(sheet.getCell('V23').value).toBeNull()
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
@@ -436,8 +435,8 @@ it('aligns every invoice and packing product row without repeating mixed package
   expect(sheet.getCell('O21').value).toBe(1)
   expect(sheet.getCell('L20').value).toBe(1)
   expect(sheet.getCell('L21').value).toBe(1)
-  expect(sheet.getCell('V20').value).toBe(15)
-  expect(sheet.getCell('V21').value).toBe(3)
+  expect(sheet.getCell('V20').value).toBe(13.636)
+  expect(sheet.getCell('V21').value).toBe(4.364)
   expect(sheet.getCell('K22').value).toBeNull()
 })
 
@@ -560,4 +559,26 @@ it.each(['ssj', 'tapeoff'] as const)('merges CTN cells for each representative p
   expect(sheet.getCell('O112').value).toMatchObject({ result: 1 })
   expect(sheet.getCell('M20').value).toBe('P1')
   expect(sheet.getCell('M21').value).toBe('P1')
+})
+
+it('merges TAPEOFF goods into the chosen product and keeps its price while preserving quantity and kg', async () => {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportChinaImportDocument(detail, metadata, { ...options, template: 'tapeoff', merges: [{ source: 'SKU-B', target: 'SKU-A' }] }) as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('C20').value).toBe('Glass')
+  expect(sheet.getCell('E20').value).toBe(25)
+  expect(sheet.getCell('G20').value).toBe(21.79)
+  expect(sheet.getCell('J20').value).toMatchObject({ result: 544.75 })
+  expect(sheet.getCell('V20').value).toBe(18)
+  expect(sheet.getCell('C21').value).toBeNull()
+  const ssj = await exportedSheet(detail, { ...options, template: 'ssj', merges: [{ source: 'SKU-B', target: 'SKU-A' }] })
+  expect(ssj.getCell('C21').value).toBe('Tray')
+})
+
+it('allocates the pallet 5kg by product CBM rather than assigning it to the first product', async () => {
+  const shipment = { ...detail, boxes: detail.boxes.map((box) => ({ ...box, palletId: 'pallet-a' })), boxItems: [{ id: 'a', boxId: 'box-a', shipmentItemId: 'item-a', quantity: 20 }, { id: 'b', boxId: 'box-b', shipmentItemId: 'item-b', quantity: 5 }] }
+  const sheet = await exportedSheet(shipment, options)
+  expect(sheet.getCell('V20').value).toBe(13.75)
+  expect(sheet.getCell('V21').value).toBe(4.25)
+  expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
 })

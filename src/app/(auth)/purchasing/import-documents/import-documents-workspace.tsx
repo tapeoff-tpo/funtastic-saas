@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { KoreaShippingDocumentPanel } from './korea-shipping-document-panel'
 import { ImportDocumentEditor } from './import-document-editor'
 
 export function ImportDocumentsWorkspace({ shipments, selectedShipmentId, invalidSelection, mode = 'document' }: {
@@ -11,6 +12,7 @@ export function ImportDocumentsWorkspace({ shipments, selectedShipmentId, invali
   mode?: 'document' | 'cost'
 }) {
   const router = useRouter()
+  const [document, setDocument] = useState<'invoice' | 'korea'>('invoice')
   const [dirty, setDirty] = useState(false)
   const [pending, startTransition] = useTransition()
 
@@ -31,6 +33,7 @@ export function ImportDocumentsWorkspace({ shipments, selectedShipmentId, invali
     </label>
     {invalidSelection && <p role="alert" className="text-sm text-red-700">출고작업을 찾을 수 없습니다.</p>}
     {!shipments.length && <p className="rounded-lg border p-8 text-center text-sm text-muted-foreground">등록된 중국출고 요청이 없습니다.</p>}
-    {selectedShipmentId && <ImportDocumentEditor mode={mode} shipmentId={selectedShipmentId} onDirtyChange={setDirty} />}
+    {mode === 'document' && <div role="tablist" aria-label="무역서류 종류" className="flex gap-2 border-b">{[['invoice', '인보이스·패킹리스트'], ['korea', '한국 출고서류']].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={document === key} onClick={() => { if (dirty && !window.confirm('저장하지 않은 내용을 닫고 이동할까요?')) return; setDirty(false); setDocument(key as 'invoice' | 'korea') }} className={`px-4 py-2 text-sm ${document === key ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground'}`}>{label}</button>)}</div>}
+    {selectedShipmentId && (mode === 'document' && document === 'korea' ? <KoreaShippingDocumentPanel shipmentId={selectedShipmentId} /> : <ImportDocumentEditor mode={mode} shipmentId={selectedShipmentId} onDirtyChange={setDirty} />)}
   </div>
 }

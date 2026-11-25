@@ -150,3 +150,20 @@ describe('import document export route', () => {
   })
 
 })
+
+it('serves the Korean shipping workbook and preview only after workspace authorization', async () => {
+  mocks.user.mockResolvedValue({ id: 'staff' })
+  mocks.access.mockResolvedValue({ superAdmin: false, allowedMenus: ['/purchasing/import-documents'] })
+  mocks.workspace.mockResolvedValue('owner')
+  mocks.detail.mockResolvedValue({ shipment: { shipmentNo: 'CN-KOREA', status: 'packing', plannedOutboundDate: '2026-11-20', originWarehouseCode: '중국', destinationName: '인천', createdAt: '2026-11-20' }, items: [], boxes: [], pallets: [], boxItems: [] })
+  mocks.metadata.mockResolvedValue(new Map())
+  mocks.prepare.mockReturnValue({ shipmentNo: 'CN-KOREA', items: [], boxes: [] })
+  mocks.preview.mockResolvedValue('<table>Korea</table>')
+  const preview = await GET(new Request('http://localhost?document=korea&group=box&format=preview'), context())
+  expect(preview.status).toBe(200)
+  expect(await preview.json()).toEqual({ html: '<table>Korea</table>' })
+  const download = await GET(new Request('http://localhost?document=korea'), context())
+  expect(download.headers.get('content-type')).toContain('spreadsheetml')
+  expect(decodeURIComponent(download.headers.get('content-disposition')!)).toContain('한국출고서류.xlsx')
+  expect(mocks.detail).toHaveBeenCalledWith({ userId: 'owner', shipmentId })
+})

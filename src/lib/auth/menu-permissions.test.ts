@@ -123,3 +123,12 @@ describe('menu authorization policy', () => {
     expect(canAccessApi(access, '/api/purchasing/china-shipments/1/import-documents/other', 'POST')).toBe(false)
   })
 })
+
+it('allows the inbound board only through the trade documents menu', () => {
+  const trade = { superAdmin: false, allowedMenus: ['/purchasing/import-documents'] }
+  const outbound = { superAdmin: false, allowedMenus: ['/purchasing/china-shipments'] }
+  for (const method of ['GET', 'POST', 'PATCH']) {
+    expect(canAccessApi(trade, '/api/purchasing/inbound-board', method)).toBe(true)
+    expect(canAccessApi(outbound, '/api/purchasing/inbound-board', method)).toBe(false)
+  }
+})

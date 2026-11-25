@@ -89,6 +89,7 @@ export function canAccessPage(access: MenuAccess, href: string): boolean {
 
 /** Shared APIs list all legitimate consuming menus, never trust Referer. */
 const API_MENU_RULES: Array<[string, string[]]> = [
+  ['/api/purchasing/inbound-board', ['/purchasing/import-documents']],
   ['/api/purchasing/product-images', ['/purchasing/orders', '/purchasing/overdue', '/purchasing/china-shipments']],
   ['/api/purchasing/purchase-requests/recommendations', ['/purchasing/purchases']],
   ['/api/purchasing/purchase-requests/budget-comparison', ['/purchasing/purchases']],

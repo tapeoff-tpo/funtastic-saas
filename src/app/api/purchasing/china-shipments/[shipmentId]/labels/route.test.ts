@@ -54,6 +54,17 @@ describe('GET /api/purchasing/china-shipments/[shipmentId]/labels', () => {
     mocks.chinaOutboundShipmentBulkLabelFilename.mockReturnValue('bulk-labels.xlsx')
   })
 
+  it('restricts multi-box printing to valid boxes in the current shipment', async () => {
+    const one = '22222222-2222-4222-8222-222222222222'
+    const two = '33333333-3333-4333-8333-333333333333'
+    mocks.getChinaOutboundShipmentDetail.mockResolvedValue({ shipment: { shipmentNo: 'OUT-1' }, items: [], boxes: [{ id: one }, { id: two }], boxItems: [{ boxId: one, quantity: 1 }, { boxId: two, quantity: 2 }] })
+    const url = `http://localhost/labels?type=boxes&format=print&boxId=${one}&boxId=${two}&boxId=${one}`
+    expect((await GET(new Request(url), { params: Promise.resolve({ shipmentId }) })).status).toBe(200)
+    expect(mocks.renderChinaShipmentLabelPrint).toHaveBeenCalledWith(expect.anything(), { boxIds: [one, two], includePalletLabels: false }, expect.any(String))
+    expect((await GET(new Request(url + '&boxId=44444444-4444-4444-8444-444444444444'), { params: Promise.resolve({ shipmentId }) })).status).toBe(404)
+    expect((await GET(new Request(url + '&boxId=invalid'), { params: Promise.resolve({ shipmentId }) })).status).toBe(400)
+  })
+
   it('prints authenticated workspace labels as private HTML without downloading Excel', async () => {
     const response = await GET(new Request('http://localhost/labels?type=boxes&format=print'), { params: Promise.resolve({ shipmentId }) })
     expect(response.status).toBe(200)

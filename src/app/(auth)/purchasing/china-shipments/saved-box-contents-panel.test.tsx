@@ -84,3 +84,13 @@ it('always displays all physical boxes including empty records without filter bu
   expect(screen.queryByRole('group', { name: '저장된 박스 필터' })).not.toBeInTheDocument()
   expect(screen.getByText('전체 박스 2개')).toBeInTheDocument()
 })
+
+it('prints only checked boxes and permits printing closed boxes without permitting a merge', async () => {
+  renderPanel([box('1'), box('2')], { editable: false })
+  fireEvent.click(screen.getByRole('checkbox', { name: '박스 2 합치기 선택' }))
+  fireEvent.click(screen.getByRole('button', { name: '선택한 박스 쉽먼트 1개 인쇄' }))
+  const print = await screen.findByRole('menuitem', { name: '선택한 박스 쉽먼트 1개 인쇄 바로 인쇄' })
+  expect(print).toHaveAttribute('href', '/api/purchasing/china-shipments/shipment/labels?type=boxes&boxId=2&format=print')
+  expect(print).toHaveAttribute('target', '_blank')
+  expect(screen.queryByRole('button', { name: /선택 박스 합치기/ })).not.toBeInTheDocument()
+})

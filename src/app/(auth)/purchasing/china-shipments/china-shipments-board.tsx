@@ -719,7 +719,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
   const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
-  const canDownloadShipmentLabels = boxesWithItems.length > 0
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
     startTransition(async () => {
@@ -777,7 +776,6 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
       </section> : null}
 
       {stage === 'boxes' ? <section className="space-y-3">
-        <div className="flex justify-end"><ShipmentLabelMenu shipmentId={shipment.id} kind="boxes" enabled={canDownloadShipmentLabels} disabledReason="박스분할을 먼저 저장해주세요." /></div>
 
         <div className="flex items-center gap-2">
           <h3 className="font-semibold">2단계 · 저장된 박스현황</h3>

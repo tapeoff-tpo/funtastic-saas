@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { mergeChinaOutboundBoxesAction } from '../saas-china-actions'
 import { largestChinaOutboundBox } from '@/lib/purchasing/china-outbound-packaging'
 import { Download, Printer } from 'lucide-react'
+import { ShipmentLabelMenu } from './shipment-label-menu'
 import { ItemCodeCell } from './item-code-cell'
 import { BoxMeasurementCells } from './box-measurement-cells'
 import { useChinaWorkGuard } from './unsaved-china-work'
@@ -24,6 +25,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, editable, isPendi
   const visibleBoxes = [...summaries].sort((left, right) => boxNumberCollator.compare(left.box.boxNo, right.box.boxNo))
   const canEditBox = (summary: SavedBoxSummary) => editable && summary.box.editable && summary.box.status === 'open'
   const selectedBoxes = summaries.filter((summary) => selected.includes(summary.box.id) && canEditBox(summary) && summary.quantity > 0)
+  const printable = summaries.filter((summary) => selected.includes(summary.box.id) && summary.quantity > 0)
   const target = largestChinaOutboundBox(selectedBoxes.map((summary) => summary.box))
   async function merge() {
     if (selectedBoxes.length < 2) return false
@@ -36,7 +38,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, editable, isPendi
     <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
       <div className="flex items-center gap-3"><h3 id="saved-box-contents-title" className="font-semibold">저장된 박스 현황</h3>
       {editable && <button type="button" disabled={selectedBoxes.length < 2 || isPending || pending || guard.busy} onClick={() => dialog.current?.showModal()} className="h-7 rounded border bg-background px-2 text-xs disabled:opacity-40">선택 박스 합치기 ({selectedBoxes.length})</button>}</div>
-      <span className="text-xs text-muted-foreground">전체 박스 {summaries.length.toLocaleString('ko-KR')}개</span>
+      <div className="flex items-center gap-3"><span className="text-xs text-muted-foreground">전체 박스 {summaries.length.toLocaleString('ko-KR')}개</span><ShipmentLabelMenu shipmentId={shipmentId} kind="boxes" enabled={summaries.some((box) => box.quantity > 0)} disabledReason="박스분할을 먼저 저장해주세요." selectedBoxIds={printable.map((box) => box.box.id)} /></div>
     </div>
     {!visibleBoxes.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">저장된 박스가 없습니다. 품목별 박스분할을 저장하면 이곳에서 내용과 수량을 확인할 수 있습니다.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[1350px] table-fixed border-collapse text-sm">
       <caption className="sr-only">박스번호 순 적재 상품, 수량, 규격·중량, 쉽먼트 인쇄 및 다운로드</caption>
@@ -47,7 +49,7 @@ export function SavedBoxContentsPanel({ shipmentId, summaries, editable, isPendi
         const boxEditable = canEditBox(summary)
         const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?boxId=${encodeURIComponent(summary.box.id)}`
         return <tr key={summary.box.id} aria-label={`박스 ${summary.box.boxNo}`} className="border-t align-middle hover:bg-muted/20">
-          <td className="px-3 py-1.5 whitespace-nowrap font-semibold tabular-nums"><label className="flex items-center gap-2">{editable && <input type="checkbox" aria-label={`박스 ${summary.box.boxNo} 합치기 선택`} checked={selected.includes(summary.box.id)} disabled={!boxEditable || summary.quantity <= 0 || isPending || pending || guard.busy}
+          <td className="px-3 py-1.5 whitespace-nowrap font-semibold tabular-nums"><label className="flex items-center gap-2">{<input type="checkbox" aria-label={`박스 ${summary.box.boxNo} 합치기 선택`} checked={selected.includes(summary.box.id)} disabled={summary.quantity <= 0 || isPending || pending || guard.busy}
             onChange={(event) => setSelected((current) => event.target.checked ? [...current, summary.box.id] : current.filter((id) => id !== summary.box.id))} />}<span data-no-translate>{summary.box.boxNo}</span></label>{mixed && <p className="text-xs text-amber-800">혼합박스</p>}</td>
           {(['code', 'name', 'option', 'quantity'] as const).map((column) => <td key={column} className="overflow-hidden px-2 py-1 text-xs leading-6">
             {summary.items.length ? summary.items.map(({ item, quantity }) => <div key={item.id} className="h-6 truncate" data-no-translate title={column === 'name' ? item.productName : column === 'option' ? item.optionName ?? '' : undefined}>

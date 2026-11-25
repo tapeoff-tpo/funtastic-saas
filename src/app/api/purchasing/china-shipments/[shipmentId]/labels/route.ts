@@ -27,7 +27,8 @@ export async function GET(
   const searchParams = new URL(request.url).searchParams
   const format = searchParams.get('format')
   if (format !== null && format !== 'print') return NextResponse.json({ error: '출력 형식을 확인해주세요.' }, { status: 400 })
-  const boxId = searchParams.get('boxId')
+  const boxIds = [...new Set(searchParams.getAll('boxId'))]
+  const boxId = boxIds[0] ?? null
   const labelType = searchParams.get('type')
   if (labelType !== null && labelType !== 'boxes' && labelType !== 'pallets') {
     return NextResponse.json({ error: '쉽먼트 종류를 확인해주세요.' }, { status: 400 })
@@ -35,7 +36,7 @@ export async function GET(
   if (boxId !== null && labelType === 'pallets') {
     return NextResponse.json({ error: '박스 선택과 파렛트 다운로드를 함께 사용할 수 없습니다.' }, { status: 400 })
   }
-  if (boxId !== null && !isUuid(boxId)) {
+  if (boxIds.some((id) => !isUuid(id))) {
     return NextResponse.json({ error: '박스 정보를 확인할 수 없습니다.' }, { status: 400 })
   }
 
@@ -45,10 +46,10 @@ export async function GET(
     if (!detail) return NextResponse.json({ error: '출고작업을 찾을 수 없습니다.' }, { status: 404 })
 
     const selectedBox = boxId ? detail.boxes.find((box) => box.id === boxId) : null
-    if (boxId && !selectedBox) {
+    if (boxIds.some((id) => !detail.boxes.some((box) => box.id === id))) {
       return NextResponse.json({ error: '이 출고작업에서 박스를 찾을 수 없습니다.' }, { status: 404 })
     }
-    if (selectedBox && !detail.boxItems.some((boxItem) => boxItem.boxId === selectedBox.id)) {
+    if (boxIds.some((id) => !detail.boxItems.some((boxItem) => boxItem.boxId === id && boxItem.quantity > 0))) {
       return NextResponse.json({ error: '내용이 저장된 박스만 부착용 쉽먼트를 내려받을 수 있습니다.' }, { status: 400 })
     }
 
@@ -66,7 +67,7 @@ export async function GET(
     }
 
     const options = selectedBox
-      ? { boxIds: [selectedBox.id], includePalletLabels: false }
+      ? { boxIds, includePalletLabels: false }
       : labelType ? { includeBoxLabels: labelType === 'boxes', includePalletLabels: labelType === 'pallets' } : {}
     if (format === 'print') {
       const nonce = randomUUID()
@@ -81,7 +82,7 @@ export async function GET(
     }
     const buffer = selectedBox
       ? await exportChinaOutboundShipmentLabelWorkbook(labelDetail, {
-        boxIds: [selectedBox.id],
+        boxIds,
         includePalletLabels: false,
       })
       : labelType
@@ -90,7 +91,7 @@ export async function GET(
           includePalletLabels: labelType === 'pallets',
         })
         : await exportChinaOutboundShipmentLabelWorkbook(labelDetail)
-    const filename = selectedBox
+    const filename = selectedBox && boxIds.length === 1
       ? chinaOutboundShipmentBoxLabelFilename(detail.shipment.shipmentNo, selectedBox.boxNo)
       : labelType
         ? chinaOutboundShipmentBulkLabelFilename(detail.shipment.shipmentNo, labelType)

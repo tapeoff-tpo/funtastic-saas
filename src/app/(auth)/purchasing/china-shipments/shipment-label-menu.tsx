@@ -7,13 +7,15 @@ type Props = {
   shipmentId: string
   kind: 'boxes' | 'pallets'
   enabled: boolean
+  selectedBoxIds?: string[]
   disabledReason: string
 }
 
-export function ShipmentLabelMenu({ shipmentId, kind, enabled, disabledReason }: Props) {
-  const label = kind === 'boxes' ? '박스 쉽먼트' : '파레트 라벨 출력'
+export function ShipmentLabelMenu({ shipmentId, kind, enabled, disabledReason, selectedBoxIds = [] }: Props) {
+  const label = kind === 'boxes' ? (selectedBoxIds.length ? `선택한 박스 쉽먼트 ${selectedBoxIds.length}개 인쇄` : '박스 쉽먼트') : '파레트 라벨 출력'
   const Icon = kind === 'boxes' ? Package : Layers3
-  const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?type=${kind}`
+  const selection = kind === 'boxes' ? selectedBoxIds.map((id) => `&boxId=${encodeURIComponent(id)}`).join('') : ''
+  const href = `/api/purchasing/china-shipments/${encodeURIComponent(shipmentId)}/labels?type=${kind}${selection}`
   const itemClassName = 'flex min-h-9 items-center gap-2 rounded-md px-2.5 py-2 text-sm text-blue-900 outline-none hover:bg-blue-50 data-highlighted:bg-blue-50'
 
   return (

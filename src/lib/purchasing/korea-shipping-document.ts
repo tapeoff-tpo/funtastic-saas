@@ -20,7 +20,7 @@ export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, 
       physical.forEach((box) => counted.add(box))
       sheet.addRow([row.pallet, formatKoreaBoxNumbers(row.boxes), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location, row.cbm || null, Math.round(row.weight * 1000000) / 1000000 || null])
     }
-    sheet.getColumn('L').numFmt = '0.0000'
+    sheet.getColumn('L').numFmt = '0.00'
     sheet.getColumn('M').numFmt = '#,##0'
     const last = sheet.rowCount
     // Preserve each physical pallet as one vertically merged group in both views.

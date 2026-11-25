@@ -7,6 +7,7 @@ import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, b
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import { checkSupplierRegistration, pingSupplierExtension, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 import { CategoryRecommendations } from './category-recommendations'
+import { useWorkbenchNavigation, type RegistrationStage } from './use-workbench-navigation'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -19,7 +20,6 @@ type DraftSummary = { id: string; name: string; revision: number; updatedAt: str
 type CategoryTemplate = { id: string; name: string; sheets: Array<{ name: string }> }
 type ConnectedTemplate = RegistrationDraft['templates'][number]
 type CatalogSelection = { product: CatalogProduct; optionName: string }
-type RegistrationStage = 'pricing' | 'information' | 'registered'
 const steps: Array<{ stage: RegistrationStage; title: string; note: string }> = [
   { stage: 'pricing', title: '판매가설정', note: '상품 검색 · 세트 구성 · 가격 확정' },
   { stage: 'information', title: '상품등록정보', note: '필수정보 입력 · 엑셀 출력 · 상품등록' },
@@ -97,8 +97,7 @@ export function CoupangRegistrationWorkbench() {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [activeId, setActiveId] = useState('')
-  const [catalogTarget, setCatalogTarget] = useState<{ bundleId?: string } | null>(null)
+  const { activeId, catalogTarget, stage, navigate, reset: resetNavigation } = useWorkbenchNavigation()
   const [query, setQuery] = useState('')
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
   const [catalogSelections, setCatalogSelections] = useState<CatalogSelection[]>([])
@@ -107,7 +106,6 @@ export function CoupangRegistrationWorkbench() {
   const [templateChoice, setTemplateChoice] = useState('')
   const [templateLibrary, setTemplateLibrary] = useState<CategoryTemplate[]>([])
   const [onlyIssues, setOnlyIssues] = useState(false)
-  const [stage, setStage] = useState<RegistrationStage>('pricing')
   const [extensionConnected, setExtensionConnected] = useState<boolean | null>(null)
   const submissionEvents = useRef<Promise<void>>(Promise.resolve())
   const draftSession = useRef(0)
@@ -147,7 +145,9 @@ export function CoupangRegistrationWorkbench() {
   function patchRow(id: string, patch: Partial<RegistrationRow>) {
     update((value) => ({ ...value, rows: value.rows.map((row) => row.id === id && !submissionLocked(row) ? connectedDefaults({ ...row, ...patch }, value.templates) : row) }))
   }
-  function changeStage(next: RegistrationStage) { setStage(next); setSelected(new Set()); setActiveId(''); setOnlyIssues(false); setRowSearch('') }
+  function setActiveId(activeId: string) { navigate({ activeId }) }
+  function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
+  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch('') }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   async function refreshDrafts() { const response = await jsonRequest('/drafts'); setSaved(response.drafts) }
   useEffect(() => {
@@ -442,20 +442,19 @@ export function CoupangRegistrationWorkbench() {
   async function load(id: string) {
     if (!id || dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 저장된 작업을 불러올까요?')) return
     draftSession.current++
-    setActiveId('')
     await run('작업 불러오는 중', async () => {
       const response = await jsonRequest(`/drafts?id=${encodeURIComponent(id)}`)
       const payload: RegistrationDraft = response.payload
       const costs = await fillMissingCostsOnOpen(payload.rows)
       const rows = costs.rows.map((row) => connectedDefaults(row, payload.templates))
-      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setActiveId(''); setTemplateChoice('')
-      setStage(!payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered')
+      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setTemplateChoice('')
+      resetNavigation({ stage: !payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered', activeId: '', catalogTarget: null })
     })
   }
   function newDraft() {
     if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')) return
     draftSession.current++
-    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setActiveId(''); setTemplateChoice(''); setStage('pricing')
+    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setTemplateChoice(''); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
   }
   async function download() {
     const rows = stageRows.filter((row) => !selected.size || selected.has(row.id))
@@ -491,8 +490,7 @@ export function CoupangRegistrationWorkbench() {
     if (draft.rows.length >= 500) { toast.error('등록행은 500개까지 추가할 수 있습니다.'); return }
     const row: RegistrationRow = { ...createRegistrationRow(), bundleComponents: [] }
     update((value) => ({ ...value, rows: [...value.rows, row] }))
-    setActiveId(row.id)
-    setCatalogTarget({ bundleId: row.id })
+    navigate({ activeId: row.id, catalogTarget: { bundleId: row.id } })
   }
 
   function createBundleFromSelectedRows() {
@@ -543,8 +541,7 @@ export function CoupangRegistrationWorkbench() {
       return { ...value, rows }
     })
     setSelected(new Set())
-    setActiveId(bundle.id)
-    setCatalogTarget(null)
+    navigate({ activeId: bundle.id, catalogTarget: null })
     toast.success(`선택한 ${selectedSingleRows.length}개 상품을 세트로 구성했습니다. 세트명·이미지·품질표시를 확인해주세요.`)
   }
 

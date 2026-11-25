@@ -15,6 +15,7 @@ const second = {
 describe('registration pricing workbench', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.history.replaceState(null, '', '/operations/coupang-registration')
     vi.mocked(pingSupplierExtension).mockResolvedValue({ connected: true })
     vi.mocked(startSupplierRegistration).mockResolvedValue({ started: true })
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : init?.method === 'POST' && url.endsWith('/catalog') ? { products: [source] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
@@ -647,6 +648,65 @@ describe('registration pricing workbench', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).endsWith('/submissions') && init?.method === 'POST')).toBe(false)
   })
 
+  it('preserves unsaved prices and registration fields while Back and Forward traverse the preceding screens', async () => {
+    const pricing = createRegistrationRow(source, '베이지')
+    const information = { ...confirmPricing(createRegistrationRow(second, '블랙')), fields: { 브랜드: '생활살림' } }
+    const saved = mockSavedDraft(informationTemplate({ ...blankDraft(), rows: [pricing, information] }))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    const supply = await screen.findByLabelText('마미백 플러스 베이지 쿠팡공급가')
+    fireEvent.change(supply, { target: { value: '17000' } })
+    fireEvent.click(screen.getByRole('tab', { name: /^2단계/ }))
+    fireEvent.click(screen.getByRole('button', { name: '루멘 철제 사이드 테이블 블랙 등록정보 입력' }))
+    const editor = screen.getByRole('region', { name: '상품등록정보 입력' })
+    await within(editor).findByRole('alert')
+    fireEvent.change(within(editor).getByLabelText('브랜드 *'), { target: { value: '수정한 브랜드' } })
+
+    await traverseWorkbenchHistory('back')
+    expect(screen.queryByRole('region', { name: '상품등록정보 입력' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^2단계/ })).toHaveAttribute('aria-selected', 'true')
+    await traverseWorkbenchHistory('back')
+    expect(screen.getByRole('tab', { name: /^1단계/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡공급가')).toHaveValue(17000)
+    expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡판매가')).toHaveValue(28334)
+    expect(window.location.pathname).toBe('/operations/coupang-registration')
+
+    await traverseWorkbenchHistory('forward')
+    await traverseWorkbenchHistory('forward')
+    const restored = screen.getByRole('region', { name: '상품등록정보 입력' })
+    await within(restored).findByRole('alert')
+    expect(within(restored).getByLabelText('브랜드 *')).toHaveValue('수정한 브랜드')
+    expect(screen.getByText('저장하지 않은 변경사항')).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await waitFor(() => {
+      const savedCall = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
+      expect(savedCall).toBeDefined()
+      const body = JSON.parse(String(savedCall![1]!.body))
+      expect(body.draft.rows[0].manualSupplyPrice).toBe(17000)
+      expect(body.draft.rows[1].fields.브랜드).toBe('수정한 브랜드')
+    })
+  })
+
+  it('closes and restores the B2B search with browser history without losing added products', async () => {
+    render(<CoupangRegistrationWorkbench />)
+    fireEvent.click(screen.getByRole('button', { name: '상품 추가' }))
+    const dialog = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
+    fireEvent.change(within(dialog).getByLabelText('B2B 상품명 또는 코드'), { target: { value: '마미백' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '검색' }))
+    fireEvent.click(await within(dialog).findByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 1개 추가' }))
+    await screen.findByLabelText('마미백 플러스 베이지 쿠팡공급가')
+    await traverseWorkbenchHistory('back')
+    expect(screen.queryByRole('dialog', { name: 'B2B 상품 검색' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡공급가')).toHaveValue(15000)
+    await traverseWorkbenchHistory('forward')
+    const restored = screen.getByRole('dialog', { name: 'B2B 상품 검색' })
+    expect(within(restored).getByLabelText('B2B 상품명 또는 코드')).toHaveValue('마미백')
+    expect(within(restored).getByLabelText('마미백 플러스 베이지 선택')).toBeDisabled()
+  })
+
   it('preserves edits made while progress is in flight and saves with the latest revision', async () => {
     const queued = { ...confirmPricing(createRegistrationRow(source, '베이지')), fields: { 브랜드: '생활살림' }, submission: { jobId: 'job-1', status: 'running' as const } }
     const editable = { ...confirmPricing(createRegistrationRow(second, '블랙')), fields: { 브랜드: '생활살림' } }
@@ -679,6 +739,14 @@ describe('registration pricing workbench', () => {
     })
   })
 })
+
+async function traverseWorkbenchHistory(direction: 'back' | 'forward') {
+  await act(async () => {
+    const changed = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
+    window.history[direction]()
+    await changed
+  })
+}
 
 function informationTemplate(draft: RegistrationDraft): RegistrationDraft {
   return { ...draft, rows: draft.rows.map((row) => ({ ...row, templateId: 'template-1', sheetName: 'QF_1_가방' })), templates: [{ id: 'template-1', name: '쿠팡 양식.xlsx', file: { name: '쿠팡 양식.xlsx', data: '' }, sheets: [{ name: 'QF_1_가방', columns: [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '브랜드', requirement: '필수', guide: '' }, { column: 3, label: '고시명', requirement: '필수', guide: '카테고리에 따라 자동설정', autoGenerated: true }] }] }] }

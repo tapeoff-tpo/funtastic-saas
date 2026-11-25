@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { applyPurchaseRequest1688TrackingLookup, savePurchaseInspection, updatePurchaseRequestPlanFields, updatePurchaseRequestStatus } from './purchase-requests'
+import { applyPurchaseRequest1688TrackingLookup, issueSavedInspectionBoxNumbers, savePurchaseInspection, updatePurchaseRequestPlanFields, updatePurchaseRequestStatus } from './purchase-requests'
 import { type PurchaseInspection } from './purchase-inspection'
 
 const fixture = vi.hoisted(() => ({
@@ -73,6 +73,29 @@ describe('inspection persistence and arrival safety', () => {
     await savePurchaseInspection({ userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id', data: { revision: 0, parcels: [parcel], resolutionNote: '부족 10개 공급처 확인 중' } })
     expect(fixture.writes[0]).toMatchObject({ status: 'inspecting', chinaReceivedQuantity: 90, purchaseInspection: { expectedQuantity: 100, revision: 1, checkedBy: null } })
     expect(fixture.receive).not.toHaveBeenCalled()
+  })
+  it('issues missing box numbers for an arrived inspection without receiving stock again', async () => {
+    const existingBox = { ...parcel.boxes[0]!, id: 'existing-box' }
+    fixture.current.status = 'china_arrived'
+    fixture.current.purchaseInspection = {
+      ...inspection,
+      parcels: [{ ...parcel, boxes: [existingBox, ...parcel.boxes] }],
+      boxNumbers: { [existingBox.id]: '261124-018' },
+    }
+
+    const numbered = await issueSavedInspectionBoxNumbers('workspace-id', 'purchase-id')
+    expect(numbered.boxNumbers).toEqual({
+      [existingBox.id]: '261124-018',
+      [parcel.boxes[0]!.id]: expect.stringMatching(/^\d{6}-001$/),
+    })
+    expect(numbered.revision).toBe(2)
+    expect(fixture.writes).toEqual([{ purchaseInspection: numbered }])
+    fixture.current.purchaseInspection = numbered
+
+    await expect(issueSavedInspectionBoxNumbers('workspace-id', 'purchase-id')).resolves.toEqual(numbered)
+    expect(fixture.writes).toHaveLength(1)
+    expect(fixture.receive).not.toHaveBeenCalled()
+    expect(fixture.adjust).not.toHaveBeenCalled()
   })
   it('preserves the reported-issue protection marker on later inspection saves', async () => {
     fixture.current.purchaseInspection = { ...inspection, hasReportedIssue: true }

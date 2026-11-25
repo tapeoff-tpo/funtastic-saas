@@ -2026,6 +2026,24 @@ async function assignInspectionBoxNumbers(tx: DbTransaction, userId: string, box
   return numbers
 }
 
+export async function issueSavedInspectionBoxNumbers(userId: string, id: string) {
+  await ensurePurchasePaymentTrackingSchema()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${userId}`}))`)
+    const [current] = await tx.select().from(purchaseRequestItems)
+      .where(and(eq(purchaseRequestItems.userId, userId), eq(purchaseRequestItems.id, id))).for('update')
+    const inspection = current?.purchaseInspection
+    const boxIds = inspection?.parcels.flatMap((parcel) => parcel.boxes.map((box) => box.id)) ?? []
+    if (!inspection || inspection.revision < 1 || !boxIds.length) throw new Error('저장된 검수 박스가 없습니다.')
+    if (boxIds.every((boxId) => inspection.boxNumbers?.[boxId])) return inspection
+    const boxNumbers = await assignInspectionBoxNumbers(tx, userId, boxIds, inspection.boxNumbers ?? {})
+    const updated = { ...inspection, boxNumbers, revision: inspection.revision + 1 }
+    await tx.update(purchaseRequestItems).set({ purchaseInspection: updated })
+      .where(and(eq(purchaseRequestItems.userId, userId), eq(purchaseRequestItems.id, id)))
+    return updated
+  })
+}
+
 export async function savePurchaseInspection(input: { userId: string; actorId: string; id: string; data: unknown }) {
   const parsed = purchaseInspectionInputSchema.parse(input.data)
   await ensurePurchasePaymentTrackingSchema()

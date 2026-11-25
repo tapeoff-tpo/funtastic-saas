@@ -212,7 +212,27 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
     frame.src = 'about:blank'
     document.body.append(frame)
   }
-  const hasPrintableBoxes = inspection?.parcels.some((parcel) => parcel.boxes.some((box) => inspection.boxNumbers?.[box.id]))
+  const savedBoxes = inspection?.parcels.flatMap((parcel) => parcel.boxes) ?? []
+  const needsBoxNumbers = savedBoxes.some((box) => !inspection?.boxNumbers?.[box.id])
+
+  async function issueBoxNumbers() {
+    if (dirty || pending) return
+    setPending(true)
+    try {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'issue-box-numbers' }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error)
+      setData((current) => current ? { ...current, inspection: body.inspection } : current)
+      toast.success('검수 박스번호를 발급했습니다.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '박스번호 발급에 실패했습니다.')
+    } finally {
+      setPending(false)
+    }
+  }
 
   return <dialog ref={ref} aria-labelledby="purchase-inspection-title" onClose={onClose}
     onCancel={(event) => { event.preventDefault(); if (!pending) close() }}
@@ -221,8 +241,9 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
       {data && inspection && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <p data-no-translate>{data.sku} · {data.productName}</p>
-        <Button type="button" variant="outline" size="sm" disabled={pending || dirty || !hasPrintableBoxes}
-          title={dirty || !hasPrintableBoxes ? '송장·박스를 저장한 뒤 인쇄할 수 있습니다.' : undefined}
+        {needsBoxNumbers && inspection.revision > 0 && <Button type="button" variant="outline" size="sm" disabled={pending || dirty} onClick={issueBoxNumbers}>박스번호 발급</Button>}
+        <Button type="button" variant="outline" size="sm" disabled={pending || dirty || !savedBoxes.length || needsBoxNumbers}
+          title={dirty ? '송장·박스를 저장한 뒤 인쇄할 수 있습니다.' : undefined}
           onClick={printBoxStickers}>박스 스티커 인쇄</Button>
         <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
           스티커 부착 상태
@@ -294,9 +315,9 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
               </div>
             })() : null}
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-sm">
-              <thead><tr>{['박스', '입고수량', '가로(cm)', '세로(cm)', '높이(cm)', '무게(kg)', 'CBM', ''].map((text, index) => <th key={index} className="p-1 text-left font-medium">{text}</th>)}</tr></thead>
+              <thead><tr>{['박스번호', '입고수량', '가로(cm)', '세로(cm)', '높이(cm)', '무게(kg)', 'CBM', ''].map((text, index) => <th key={index} className="p-1 text-left font-medium">{text}</th>)}</tr></thead>
               <tbody>{parcel.boxes.map((box, boxIndex) => <tr key={box.id}>
-                <td className="whitespace-nowrap p-1 font-mono">{inspection.boxNumbers?.[box.id] ?? boxIndex + 1}</td>
+                <td className="whitespace-nowrap p-1 font-mono">{inspection.boxNumbers?.[box.id] ?? '미발급'}</td>
                 {(['quantity', 'lengthCm', 'widthCm', 'heightCm', 'weightKg'] as const).map((field) => <td key={field} className="p-1">
                   <input type="number" aria-label={`${parcelIndex + 1}번 송장 ${boxIndex + 1}번 박스 ${field}`} min={field === 'quantity' ? 0 : 0.001} step={field === 'quantity' ? 1 : 'any'} value={box[field] ?? ''} className="w-24 rounded border bg-background p-1.5"
                     onChange={(event) => { const value = event.target.value === '' ? null : Number(event.target.value); changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: row.boxes.map((entry) => entry.id === box.id ? { ...entry, [field]: value } : entry) } : row)) }} />

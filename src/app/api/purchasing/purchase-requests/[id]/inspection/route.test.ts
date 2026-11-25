@@ -45,6 +45,7 @@ describe('purchase inspection endpoints', () => {
       expect(html).toContain(value)
     }
     expect(html.match(/class="page box-label"/g)).toHaveLength(1)
+    expect(html).toMatch(/<td class="box-number"[^>]*>.*箱子号: .*261125-001.*<\/td>/)
     expect(mocks.labelData).toHaveBeenCalledWith('owner-id', ['SKU-01'])
   })
   it('separates workspace ownership from the real inspector identity', async () => {

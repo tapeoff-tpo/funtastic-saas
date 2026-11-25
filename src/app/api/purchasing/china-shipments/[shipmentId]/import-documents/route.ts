@@ -12,7 +12,7 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { getUserMenuAccess } from '@/lib/auth/menu-access'
 import { canUseMenu } from '@/lib/auth/menu-permissions'
 import { exportChinaImportDocument, prepareImportDocument } from '@/lib/purchasing/china-import-document'
-import { getAllPurchasingItems, getPurchasingItemTradeDataBySku } from '@/lib/purchasing/items'
+import { getAllPurchasingItems, getPurchasingItemTradeDataBySku, getPurchasingItemLocationsBySku } from '@/lib/purchasing/items'
 import { getChinaOutboundShipmentDetail } from '@/lib/purchasing/saas-china-outbound'
 import { getImportDocumentProductImages } from '@/lib/purchasing/import-document-product-images'
 
@@ -79,7 +79,9 @@ export async function GET(_request: Request, context: Context) {
     if (loaded.response) return loaded.response
     const query = new URL(_request.url).searchParams
     if (query.get('document') === 'korea') {
-      const buffer = await exportKoreaShippingDocument(loaded.detail, query.get('group') === 'box' ? 'box' : 'pallet')
+      const locations = await getPurchasingItemLocationsBySku(loaded.userId, loaded.detail.items.map((item) => item.sku))
+      const detail = { ...loaded.detail, items: loaded.detail.items.map((item) => ({ ...item, location: locations.get(item.sku) || item.location || '' })) }
+      const buffer = await exportKoreaShippingDocument(detail, query.get('group') === 'box' ? 'box' : 'pallet')
       if (query.get('format') === 'preview') return NextResponse.json({ html: await renderChinaImportPreview(buffer) }, { headers: { 'Cache-Control': 'private, no-store' } })
       return new NextResponse(new Uint8Array(buffer), { headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(loaded.prepared.shipmentNo + '_한국출고서류.xlsx')}`, 'Cache-Control': 'private, no-store' } })
     }

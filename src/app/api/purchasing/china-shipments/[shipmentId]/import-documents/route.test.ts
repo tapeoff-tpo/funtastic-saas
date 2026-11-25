@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn(), images: vi.fn(), allItems: vi.fn(), calculate: vi.fn(), confirm: vi.fn(), revalidate: vi.fn(), preview: vi.fn(), draft: vi.fn(), saveDraft: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), access: vi.fn(), workspace: vi.fn(), detail: vi.fn(), locations: vi.fn().mockResolvedValue(new Map()), metadata: vi.fn(), prepare: vi.fn(), export: vi.fn(), images: vi.fn(), allItems: vi.fn(), calculate: vi.fn(), confirm: vi.fn(), revalidate: vi.fn(), preview: vi.fn(), draft: vi.fn(), saveDraft: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/auth/menu-access', () => ({ getUserMenuAccess: mocks.access }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.workspace }))
 vi.mock('@/lib/purchasing/saas-china-outbound', () => ({ getChinaOutboundShipmentDetail: mocks.detail }))
-vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemTradeDataBySku: mocks.metadata, getAllPurchasingItems: mocks.allItems }))
+vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLocationsBySku: mocks.locations, getPurchasingItemTradeDataBySku: mocks.metadata, getAllPurchasingItems: mocks.allItems }))
 vi.mock('@/lib/purchasing/china-import-document', () => ({ prepareImportDocument: mocks.prepare, exportChinaImportDocument: mocks.export }))
 vi.mock('@/lib/purchasing/import-document-product-images', () => ({ getImportDocumentProductImages: mocks.images }))
 vi.mock('@/lib/purchasing/china-import-preview', () => ({ renderChinaImportPreview: mocks.preview }))
@@ -166,4 +166,5 @@ it('serves the Korean shipping workbook and preview only after workspace authori
   expect(download.headers.get('content-type')).toContain('spreadsheetml')
   expect(decodeURIComponent(download.headers.get('content-disposition')!)).toContain('한국출고서류.xlsx')
   expect(mocks.detail).toHaveBeenCalledWith({ userId: 'owner', shipmentId })
+  expect(mocks.locations).toHaveBeenCalledWith('owner', [])
 })

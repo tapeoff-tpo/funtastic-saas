@@ -22,3 +22,22 @@ it('keeps mixed-box SKUs and classifies only warehouse, Coupang and bulk', async
   expect(sheet.getCell('C6').value).toMatchObject({ result: 2 })
   expect(sheet.getCell('G6').value).toMatchObject({ result: 5 })
 })
+
+it('merges exact option SKUs within each pallet and merges the pallet heading', async () => {
+  const source: ImportDocumentDetail = {
+    ...detail,
+    items: [...detail.items, { ...detail.items[0], id: 'duplicate', optionName: '다른 표기', location: 'A-01' }, { ...detail.items[0], id: 'other-option', sku: '100-0002', location: 'A-02' }],
+    boxItems: [...detail.boxItems, { id: 'extra', boxId: 'b', shipmentItemId: 'duplicate', quantity: 2 }, { id: 'option', boxId: 'b', shipmentItemId: 'other-option', quantity: 4 }],
+  }
+  const rows = koreaShippingRows(source, 'pallet')
+  expect(rows.filter((row) => row.pallet === '1' && row.sku === '100-0001')).toHaveLength(1)
+  expect(rows.find((row) => row.sku === '100-0001')).toMatchObject({ quantity: 5, location: 'A-01' })
+  expect(rows.find((row) => row.sku === '100-0002')).toMatchObject({ quantity: 4, location: 'A-02' })
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await exportKoreaShippingDocument(source) as unknown as ExcelJS.Buffer)
+  for (const sheet of workbook.worksheets) {
+    expect(sheet.getCell('A4').master.address).toBe('A3')
+    expect(sheet.getCell('A5').master.address).toBe('A3')
+    expect(sheet.getCell('K3').value).toBe('A-01')
+  }
+})

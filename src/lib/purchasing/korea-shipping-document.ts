@@ -12,8 +12,9 @@ export function koreaShippingRows(source: ImportDocumentDetail, by: 'pallet' | '
       const item = items.get(line.shipmentItemId)
       if (!item) continue
       const pallet = box.palletId ? pallets.get(box.palletId) ?? 'BOX' : 'BOX'
-      const key = JSON.stringify([by === 'box' ? box.id : box.palletId ?? box.id, item.sku, item.optionName ?? ''])
+      const key = JSON.stringify([by === 'box' ? box.id : pallet, item.sku])
       const row = rows.get(key) ?? { pallet, boxes: new Set<string>(), sku: item.sku, name: item.productName, option: item.optionName ?? '', quantity: 0, warehouse: 0, coupang: 0, bulk: 0, location: item.location ?? '' }
+      row.location = [...new Set([row.location, item.location ?? ''].flatMap((value) => value.split(', ')).filter(Boolean))].join(', ')
       row.quantity += line.quantity
       row.boxes.add(box.boxNo)
       const category = /쿠팡|로켓/.test(item.warehouseCode) ? 'coupang' : /대량/.test(item.warehouseCode) ? 'bulk' : 'warehouse'
@@ -44,6 +45,15 @@ export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, 
       sheet.addRow([row.pallet, row.boxes.join(', '), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location])
     }
     const last = sheet.rowCount
+    // Preserve each physical pallet as one vertically merged group in both views.
+    let start = 3
+    while (start <= last) {
+      const pallet = sheet.getCell(`A${start}`).value
+      let end = start
+      while (end < last && sheet.getCell(`A${end + 1}`).value === pallet) end++
+      if (pallet !== 'BOX' && end > start) sheet.mergeCells(start, 1, end, 1)
+      start = end + 1
+    }
     const total = sheet.addRow(['합계'])
     for (const column of ['C', 'G', 'H', 'I', 'J']) {
       let sum = 0

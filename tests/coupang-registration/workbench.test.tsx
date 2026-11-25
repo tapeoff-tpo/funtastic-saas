@@ -283,14 +283,15 @@ describe('registration pricing workbench', () => {
     render(<CoupangRegistrationWorkbench />)
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
-    const card = await screen.findByRole('row', { name: `${row.name} 상품등록정보` })
+    let card = await screen.findByRole('row', { name: `${row.name} 상품등록정보` })
     fireEvent.change(within(card).getByLabelText('브랜드'), { target: { value: '직접 입력한 브랜드' } })
     fireEvent.change(within(card).getByLabelText('제조국'), { target: { value: '미국' } })
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0].fields).toMatchObject({ 브랜드: '직접 입력한 브랜드', 제조국: '미국' }))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     fireEvent.change(within(card).getByLabelText(`${row.name} 카테고리 엑셀 파일`), { target: { files: [new File(['official'], template.name)] } })
-    expect(await within(card).findByLabelText('인증정보 *')).toHaveValue('')
+    expect(await screen.findByLabelText('인증정보 *')).toHaveValue('')
+    card = screen.getByRole('row', { name: `${row.name} 상품등록정보` })
     expect(within(card).queryByLabelText('제조국 *')).not.toBeInTheDocument()
     expect(within(card).getByLabelText('브랜드 *')).toHaveValue('직접 입력한 브랜드')
     expect(within(card).getByRole('list')).toHaveTextContent('인증정보 누락')
@@ -534,24 +535,25 @@ describe('registration pricing workbench', () => {
     render(<CoupangRegistrationWorkbench />)
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
-    const firstCard = await screen.findByRole('row', { name: `${first.name} 상품등록정보` })
-    const otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
+    let firstCard = await screen.findByRole('row', { name: `${first.name} 상품등록정보` })
+    let otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
     fireEvent.change(within(firstCard).getByLabelText(`${first.name} 카테고리 엑셀 파일`), { target: { files: [new File(['first'], firstTemplate.name)] } })
-    expect(await within(firstCard).findByLabelText('가방종류 *')).toHaveValue('')
+    expect(await screen.findByLabelText('가방종류 *')).toHaveValue('')
+    firstCard = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
+    otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
     expect(within(otherCard).queryByLabelText('가방종류 *')).not.toBeInTheDocument()
     fireEvent.change(within(otherCard).getByLabelText(`${other.name} 카테고리 엑셀 파일`), { target: { files: [new File(['other'], otherTemplate.name)] } })
-    expect(await within(otherCard).findByLabelText('가구재질 *')).toHaveValue('')
+    expect(await screen.findByLabelText('가구재질 *')).toHaveValue('')
+    firstCard = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
+    otherCard = screen.getByRole('row', { name: `${other.name} 상품등록정보` })
     expect(within(firstCard).queryByLabelText('가구재질 *')).not.toBeInTheDocument()
-    const table = screen.getByRole('table', { name: '상품등록정보 입력표' })
-    const headers = within(table).getAllByRole('columnheader')
-    const bagIndex = headers.findIndex(header => header.textContent?.includes('가방종류'))
-    const materialIndex = headers.findIndex(header => header.textContent?.includes('가구재질'))
-    expect(bagIndex).toBeGreaterThan(-1)
-    expect(materialIndex).toBeGreaterThan(-1)
-    expect(firstCard.children[materialIndex]).toHaveTextContent('—')
-    expect(firstCard.children[materialIndex]).toHaveAttribute('title', '이 상품의 양식에 없는 항목입니다.')
-    expect(otherCard.children[bagIndex]).toHaveTextContent('—')
-    expect(otherCard.children[bagIndex]).toHaveAttribute('title', '이 상품의 양식에 없는 항목입니다.')
+    const bagTable = firstCard.closest('table')!
+    const furnitureTable = otherCard.closest('table')!
+    expect(bagTable).not.toBe(furnitureTable)
+    expect(within(bagTable).getByRole('columnheader', { name: /^가방종류/ })).toBeInTheDocument()
+    expect(within(bagTable).queryByRole('columnheader', { name: /^가구재질/ })).not.toBeInTheDocument()
+    expect(within(furnitureTable).getByRole('columnheader', { name: /^가구재질/ })).toBeInTheDocument()
+    expect(within(furnitureTable).queryByRole('columnheader', { name: /^가방종류/ })).not.toBeInTheDocument()
     fireEvent.change(within(firstCard).getByLabelText('가방종류 *'), { target: { value: '숄더백' } })
     fireEvent.change(within(otherCard).getByLabelText('가구재질 *'), { target: { value: '철제' } })
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
@@ -590,6 +592,56 @@ describe('registration pricing workbench', () => {
     })
   })
 
+  it('uses every original worksheet header in its own category table and preserves edits while changing sheet filters', async () => {
+    const firstSheet: TemplateSheet = { name: 'QF_101_가방', columns: [
+      { column: 1, label: '상품명', requirement: '필수', guide: '' },
+      { column: 2, label: '가방종류', requirement: '필수', guide: '' },
+      { column: 3, label: '가방선택정보', requirement: '선택', guide: '' },
+    ] }
+    const secondSheet: TemplateSheet = { name: 'QF_202_가구', columns: [
+      { column: 1, label: '상품명', requirement: '필수', guide: '' },
+      { column: 2, label: '가구재질', requirement: '필수', guide: '' },
+      { column: 3, label: '설치방식', requirement: '선택', guide: '' },
+    ] }
+    const template = { ...manualTemplate('multi-sheet-template', '카테고리두시트원본.xlsx', firstSheet.name, firstSheet.columns), sheets: [firstSheet, secondSheet] }
+    const first = { ...confirmPricing(createRegistrationRow(source, '베이지')), templateId: template.id, sheetName: firstSheet.name, fields: { 가방종류: '숄더백' } }
+    const sameSheet = { ...confirmPricing(createRegistrationRow(source, '아이보리')), templateId: template.id, sheetName: firstSheet.name, fields: { 가방종류: '토트백' } }
+    const furniture = { ...confirmPricing(createRegistrationRow(second, '블랙')), templateId: template.id, sheetName: secondSheet.name, fields: { 가구재질: '철제' } }
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [first, sameSheet, furniture], templates: [template] })
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    const bagGroup = await screen.findByRole('region', { name: '가방 입력표' })
+    const furnitureGroup = screen.getByRole('region', { name: '가구 입력표' })
+    expect(within(bagGroup).getByRole('row', { name: `${first.name} 상품등록정보` })).toBeInTheDocument()
+    expect(within(bagGroup).getByRole('row', { name: `${sameSheet.name} 상품등록정보` })).toBeInTheDocument()
+    expect(within(bagGroup).getAllByRole('table')).toHaveLength(1)
+    expect(within(bagGroup).queryByRole('columnheader', { name: /^가구재질/ })).not.toBeInTheDocument()
+    expect(within(furnitureGroup).queryByRole('columnheader', { name: /^가방종류/ })).not.toBeInTheDocument()
+    const optional = within(within(bagGroup).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')
+    expect(optional).toHaveValue('')
+    fireEvent.change(optional, { target: { value: '선택항목도 입력' } })
+    const sheetTabs = screen.getByRole('tablist', { name: '카테고리 시트' })
+    fireEvent.click(within(sheetTabs).getByRole('tab', { name: /^가구\s*1개$/ }))
+    expect(screen.queryByRole('region', { name: '가방 입력표' })).not.toBeInTheDocument()
+    const visibleFurniture = screen.getByRole('region', { name: '가구 입력표' })
+    const installation = within(visibleFurniture).getByLabelText('설치방식')
+    fireEvent.change(installation, { target: { value: '고객 조립' } })
+    fireEvent.click(within(sheetTabs).getByRole('tab', { name: /^가방\s*2개$/ }))
+    const restoredBag = screen.getByRole('region', { name: '가방 입력표' })
+    expect(within(within(restoredBag).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')).toHaveValue('선택항목도 입력')
+    fireEvent.click(within(sheetTabs).getByRole('tab', { name: '전체 3개' }))
+    expect(screen.getAllByRole('table', { name: '상품등록정보 입력표' })).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => {
+      const rows = savedBodies().at(-1)?.draft.rows
+      expect(rows).toHaveLength(3)
+      expect(rows?.[0]).toMatchObject({ id: first.id, fields: { 가방종류: '숄더백', 가방선택정보: '선택항목도 입력' } })
+      expect(rows?.[1]).toMatchObject({ id: sameSheet.id, fields: { 가방종류: '토트백' } })
+      expect(rows?.[2]).toMatchObject({ id: furniture.id, fields: { 가구재질: '철제', 설치방식: '고객 조립' } })
+    })
+  })
+
   it('keeps a selected row file snapshot when the native input clears its live FileList before parsing completes', async () => {
     const row = confirmPricing(createRegistrationRow(source, '베이지'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [row] })
@@ -607,7 +659,7 @@ describe('registration pricing workbench', () => {
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/template'))).toBe(true))
     liveFiles.length = 0
     finish({ ok: true, json: async () => ({ template, rows: [] }) })
-    expect(await within(card).findByLabelText('공식필수값 *')).toHaveValue('')
+    expect(await screen.findByLabelText('공식필수값 *')).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: row.id, templateId: template.id, sheetName: template.sheets[0].name }))
   })

@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, reopenRegistration, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import { useWorkbenchNavigation, type RegistrationStage } from './use-workbench-navigation'
-import { buildInformationColumns } from './information-columns'
+import { buildInformationColumns, groupInformationRows } from './information-columns'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -108,6 +108,7 @@ export function CoupangRegistrationWorkbench() {
   const [templateLibrary, setTemplateLibrary] = useState<CategoryTemplate[]>([])
   const [onlyIssues, setOnlyIssues] = useState(false)
   const [informationLimit, setInformationLimit] = useState(20)
+  const [informationSheet, setInformationSheet] = useState('all')
   const [expandedWorkbench, setExpandedWorkbench] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -120,13 +121,16 @@ export function CoupangRegistrationWorkbench() {
   const bundleEditor = useRef<HTMLDivElement>(null)
   const informationEditor = useRef<HTMLDivElement>(null)
   const stageRows = draft.rows.filter((row) => getRegistrationStage(row) === stage)
+  const informationGroups = groupInformationRows(stageRows, draft.templates)
+  const currentInformationSheet = informationGroups.some((group) => group.key === informationSheet) ? informationSheet : 'all'
+  const sheetRowIds = currentInformationSheet === 'all' ? null : new Set(informationGroups.find((group) => group.key === currentInformationSheet)!.rows.map((row) => row.id))
   const active = stageRows.find((row) => row.id === activeId)
   const issueMap = new Map(draft.rows.map((row) => [row.id, rowIssues(row, draft)]))
   const pricingIssueMap = new Map(draft.rows.map((row) => [row.id, priceIssues(row, draft.rounding)]))
   const stageIssueMap = stage === 'pricing' ? pricingIssueMap : issueMap
   const visible = stageRows.filter((row) => {
     const date = getRegistrationDate(row)
-    return (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
+    return (stage !== 'information' || !sheetRowIds || sheetRowIds.has(row.id)) && (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
       && [row.name, row.internalSku, row.sourceCode].some((value) => value.toLowerCase().includes(rowSearch.toLowerCase()))
   })
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
@@ -155,7 +159,7 @@ export function CoupangRegistrationWorkbench() {
   }
   function setActiveId(activeId: string) { navigate({ activeId }) }
   function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
-  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch(''); setInformationLimit(20) }
+  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch(''); setInformationLimit(20); setInformationSheet('all') }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   async function refreshDrafts() { const response = await jsonRequest('/drafts'); setSaved(response.drafts) }
   useEffect(() => {
@@ -404,14 +408,14 @@ export function CoupangRegistrationWorkbench() {
       const payload: RegistrationDraft = response.payload
       const costs = await fillMissingCostsOnOpen(payload.rows)
       const rows = costs.rows.map((row) => connectedDefaults(row, payload.templates))
-      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setTemplateChoice('')
+      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setTemplateChoice(''); setInformationSheet('all')
       resetNavigation({ stage: !payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered', activeId: '', catalogTarget: null })
     })
   }
   function newDraft() {
     if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')) return
     draftSession.current++
-    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setTemplateChoice(''); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
+    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setTemplateChoice(''); setInformationSheet('all'); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
   }
   function closeCatalog() {
     if (busy) return
@@ -558,9 +562,11 @@ export function CoupangRegistrationWorkbench() {
     </div>
   }
   function informationRows(expanded = false) {
+    const groups = groupInformationRows(visible.slice(0, informationLimit), draft.templates)
     return <>
+      {informationGroups.length > 1 && <nav role="tablist" aria-label="카테고리 시트" className="flex shrink-0 flex-wrap gap-2"><button role="tab" aria-selected={currentInformationSheet === 'all'} className={`${buttonClass} ${currentInformationSheet === 'all' ? 'border-blue-600 bg-blue-50 text-blue-800' : ''}`} onClick={() => { setInformationSheet('all'); setInformationLimit(20) }}>전체 {stageRows.length}개</button>{informationGroups.map((group) => <button key={group.key} role="tab" aria-selected={currentInformationSheet === group.key} title={group.fileName || undefined} className={`${buttonClass} max-w-80 ${currentInformationSheet === group.key ? 'border-blue-600 bg-blue-50 text-blue-800' : ''}`} onClick={() => { setInformationSheet(group.key); setInformationLimit(20) }}><span className="truncate">{group.name}</span><span>{group.rows.length}개</span></button>)}</nav>}
       {!visible.length && <p className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '1단계에서 상품을 추가하고 가격설정을 완료해주세요.'}</p>}
-      {visible.length > 0 && <InformationGrid expanded={expanded} rows={visible.slice(0, informationLimit)} columnRows={stageRows} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap} selected={selected} onToggle={toggle} onPatch={patchRow} onCategory={(rowId, choice) => void chooseCategory(choice, [rowId])} onUpload={(rowId, files) => void importTemplates(files, rowId)} onOpen={setActiveId} onPrice={(row) => void reopenPricing(row)} onComplete={(row) => void completeRegistration([row.id])} />}
+      {groups.length > 0 && <div className={expanded ? 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto' : 'space-y-4'}>{groups.map((group) => <section key={group.key} role="region" aria-label={group.name + ' 입력표'} className={expanded && groups.length === 1 ? 'flex min-h-0 flex-1 flex-col gap-2' : 'shrink-0 space-y-2'}><header className="flex shrink-0 items-center gap-3 px-1"><h3 className="text-sm font-semibold">{group.name}</h3><span className="text-xs text-muted-foreground">{group.rows.length}개</span>{group.fileName && <span className="truncate text-[10px] text-muted-foreground" title={group.fileName}>{group.fileName}</span>}</header><InformationGrid expanded={expanded && groups.length === 1} rows={group.rows} columnRows={group.rows} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap} selected={selected} onToggle={toggle} onPatch={patchRow} onCategory={(rowId, choice) => void chooseCategory(choice, [rowId])} onUpload={(rowId, files) => void importTemplates(files, rowId)} onOpen={setActiveId} onPrice={(row) => void reopenPricing(row)} onComplete={(row) => void completeRegistration([row.id])} /></section>)}</div>}
       {visible.length > informationLimit && <button className={`${buttonClass} shrink-0 self-start`} onClick={() => setInformationLimit((value) => value + 20)}>다음 상품 20개 더 보기 ({informationLimit}/{visible.length})</button>}
     </>
   }
@@ -830,7 +836,7 @@ function CategorySelect({ label, value, templates, onChange }: { label: string; 
   const hasCategories = templates.some((template) => template.sheets.length > 0)
   return <select className={`${inputClass} max-w-full`} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
     <option value="" disabled={!hasCategories}>{hasCategories ? '업로드한 양식 선택' : '카테고리 엑셀 업로드 필요'}</option>
-    {templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{template.name} · {sheet.name.replace(/^QF_\d+_/, '')}</option>))}
+    {templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')} · {template.name}</option>))}
   </select>
 }
 

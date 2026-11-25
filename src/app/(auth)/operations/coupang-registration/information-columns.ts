@@ -37,12 +37,43 @@ export type InformationColumns = {
   rows: Map<string, InformationRowColumns>
 }
 
+export type InformationRowGroup = {
+  key: string
+  name: string
+  fileName: string
+  rows: RegistrationRow[]
+  hasOfficialSheet: boolean
+}
+
 const dedicatedFields = new Set([
   '상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '추가이미지 파일명',
   '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD,
 ])
 
-/** Share visual headers across files while keeping each cell's original field key. */
+/** Separate tables by the exact original file and sheet, retaining the original rows. */
+export function groupInformationRows(
+  rows: readonly RegistrationRow[],
+  templates: RegistrationDraft['templates'],
+): InformationRowGroup[] {
+  const groups = new Map<string, InformationRowGroup>()
+  for (const row of rows) {
+    const template = templates.find(template => template.id === row.templateId)
+    const sheet = template?.sheets.find(sheet => sheet.name === row.sheetName)
+    const key = sheet ? JSON.stringify([row.templateId, sheet.name]) : 'unassigned'
+    const existing = groups.get(key)
+    if (existing) existing.rows.push(row)
+    else groups.set(key, {
+      key,
+      name: sheet ? sheet.name.replace(/^QF_\d+_/, '') : '양식 미선택',
+      fileName: sheet ? template!.name || template!.file.name : '',
+      rows: [row],
+      hasOfficialSheet: !!sheet,
+    })
+  }
+  return [...groups.values()]
+}
+
+/** Keep every editable original header and each cell's original field key. */
 export function buildInformationColumns(
   rows: readonly RegistrationRow[],
   templates: RegistrationDraft['templates'],
@@ -58,7 +89,7 @@ export function buildInformationColumns(
     const cells = new Map<string, InformationCell>()
 
     for (const column of sheet.columns) {
-      // Count before filtering: a hidden first column must not rename the second.
+      // Count before excluding formula columns so duplicate positions stay stable.
       const occurrence = (occurrences.get(column.label) ?? 0) + 1
       occurrences.set(column.label, occurrence)
       if (dedicatedFields.has(column.label) || isAutomaticTemplateColumn(column)) continue
@@ -69,7 +100,6 @@ export function buildInformationColumns(
 
       const required = column.requirement === '필수'
       const conditional = column.requirement.includes('조건부')
-      if (officialSheet && !required && !conditional && !value) continue
 
       const existing = headers.get(key)
       if (existing) {
@@ -87,10 +117,5 @@ export function buildInformationColumns(
     rowColumns.set(row.id, { sheet, hasOfficialSheet: !!officialSheet, columns: cells })
   }
 
-  // A blank optional cell remains editable if another row exposes that header.
-  // Columns absent from a row's own sheet have no cell mapping at all.
-  for (const { columns } of rowColumns.values()) {
-    for (const key of columns.keys()) if (!headers.has(key)) columns.delete(key)
-  }
   return { columns: [...headers.values()], rows: rowColumns }
 }

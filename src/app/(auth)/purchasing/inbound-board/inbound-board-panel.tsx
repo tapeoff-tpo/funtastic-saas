@@ -1,4 +1,5 @@
 'use client'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { InboundPost, InboundPostSummary } from '@/lib/purchasing/inbound-board-store'
 import { koreaShippingRows, formatKoreaBoxNumbers } from '@/lib/purchasing/korea-shipping-rows'
@@ -90,4 +91,12 @@ export function InboundBoardPanel({ postId, onSelect }: { postId: string; onSele
       </div>
     </div>
   </section>
+}
+
+export function InboundBoardWorkspace() {
+  const router = useRouter()
+  const params = useSearchParams()
+  return <InboundBoardPanel postId={params.get('post') ?? ''} onSelect={(id) => {
+    router.replace('/purchasing/inbound-board?post=' + encodeURIComponent(id), { scroll: false })
+  }} />
 }

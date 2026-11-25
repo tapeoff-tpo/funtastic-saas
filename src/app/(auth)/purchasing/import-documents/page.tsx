@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -14,6 +15,10 @@ export default async function ImportDocumentsPage({
   const user = await getCurrentUser()
   if (!user) return null
   const [params, workspaceUserId] = await Promise.all([searchParams, getWorkspaceUserId(user.id)])
+  if (params.document === 'board') {
+    const post = typeof params.post === 'string' ? '?post=' + encodeURIComponent(params.post) : ''
+    redirect('/purchasing/inbound-board' + post)
+  }
   const shipments = await listChinaOutboundShipments(workspaceUserId)
   const selectedId = Array.isArray(params.shipment) ? params.shipment[0] : params.shipment
   const selected = shipments.find((shipment) => shipment.id === selectedId)

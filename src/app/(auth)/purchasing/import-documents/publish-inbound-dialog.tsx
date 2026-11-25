@@ -24,6 +24,6 @@ export function PublishInboundDialog({ shipmentId, onPublished, onClose }: { shi
     <label className="block text-sm">메모<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={3000} rows={3} className="mt-1 block w-full rounded border p-2" /></label>
     <p className="text-xs text-muted-foreground">현재 출고 상품·옵션·수량·로케이션을 저장합니다. 동일 출고 건의 게시글이 있으면 기존 글을 엽니다.</p>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={onClose} className="rounded border px-4 py-2">취소</button><button disabled={pending} className="rounded bg-primary px-4 py-2 text-primary-foreground">{pending ? '게시 중…' : '게시하기'}</button></div>
+    <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={onClose} className="rounded border px-4 py-2">취소</button><button disabled={pending} className="rounded-md bg-teal-700 px-4 py-2 font-medium text-white hover:bg-teal-800">{pending ? '게시 중…' : '게시하기'}</button></div>
   </form></div>
 }

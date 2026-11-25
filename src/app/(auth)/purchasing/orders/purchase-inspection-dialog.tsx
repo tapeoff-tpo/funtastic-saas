@@ -252,7 +252,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-sm">
               <thead><tr>{['박스', '입고수량', '가로(cm)', '세로(cm)', '높이(cm)', '무게(kg)', 'CBM', ''].map((text, index) => <th key={index} className="p-1 text-left font-medium">{text}</th>)}</tr></thead>
               <tbody>{parcel.boxes.map((box, boxIndex) => <tr key={box.id}>
-                <td className="p-1">{boxIndex + 1}</td>
+                <td className="whitespace-nowrap p-1 font-mono">{inspection.boxNumbers?.[box.id] ?? boxIndex + 1}</td>
                 {(['quantity', 'lengthCm', 'widthCm', 'heightCm', 'weightKg'] as const).map((field) => <td key={field} className="p-1">
                   <input type="number" aria-label={`${parcelIndex + 1}번 송장 ${boxIndex + 1}번 박스 ${field}`} min={field === 'quantity' ? 0 : 0.001} step={field === 'quantity' ? 1 : 'any'} value={box[field] ?? ''} className="w-24 rounded border bg-background p-1.5"
                     onChange={(event) => { const value = event.target.value === '' ? null : Number(event.target.value); changeParcels(inspection.parcels.map((row) => row.id === parcel.id ? { ...row, boxes: row.boxes.map((entry) => entry.id === box.id ? { ...entry, [field]: value } : entry) } : row)) }} />

@@ -7,7 +7,7 @@ const fixture = vi.hoisted(() => ({
   receive: vi.fn(), adjust: vi.fn(), recordCompletion: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({ db: { transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
-  execute: vi.fn(), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
+  execute: vi.fn(async (query) => query.queryChunks.some((chunk: { value?: string[] }) => chunk.value?.join?.('').includes('RETURNING last_number')) ? [{ last_number: 1 }] : []), select: () => ({ from: () => ({ where: () => ({ limit: async () => [fixture.current], for: async () => [fixture.current] }) }) }),
   update: () => ({ set: (values: Record<string, unknown>) => { fixture.writes.push(values); return { where: () => ({ returning: async () => [{ id: fixture.current.id }] }) } } }),
 }) } }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))

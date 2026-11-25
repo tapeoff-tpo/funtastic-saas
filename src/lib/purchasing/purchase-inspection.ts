@@ -45,6 +45,7 @@ export type PurchaseInspection = {
   checkedAt: string | null; checkedBy: string | null; resolutionNote: string
   /** Kept on the inspection record so raw logistics refreshes never replace a row with a reported issue. */
   hasReportedIssue?: boolean
+  boxNumbers?: Record<string, string>
   stickerStatus?: InspectionStickerStatus | null
 }
 

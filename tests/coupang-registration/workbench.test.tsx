@@ -261,8 +261,8 @@ describe('registration pricing workbench', () => {
     expect(firstBrand).toHaveFocus()
     fireEvent.keyDown(firstBrand, { key: 'Enter', code: 'Enter' })
     expect(secondBrand).toHaveFocus()
-    expect(screen.queryByRole('button', { name: '등록정보 입력', exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '상품등록', exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '등록정보 입력' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '상품등록' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /엑셀.*출력|엑셀.*생성|엑셀.*다운로드/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
     for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
@@ -332,7 +332,7 @@ describe('registration pricing workbench', () => {
       expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: first.id, manualSupplyPrice: 17700, manualSalePrice: 29500, fields: { 브랜드: '확대 화면 수정 브랜드' } })
       expect(savedBodies().at(-1)?.draft.rows).toHaveLength(2)
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: '닫기', exact: true }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })).not.toBeInTheDocument())
     const restored = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
     expect(within(restored).getByLabelText('브랜드')).toHaveValue('확대 화면 수정 브랜드')
@@ -387,7 +387,7 @@ describe('registration pricing workbench', () => {
     expect(within(informationRow).getByText('18,000원')).toBeInTheDocument()
     expect(within(informationRow).getByText('30,000원')).toBeInTheDocument()
     expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: row.id, stage: 'information', manualSupplyPrice: 18000, manualSalePrice: 30000 })
-    fireEvent.click(within(dialog).getByRole('button', { name: '닫기', exact: true }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })).not.toBeInTheDocument())
     expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('row', { name: `${row.name} 상품등록정보` })).toHaveTextContent('18,000원')
@@ -782,7 +782,7 @@ function savedBodies(): Array<{ draft: RegistrationDraft }> {
 
 async function openCatalogSearch(query: string) {
   fireEvent.change(screen.getByLabelText('상품 통합검색'), { target: { value: query } })
-  fireEvent.click(screen.getByRole('button', { name: '상품 검색', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '상품 검색' }))
   return screen.findByRole('dialog', { name: 'B2B 상품 검색' })
 }
 

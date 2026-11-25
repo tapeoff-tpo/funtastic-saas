@@ -186,8 +186,9 @@ export function CoupangRegistrationWorkbench() {
   useEffect(() => {
     let cancelled = false
     void jsonRequest('/sheet-mappings').then((response) => {
-      if (!cancelled && Array.isArray(response.mappings)) setSheetMappings(response.mappings)
-    }).catch(() => { if (!cancelled) toast.error('저장된 카테고리 연결을 불러오지 못했습니다.') }).finally(() => { if (!cancelled) setSheetMappingsReady(true) })
+      if (!Array.isArray(response.mappings)) throw new Error('저장된 카테고리 연결을 확인하지 못했습니다.')
+      if (!cancelled) { setSheetMappings(response.mappings); setSheetMappingsReady(true) }
+    }).catch(() => { if (!cancelled) toast.error('저장된 카테고리 연결을 불러오지 못했습니다.') })
     return () => { cancelled = true }
   }, [])
   useEffect(() => {

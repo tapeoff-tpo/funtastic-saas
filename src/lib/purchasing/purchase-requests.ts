@@ -50,12 +50,11 @@ import {
   purchasingOutboundComponentIdentity,
 } from './ignored-purchasing-items'
 import { isUniqueSupplierOrderIdentifier } from './supplier-order-reference'
-import { purchaseArrivalWarehouse, type PurchaseArrivalWarehouse } from './purchase-arrival-warehouse'
+import type { PurchaseArrivalWarehouse } from './purchase-arrival-warehouse'
 import {
   adjustSaasChinaPurchaseArrivalQuantityInTransaction,
   ensureSaasChinaOutboundSchema,
   hasSaasChinaPurchaseLinkInTransaction,
-  receiveSaasChinaPurchaseArrivalInTransaction,
 } from './saas-china-outbound'
 
 const CHINA_INVENTORY_WAREHOUSE_ORDER = [
@@ -2047,7 +2046,6 @@ export async function issueSavedInspectionBoxNumbers(userId: string, id: string)
 export async function savePurchaseInspection(input: { userId: string; actorId: string; id: string; data: unknown }) {
   const parsed = purchaseInspectionInputSchema.parse(input.data)
   await ensurePurchasePaymentTrackingSchema()
-  if (parsed.complete) await ensureSaasChinaOutboundSchema()
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
     const [current] = await tx.select().from(purchaseRequestItems)
@@ -2069,18 +2067,6 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
       tx, input.userId, inspection.parcels.flatMap((parcel) => parcel.boxes.map((box) => box.id)),
       current.purchaseInspection?.boxNumbers ?? {},
     )
-    if (parsed.complete && summary.receivedQuantity > 0) {
-      await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
-        userId: input.userId,
-        createdBy: input.actorId,
-        purchaseRequestItemId: current.id,
-        sku: current.sku,
-        productName: current.productName,
-        optionName: current.optionName,
-        quantity: summary.receivedQuantity,
-        warehouseCode: purchaseArrivalWarehouse(current.rawData),
-      })
-    }
     const status = parsed.complete ? 'china_arrived' : 'inspecting'
     await tx.update(purchaseRequestItems).set({
       status, purchaseInspection: inspection,
@@ -2088,7 +2074,6 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
         chinaReceivedAt: current.chinaReceivedAt ?? new Date(),
         rawData: {
           ...current.rawData,
-          saasChinaMode: true,
           ...(current.outboundExpectedDate ? { purchaseDate: current.outboundExpectedDate } : {}),
         },
       } : {}),
@@ -2135,7 +2120,7 @@ export async function updatePurchaseRequestStatus(input: {
       if (current.chinaReceivedQuantity !== inspectionSummary(current.purchaseInspection).receivedQuantity) throw new Error('검수 수량이 변경되었습니다. 다시 확인해주세요.')
     }
 
-    const saasChinaMode = input.status === 'china_arrived' || usesSaasChinaInventory(current.rawData)
+    const saasChinaMode = usesSaasChinaInventory(current.rawData)
     if (saasChinaMode) {
       const hasSaasChinaLink = await hasSaasChinaPurchaseLinkInTransaction({
         tx,
@@ -2150,20 +2135,6 @@ export async function updatePurchaseRequestStatus(input: {
       }
     }
 
-    if (input.status === 'china_arrived') {
-      if (purchaseQuantity(current) > 0) {
-        await receiveSaasChinaPurchaseArrivalInTransaction(tx, {
-          userId: input.userId,
-          createdBy: input.userId,
-          purchaseRequestItemId: current.id,
-          sku: current.sku,
-          productName: current.productName,
-          optionName: current.optionName,
-          quantity: purchaseQuantity(current),
-          warehouseCode: purchaseArrivalWarehouse(current.rawData),
-        })
-      }
-    }
     if (input.status === 'outbound_requested') {
       if (current.status === 'china_arrived') {
         await addChinaWarehouseStock(tx, current)
@@ -2205,7 +2176,6 @@ export async function updatePurchaseRequestStatus(input: {
       values.chinaReceivedQuantity = current.chinaReceivedQuantity ?? purchaseQuantity(current)
       values.rawData = {
         ...current.rawData,
-        saasChinaMode: true,
         ...(current.outboundExpectedDate ? { purchaseDate: current.outboundExpectedDate } : {}),
       }
     }

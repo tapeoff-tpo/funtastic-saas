@@ -127,7 +127,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       setDirty(false)
       setBoxNumberError('')
       if (complete) {
-        toast.success('검수를 완료하고 실제 입고수량을 반영했습니다.')
+        toast.success('검수를 완료하고 중국창고도착으로 이동했습니다.')
         ref.current?.close()
       } else toast.success('송장·박스를 임시저장했습니다.')
       router.refresh()

@@ -105,6 +105,7 @@ export function PurchaseInspectionIssueRegister({
   disabled?: boolean
   onRegistered: (saved: { inspection: PurchaseInspection; issue: PurchaseInspectionIssue }) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [description, setDescription] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
   const [preparing, setPreparing] = useState(false)
@@ -147,6 +148,7 @@ export function PurchaseInspectionIssueRegister({
       onRegistered(body as { inspection: PurchaseInspection; issue: PurchaseInspectionIssue })
       setDescription('')
       setPhotos([])
+      setExpanded(false)
       toast.success('검수 오류를 등록했습니다.')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '검수 오류 등록에 실패했습니다.')
@@ -156,37 +158,38 @@ export function PurchaseInspectionIssueRegister({
   }
 
   const busy = Boolean(disabled || preparing || pending)
-  return <section className="space-y-3 rounded-lg border border-red-200 bg-red-50/40 p-3">
-    <div>
-      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-red-900"><AlertTriangle className="size-4" />검수 오류 등록</h3>
-      <p className="mt-1 text-xs text-red-800/80">오류 설명만으로 등록할 수 있으며, 사진은 선택입니다.</p>
-    </div>
-    <label className="block text-sm font-medium">오류 설명
-      <textarea
-        value={description}
-        maxLength={2_000}
-        rows={3}
-        disabled={busy}
-        placeholder="예: 수량 10개 부족, 박스 2번 모서리 파손"
-        className="mt-1 block w-full rounded border bg-background p-2 text-sm disabled:opacity-60"
-        onChange={(event) => setDescription(event.target.value)}
-      />
-    </label>
-    <div>
-      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-sm font-medium hover:bg-muted has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
-        {preparing ? <Loader2 className="size-4 animate-spin" /> : <FileImage className="size-4" />}
-        사진 첨부 (선택)
-        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" disabled={busy || photos.length >= MAX_ATTACHMENTS} onChange={(event) => { void selectPhotos(event.target.files); event.currentTarget.value = '' }} />
+  return <section className="space-y-2">
+    <Button type="button" size="sm" variant="outline" aria-expanded={expanded}
+      className="text-red-800" disabled={busy} onClick={() => setExpanded(!expanded)}>
+      <AlertTriangle />검수 오류 등록
+    </Button>
+    {expanded && <div className="space-y-2 rounded-md border p-2">
+      <label className="block text-sm font-medium">오류 설명
+        <textarea
+          value={description}
+          maxLength={2_000}
+          rows={2}
+          disabled={busy}
+          placeholder="예: 수량 10개 부족, 박스 2번 모서리 파손"
+          className="mt-1 block w-full rounded border bg-background p-2 text-sm disabled:opacity-60"
+          onChange={(event) => setDescription(event.target.value)}
+        />
       </label>
-      <p className="mt-1 text-xs text-muted-foreground">자동 압축 후 장당 700KB 이하로 저장 · 최대 {MAX_ATTACHMENTS}장</p>
-      {photos.length > 0 ? <ul className="mt-2 space-y-1">
-        {photos.map((photo, index) => <li key={`${photo.name}-${index}`} className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs">
-          <span data-no-translate className="min-w-0 truncate"><Paperclip className="mr-1 inline size-3" />{photo.name} · {Math.ceil(photo.size / 1024)}KB</span>
-          <button type="button" disabled={busy} onClick={() => setPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))} className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`${photo.name} 제거`}><X className="size-3.5" /></button>
-        </li>)}
-      </ul> : null}
-    </div>
-    <div className="flex justify-end"><Button type="button" variant="outline" disabled={busy} onClick={() => void register()}>{pending ? <Loader2 className="animate-spin" /> : <AlertTriangle />}오류 등록</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-sm font-medium hover:bg-muted has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+          {preparing ? <Loader2 className="size-4 animate-spin" /> : <FileImage className="size-4" />}
+          사진 첨부 (선택)
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" disabled={busy || photos.length >= MAX_ATTACHMENTS} onChange={(event) => { void selectPhotos(event.target.files); event.currentTarget.value = '' }} />
+        </label>
+        <Button type="button" size="sm" disabled={busy || !description.trim()} onClick={() => void register()}>{pending && <Loader2 className="animate-spin" />}오류 등록</Button>
+      </div>
+        {photos.length > 0 ? <ul className="mt-2 space-y-1">
+          {photos.map((photo, index) => <li key={`${photo.name}-${index}`} className="flex items-center justify-between gap-2 rounded border bg-background px-2 py-1.5 text-xs">
+            <span data-no-translate className="min-w-0 truncate"><Paperclip className="mr-1 inline size-3" />{photo.name} · {Math.ceil(photo.size / 1024)}KB</span>
+            <button type="button" disabled={busy} onClick={() => setPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))} className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`${photo.name} 제거`}><X className="size-3.5" /></button>
+          </li>)}
+        </ul> : null}
+    </div>}
   </section>
 }
 

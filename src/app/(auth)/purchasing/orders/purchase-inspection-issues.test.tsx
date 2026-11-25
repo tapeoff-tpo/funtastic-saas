@@ -24,6 +24,8 @@ describe('purchase inspection issue UI', () => {
     vi.stubGlobal('fetch', fetcher)
     render(<PurchaseInspectionIssueRegister purchaseItemId={id} onRegistered={onRegistered} />)
 
+    expect(screen.queryByLabelText('오류 설명')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '검수 오류 등록' }))
     fireEvent.change(screen.getByLabelText('오류 설명'), { target: { value: '수량 부족' } })
     fireEvent.click(screen.getByRole('button', { name: '오류 등록' }))
 

@@ -191,6 +191,8 @@ describe('purchase tracking and inspection editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '송장·검수' }))
 
     fireEvent.change(await screen.findByLabelText('1번 송장 1번 박스 lengthCm'), { target: { value: '77' } })
+    expect(screen.queryByLabelText('오류 설명')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '검수 오류 등록' }))
     fireEvent.change(screen.getByLabelText('오류 설명'), { target: { value: '외관 파손' } })
     fireEvent.click(screen.getByRole('button', { name: '오류 등록' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))

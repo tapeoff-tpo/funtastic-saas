@@ -29,7 +29,6 @@ type ProductGroupMoqRule = {
 
 const PRODUCT_GROUP_MOQ_RULES: readonly ProductGroupMoqRule[] = [
   { productName: '테피 USB 캔들라이터', minimumOrderQuantity: 200, roundingUnit: 10 },
-  { productName: '루멘 철제 사이드 테이블', minimumOrderQuantity: 200, roundingUnit: 10 },
   { productName: '린블 아기옷 원형 건조대', minimumOrderQuantity: 200, roundingUnit: 10 },
   { productName: '미니스텝퍼', sku: '101542-0001', minimumOrderQuantity: 300, roundingUnit: 10 },
 ] as const

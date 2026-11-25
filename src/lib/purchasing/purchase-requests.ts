@@ -2064,7 +2064,6 @@ export async function savePurchaseInspection(input: { userId: string; actorId: s
       hasReportedIssue: current.purchaseInspection?.hasReportedIssue === true,
     }
     const summary = parsed.complete ? validateInspectionCompletion(inspection, parsed.acknowledgeMismatch) : validateInspectionSave(inspection)
-    if (parsed.complete && !stickerStatus) throw new Error('스티커 부착 상태를 선택해주세요.')
     inspection.boxNumbers = await assignInspectionBoxNumbers(
       tx, input.userId, inspection.parcels.flatMap((parcel) => parcel.boxes.map((box) => box.id)),
       current.purchaseInspection?.boxNumbers ?? {},

@@ -168,9 +168,8 @@ describe('inspection persistence and arrival safety', () => {
   it('records the real inspector only after shortage verification', async () => {
     const data = { revision: 0, parcels: [parcel], complete: true, acknowledgeMismatch: true, resolutionNote: '부족 10개 공급처 확인' }
     const context = { userId: 'workspace-id', actorId: 'staff-id', id: 'purchase-id' }
-    await expect(savePurchaseInspection({ ...context, data })).rejects.toThrow('스티커 부착 상태')
-    await savePurchaseInspection({ ...context, data: { ...data, stickerStatus: 'barcode' } })
-    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { checkedBy: 'staff-id', resolutionNote: '부족 10개 공급처 확인', expectedQuantity: 100, stickerStatus: 'barcode' } })
+    await savePurchaseInspection({ ...context, data })
+    expect(fixture.writes[0]).toMatchObject({ purchaseInspection: { checkedBy: 'staff-id', resolutionNote: '부족 10개 공급처 확인', expectedQuantity: 100 } })
     expect(fixture.receive).not.toHaveBeenCalled()
   })
   it('preserves the recorded sticker status when another entry point only edits tracking', async () => {

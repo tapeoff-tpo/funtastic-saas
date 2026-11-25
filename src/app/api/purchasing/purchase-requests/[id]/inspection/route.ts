@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { createInspectionBoxLabelWorkbook } from '@/lib/purchasing/china-outbound-shipment-labels'
 import { renderShipmentLabelWorkbookPrint } from '@/lib/purchasing/china-shipment-label-print'
+import { listInspectionPrintRequests, recordInspectionPrintRequest } from '@/lib/purchasing/purchase-inspection-print-history'
+import { listInspectionLabelFiles } from '@/lib/purchasing/purchase-inspection-label-files'
+import { INSPECTION_LABEL_SOURCES } from '@/lib/purchasing/purchase-inspection-label-types'
 import { getPurchasingItemLabelDataBySku } from '@/lib/purchasing/items'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
@@ -43,7 +46,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
     })
   }
-  return data ? NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } })
+  return data ? NextResponse.json({ ...data, printRequests: await listInspectionPrintRequests(workspaceUserId, id.data) }, { headers: { 'Cache-Control': 'private, no-store' } })
     : NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
 }
 
@@ -53,6 +56,35 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const id = z.string().uuid().safeParse((await params).id)
   if (!id.success) return NextResponse.json({ error: '발주 항목을 확인해주세요.' }, { status: 400 })
   const payload = await request.json().catch(() => null)
+  if (payload?.action === 'record-print') {
+    const target = z.union([
+      z.object({ kind: z.literal('box') }),
+      z.object({ kind: z.literal('file'), fileId: z.uuid(), source: z.enum(INSPECTION_LABEL_SOURCES) }),
+    ]).safeParse(payload)
+    if (!target.success) return NextResponse.json({ error: '인쇄할 스티커를 확인해주세요.' }, { status: 400 })
+    try {
+      const userId = await getWorkspaceUserId(user.id)
+      const data = await getPurchaseInspection(userId, id.data)
+      if (!data) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
+      const scope = { userId, itemId: id.data, actorId: user.id }
+      if (target.data.kind === 'box') {
+        const numbers = data.inspection.parcels.flatMap((parcel) => parcel.boxes.map((box) => data.inspection.boxNumbers?.[box.id]))
+        if (!numbers.length || !numbers.every((number): number is string => Boolean(number))) {
+          return NextResponse.json({ error: '박스번호를 먼저 발급해주세요.' }, { status: 409 })
+        }
+        const entry = await recordInspectionPrintRequest({ ...scope, kind: 'box', boxNumbers: numbers, fileName: null })
+        return NextResponse.json({ entry }, { status: 201 })
+      }
+      const { fileId, source } = target.data
+      const file = (await listInspectionLabelFiles(userId, data.sku)).find((file) => file.id === fileId && file.source === source)
+      if (!file) return NextResponse.json({ error: '스티커 파일을 찾을 수 없습니다.' }, { status: 404 })
+      const entry = await recordInspectionPrintRequest({ ...scope, kind: file.kind, boxNumbers: null, fileName: file.fileName })
+      return NextResponse.json({ entry }, { status: 201 })
+    } catch (error) {
+      console.error('Purchase inspection print request recording failed', error instanceof Error ? error.name : 'unknown')
+      return NextResponse.json({ error: '인쇄 요청 이력을 저장하지 못했습니다.' }, { status: 500 })
+    }
+  }
   if (payload?.action === 'issue-box-numbers') {
     try {
       const inspection = await issueSavedInspectionBoxNumbers(await getWorkspaceUserId(user.id), id.data)

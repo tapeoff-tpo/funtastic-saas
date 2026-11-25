@@ -13,3 +13,12 @@ export type InspectionLabelFile = {
 
 export const INSPECTION_LABEL_FILE_LIMIT = 4 * 1024 * 1024
 export const INSPECTION_LABEL_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
+export type InspectionPrintRequest = {
+  id: string
+  kind: 'box' | InspectionLabelKind
+  actorName: string
+  requestedAt: string
+  boxNumbers: string[] | null
+  fileName: string | null
+}

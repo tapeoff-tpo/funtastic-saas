@@ -10,7 +10,7 @@ import {
 const titles = { quality: '품질표시사항', barcode: '바코드 스티커' } as const
 const linkStyle = 'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted'
 
-export function PurchaseInspectionLabelPanel({ id, canUpload }: { id: string; canUpload: boolean }) {
+export function PurchaseInspectionLabelPanel({ id, canUpload, onPrint }: { id: string; canUpload: boolean; onPrint: (file: InspectionLabelFile) => void }) {
   const endpoint = `/api/purchasing/purchase-requests/${id}/inspection/labels`
   const [files, setFiles] = useState<InspectionLabelFile[] | null>(null)
   const [uploading, setUploading] = useState<InspectionLabelKind | null>(null)
@@ -84,7 +84,7 @@ export function PurchaseInspectionLabelPanel({ id, canUpload }: { id: string; ca
                 ) : <FileText className="size-4 shrink-0 text-muted-foreground" />}
                 <span title={file.fileName} data-no-translate className="truncate">{file.fileName}</span>
               </a>
-              <a href={`${href}&print=1`} target="_blank" rel="noopener noreferrer" className={linkStyle} aria-label={`${titles[kind]} 인쇄`}>
+              <a href={`${href}&print=1`} target="_blank" rel="noopener noreferrer" className={linkStyle} aria-label={`${titles[kind]} 인쇄`} onClick={() => onPrint(file)}>
                 <Printer className="size-3.5" />인쇄
               </a>
             </div>

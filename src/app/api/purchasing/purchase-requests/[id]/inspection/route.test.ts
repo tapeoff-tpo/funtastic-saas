@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET, POST } from './route'
 
-const mocks = vi.hoisted(() => ({ user: vi.fn(), owner: vi.fn(), get: vi.fn(), save: vi.fn(), labelData: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), owner: vi.fn(), get: vi.fn(), save: vi.fn(), labelData: vi.fn(), recordPrint: vi.fn(), listFiles: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.owner }))
 vi.mock('@/lib/purchasing/purchase-requests', () => ({ getPurchaseInspection: mocks.get, savePurchaseInspection: mocks.save }))
 vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mocks.labelData }))
+vi.mock('@/lib/purchasing/purchase-inspection-print-history', () => ({
+  listInspectionPrintRequests: async () => [], recordInspectionPrintRequest: mocks.recordPrint,
+}))
+vi.mock('@/lib/purchasing/purchase-inspection-label-files', () => ({ listInspectionLabelFiles: mocks.listFiles }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 const id = '00000000-0000-4000-8000-000000000001'
 const context = { params: Promise.resolve({ id }) }
@@ -47,6 +51,33 @@ describe('purchase inspection endpoints', () => {
     expect(html.match(/class="page box-label"/g)).toHaveLength(1)
     expect(html).toMatch(/<td class="box-number"[^>]*>.*箱子号: .*261125-001.*<\/td>/)
     expect(mocks.labelData).toHaveBeenCalledWith('owner-id', ['SKU-01'])
+  })
+  it('records the signed-in inspector and box numbers from the saved inspection', async () => {
+    const box = input.parcels[0].boxes[0]
+    mocks.get.mockResolvedValue({ id, inspection: { ...input, boxNumbers: { [box.id]: '261125-001' } } })
+    mocks.recordPrint.mockResolvedValue({ kind: 'box' })
+
+    const response = await POST(request({ action: 'record-print', kind: 'box', boxNumbers: ['forged'] }), context)
+    expect(response.status).toBe(201)
+    expect(mocks.recordPrint).toHaveBeenCalledWith({
+      actorId: 'staff-id', userId: 'owner-id', itemId: id, kind: 'box', boxNumbers: ['261125-001'], fileName: null,
+    })
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it('records the kind and name of the actual sticker file in the workspace', async () => {
+    const fileId = '00000000-0000-4000-8000-000000000007'
+    mocks.get.mockResolvedValue({ id, sku: 'SKU-01' })
+    mocks.listFiles.mockResolvedValue([{ id: fileId, kind: 'quality', source: 'works', fileName: '품질표시.pdf' }])
+    mocks.recordPrint.mockResolvedValue({ kind: 'quality' })
+    const target = { action: 'record-print', kind: 'file', fileId, source: 'works' }
+
+    expect((await POST(request(target), context)).status).toBe(201)
+    expect(mocks.listFiles).toHaveBeenCalledWith('owner-id', 'SKU-01')
+    expect(mocks.recordPrint).toHaveBeenCalledWith({
+      actorId: 'staff-id', userId: 'owner-id', itemId: id, kind: 'quality', boxNumbers: null, fileName: '품질표시.pdf',
+    })
+    expect((await POST(request({ ...target, source: 'attachment' }), context)).status).toBe(404)
+    expect(mocks.recordPrint).toHaveBeenCalledOnce()
   })
   it('separates workspace ownership from the real inspector identity', async () => {
     expect((await POST(request(input), context)).status).toBe(200)

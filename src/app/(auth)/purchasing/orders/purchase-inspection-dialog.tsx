@@ -7,13 +7,23 @@ import { Copy, ExternalLink } from 'lucide-react'
 import { PurchasingProductImageButton } from '@/components/purchasing-product-image'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { Button } from '@/components/ui/button'
-import { blankInspectionBox, inspectionSummary, validateInspectionSave, STICKER_STATUS_LABELS, type InspectionParcel, type InspectionStickerStatus, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import { blankInspectionBox, inspectionSummary, validateInspectionSave, type InspectionParcel, type PurchaseInspection } from '@/lib/purchasing/purchase-inspection'
+import type { InspectionLabelFile, InspectionPrintRequest } from '@/lib/purchasing/purchase-inspection-label-types'
 import type { PurchaseInspectionIssue } from '@/lib/purchasing/purchase-inspection-issues'
 import { PurchaseInspectionIssueList, PurchaseInspectionIssueRegister } from './purchase-inspection-issues'
 import { PurchaseInspectionLabelPanel } from './purchase-inspection-label-panel'
 
-type Detail = { id: string; status: string; productName: string; sku: string; inspection: PurchaseInspection; inspectionIssues?: PurchaseInspectionIssue[]; imageUrls: string[] }
+type Detail = { id: string; status: string; productName: string; sku: string; inspection: PurchaseInspection; inspectionIssues?: PurchaseInspectionIssue[]; printRequests?: InspectionPrintRequest[]; imageUrls: string[] }
 type BoxCopySource = { parcelId: string; boxId: string }
+
+const printRequestDate = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+const printRequestNames = { box: '박스 스티커', quality: '품질표시사항', barcode: '바코드 스티커' }
+
+function formatPrintRequest(entry: InspectionPrintRequest) {
+  return `${printRequestNames[entry.kind]} · ${printRequestDate.format(new Date(entry.requestedAt))} · ${entry.actorName}`
+}
 
 function canCopyInspectionBox(box: InspectionParcel['boxes'][number]) {
   return typeof box.quantity === 'number'
@@ -62,6 +72,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
   const [acknowledgeMismatch, setAcknowledgeMismatch] = useState(false)
+  const [printHistoryError, setPrintHistoryError] = useState('')
   const [boxNumberError, setBoxNumberError] = useState('')
   const [dirty, setDirty] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -147,15 +158,11 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       quantityReasonRef.current?.focus()
       return
     }
-    if (complete && !inspection.stickerStatus) {
-      toast.error('스티커 부착 상태를 선택해주세요.')
-      return
-    }
     setPending(true)
     try {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: inspection.revision, parcels: inspection.parcels, complete, acknowledgeMismatch, resolutionNote: inspection.resolutionNote, stickerStatus: inspection.stickerStatus }),
+        body: JSON.stringify({ revision: inspection.revision, parcels: inspection.parcels, complete, acknowledgeMismatch, resolutionNote: inspection.resolutionNote }),
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || '검수 저장에 실패했습니다.')
@@ -177,6 +184,26 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
 
   const savedBoxes = inspection?.parcels.flatMap((parcel) => parcel.boxes) ?? []
   const needsBoxNumbers = savedBoxes.some((box) => !inspection?.boxNumbers?.[box.id])
+
+  async function recordPrint(file?: InspectionLabelFile) {
+    setPrintHistoryError('')
+    const target = file ? { kind: 'file', fileId: file.id, source: file.source } : { kind: 'box' }
+    try {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ action: 'record-print', ...target }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.entry) throw new Error(result.error || '인쇄 요청 이력을 저장하지 못했습니다.')
+      const entry = result.entry as InspectionPrintRequest
+      setData((current) => current ? {
+        ...current,
+        printRequests: [entry, ...(current.printRequests ?? [])].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).slice(0, 100),
+      } : current)
+    } catch {
+      setPrintHistoryError('인쇄 요청 이력을 저장하지 못했습니다.')
+    }
+  }
 
   async function issueBoxNumbers() {
     if (dirty || pending) return
@@ -205,24 +232,12 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
       {data && inspection && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <p data-no-translate>{data.sku} · {data.productName}</p>
-        <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
-          스티커 부착 상태
-          <select value={inspection.stickerStatus ?? ''} disabled={pending || !editable} className="h-8 rounded-md border bg-background px-2 text-sm"
-            onChange={(event) => {
-              const stickerStatus = event.target.value as InspectionStickerStatus
-              setData({ ...data, inspection: { ...inspection, stickerStatus } })
-              setDirty(true)
-            }}>
-            <option value="" disabled>미확인</option>
-            {Object.entries(STICKER_STATUS_LABELS).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
-          </select>
-        </label>
       </div>}
     </div>
     <div className="space-y-4 p-4">
       {error ? <div role="alert" className="text-sm text-red-700">{error}<Button type="button" variant="outline" className="ml-3" onClick={() => setAttempt((value) => value + 1)}>다시 불러오기</Button></div> : !data ? <p>불러오는 중…</p> : null}
       {data && inspection && summary && <>
-        <PurchaseInspectionLabelPanel id={id} canUpload={editable || data.status === 'china_arrived'} />
+        <PurchaseInspectionLabelPanel id={id} canUpload={editable || data.status === 'china_arrived'} onPrint={recordPrint} />
         <fieldset disabled={pending || !editable} className="min-w-0 space-y-4">
           {inspection.parcels.map((parcel, parcelIndex) => <section key={parcel.id} className="space-y-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-end gap-3">
@@ -335,6 +350,15 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
         {inspection.parcels.length && summary.hasError ? <p role="status" className="font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p>입고수량 미입력</p> : null}
       </div>
+      {printHistoryError && <p role="alert" className="text-xs text-red-700">{printHistoryError}</p>}
+      {!!data?.printRequests?.length && <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer">최근 인쇄 요청 · {formatPrintRequest(data.printRequests[0]!)}</summary>
+        <ol className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+          {data.printRequests.map((entry) => <li key={entry.id}>
+            {formatPrintRequest(entry)}{entry.boxNumbers?.length ? ` · ${entry.boxNumbers.join(', ')}` : entry.fileName ? ` · ${entry.fileName}` : ''}
+          </li>)}
+        </ol>
+      </details>}
       {boxNumberError && <p role="alert" className="text-sm text-red-700">{boxNumberError}</p>}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {editable && <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장</Button>}
@@ -343,7 +367,10 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
             <Button type="button" variant="outline" disabled={pending || dirty} onClick={issueBoxNumbers}>박스번호 발급</Button>
           ) : <span className="text-sm text-muted-foreground">박스번호 발급 완료</span>}
           <Button type="button" variant="outline" disabled={pending || dirty || needsBoxNumbers}
-            onClick={() => window.open(`/api/purchasing/purchase-requests/${id}/inspection?format=box-print`, '_blank', 'noopener,noreferrer')}>박스 스티커 인쇄</Button>
+            onClick={() => {
+              window.open(`/api/purchasing/purchase-requests/${id}/inspection?format=box-print`, '_blank', 'noopener,noreferrer')
+              void recordPrint()
+            }}>박스 스티커 인쇄</Button>
         </>}
         {editable && <Button type="button" disabled={pending} onClick={() => void save(true)}>검수완료</Button>}
       </div>

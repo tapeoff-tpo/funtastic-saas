@@ -26,7 +26,7 @@ describe('Coupang three-stage registration workflow', () => {
   it('confirms prices before category, labels and registration fields are complete', () => {
     const row = pricedRow()
     expect(priceIssues(row)).toEqual([])
-    expect(rowIssues(row, blankDraft())).toContain('쿠팡 견적서 카테고리를 선택해주세요.')
+    expect(rowIssues(row, blankDraft())).toContain('카테고리 엑셀을 업로드하고 해당 양식을 선택해주세요.')
     const confirmed = confirmPricing(row, 1, now)
     expect(confirmed).toMatchObject({ stage: 'information', priceConfirmedAt: now, fields: row.fields })
     expect(getRegistrationStage(confirmed)).toBe('information')
@@ -67,14 +67,14 @@ describe('Coupang three-stage registration workflow', () => {
     }
   })
 
-  it('requires the matching server job and receipt evidence before recording completion', () => {
+  it('preserves matching legacy Hub receipts without adding products to the manually completed list', () => {
     const confirmed = confirmPricing(pricedRow(), 1, now)
     expect(() => applyRegistrationSubmission(confirmed, succeeded)).toThrow('일치하지 않는')
     const row = applyRegistrationSubmission(confirmed, queued)
     expect(() => applyRegistrationSubmission(row, { ...succeeded, receiptId: undefined, receiptUrl: undefined })).toThrow('확인번호')
     expect(() => applyRegistrationSubmission(row, { ...succeeded, jobId: 'stale-job' })).toThrow('일치하지 않는')
     const registered = applyRegistrationSubmission(row, succeeded)
-    expect(getRegistrationStage(registered)).toBe('registered')
+    expect(getRegistrationStage(registered)).toBe('information')
     expect(registered.registeredAt).toBe(completedAt)
     expect(applyRegistrationSubmission(registered, succeeded)).toBe(registered)
     expect(() => returnToPricing(registered)).toThrow('등록완료')

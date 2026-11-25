@@ -5,7 +5,7 @@ import type { SQL } from 'drizzle-orm'
 const mocks = vi.hoisted(() => ({ select: vi.fn(), fetch: vi.fn(), findProductMasters: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: { select: mocks.select } }))
 vi.mock('@/lib/coupang-registration/product-master', () => ({ findRegistrationProductMasters: mocks.findProductMasters }))
-import { getCatalogProduct, searchCatalog } from '@/lib/coupang-registration/catalog'
+import { getCatalogProduct, matchCatalogProducts, searchCatalog } from '@/lib/coupang-registration/catalog'
 import { createRegistrationRow } from '@/lib/coupang-registration/model'
 
 const source = { code: '1471', name: '마미백 플러스', price: 14500, imageUrl: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], options: [{ optionName: '베이지' }] }
@@ -46,6 +46,45 @@ describe('fast registration catalogue search', () => {
     const product = await getCatalogProduct('workspace-owner', source.code)
     expect(product.productMaster).toMatchObject({ itemId: 'product-management-item', match: 'sku', noticeSize: '25*12*41cm' })
     expect(mocks.findProductMasters).toHaveBeenCalledWith('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+  })
+  it('keeps current costs and option prices while deferring product-management information for pricing', async () => {
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ ...source, options: [{ optionName: '베이지', addPrice: 2500 }] }) })
+    const product = await getCatalogProduct('workspace-owner', source.code, { includeProductMasters: false })
+    expect(createRegistrationRow(product, '베이지')).toMatchObject({ internalSku: '112361-0001', costPrice: 8776, wholesalePrice: 17000 })
+    expect(mocks.select).toHaveBeenCalledTimes(1)
+    expect(mocks.findProductMasters).not.toHaveBeenCalled()
+    expect(product.productMaster).toBeUndefined()
+  })
+  it('fetches each supplied code once in parallel batches of at most four', async () => {
+    const pending: Array<() => void> = []
+    mocks.fetch.mockImplementation((url: string) => new Promise((resolve) => {
+      const code = new URL(url).searchParams.get('code')!
+      pending.push(() => resolve({ ok: true, json: async () => ({ ...source, code, options: [{ optionName: '베이지', addPrice: Number(code) }] }) }))
+    }))
+    const result = matchCatalogProducts('workspace-owner', [], ['1', '2', '3', '4', '5', '2', ''], { includeProductMasters: false })
+    expect(mocks.fetch).toHaveBeenCalledTimes(4)
+    for (const release of pending.splice(0)) release()
+    await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(5))
+    pending[0]()
+    const products = await result
+    expect(products.map((product) => product.code)).toEqual(['1', '2', '3', '4', '5'])
+    expect(products.map((product) => product.options[0].addPrice)).toEqual([1, 2, 3, 4, 5])
+    expect(mocks.fetch.mock.calls.map(([url]) => new URL(url).searchParams.get('code'))).toEqual(['1', '2', '3', '4', '5'])
+    expect(mocks.select).toHaveBeenCalledTimes(1)
+    expect(products[0].costCandidates[0]).toMatchObject({ sku: '112361-0001', costPrice: 8776 })
+    expect(mocks.findProductMasters).not.toHaveBeenCalled()
+  })
+  it('hydrates overlapping name matches and explicit codes once using full details', async () => {
+    mocks.fetch.mockImplementation(async (url: string) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/api/products') return { ok: true, json: async () => ({ products: [{ ...source, price: 1 }] }) }
+      return { ok: true, json: async () => ({ ...source, code: parsed.searchParams.get('code'), options: [{ optionName: '베이지', addPrice: 2500 }] }) }
+    })
+    const products = await matchCatalogProducts('workspace-owner', [source.name], [source.code, '1472', source.code])
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(products.map((product) => product.code)).toEqual(['1471', '1472'])
+    expect(products[0]).toMatchObject({ price: 14500, options: [{ name: '베이지', addPrice: 2500 }] })
+    expect(mocks.findProductMasters).toHaveBeenCalledTimes(1)
   })
   it('links option costs retained in the item master when legacy option product rows are hidden', async () => {
     const name = '바뜨 옷장 레일행거'

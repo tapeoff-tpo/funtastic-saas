@@ -24,16 +24,25 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
     { label: '재고 보유개월', value: coverage == null ? '-' : `${formatNumber(coverage)}개월` },
   ]
   const notes: Note[] = []
+  const stockReview = rawData.moqStockReview && typeof rawData.moqStockReview === 'object'
+    ? rawData.moqStockReview as Record<string, unknown> : null
+  const moqDeferred = stockReview?.deferred === true
   const trend = recommendationTrend(rawData.salesTrend, rawData.effectiveMonthlyOutgoing)
   if (trend) notes.push(trend)
-  const state = rawData.recommendationState === 'new_product_first_sale' ? '신규상품 첫 판매 감지'
+  const state = moqDeferred
+    ? `MOQ 발주 보류 · 목표재고의 ${formatNumber(stockReview.availableStockPercent)}% 확보 · ${formatNumber(stockReview.reorderStockPercent)}% 이하에서 발주검토`
+    : rawData.recommendationState === 'new_product_first_sale' ? '신규상품 첫 판매 감지'
     : rawData.recommendationState === 'near_target_deferred' ? '목표 재고 근접 · 이번 회차 보류'
       : rawData.recommendationState === 'monitoring' ? '현재 발주 보류 · 계속 관찰' : null
-  if (state) notes.push({ label: state, className: 'text-emerald-700' })
+  if (state) notes.push({ label: state, className: moqDeferred ? 'text-amber-700' : 'text-emerald-700' })
+  const incoming = stockReview?.pipelineQuantity
+  if (stockReview?.domesticOutOfStock === true && typeof incoming === 'number' && incoming > 0) {
+    notes.push({ label: `국내재고 부족 · 진행 중 ${formatNumber(incoming)}개 국내 입고 예정일 확인`, className: 'text-amber-700' })
+  }
   const pipeline = Number(rawData.pipelineQuantity)
   if (!metrics && Number.isFinite(pipeline) && pipeline > 0) notes.push({ label: `진행 중 발주 ${formatNumber(pipeline)}`, className: 'text-slate-700' })
   const adjusted = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
-  if (typeof rawData.moqProductGroupName === 'string') notes.push({ label: `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · 보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(adjusted)}`, className: 'text-violet-700' })
+  if (!moqDeferred && typeof rawData.moqProductGroupName === 'string') notes.push({ label: `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · 보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(adjusted)}`, className: 'text-violet-700' })
   const bundle = Number(rawData.siblingOptionBundleQuantity)
   if (typeof rawData.siblingOptionBundleGroupName === 'string' && rawData.siblingOptionBundleGroupName.trim() && Number.isFinite(bundle) && bundle > 0) notes.push({ label: `동일상품 옵션 동시 발주 · ${formatNumber(bundle)}개`, className: 'text-cyan-700' })
   if (rawData.salesAnomalyDetected === true) notes.push({ label: rawData.oneOffCurrentMonthSpikeDetected === true
@@ -43,7 +52,7 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
   if (Number.isFinite(season) && season !== 1) notes.push({ label: season < 1 ? `여름 시즌 감산 ${formatNumber(season * 100)}%` : `겨울 시즌 증산 +${formatNumber((season - 1) * 100)}%`, className: season < 1 ? 'text-sky-700' : 'text-rose-700' })
   const bulk = specialBulkOutgoingText(rawData.specialBulkOutgoingAdjustment)
   if (bulk) notes.push({ label: bulk, className: 'text-fuchsia-700' })
-  if (adjusted > Number(rawData.allocatedQuantity)) notes.push({ label: `예산 조정 ${formatNumber(adjusted)} → ${formatNumber(rawData.allocatedQuantity)}`, className: 'text-blue-700' })
+  if (!moqDeferred && adjusted > Number(rawData.allocatedQuantity)) notes.push({ label: `예산 조정 ${formatNumber(adjusted)} → ${formatNumber(rawData.allocatedQuantity)}`, className: 'text-blue-700' })
   return { items, notes }
 }
 

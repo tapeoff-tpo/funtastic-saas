@@ -6,11 +6,51 @@ const mocks = vi.hoisted(() => ({ select: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: mocks }))
 vi.mock('./purchase-payment-tracking', () => ({ ensurePurchasePaymentTrackingSchema: async () => {} }))
 vi.mock('./purchase-inspection-issues', () => ({ ensurePurchaseInspectionIssueSchema: async () => {} }))
-import { getPurchaseRequests } from './purchase-requests'
+vi.mock('./items', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./items')>(),
+  getSkuOutgoingMetrics: async () => new Map(),
+}))
+import { getPurchaseRequests, getPurchaseReviewList } from './purchase-requests'
+import { getRecommendationBasis } from './recommendation-basis'
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('purchase list summary reads', () => {
+  it('includes the MOQ hold note in the default review list even with no orderable row ID', async () => {
+    const sku = '101542-0001'
+    const productName = 'CABOSS 미니스텝퍼'
+    const stockReview = {
+      reorderStockPercent: 60,
+      availableStockPercent: (353 / 358) * 100,
+      deferred: true,
+      domesticOutOfStock: true,
+      pipelineQuantity: 400,
+    }
+    mocks.select.mockImplementation((fields: Record<string, SQL>) => {
+      const result = 'rawMoqStockReview' in fields
+        ? [{
+          id: 'saved-review', sku, productName, requestedQuantity: 0, rawData: {},
+          rawDataSource: 'auto_purchase_recommendation', rawStockCoverageMonths: '1.3',
+          rawMoqStockReview: stockReview,
+        }]
+        : 'purchasingStatusNote' in fields ? [{ sku, productName }] : []
+      const builder = {
+        from: () => builder, where: () => builder, orderBy: () => builder,
+        groupBy: () => builder,
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve),
+      }
+      return builder
+    })
+
+    const { items } = await getPurchaseReviewList({ userId: 'owner' })
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ id: null, requestedQuantity: 0, reviewStatus: 'not_required' })
+    expect(getRecommendationBasis(items[0].rawData, items[0].purchaseReviewMetrics)?.notes.map(({ label }) => label)).toEqual([
+      'MOQ 발주 보류 · 목표재고의 98.6% 확보 · 60% 이하에서 발주검토',
+      '국내재고 부족 · 진행 중 400개 국내 입고 예정일 확인',
+    ])
+  })
+
   it('combines status and delay counts while keeping search out of global status badges', async () => {
     const selectedFields: Array<Record<string, SQL>> = []
     const clauses: SQL[] = []

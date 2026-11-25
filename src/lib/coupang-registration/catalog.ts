@@ -9,6 +9,7 @@ type SourceProduct = {
   code: string; name: string; price?: number; status?: string; imageUrl?: string; thumbnailImages?: string[]; detailImages?: string[]; description?: string;
   options?: Array<{ optionName?: string; addPrice?: number }>; productInfoNotice?: Array<{ label: string; value: string }>
 }
+type CatalogLookupOptions = { includeProductMasters?: boolean }
 const SOURCE = 'https://funtasticb2b.com'
 
 async function sourceJson(path: string): Promise<unknown> {
@@ -62,11 +63,11 @@ export async function lookupRegistrationCosts(userId: string, rows: CostLookup[]
   })
 }
 
-async function normalizeCatalog(userId: string, sources: SourceProduct[], includeCosts = true): Promise<CatalogProduct[]> {
+async function normalizeCatalog(userId: string, sources: SourceProduct[], includeCosts = true, includeProductMasters = true): Promise<CatalogProduct[]> {
   const unique = [...new Map(sources.map((product) => [product.code, product])).values()]
   const candidates = includeCosts && unique.length ? await findCostCandidates(userId, '', unique.map((product) => product.name)) : []
   const costsByProduct = new Map(unique.map((product) => [String(product.code), candidates.filter((item) => candidateNames(item).includes(normalizeCostName(product.name)))]))
-  const masters = includeCosts && unique.length
+  const masters = includeCosts && includeProductMasters && unique.length
     ? await findRegistrationProductMasters(userId, unique.map((product) => ({
       id: String(product.code), name: product.name, skus: costsByProduct.get(String(product.code))?.map((item) => item.sku) ?? [],
     })))
@@ -95,12 +96,12 @@ export async function searchCatalog(userId: string, query: string) {
   return normalizeCatalog(userId, payload.products ?? [], false)
 }
 
-export async function getCatalogProduct(userId: string, code: string) {
+export async function getCatalogProduct(userId: string, code: string, options: CatalogLookupOptions = {}) {
   const product = await sourceJson(`/api/products/by-code?${new URLSearchParams({ code })}`) as SourceProduct
-  return (await normalizeCatalog(userId, [product]))[0]
+  return (await normalizeCatalog(userId, [product], true, options.includeProductMasters !== false))[0]
 }
 
-export async function matchCatalogProducts(userId: string, names: string[], codes: string[]) {
+export async function matchCatalogProducts(userId: string, names: string[], codes: string[], options: CatalogLookupOptions = {}) {
   const candidates = new Set<string>()
   for (const name of names) {
     const parts = name.trim().split(/\s+/)
@@ -112,11 +113,10 @@ export async function matchCatalogProducts(userId: string, names: string[], code
     const response = await sourceJson(`/api/products?${new URLSearchParams({ exactNames: chunks.slice(index, index + 100).join('\n'), limit: '100' })}`) as { products?: SourceProduct[] }
     found.push(...(response.products ?? []))
   }
-  for (const code of [...new Set(codes)].filter(Boolean)) {
-    if (!found.some((product) => product.code === code)) found.push(await sourceJson(`/api/products/by-code?${new URLSearchParams({ code })}`) as SourceProduct)
-  }
   const full: SourceProduct[] = []
-  const unique = [...new Map(found.map((product) => [product.code, product])).values()]
-  for (let index = 0; index < unique.length; index += 4) full.push(...await Promise.all(unique.slice(index, index + 4).map((product) => sourceJson(`/api/products/by-code?${new URLSearchParams({ code: product.code })}`) as Promise<SourceProduct>)))
-  return normalizeCatalog(userId, full)
+  // List responses can omit current option surcharges. Fetch each selected code's
+  // full detail once, including codes supplied without a preceding name match.
+  const uniqueCodes = [...new Set([...found.map((product) => String(product.code)), ...codes].filter(Boolean))]
+  for (let index = 0; index < uniqueCodes.length; index += 4) full.push(...await Promise.all(uniqueCodes.slice(index, index + 4).map((code) => sourceJson(`/api/products/by-code?${new URLSearchParams({ code })}`) as Promise<SourceProduct>)))
+  return normalizeCatalog(userId, full, true, options.includeProductMasters !== false)
 }

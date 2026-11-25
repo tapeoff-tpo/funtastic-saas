@@ -25,13 +25,21 @@ type ProductGroupMoqRule = {
   sku?: string
   minimumOrderQuantity: number
   roundingUnit: number
+  reorderStockPercent?: number
+}
+
+type MoqStockReview = {
+  reorderStockPercent: number
+  availableStockPercent: number
+  deferred: boolean
+  domesticOutOfStock: boolean
+  pipelineQuantity: number
 }
 
 const PRODUCT_GROUP_MOQ_RULES: readonly ProductGroupMoqRule[] = [
   { productName: '테피 USB 캔들라이터', minimumOrderQuantity: 200, roundingUnit: 10 },
-  { productName: '루멘 철제 사이드 테이블', minimumOrderQuantity: 200, roundingUnit: 10 },
   { productName: '린블 아기옷 원형 건조대', minimumOrderQuantity: 200, roundingUnit: 10 },
-  { productName: '미니스텝퍼', sku: '101542-0001', minimumOrderQuantity: 300, roundingUnit: 10 },
+  { productName: '미니스텝퍼', sku: '101542-0001', minimumOrderQuantity: 300, roundingUnit: 10, reorderStockPercent: 60 },
 ] as const
 
 const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
@@ -969,6 +977,7 @@ export async function generatePurchaseRecommendations(input: {
       .filter((item) => (
         autoReviewRowBySku.has(item.row.sku)
         || allocatedQuantityBySku.has(item.row.sku)
+        || item.moqStockReview?.deferred
         || (item.isNewProduct && item.currentMonthOutgoing > 0)
         || item.oneOffCurrentMonthSpikeDetected
       ))
@@ -1163,6 +1172,7 @@ function buildAutoRecommendationRawData(input: {
     moqMinimumOrderQuantity: number | null
     moqRoundingUnit: number | null
     moqAddedQuantity: number
+    moqStockReview: MoqStockReview | null
     nearTargetDeferred: boolean
     nearTargetShortfallQuantity: number
     nearTargetDeferThreshold: number | null
@@ -1225,6 +1235,7 @@ function buildAutoRecommendationRawData(input: {
     moqMinimumOrderQuantity: input.item.moqMinimumOrderQuantity,
     moqRoundingUnit: input.item.moqRoundingUnit,
     moqAddedQuantity: input.item.moqAddedQuantity,
+    ...(input.item.moqStockReview ? { moqStockReview: input.item.moqStockReview } : {}),
     nearTargetDeferred: input.item.nearTargetDeferred,
     nearTargetShortfallQuantity: input.item.nearTargetShortfallQuantity,
     nearTargetDeferThreshold: input.item.nearTargetDeferThreshold,
@@ -1274,6 +1285,7 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
     moqMinimumOrderQuantity: null as number | null,
     moqRoundingUnit: null as number | null,
     moqAddedQuantity: 0,
+    moqStockReview: null as MoqStockReview | null,
   }))
 
   for (const rule of PRODUCT_GROUP_MOQ_RULES) {
@@ -1282,22 +1294,41 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
       : item.row.productName === rule.productName)
     if (groupItems.length === 0) continue
 
-    const hasRecommendation = groupItems.some((item) => item.baseRecommendedQuantity > 0)
-    if (!hasRecommendation) continue
+    if (rule.reorderStockPercent !== undefined) {
+      for (const item of groupItems) {
+        const targetStockQuantity = item.calculation.targetStockQuantity
+        if (targetStockQuantity <= 0) continue
+        const stockInPercentUnits = Math.max(0, item.availableStockWithPipeline) * 100
+        const deferred = stockInPercentUnits > targetStockQuantity * rule.reorderStockPercent
+        item.moqStockReview = {
+          reorderStockPercent: rule.reorderStockPercent,
+          availableStockPercent: stockInPercentUnits / targetStockQuantity,
+          deferred,
+          domesticOutOfStock: item.row.domesticAvailableStock <= 0,
+          pipelineQuantity: item.pipelineQuantity,
+        }
+        if (deferred) item.recommendedQuantity = 0
+      }
+    }
 
+    const hasRecommendation = groupItems.some((item) => item.recommendedQuantity > 0)
     for (const item of groupItems) {
+      if (!hasRecommendation && !item.moqStockReview?.deferred) continue
       item.moqProductGroupName = rule.productName
       item.moqMinimumOrderQuantity = rule.minimumOrderQuantity
       item.moqRoundingUnit = rule.roundingUnit
+      // Keep its MOQ identity so sibling-option bundling cannot add it back.
+      if (item.moqStockReview?.deferred) continue
       item.recommendedQuantity = roundUpToUnit(item.baseRecommendedQuantity, rule.roundingUnit)
       item.moqAddedQuantity = item.recommendedQuantity - item.baseRecommendedQuantity
     }
+    if (!hasRecommendation) continue
 
     let totalQuantity = groupItems.reduce((total, item) => total + item.recommendedQuantity, 0)
     if (totalQuantity >= rule.minimumOrderQuantity) continue
 
     const allocationTargets = groupItems
-      .filter((item) => item.baseRecommendedQuantity > 0)
+      .filter((item) => item.recommendedQuantity > 0)
       .sort((left, right) => {
         const scoreDifference = purchaseMoqDemandScore(right) - purchaseMoqDemandScore(left)
         if (scoreDifference !== 0) return scoreDifference

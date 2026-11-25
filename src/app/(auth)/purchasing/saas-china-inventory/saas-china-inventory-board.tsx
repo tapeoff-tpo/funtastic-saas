@@ -58,7 +58,8 @@ export function SaasChinaInventoryBoard({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [showReceive, setShowReceive] = useState(items.length === 0)
+  const stockedItems = useMemo(() => items.filter((item) => item.onHandQuantity > 0), [items])
+  const [showReceive, setShowReceive] = useState(stockedItems.length === 0)
   const resolvedDefaultWarehouseCode = defaultWarehouseCode.trim() || '중국창고'
   const receiveWarehouseCodes = [...new Set([
     resolvedDefaultWarehouseCode,
@@ -72,15 +73,15 @@ export function SaasChinaInventoryBoard({
   const [adjustNote, setAdjustNote] = useState('')
   const [search, setSearch] = useState('')
   const [warehouseFilter, setWarehouseFilter] = useState('')
-  const filterWarehouses = [...new Set(items.map((item) => item.warehouseCode))]
+  const filterWarehouses = [...new Set(stockedItems.map((item) => item.warehouseCode))]
   const activeWarehouseFilter = filterWarehouses.includes(warehouseFilter) ? warehouseFilter : ''
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase('ko-KR')
-    return items.filter((item) => (!activeWarehouseFilter || item.warehouseCode === activeWarehouseFilter) && (
+    return stockedItems.filter((item) => (!activeWarehouseFilter || item.warehouseCode === activeWarehouseFilter) && (
       !keyword || [item.sku, item.productName, item.optionName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(keyword))
     ))
-  }, [items, search, activeWarehouseFilter])
+  }, [stockedItems, search, activeWarehouseFilter])
 
   function receiveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -182,7 +183,7 @@ export function SaasChinaInventoryBoard({
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-semibold">SaaS 중국재고 목록</h2>
-            <p className="mt-1 text-xs text-muted-foreground">총 {items.length.toLocaleString('ko-KR')}개 재고 항목</p>
+            <p className="mt-1 text-xs text-muted-foreground">총 {stockedItems.length.toLocaleString('ko-KR')}개 재고 항목</p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <SaasChinaInventoryExcelDialog />

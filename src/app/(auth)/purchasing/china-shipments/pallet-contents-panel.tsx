@@ -14,9 +14,9 @@ import { useChinaWorkGuard } from './unsaved-china-work'
 import type { ChinaOutboundPalletSavedState } from '@/lib/purchasing/china-outbound-save-state'
 import type { ChinaShipmentDetailView, PalletSummary } from './china-shipments-board'
 
-export function PalletContentsPanel({ shipmentId, summaries: serverSummaries, boxItems, items, editable, dimensionsEditable = editable, isPending, assignmentEditor, unassignedBoxes = [], initiallyExpanded = false }: {
+export function PalletContentsPanel({ shipmentId, summaries: serverSummaries, boxItems, items, editable, dimensionsEditable = editable, isPending, assignmentEditor, unassignedBoxes = [], initiallyExpanded = false, onFinalConfirmed }: {
   shipmentId: string; summaries: PalletSummary[]; boxItems: ChinaShipmentDetailView['boxItems']; items: ChinaShipmentDetailView['items']
-  editable: boolean; dimensionsEditable?: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean
+  editable: boolean; dimensionsEditable?: boolean; isPending: boolean; assignmentEditor?: ReactNode; unassignedBoxes?: ChinaShipmentDetailView['boxes']; initiallyExpanded?: boolean; onFinalConfirmed?: () => void
 }) {
   const [palletSaves, setPalletSaves] = useState<Record<string, { source: string; pallet: ChinaOutboundPalletSavedState }>>({})
   const summaries = serverSummaries.map((summary) => {
@@ -78,6 +78,7 @@ export function PalletContentsPanel({ shipmentId, summaries: serverSummaries, bo
     if (!allPalletsConfirmed || !looseConfirmed) { toast.error('파렛트와 낱박스를 먼저 확정해주세요.'); return }
     if (totals.cbm == null || totals.weightKg == null) { toast.error('CBM과 무게의 미입력 값을 확인해주세요.'); return }
     setFinalSnapshot(snapshot)
+    onFinalConfirmed?.()
   }
   return <section className="space-y-5" aria-label="사용 파렛트">
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">사용 파렛트</h3><div className="flex flex-wrap items-center gap-3 text-sm"><span>{totals.palletCount} PLT + {totals.looseBoxCount} BOX, {totals.palletCount + totals.looseBoxCount} CTN</span>{assignmentEditor && <button type="button" disabled={isPending || guard.busy} onClick={() => dialog.current?.showModal()} className="rounded-md border px-3 py-1">파렛트 배정 수정</button>}</div></div>

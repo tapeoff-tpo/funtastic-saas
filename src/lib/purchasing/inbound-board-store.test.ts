@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 const execute=vi.hoisted(()=>vi.fn())
 vi.mock('@/lib/db',()=>({db:{execute}}))
-import { inboundSearchText, listInboundPosts, publishInboundPost, updateInboundDates } from './inbound-board-store'
+import { deleteInboundMemo, inboundSearchText, listInboundPosts, publishInboundPost, updateInboundDates } from './inbound-board-store'
 import type { ImportDocumentDetail } from './china-import-document'
 const detail:ImportDocumentDetail={shipment:{shipmentNo:'CN',status:'packing',originWarehouseCode:'중국',destinationName:'인천',plannedOutboundDate:null,createdAt:'2026-11-25'},items:[{id:'a',sku:'100-0001',productName:'흰색 컵',optionName:'대',location:'A-01',warehouseCode:'중국',packedQuantity:3,reservedQuantity:3},{id:'unused',sku:'UNUSED',productName:'미포장',optionName:null,warehouseCode:'중국',packedQuantity:0,reservedQuantity:0}],pallets:[],boxes:[],boxItems:[{id:'line',boxId:'b',shipmentItemId:'a',quantity:3}]}
 const dialect=new PgDialect()
@@ -31,4 +31,13 @@ it('only changes dates with the matching workspace and revision',async()=>{
  execute.mockResolvedValueOnce([{exists:true}]).mockResolvedValueOnce([])
  expect(await updateInboundDates({userId:'owner',actorId:'staff',id:'post',revision:2,expectedDate:'2026-11-26',receivedDate:null})).toBeNull()
  const query=dialect.sqlToQuery(execute.mock.calls[1][0]);expect(query.sql).toContain('revision=');expect(query.sql).not.toContain('detail=');expect(query.params).toContain('owner');expect(query.params).toContain(2)
+})
+
+it('scopes memo deletion to the workspace, revision and authorized author', async () => {
+  execute.mockResolvedValueOnce([{ exists: true }]).mockResolvedValueOnce([])
+  expect(await deleteInboundMemo({ userId: 'owner', actorId: 'staff', id: 'post', revision: 3, isAdmin: false })).toBeNull()
+  const query = dialect.sqlToQuery(execute.mock.calls[1][0])
+  expect(query.sql).toContain("detail-'freightKrw'-'memoAuthor'")
+  expect(query.sql).toContain("detail->'memoAuthor'->>'actorId'")
+  expect(query.params).toEqual(expect.arrayContaining(['owner', 'staff', 'post', 3, false]))
 })

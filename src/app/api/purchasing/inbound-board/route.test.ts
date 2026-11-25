@@ -42,8 +42,8 @@ it('rejects invalid dates and protects concurrent date edits',async()=>{
 })
 it('prints and downloads the saved snapshot, not current shipment data',async()=>{
  const detail={shipment:{shipmentNo:'snapshot'}};m.get.mockResolvedValue({id,title:'입고',detail});m.excel.mockResolvedValue(Buffer.from('xlsx'));m.preview.mockResolvedValue('<table>saved</table>')
- const response=await GET(new Request(`http://localhost?id=${id}&group=box&format=print`))
- expect(await response.text()).toContain('saved');expect(m.excel).toHaveBeenCalledWith(detail,'box',expect.stringContaining('입고'));expect(m.detail).not.toHaveBeenCalled()
+ const response=await GET(new Request(`http://localhost?id=${id}&group=pallet&format=print`))
+ expect(await response.text()).toContain('saved');expect(m.excel).toHaveBeenCalledWith(detail,'box',expect.stringContaining('입고'),true);expect(m.detail).not.toHaveBeenCalled()
  expect((await GET(new Request(`http://localhost?id=${id}&format=excel`))).headers.get('content-type')).toContain('spreadsheetml')
 })
 

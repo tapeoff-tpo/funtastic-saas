@@ -5,7 +5,9 @@ import type { ImportDocumentDetail } from './china-import-document'
 
 export type InboundPostSummary = {
   id: string; shipmentId: string; title: string; expectedDate: string; receivedDate: string | null
-  note: string; quantity: number; revision: number; createdAt: string
+  memoOwnerId?: string | null
+  memoAuthor?: { account: string | null; name: string | null; date: string; savedAt: string } | null
+  note: string; freightKrw?: number | null; quantity: number; revision: number; createdAt: string
 }
 export type InboundPost = InboundPostSummary & { detail: ImportDocumentDetail }
 let ready: Promise<unknown> | undefined
@@ -28,7 +30,8 @@ function ensureTable() {
     await db.execute(sql`REVOKE ALL ON purchasing_inbound_posts FROM PUBLIC`)
   })().catch((error) => { ready = undefined; throw error })
 }
-const columns = sql`id, shipment_id AS "shipmentId", title, expected_date::text AS "expectedDate", received_date::text AS "receivedDate", note, quantity, revision, created_at::text AS "createdAt"`
+const memoOwner = sql`coalesce(detail->'memoAuthor'->>'actorId', CASE WHEN note <> '' OR detail->>'freightKrw' IS NOT NULL OR detail ? 'memoAuthor' THEN actor_id::text END)`
+const columns = sql`id, shipment_id AS "shipmentId", title, expected_date::text AS "expectedDate", received_date::text AS "receivedDate", note, (detail->>'freightKrw')::integer AS "freightKrw", detail->'memoAuthor' AS "memoAuthor", ${memoOwner} AS "memoOwnerId", quantity, revision, created_at::text AS "createdAt"`
 export function inboundSearchText(detail: ImportDocumentDetail, title: string, note: string) {
   const allocated = new Set(detail.boxItems.filter((line) => line.quantity > 0).map((line) => line.shipmentItemId))
   return [title, note, detail.shipment.shipmentNo, ...detail.items.filter((item) => allocated.has(item.id)).flatMap((item) => [item.sku, item.productName, item.optionName ?? '', item.location ?? ''])].join('\n').normalize('NFKC').toLocaleLowerCase('ko-KR')
@@ -36,7 +39,7 @@ export function inboundSearchText(detail: ImportDocumentDetail, title: string, n
 export async function listInboundPosts(userId: string, query: string) {
   if (!await exists()) return []
   const terms = query.normalize('NFKC').toLocaleLowerCase('ko-KR').split(/\s+/).filter(Boolean)
-  const filter = terms.length ? sql.join(terms.map((term) => sql`position(${term} in search_text) > 0`), sql` AND `) : sql`true`
+  const filter = terms.length ? sql.join(terms.map((term) => sql`position(${term} in search_text || E'\n' || lower(note)) > 0`), sql` AND `) : sql`true`
   return db.execute<InboundPostSummary>(sql`SELECT ${columns} FROM purchasing_inbound_posts WHERE user_id=${userId} AND ${filter} ORDER BY expected_date DESC, created_at DESC LIMIT 100`)
 }
 export async function getInboundPost(userId: string, id: string) {
@@ -53,14 +56,37 @@ export async function publishInboundPost(input: {
   const id = randomUUID()
   const [post] = await db.execute<InboundPostSummary>(sql`
     INSERT INTO purchasing_inbound_posts (id,user_id,shipment_id,actor_id,title,expected_date,received_date,note,quantity,search_text,detail)
-    VALUES (${id},${input.userId},${input.shipmentId},${input.actorId},${input.title},${input.expectedDate},${input.receivedDate},${input.note},${quantity},${inboundSearchText(input.detail,input.title,input.note)},${JSON.stringify(input.detail)}::jsonb)
+    VALUES (${id},${input.userId},${input.shipmentId},${input.actorId},${input.title},${input.expectedDate},${input.receivedDate},${input.note},${quantity},${inboundSearchText(input.detail,input.title,'')},${JSON.stringify(input.detail)}::jsonb)
     ON CONFLICT (user_id,shipment_id) DO NOTHING RETURNING ${columns}`)
   if (post) return { post, created: true }
   const [existing] = await db.execute<InboundPostSummary>(sql`SELECT ${columns} FROM purchasing_inbound_posts WHERE user_id=${input.userId} AND shipment_id=${input.shipmentId}`)
   return { post: existing, created: false }
 }
-export async function updateInboundDates(input: { userId: string; actorId: string; id: string; revision: number; expectedDate: string; receivedDate: string | null }) {
+export async function updateInboundDates(input: { userId: string; actorId: string; id: string; revision: number; expectedDate: string; receivedDate: string | null; note?: string; freightKrw?: number | null; memoName?: string; isAdmin?: boolean }) {
   if (!await exists()) return null
-  const [post] = await db.execute<InboundPostSummary>(sql`UPDATE purchasing_inbound_posts SET expected_date=${input.expectedDate},received_date=${input.receivedDate},actor_id=${input.actorId},revision=revision+1,updated_at=now() WHERE user_id=${input.userId} AND id=${input.id} AND revision=${input.revision} RETURNING ${columns}`)
+  const noteUpdate = input.note === undefined ? sql`` : sql`note=${input.note},`
+  const memoChanged = input.note !== undefined || input.freightKrw !== undefined
+  const freight = input.freightKrw === undefined ? sql`detail` : sql`jsonb_set(detail, '{freightKrw}', ${JSON.stringify(input.freightKrw)}::jsonb)`
+  const memoUpdate = memoChanged ? sql`detail=jsonb_set(${freight}, '{memoAuthor}', jsonb_build_object(
+    'actorId', coalesce(${memoOwner}, ${input.actorId}::text),
+    'account', (SELECT email FROM user_profiles WHERE id=${input.actorId}),
+    'name', coalesce(nullif(${input.memoName ?? ''}, ''), (SELECT display_name FROM user_profiles WHERE id=${input.actorId})),
+    'date', (now() AT TIME ZONE 'Asia/Seoul')::date::text,
+    'savedAt', now()
+  )),` : sql``
+  const allowed = memoChanged && !input.isAdmin
+    ? sql`AND (${memoOwner} IS NULL OR ${memoOwner}=${input.actorId}::text)` : sql``
+  const [post] = await db.execute<InboundPostSummary>(sql`UPDATE purchasing_inbound_posts SET ${noteUpdate} ${memoUpdate} expected_date=${input.expectedDate},received_date=${input.receivedDate},revision=revision+1,updated_at=now() WHERE user_id=${input.userId} AND id=${input.id} AND revision=${input.revision} ${allowed} RETURNING ${columns}`)
+  return post ?? null
+}
+
+export async function deleteInboundMemo(input: { userId: string; actorId: string; id: string; revision: number; isAdmin: boolean }) {
+  if (!await exists()) return null
+  const [post] = await db.execute<InboundPostSummary>(sql`
+    UPDATE purchasing_inbound_posts
+    SET note='', detail=detail-'freightKrw'-'memoAuthor', revision=revision+1, updated_at=now()
+    WHERE user_id=${input.userId} AND id=${input.id} AND revision=${input.revision}
+      AND ${memoOwner} IS NOT NULL AND (${input.isAdmin} OR ${memoOwner}=${input.actorId}::text)
+    RETURNING ${columns}`)
   return post ?? null
 }

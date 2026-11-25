@@ -3,9 +3,9 @@ import type { ImportDocumentDetail } from './china-import-document'
 import { koreaShippingRows, formatKoreaBoxNumbers } from './korea-shipping-rows'
 export { koreaShippingRows, formatKoreaBoxNumbers } from './korea-shipping-rows'
 
-export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, first: 'pallet' | 'box' = 'pallet', title?: string) {
+export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, first: 'pallet' | 'box' = 'pallet', title?: string, singleSheet = false) {
   const workbook = new ExcelJS.Workbook()
-  for (const by of [first, first === 'pallet' ? 'box' : 'pallet'] as const) {
+  for (const by of singleSheet ? [first] as const : [first, first === 'pallet' ? 'box' : 'pallet'] as const) {
     const sheet = workbook.addWorksheet(by === 'pallet' ? '파레트별 한국 출고서류' : '박스별 한국 출고서류')
     const headers = ['파레트', '박스번호', '박스수', '품목코드', '상품명', '옵션', '수량', '창고', '쿠팡', '대량', '로케이션', 'CBM (m³)', '총중량(kg)']
     sheet.mergeCells('A1:M1')

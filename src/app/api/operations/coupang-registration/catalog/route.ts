@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ costs: rows.map((row) => ({ ...row, costPrice: money(row.costPrice) })) })
     }
     const code = (request.nextUrl.searchParams.get('code') ?? '').trim().slice(0, 100)
-    if (code) return NextResponse.json({ product: await getCatalogProduct(workspace, code) })
+    if (code) return NextResponse.json({ product: await getCatalogProduct(workspace, code, { includeProductMasters: request.nextUrl.searchParams.get('phase') !== 'pricing' }) })
     return NextResponse.json({ products: await searchCatalog(workspace, query) })
   } catch (error) {
     console.error('Coupang catalogue lookup failed', error)
@@ -27,10 +27,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const workspace = await registrationWorkspace()
   if (!workspace) return NextResponse.json({ error: '접근 권한이 없습니다.' }, { status: 403 })
-  const parsed = z.object({ names: z.array(z.string().min(1).max(500)).max(100), codes: z.array(z.string().max(100)).max(100) }).safeParse(await request.json().catch(() => null))
+  const parsed = z.object({ names: z.array(z.string().min(1).max(500)).max(100), codes: z.array(z.string().max(100)).max(100), phase: z.enum(['pricing', 'information']).optional() }).safeParse(await request.json().catch(() => null))
   if (!parsed.success) return NextResponse.json({ error: '상품명 목록을 확인해주세요.' }, { status: 400 })
   try {
-    return NextResponse.json({ products: await matchCatalogProducts(workspace, parsed.data.names, parsed.data.codes) })
+    return NextResponse.json({ products: await matchCatalogProducts(workspace, parsed.data.names, parsed.data.codes, { includeProductMasters: parsed.data.phase !== 'pricing' }) })
   } catch (error) {
     console.error('Coupang catalogue matching failed', error)
     return NextResponse.json({ error: 'B2B 상품 매칭에 실패했습니다. 잠시 후 다시 시도해주세요.' }, { status: 502 })

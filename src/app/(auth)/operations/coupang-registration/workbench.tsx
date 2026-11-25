@@ -105,7 +105,7 @@ export function CoupangRegistrationWorkbench() {
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
   const [catalogSelections, setCatalogSelections] = useState<CatalogSelection[]>([])
   const [searched, setSearched] = useState(false)
-  const [rowSearch, setRowSearch] = useState('')
+  const [productQuery, setProductQuery] = useState('')
   const [templateChoice, setTemplateChoice] = useState('')
   const [templateLibrary, setTemplateLibrary] = useState<CategoryTemplate[]>([])
   const [onlyIssues, setOnlyIssues] = useState(false)
@@ -138,7 +138,6 @@ export function CoupangRegistrationWorkbench() {
   const visible = stageRows.filter((row) => {
     const date = getRegistrationDate(row)
     return (stage !== 'information' || !sheetRowIds || sheetRowIds.has(row.id)) && (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
-      && [row.name, row.internalSku, row.sourceCode].some((value) => value.toLowerCase().includes(rowSearch.toLowerCase()))
   })
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
   const selectedRows = stageRows.filter((row) => selected.has(row.id))
@@ -175,7 +174,7 @@ export function CoupangRegistrationWorkbench() {
   }
   function setActiveId(activeId: string) { navigate({ activeId }) }
   function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
-  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setRowSearch(''); setInformationLimit(20); setInformationSheet('all') }
+  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setProductQuery(''); setInformationLimit(20); setInformationSheet('all') }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   async function refreshDrafts() { const response = await jsonRequest('/drafts'); setSaved(response.drafts) }
   useEffect(() => {
@@ -407,7 +406,7 @@ export function CoupangRegistrationWorkbench() {
   }
 
   useEffect(() => {
-    if (busy || stage === 'registered') return
+    if (busy || stage !== 'information') return
     const targets = stageRows.filter((row) => !submissionLocked(row) && !row.bundleComponents && !!row.sourceCode
       && (!row.productMaster || !row.detailImages.length || !!row.productMaster.qualityPdf && qualityPdfNeedsConversion(row, row.productMaster.qualityPdf.id, draft.labels))
       && !connectedRows.current.has(`${draftSession.current}:${row.id}:${row.sourceCode}`))
@@ -443,10 +442,10 @@ export function CoupangRegistrationWorkbench() {
     })
   }
   async function searchProducts() {
-    const searchQuery = rowSearch.trim()
+    const searchQuery = productQuery.trim()
     if (!searchQuery) return
     setQuery(searchQuery)
-    setRowSearch('')
+    setProductQuery('')
     setCatalogTarget({})
     await run('상품 검색 중', async () => {
       const response = await jsonRequest(`/catalog?q=${encodeURIComponent(searchQuery)}`)
@@ -573,7 +572,7 @@ export function CoupangRegistrationWorkbench() {
       if (draft.rows.some((row) => row.sourceCode === product.code && row.optionName === optionName)) { toast.error('이미 추가된 상품 옵션입니다.'); return }
     }
     await run('선택 상품의 가격·원가 확인 중', async () => {
-      const response = await jsonRequest(`/catalog?code=${encodeURIComponent(product.code)}`)
+      const response = await jsonRequest(`/catalog?code=${encodeURIComponent(product.code)}&phase=pricing`)
       const full: CatalogProduct = response.product
       setCatalog((value) => value.map((item) => item.code === full.code ? full : item))
       if (full.options.length ? !full.options.some((option) => option.name === optionName) : !!optionName) {
@@ -605,7 +604,7 @@ export function CoupangRegistrationWorkbench() {
       const fullProducts = new Map<string, CatalogProduct>()
       const codes = [...new Set(additions.map((item) => item.product.code))]
       for (let start = 0; start < codes.length; start += 100) {
-        const response = await postJson('/catalog', { names: [], codes: codes.slice(start, start + 100) })
+        const response = await postJson('/catalog', { names: [], codes: codes.slice(start, start + 100), phase: 'pricing' })
         const products = response.products as CatalogProduct[]
         if (!Array.isArray(products)) throw new Error('선택한 B2B 상품 정보를 확인하지 못했습니다.')
         for (const product of products) fullProducts.set(product.code, product)
@@ -656,7 +655,7 @@ export function CoupangRegistrationWorkbench() {
     </section>
 
     <section aria-label="검색 및 날짜" className="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
-      <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void searchProducts() }}><Search aria-hidden="true" className="size-4 text-muted-foreground" /><input aria-label="상품 통합검색" className={`${inputClass} w-64`} placeholder="상품명·SKU·B2B코드 검색" value={rowSearch} onChange={(event) => { setRowSearch(event.target.value); setInformationLimit(20) }} /><button className={buttonClass} disabled={!rowSearch.trim()}>상품 검색</button></form>
+      <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void searchProducts() }}><Search aria-hidden="true" className="size-4 text-muted-foreground" /><input aria-label="상품 검색어" className={`${inputClass} w-64`} placeholder="추가할 상품명·B2B코드 검색" value={productQuery} onChange={(event) => setProductQuery(event.target.value)} /><button className={buttonClass} disabled={!productQuery.trim()}>상품 검색</button></form>
       <span className="text-xs font-medium">{stage === 'pricing' ? '추가일' : stage === 'information' ? '가격확정일' : '등록완료일'}</span><label className="flex items-center gap-2 text-xs">시작일<input aria-label="시작일" type="date" className={inputClass} value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><span className="text-muted-foreground">~</span><label className="flex items-center gap-2 text-xs">종료일<input aria-label="종료일" type="date" className={inputClass} value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>{(dateFrom || dateTo) && <button className={buttonClass} onClick={() => { setDateFrom(''); setDateTo('') }}>전체 날짜</button>}
       {stage !== 'registered' && <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => { setOnlyIssues(event.target.checked); setInformationLimit(20) }} />확인 필요만 보기</label>}
     </section>

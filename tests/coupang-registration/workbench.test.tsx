@@ -153,6 +153,50 @@ describe('registration pricing workbench', () => {
     expect(within(reopened).getByLabelText('루멘 철제 사이드 테이블 블랙 선택')).toBeDisabled()
   })
 
+  it('adds pricing rows with one lookup and defers product information and PDF conversion until stage two', async () => {
+    mockSavedDraft(blankDraft())
+    const fallback = vi.mocked(fetch)
+    const fullProduct = {
+      ...source,
+      productMaster: {
+        itemId: 'quality-master', match: 'sku' as const, noticeSize: '25*12*41cm', noticeWeight: '400g',
+        noticeMaterial: '철제', noticeManufacturer: '확인된 제조공장', noticeCountry: '중국',
+        qualityPdf: { id: 'quality-pdf', fileName: '품질표시.pdf', contentType: 'application/pdf' },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/catalog') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        return { ok: true, json: async () => ({ products: [body.phase === 'pricing' ? source : fullProduct] }) }
+      }
+      if (url.endsWith('/quality-label')) return { ok: true, json: async () => ({ labels: [{ name: '품질표시.jpg', data: 'converted-jpg' }] }) }
+      return fallback(url, init)
+    }))
+    render(<CoupangRegistrationWorkbench />)
+    const dialog = await openCatalogSearch('마미백')
+    fireEvent.click(await within(dialog).findByLabelText('마미백 플러스 베이지 선택'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '선택 상품 1개 추가' }))
+    await screen.findByLabelText('마미백 플러스 베이지 원가')
+    await waitFor(() => expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡공급가')).toBeEnabled())
+    const lookups = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/catalog') && init?.method === 'POST')
+    expect(lookups()).toHaveLength(1)
+    expect(JSON.parse(String(lookups()[0][1]!.body))).toMatchObject({ codes: [source.code], phase: 'pricing' })
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/quality-label'))).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
+    fireEvent.change(screen.getByLabelText('마미백 플러스 베이지 쿠팡공급가'), { target: { value: '18000' } })
+    fireEvent.change(screen.getByLabelText('마미백 플러스 베이지 쿠팡판매가'), { target: { value: '31000' } })
+    fireEvent.click(screen.getByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' }))
+
+    const information = await screen.findByRole('row', { name: '마미백 플러스 베이지 상품등록정보' })
+    await waitFor(() => expect(within(information).getByLabelText('품질표시 파일명 또는 공개 URL')).toHaveValue('품질표시.jpg'))
+    expect(lookups()).toHaveLength(2)
+    expect(JSON.parse(String(lookups()[1][1]!.body)).phase).not.toBe('pricing')
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/quality-label'))).toHaveLength(1)
+    expect(within(information).getByLabelText('주요 소재')).toHaveValue('철제')
+    expect(within(information).getByText('18,000원')).toBeInTheDocument()
+    expect(within(information).getByText('31,000원')).toBeInTheDocument()
+  })
+
   it('keeps earlier products and their edited prices visible after reopening search and adding another product', async () => {
     mockSavedDraft(blankDraft())
     render(<CoupangRegistrationWorkbench />)
@@ -176,7 +220,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡공급가')).toHaveValue(18000)
     expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡판매가')).toHaveValue(31000)
     expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
-    expect(screen.getByLabelText('상품 통합검색')).toHaveValue('')
+    expect(screen.getByLabelText('상품 검색어')).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
     await waitFor(() => expect(savedBodies()).toHaveLength(1))
     expect(savedBodies()[0].draft.rows).toEqual([
@@ -189,24 +233,38 @@ describe('registration pricing workbench', () => {
     expect(await within(reopened).findByLabelText('마미백 플러스 베이지 선택')).toBeDisabled()
   })
 
-  it('restores the complete list when product search is closed without adding', async () => {
-    mockSavedDraft({ ...blankDraft(), rows: [createRegistrationRow(source, '베이지')] })
+  it('keeps the existing list visible while typing, waiting for search, closing and reopening its popup', async () => {
+    mockSavedDraft({ ...blankDraft(), rows: [createRegistrationRow(source, '베이지'), createRegistrationRow(second, '블랙')] })
+    const fallback = vi.mocked(fetch)
+    let finishSearch!: (response: { ok: boolean; json: () => Promise<unknown> }) => void
+    const pendingSearch = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => { finishSearch = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.includes('/catalog?q=') ? pendingSearch : fallback(url, init)))
     render(<CoupangRegistrationWorkbench />)
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: 'draft-1' } })
     await screen.findByLabelText('마미백 플러스 베이지 원가')
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
 
-    // Typing still filters the list; submitting hands the query over to the catalog dialog.
-    fireEvent.change(screen.getByLabelText('상품 통합검색'), { target: { value: '루멘' } })
-    expect(screen.queryByLabelText('마미백 플러스 베이지 원가')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('상품 검색어'), { target: { value: '새로운 상품 검색어' } })
+    expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
+    expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
+    expect(screen.queryByText('검색 조건에 맞는 상품이 없습니다.')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '상품 검색' }))
     const dialog = await screen.findByRole('dialog', { name: 'B2B 상품 검색' })
-    expect(within(dialog).getByLabelText('B2B 상품명 또는 코드')).toHaveValue('루멘')
+    expect(within(dialog).getByLabelText('B2B 상품명 또는 코드')).toHaveValue('새로운 상품 검색어')
+    expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
+    expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
+    expect(screen.getByRole('tab', { name: /1단계 판매가설정/ })).toHaveTextContent('2개')
+    finishSearch({ ok: true, json: async () => ({ products: [source, second] }) })
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     fireEvent.click(within(dialog).getByRole('button', { name: '상품 검색 닫기' }))
     expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
-    expect(screen.getByLabelText('상품 통합검색')).toHaveValue('')
+    expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
+    const reopened = await openCatalogSearch('다시 다른 상품 검색어')
+    expect(within(reopened).getByLabelText('B2B 상품명 또는 코드')).toHaveValue('다시 다른 상품 검색어')
+    expect(screen.getByLabelText('마미백 플러스 베이지 원가')).toHaveValue(10000)
+    expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
+    expect(screen.queryByText('검색 조건에 맞는 상품이 없습니다.')).not.toBeInTheDocument()
   })
 
   it('replaces selected added products with one set and snapshots their component prices', async () => {
@@ -372,16 +430,16 @@ describe('registration pricing workbench', () => {
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     const firstRow = await screen.findByRole('row', { name: `${first.name} 상품등록정보` })
     fireEvent.click(within(firstRow).getByLabelText(`${first.name} 선택`))
-    fireEvent.change(screen.getByLabelText('상품 통합검색'), { target: { value: '마미백' } })
+    fireEvent.change(screen.getByLabelText('상품 검색어'), { target: { value: '마미백' } })
     fireEvent.click(screen.getByLabelText('확인 필요만 보기'))
     fireEvent.click(screen.getByRole('button', { name: '크게 보기' }))
     const dialog = await screen.findByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })
     expect(screen.getAllByRole('table', { name: '상품등록정보 입력표', hidden: true })).toHaveLength(1)
-    expect(within(dialog).getByLabelText('상품 통합검색')).toHaveValue('마미백')
+    expect(within(dialog).getByLabelText('상품 검색어')).toHaveValue('마미백')
     expect(within(dialog).getByLabelText('확인 필요만 보기')).toBeChecked()
     const expandedRow = within(dialog).getByRole('row', { name: `${first.name} 상품등록정보` })
     expect(within(expandedRow).getByLabelText(`${first.name} 선택`)).toBeChecked()
-    expect(within(dialog).queryByRole('row', { name: `${other.name} 상품등록정보` })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('row', { name: `${other.name} 상품등록정보` })).toBeInTheDocument()
     fireEvent.change(within(expandedRow).getByLabelText('브랜드'), { target: { value: '확대 화면 수정 브랜드' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => {
@@ -393,7 +451,7 @@ describe('registration pricing workbench', () => {
     const restored = screen.getByRole('row', { name: `${first.name} 상품등록정보` })
     expect(within(restored).getByLabelText('브랜드')).toHaveValue('확대 화면 수정 브랜드')
     expect(within(restored).getByLabelText(`${first.name} 선택`)).toBeChecked()
-    expect(screen.getByLabelText('상품 통합검색')).toHaveValue('마미백')
+    expect(screen.getByLabelText('상품 검색어')).toHaveValue('마미백')
     expect(screen.getByLabelText('확인 필요만 보기')).toBeChecked()
   })
 
@@ -839,8 +897,8 @@ function savedBodies(): Array<{ draft: RegistrationDraft }> {
 }
 
 async function openCatalogSearch(query: string) {
-  await waitFor(() => expect(screen.getByLabelText('상품 통합검색')).toBeEnabled())
-  fireEvent.change(screen.getByLabelText('상품 통합검색'), { target: { value: query } })
+  await waitFor(() => expect(screen.getByLabelText('상품 검색어')).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('상품 검색어'), { target: { value: query } })
   await waitFor(() => expect(screen.getByRole('button', { name: '상품 검색' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '상품 검색' }))
   return screen.findByRole('dialog', { name: 'B2B 상품 검색' })

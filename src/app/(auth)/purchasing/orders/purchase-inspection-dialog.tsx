@@ -173,6 +173,47 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
     finally { setPending(false) }
   }
 
+  function printBoxStickers() {
+    if (!data || !inspection || dirty) return
+    const frame = document.createElement('iframe')
+    frame.title = '검수 박스 스티커 인쇄'
+    frame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none'
+    frame.onload = () => {
+      const printable = frame.contentDocument
+      const printWindow = frame.contentWindow
+      if (!printable || !printWindow) {
+        frame.remove()
+        toast.error('스티커 인쇄 화면을 열지 못했습니다.')
+        return
+      }
+      const style = printable.createElement('style')
+      style.textContent = '@page { size: 180mm 100mm; margin: 8mm } body { margin: 0; color: #000; font: 18px sans-serif } section { break-after: page; padding: 6mm; border: 1px solid } section:last-child { break-after: auto } h1 { font-size: 36px; margin: 0 0 4mm } p { margin: 2mm 0; overflow-wrap: anywhere }'
+      printable.head.append(style)
+      for (const parcel of inspection.parcels) {
+        for (const box of parcel.boxes) {
+          const number = inspection.boxNumbers?.[box.id]
+          if (!number) continue
+          const label = printable.createElement('section')
+          const heading = printable.createElement('h1')
+          heading.textContent = number
+          label.append(heading)
+          for (const value of [data.productName, '품목코드 ' + data.sku, '송장번호 ' + parcel.trackingNumber, '입고수량 ' + (box.quantity ?? '미입력')]) {
+            const line = printable.createElement('p')
+            line.textContent = value
+            label.append(line)
+          }
+          printable.body.append(label)
+        }
+      }
+      printWindow.addEventListener('afterprint', () => frame.remove(), { once: true })
+      printWindow.focus()
+      printWindow.print()
+    }
+    frame.src = 'about:blank'
+    document.body.append(frame)
+  }
+  const hasPrintableBoxes = inspection?.parcels.some((parcel) => parcel.boxes.some((box) => inspection.boxNumbers?.[box.id]))
+
   return <dialog ref={ref} aria-labelledby="purchase-inspection-title" onClose={onClose}
     onCancel={(event) => { event.preventDefault(); if (!pending) close() }}
     className="fixed inset-0 m-auto max-h-[92dvh] w-[min(64rem,96vw)] rounded-xl border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/40">
@@ -180,6 +221,9 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
       {data && inspection && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <p data-no-translate>{data.sku} · {data.productName}</p>
+        <Button type="button" variant="outline" size="sm" disabled={pending || dirty || !hasPrintableBoxes}
+          title={dirty || !hasPrintableBoxes ? '송장·박스를 저장한 뒤 인쇄할 수 있습니다.' : undefined}
+          onClick={printBoxStickers}>박스 스티커 인쇄</Button>
         <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
           스티커 부착 상태
           <select value={inspection.stickerStatus ?? ''} disabled={pending || !editable} className="h-8 rounded-md border bg-background px-2 text-sm"

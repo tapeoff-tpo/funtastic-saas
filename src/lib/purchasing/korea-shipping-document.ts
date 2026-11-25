@@ -2,6 +2,22 @@ import ExcelJS from 'exceljs'
 import type { ImportDocumentDetail } from './china-import-document'
 import { resolveChinaLooseBoxes } from './china-pallet-number'
 
+export function formatKoreaBoxNumbers(boxes: string[]) {
+  const sorted = [...new Set(boxes)].sort(new Intl.Collator('ko-KR', { numeric: true }).compare)
+  const ranges: string[] = []
+  for (let index = 0; index < sorted.length; index++) {
+    const start = sorted[index]
+    let end = index
+    // Only compress plain numeric labels; retain prefixed and zero-padded IDs verbatim.
+    if (/^(0|[1-9]\d*)$/.test(start)) {
+      while (end + 1 < sorted.length && /^(0|[1-9]\d*)$/.test(sorted[end + 1]) && Number(sorted[end + 1]) === Number(sorted[end]) + 1) end++
+    }
+    ranges.push(end === index ? start : `${start}-${sorted[end]}`)
+    index = end
+  }
+  return ranges.join(', ')
+}
+
 export function koreaShippingRows(source: ImportDocumentDetail, by: 'pallet' | 'box') {
   const detail = { ...source, ...resolveChinaLooseBoxes(source.pallets, source.boxes) }
   const items = new Map(detail.items.map((item) => [item.id, item]))
@@ -12,8 +28,9 @@ export function koreaShippingRows(source: ImportDocumentDetail, by: 'pallet' | '
       const item = items.get(line.shipmentItemId)
       if (!item) continue
       const pallet = box.palletId ? pallets.get(box.palletId) ?? 'BOX' : 'BOX'
-      const key = JSON.stringify([by === 'box' ? box.id : pallet, item.sku])
+      const key = JSON.stringify([by === 'box' ? box.id : pallet, item.productName.trim(), (item.optionName ?? '').trim()])
       const row = rows.get(key) ?? { pallet, boxes: new Set<string>(), sku: item.sku, name: item.productName, option: item.optionName ?? '', quantity: 0, warehouse: 0, coupang: 0, bulk: 0, location: item.location ?? '' }
+      row.sku = [...new Set([...row.sku.split(', '), item.sku])].join(', ')
       row.location = [...new Set([row.location, item.location ?? ''].flatMap((value) => value.split(', ')).filter(Boolean))].join(', ')
       row.quantity += line.quantity
       row.boxes.add(box.boxNo)
@@ -42,7 +59,7 @@ export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, 
     for (const row of koreaShippingRows(detail, by)) {
       const physical = row.boxes.filter((box) => !counted.has(box))
       physical.forEach((box) => counted.add(box))
-      sheet.addRow([row.pallet, row.boxes.join(', '), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location])
+      sheet.addRow([row.pallet, formatKoreaBoxNumbers(row.boxes), physical.length || null, row.sku, row.name, row.option, row.quantity, row.warehouse || null, row.coupang || null, row.bulk || null, row.location])
     }
     const last = sheet.rowCount
     // Preserve each physical pallet as one vertically merged group in both views.

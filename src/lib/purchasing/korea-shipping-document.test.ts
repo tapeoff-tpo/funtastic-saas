@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
-import { exportKoreaShippingDocument, koreaShippingRows } from './korea-shipping-document'
+import { exportKoreaShippingDocument, koreaShippingRows, formatKoreaBoxNumbers } from './korea-shipping-document'
 import type { ImportDocumentDetail } from './china-import-document'
 const detail: ImportDocumentDetail = {
   shipment: { shipmentNo: 'CN-1', status: 'packing', originWarehouseCode: '중국', destinationName: '인천', plannedOutboundDate: '2026-11-20', createdAt: '2026-11-20' },
@@ -26,7 +26,7 @@ it('keeps mixed-box SKUs and classifies only warehouse, Coupang and bulk', async
 it('merges exact option SKUs within each pallet and merges the pallet heading', async () => {
   const source: ImportDocumentDetail = {
     ...detail,
-    items: [...detail.items, { ...detail.items[0], id: 'duplicate', optionName: '다른 표기', location: 'A-01' }, { ...detail.items[0], id: 'other-option', sku: '100-0002', location: 'A-02' }],
+    items: [...detail.items, { ...detail.items[0], id: 'duplicate', optionName: '흰색', location: 'A-01' }, { ...detail.items[0], id: 'other-option', sku: '100-0002', optionName: '검정', location: 'A-02' }],
     boxItems: [...detail.boxItems, { id: 'extra', boxId: 'b', shipmentItemId: 'duplicate', quantity: 2 }, { id: 'option', boxId: 'b', shipmentItemId: 'other-option', quantity: 4 }],
   }
   const rows = koreaShippingRows(source, 'pallet')
@@ -40,4 +40,24 @@ it('merges exact option SKUs within each pallet and merges the pallet heading', 
     expect(sheet.getCell('A5').master.address).toBe('A3')
     expect(sheet.getCell('K3').value).toBe('A-01')
   }
+})
+
+
+it('compresses consecutive boxes while keeping gaps and nonnumeric labels', () => {
+  expect(formatKoreaBoxNumbers(['5', '2', '1', '4', '3', '8', '10', '9', 'BOX-A'])).toBe('1-5, 8-10, BOX-A')
+  expect(formatKoreaBoxNumbers(['001', '002'])).toBe('001, 002')
+})
+
+it('combines matching product names and options across different SKUs without mixing options or pallets', async () => {
+  const source: ImportDocumentDetail = {
+    ...detail,
+    boxes: [...detail.boxes, { id: 'd', boxNo: '3', palletId: 'p', status: 'open' }],
+    items: [...detail.items, { ...detail.items[0], id: 'same', sku: '999-0001', location: 'A-01' }, { ...detail.items[0], id: 'black', sku: '999-0002', optionName: '검정' }],
+    boxItems: [...detail.boxItems, { id: 's', boxId: 'd', shipmentItemId: 'same', quantity: 2 }, { id: 't', boxId: 'd', shipmentItemId: 'black', quantity: 4 }],
+  }
+  const rows = koreaShippingRows(source, 'pallet')
+  expect(rows.filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(1)
+  expect(rows.find((row) => row.option === '흰색')).toMatchObject({ quantity: 5, sku: '100-0001, 999-0001', boxes: ['1', '3'], location: 'A-01' })
+  expect(rows.find((row) => row.option === '검정')?.quantity).toBe(4)
+  expect(koreaShippingRows(source, 'box').filter((row) => row.name === '컵' && row.option === '흰색')).toHaveLength(2)
 })

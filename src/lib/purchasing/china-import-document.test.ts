@@ -94,11 +94,11 @@ describe('China import documents', () => {
     [[10, 60, 20], 'P2'],
     [[10, 20, 60], 'P3'],
     [[40, 40, 10], 'P1'],
-  ] as const)('combines invoice quantities %j at %s with matching packing rows and all pallet locations', async (quantities, palletNo) => {
+  ] as const)('combines invoice quantities %j at %s with matching packing rows and the largest pallet only', async (quantities, palletNo) => {
     const { shipment, overrides } = splitAcrossPallets([...quantities])
     const sheet = await exportedSheet(shipment, overrides)
     expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
-    expect(sheet.getCell('B20').value).toBe('P1, P2, P3')
+    expect(sheet.getCell('B20').value).toBe(palletNo)
     expect(sheet.getCell('C20').value).toBe('Glass')
     expect(sheet.getCell('D20').value).toBe('7013')
     expect(sheet.getCell('E20').value).toBe(90)
@@ -106,7 +106,7 @@ describe('China import documents', () => {
     for (const row of [21, 22]) {
       for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
     }
-    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1, P2, P3', null, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual([palletNo, null, null])
     expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
     expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
@@ -150,7 +150,7 @@ describe('China import documents', () => {
     }
     const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 1.25 }, 'item-b': { englishName: 'Glass', unitPriceCny: 1.25 } } }
     const sheet = await exportedSheet(shipment, overrides)
-    expect(sheet.getCell('B20').value).toBe('P1, P2')
+    expect(sheet.getCell('B20').value).toBe('P1')
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
@@ -519,4 +519,34 @@ it.each(['ssj', 'tapeoff'] as const)('shows only loose-box counts for a product 
   expect(sheet.getCell('O20').value).toBe(3)
   expect(sheet.getCell('R14').value).toBe('2plt + 1ctn')
   expect(sheet.getCell('W14').value).toBe(3)
+})
+
+it.each(['ssj', 'tapeoff'] as const)('puts mixed BOX products below pallet-only products in %s on both documents', async (template) => {
+  const shipment: ImportDocumentDetail = {
+    ...detail,
+    items: [{ ...detail.items[0], reservedQuantity: 20 }, { ...detail.items[1], reservedQuantity: 5 }],
+    boxes: [detail.boxes[0], detail.boxes[1], { ...detail.boxes[0], id: 'box-c', boxNo: '3' }],
+    boxItems: [
+      { id: 'a', boxId: 'box-a', shipmentItemId: 'item-a', quantity: 19 },
+      { id: 'b', boxId: 'box-b', shipmentItemId: 'item-a', quantity: 1 },
+      { id: 'c', boxId: 'box-c', shipmentItemId: 'item-b', quantity: 5 },
+    ],
+  }
+  const sheet = await exportedSheet(shipment, { ...options, template, boxes: { ...options.boxes, 'box-c': { grossWeightKg: 2, cbm: 0.01 } } })
+  expect(sheet.getCell('C20').value).toBe('Tray')
+  expect(sheet.getCell('B20').value).toBe('P1')
+  expect(sheet.getCell('M20').value).toBe('P1')
+  expect(sheet.getCell('C21').value).toBe('Glass')
+  expect(sheet.getCell('B21').value).toBe('BOX')
+  expect(sheet.getCell('M21').value).toBe('BOX')
+  expect(sheet.getCell('E21').value).toBe(20)
+  expect(sheet.getCell('R21').value).toBe(20)
+})
+
+it('chooses the smallest pallet number when quantities tie regardless of source order', async () => {
+  const { shipment, overrides } = splitAcrossPallets([40, 40])
+  shipment.pallets.reverse()
+  const sheet = await exportedSheet(shipment, overrides)
+  expect(sheet.getCell('B20').value).toBe('P1')
+  expect(sheet.getCell('M20').value).toBe('P1')
 })

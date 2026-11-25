@@ -178,7 +178,7 @@ export async function exportChinaImportDocument(
   }
   const itemById = new Map(prepared.items.map((item) => [item.id, item]))
   type TradeRow = { itemId: string; quantity: number; marks: string[]; boxCount: number; gross: number }
-  const groups = [...prepared.pallets.map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
+  const groups = [...[...prepared.pallets].sort((a, b) => a.palletNo.localeCompare(b.palletNo, 'ko-KR', { numeric: true })).map((pallet) => ({ id: pallet.id as string | null, no: pallet.palletNo })), { id: null, no: 'box' }]
     .map((group) => {
       const rows = new Map<string, TradeRow>()
       for (const box of prepared.boxes.filter((box) => box.palletId === group.id)) {
@@ -250,7 +250,14 @@ export async function exportChinaImportDocument(
   for (const [product, packing] of packingByProduct) {
     packing.looseBoxCount = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku) === product)).length
   }
-  const packingLocation = (packing: { looseBoxCount: number; locations: string[] }) => packing.looseBoxCount ? 'BOX' : packing.locations.join(', ')
+  const packingLocation = (packing: { looseBoxCount: number }, invoice: InvoiceRow) => packing.looseBoxCount ? 'BOX' : groups[invoice.groupIndex].no
+  // Both sides use the same row order: representative pallet number first,
+  // then every product with loose cartons, even when most units are palletized.
+  invoiceRows.sort((a, b) => {
+    const left = packingByProduct.get(importDocumentProductCode(itemById.get(a.itemId)!.sku))!
+    const right = packingByProduct.get(importDocumentProductCode(itemById.get(b.itemId)!.sku))!
+    return Number(left.looseBoxCount > 0) - Number(right.looseBoxCount > 0) || a.groupIndex - b.groupIndex
+  })
   const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
@@ -295,7 +302,7 @@ export async function exportChinaImportDocument(
     const looseMarks = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku) === importDocumentProductCode(item.sku))).map((box) => box.boxNo)
     sheet.getCell(`K${row}`).value = documentBoxMarks(packing.looseBoxCount ? looseMarks : invoice.marks)
     sheet.getCell(`L${row}`).value = (packing.looseBoxCount || packing.boxCount) || null
-    sheet.getCell(`M${row}`).value = packingLocation(packing) || null
+    sheet.getCell(`M${row}`).value = packingLocation(packing, invoice) || null
     sheet.getCell(`O${row}`).value = packing.packageCount || null
     sheet.getCell(`R${row}`).value = invoice.quantity
     sheet.getCell(`S${row}`).value = 'ea'
@@ -316,7 +323,7 @@ export async function exportChinaImportDocument(
     const source = options.items[item.id]
     sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
     const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
-    sheet.getCell(`B${row}`).value = packingLocation(packing) || null
+    sheet.getCell(`B${row}`).value = packingLocation(packing, invoice) || null
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
     sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null

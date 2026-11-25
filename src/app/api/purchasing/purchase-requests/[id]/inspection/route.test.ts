@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET, POST } from './route'
 
-const mocks = vi.hoisted(() => ({ user: vi.fn(), owner: vi.fn(), get: vi.fn(), save: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: vi.fn(), owner: vi.fn(), get: vi.fn(), save: vi.fn(), labelData: vi.fn() }))
 vi.mock('@/lib/auth/current-user', () => ({ getCurrentUser: mocks.user }))
 vi.mock('@/lib/admin-accounts/queries', () => ({ getWorkspaceUserId: mocks.owner }))
 vi.mock('@/lib/purchasing/purchase-requests', () => ({ getPurchaseInspection: mocks.get, savePurchaseInspection: mocks.save }))
+vi.mock('@/lib/purchasing/items', () => ({ getPurchasingItemLabelDataBySku: mocks.labelData }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 const id = '00000000-0000-4000-8000-000000000001'
 const context = { params: Promise.resolve({ id }) }
@@ -23,6 +24,28 @@ describe('purchase inspection endpoints', () => {
     const response = await GET(request(null), context)
     expect(mocks.get).toHaveBeenCalledWith('owner-id', id)
     expect(response.headers.get('cache-control')).toContain('no-store')
+  })
+  it('prints saved inspection cartons using the China shipment label template', async () => {
+    const box = { ...input.parcels[0].boxes[0], quantity: 20 }
+    mocks.get.mockResolvedValue({
+      id, sku: 'SKU-01', productName: '수납함', optionName: '블랙',
+      inspection: {
+        parcels: [{ ...input.parcels[0], boxes: [box] }],
+        boxNumbers: { [box.id]: '261125-001' },
+      },
+    })
+    mocks.labelData.mockResolvedValue(new Map([['SKU-01', { chineseProductName: '收纳箱', location: 'A-01' }]]))
+    const printRequest = new NextRequest(`${request(null).url}?format=box-print`)
+    const response = await GET(printRequest, context)
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-security-policy')).toContain("script-src 'nonce-")
+    for (const value of ['size:180mm 100mm', 'TAPEOFF', '20 PC', '수납함', '블랙', '收纳箱', 'A-01', '261125-001']) {
+      expect(html).toContain(value)
+    }
+    expect(html.match(/class="page box-label"/g)).toHaveLength(1)
+    expect(mocks.labelData).toHaveBeenCalledWith('owner-id', ['SKU-01'])
   })
   it('separates workspace ownership from the real inspector identity', async () => {
     expect((await POST(request(input), context)).status).toBe(200)

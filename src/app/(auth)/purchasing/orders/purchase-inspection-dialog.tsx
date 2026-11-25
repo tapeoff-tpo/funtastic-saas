@@ -175,45 +175,6 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
     finally { setPending(false) }
   }
 
-  function printBoxStickers() {
-    if (!data || !inspection || dirty) return
-    const frame = document.createElement('iframe')
-    frame.title = '검수 박스 스티커 인쇄'
-    frame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none'
-    frame.onload = () => {
-      const printable = frame.contentDocument
-      const printWindow = frame.contentWindow
-      if (!printable || !printWindow) {
-        frame.remove()
-        toast.error('스티커 인쇄 화면을 열지 못했습니다.')
-        return
-      }
-      const style = printable.createElement('style')
-      style.textContent = '@page { size: 180mm 100mm; margin: 8mm } body { margin: 0; color: #000; font: 18px sans-serif } section { break-after: page; padding: 6mm; border: 1px solid } section:last-child { break-after: auto } h1 { font-size: 36px; margin: 0 0 4mm } p { margin: 2mm 0; overflow-wrap: anywhere }'
-      printable.head.append(style)
-      for (const parcel of inspection.parcels) {
-        for (const box of parcel.boxes) {
-          const number = inspection.boxNumbers?.[box.id]
-          if (!number) continue
-          const label = printable.createElement('section')
-          const heading = printable.createElement('h1')
-          heading.textContent = number
-          label.append(heading)
-          for (const value of [data.productName, '품목코드 ' + data.sku, '송장번호 ' + parcel.trackingNumber, '입고수량 ' + (box.quantity ?? '미입력')]) {
-            const line = printable.createElement('p')
-            line.textContent = value
-            label.append(line)
-          }
-          printable.body.append(label)
-        }
-      }
-      printWindow.addEventListener('afterprint', () => frame.remove(), { once: true })
-      printWindow.focus()
-      printWindow.print()
-    }
-    frame.src = 'about:blank'
-    document.body.append(frame)
-  }
   const savedBoxes = inspection?.parcels.flatMap((parcel) => parcel.boxes) ?? []
   const needsBoxNumbers = savedBoxes.some((box) => !inspection?.boxNumbers?.[box.id])
 
@@ -382,7 +343,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
             <Button type="button" variant="outline" disabled={pending || dirty} onClick={issueBoxNumbers}>박스번호 발급</Button>
           ) : <span className="text-sm text-muted-foreground">박스번호 발급 완료</span>}
           <Button type="button" variant="outline" disabled={pending || dirty || needsBoxNumbers}
-            onClick={printBoxStickers}>박스 스티커 인쇄</Button>
+            onClick={() => window.open(`/api/purchasing/purchase-requests/${id}/inspection?format=box-print`, '_blank', 'noopener,noreferrer')}>박스 스티커 인쇄</Button>
         </>}
         {editable && <Button type="button" disabled={pending} onClick={() => void save(true)}>검수완료</Button>}
       </div>

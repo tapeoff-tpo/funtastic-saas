@@ -1985,7 +1985,7 @@ export async function getPurchaseInspection(userId: string, id: string) {
   if (!row) return null
   const inspectionIssues = await getPurchaseInspectionIssues({ userId, purchaseRequestItemId: id })
   return {
-    id: row.item.id, status: row.item.status, productName: row.item.productName, sku: row.item.sku,
+    id: row.item.id, status: row.item.status, productName: row.item.productName, sku: row.item.sku, optionName: row.item.optionName,
     inspection: row.item.purchaseInspection ?? createPurchaseInspection(row.item.actualPurchaseQuantity ?? row.item.requestedQuantity, row.item.trackingNumber),
     inspectionIssues,
     purchaseFields: {

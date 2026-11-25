@@ -136,13 +136,24 @@ function addBoxLabelSheets(
   }
 
   for (const [index, box] of boxes.entries()) {
-    const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes, index))
-    configureLabelSheet(sheet, 'F')
-    // Use the full A4 landscape page for a physical carton label, not a small table.
-    sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
     const products = aggregateLabelProducts(boxItemsByBoxId.get(box.id) ?? [], itemById)
-    addLargeBoxLabel(sheet, box.boxNo, products)
+    addBoxLabelSheet(workbook, index, box.boxNo, products)
   }
+}
+
+type BoxLabelProduct = Omit<LabelProductRow, 'quantity'> & { quantity: number | null }
+
+function addBoxLabelSheet(workbook: ExcelJS.Workbook, index: number, boxNo: string, products: BoxLabelProduct[]) {
+  const sheet = workbook.addWorksheet(labelSheetName(CHINA_OUTBOUND_SHIPMENT_LABEL_SHEETS.boxes, index))
+  configureLabelSheet(sheet, 'F')
+  sheet.pageSetup.margins = { top: 0.2, bottom: 0.2, left: 0.2, right: 0.2, header: 0, footer: 0 }
+  addLargeBoxLabel(sheet, boxNo, products)
+}
+
+export function createInspectionBoxLabelWorkbook(boxes: readonly { boxNo: string; product: BoxLabelProduct }[]) {
+  const workbook = new ExcelJS.Workbook()
+  boxes.forEach(({ boxNo, product }, index) => addBoxLabelSheet(workbook, index, boxNo, [product]))
+  return workbook
 }
 
 function addPalletLabelSheets(
@@ -198,7 +209,7 @@ const BOX_LABEL_FILL: ExcelJS.FillPattern = {
 }
 const BOX_LABEL_EDGE: Partial<ExcelJS.Border> = { style: 'thin', color: { argb: 'FF000000' } }
 
-function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: LabelProductRow[]) {
+function addLargeBoxLabel(sheet: ExcelJS.Worksheet, boxNo: string, products: BoxLabelProduct[]) {
   sheet.columns = Array.from({ length: 6 }, () => ({ width: 24 }))
   const count = Math.max(1, products.length)
   const productFontSize = Math.max(14, Math.floor(40 / Math.sqrt(count)))

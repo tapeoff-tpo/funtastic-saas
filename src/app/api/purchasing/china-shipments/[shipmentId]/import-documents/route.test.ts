@@ -145,7 +145,7 @@ describe('import document export route', () => {
     const response = await POST(request({ snapshot, invoiceNo: '', invoiceDate: '2026-11-20', sailingDate: '2026-11-20', exporter: '', importer: '', importerAddress: '', loadingPort: '', destinationPort: '', paymentTerms: '', palletTareKg: 5, palletExtraCbm: 0, items: { [shipmentId]: { englishName: '', unitPriceCny: null } }, boxes: { [shipmentId]: { grossWeightKg: null, cbm: null } } }), context())
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('spreadsheetml')
-    expect(response.headers.get('content-disposition')).toContain('_INV_PL.xlsx')
+    expect(response.headers.get('content-disposition')).toContain('_INV_PL_SSJ.xlsx')
     expect(mocks.export).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ boxes: { [shipmentId]: { grossWeightKg: Number.NaN, cbm: null } } }), expect.anything(), true)
   })
 

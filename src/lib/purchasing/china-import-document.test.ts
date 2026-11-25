@@ -98,7 +98,7 @@ describe('China import documents', () => {
     const { shipment, overrides } = splitAcrossPallets([...quantities])
     const sheet = await exportedSheet(shipment, overrides)
     expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
-    expect(sheet.getCell('B20').value).toBe(palletNo)
+    expect(sheet.getCell('B20').value).toBeNull()
     expect(sheet.getCell('C20').value).toBe('Glass')
     expect(sheet.getCell('D20').value).toBe('7013')
     expect(sheet.getCell('E20').value).toBe(90)
@@ -106,7 +106,7 @@ describe('China import documents', () => {
     for (const row of [21, 22]) {
       for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
     }
-    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1, P2, P3', null, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual([null, null, null])
     expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
     expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
@@ -150,7 +150,7 @@ describe('China import documents', () => {
     }
     const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 1.25 }, 'item-b': { englishName: 'Glass', unitPriceCny: 1.25 } } }
     const sheet = await exportedSheet(shipment, overrides)
-    expect(sheet.getCell('B20').value).toBe('P1')
+    expect(sheet.getCell('B20').value).toBeNull()
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
@@ -164,7 +164,7 @@ describe('China import documents', () => {
     const sheet = await exportedSheet(detail, { ...options, items: { ...options.items, 'item-b': { englishName: 'Glass', unitPriceCny: 2 } } })
     expect([sheet.getCell('C20').value, sheet.getCell('C21').value]).toEqual(['Glass', 'Glass'])
     expect([sheet.getCell('E20').value, sheet.getCell('E21').value]).toEqual([20, 5])
-    expect(sheet.getCell('B21').value).toBe('box')
+    expect(sheet.getCell('B21').value).toBe('1 BOX')
     expect(sheet.getCell('C22').value).toBeNull()
   })
   it('rounds the combined invoice amount once and totals the displayed lines', async () => {
@@ -395,7 +395,7 @@ it('combines option suffixes by product on both documents while preserving optio
   expect(sheet.getCell('L20').value).toBe(2)
   expect(sheet.getCell('L21').value).toBeNull()
   expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
-  expect(sheet.getCell('M20').value).toBe('P1, box')
+  expect(sheet.getCell('M20').value).toBe('1 BOX')
   expect(sheet.getCell('O20').value).toBe(2)
   expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
   expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
@@ -430,7 +430,7 @@ it('aligns every invoice and packing product row without repeating mixed package
     expect(sheet.getCell(`K${row}`).value).toBe(sheet.getCell(`A${row}`).value)
     expect(sheet.getCell(`R${row}`).value).toBe(sheet.getCell(`E${row}`).value)
   }
-  expect(sheet.getCell('M21').value).toBe('P1, box')
+  expect(sheet.getCell('M21').value).toBe('1 BOX')
   expect(sheet.getCell('O20').value).toBe(1)
   expect(sheet.getCell('O21').value).toBe(1)
   expect(sheet.getCell('L20').value).toBe(1)
@@ -482,4 +482,36 @@ it('retains an available option image after grouping options into one product in
   expect(sheet.getCell('B2').value).toBe('100457')
   expect(sheet.getImages()).toHaveLength(1)
   expect(sheet.getCell('A2').value).toBeNull()
+})
+
+it('uses TAPEOFF quarantine text and a single 1.3 surcharge without changing base inputs', async () => {
+  const trade = new Map(metadata)
+  trade.set('SKU-A', { ...metadata.get('SKU-A')!, quarantineText: '식품검역' })
+  const adjusted = { ...options, template: 'tapeoff' as const }
+  const cells: ImportDocumentEditCells = {}
+  const buffer = await exportChinaImportDocument(detail, trade, adjusted, {}, true, cells)
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const sheet = workbook.worksheets[0]
+  expect(sheet.getCell('X20').value).toBe('식품검역')
+  expect(sheet.getCell('X21').value).toBeNull()
+  expect(sheet.getCell('G20').value).toBe(21.79)
+  expect(sheet.getCell('J20').value).toMatchObject({ result: 435.8 })
+  expect(sheet.getCell('G21').value).toBe(2.6)
+  expect(options.items['item-a'].unitPriceCny).toBe(16.758)
+  expect(cells.G20).toBeUndefined()
+  const ssj = await exportedSheet(detail, options)
+  expect(ssj.getCell('G20').value).toBe(16.758)
+  expect(ssj.getCell('X20').value).toBeNull()
+})
+
+it.each(['ssj', 'tapeoff'] as const)('shows only loose-box counts for a product across pallets and BOX in %s', async (template) => {
+  const { shipment, overrides } = splitAcrossPallets([10, 20, 30])
+  shipment.boxes[2].palletId = null
+  const sheet = await exportedSheet(shipment, { ...overrides, template })
+  expect(sheet.getCell('M20').value).toBe('1 BOX')
+  expect(sheet.getCell('B20').value).toBe('1 BOX')
+  expect(sheet.getCell('O20').value).toBe(3)
+  expect(sheet.getCell('R14').value).toBe('2plt + 1ctn')
+  expect(sheet.getCell('W14').value).toBe(3)
 })

@@ -10,8 +10,9 @@ import { calculateChinaOutboundPalletWeight, palletTareWeightKg } from './china-
 import type { ChinaOutboundPackingExportDetail } from './china-outbound-packing-export'
 import { addImportDocumentHsSheets, type ImportDocumentSupplements } from './china-import-hs-sheets'
 
-export type ImportItemMetadata = { englishName: string; chineseName: string; hsCode: string; material: string; unitPriceCny: number | null }
+export type ImportItemMetadata = { englishName: string; chineseName: string; hsCode: string; material: string; unitPriceCny: number | null; quarantineText?: string }
 export type ImportDocumentOptions = {
+  template?: 'ssj' | 'tapeoff'
   invoiceNo: string; invoiceDate: string; sailingDate: string
   exporter: string; importer: string; importerAddress: string
   loadingPort: string; destinationPort: string; paymentTerms: string
@@ -119,6 +120,9 @@ export async function exportChinaImportDocument(
   editCells?: ImportDocumentEditCells,
 ) {
   detail = { ...detail, ...resolveChinaLooseBoxes(detail.pallets, detail.boxes) }
+  const template = options.template ?? 'ssj'
+  // Template adjustments are output-only; never compound or persist the surcharge.
+  options = { ...options, items: Object.fromEntries(Object.entries(options.items).map(([id, item]) => [id, { ...item, unitPriceCny: template === 'tapeoff' ? money(item.unitPriceCny * 1.3) : item.unitPriceCny }])) }
   const prepared = prepareImportDocument(detail, metadata)
   for (const item of prepared.items) {
     const override = options.items[item.id]
@@ -144,6 +148,9 @@ export async function exportChinaImportDocument(
   sheet.unMergeCells('C18:D18')
   sheet.getCell('C18').value = 'NAME'
   sheet.getCell('D18').value = 'HS CODE'
+  sheet.getCell('B18').value = 'BOX'
+  sheet.getCell('M18').value = 'BOX'
+  sheet.getCell('X18').value = 'Measurement'
   sheet.getCell('D18').style = structuredClone(sheet.getCell('C18').style)
   const rowStyle = Array.from({ length: 25 }, (_, index) => structuredClone(sheet.getRow(20).getCell(index + 1).style))
   for (const range of [...sheet.model.merges]) {
@@ -227,17 +234,21 @@ export async function exportChinaImportDocument(
   const invoiceRows = [...invoiceBySku.values()].sort((a, b) => a.groupIndex - b.groupIndex)
   // The two documents share one product order. Keep all physical locations on
   // that row rather than repeating a product once for every pallet it occupies.
-  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[] }>()
+  const packingByProduct = new Map<string, { boxCount: number; packageCount: number; gross: number; locations: string[]; looseBoxCount: number }>()
   for (const group of groups) {
     for (const [index, trade] of group.rows.entries()) {
       const product = importDocumentProductCode(itemById.get(trade.itemId)!.sku)
-      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [] }
+      const row = packingByProduct.get(product) ?? { boxCount: 0, packageCount: 0, gross: 0, locations: [], looseBoxCount: 0 }
       row.boxCount += trade.boxCount
+      if (!group.id) row.looseBoxCount += trade.boxCount
       row.packageCount += group.id ? (index === 0 ? 1 : 0) : trade.boxCount
       row.gross += trade.gross
       if (!row.locations.includes(group.no)) row.locations.push(group.no)
       packingByProduct.set(product, row)
     }
+  }
+  for (const [product, packing] of packingByProduct) {
+    packing.looseBoxCount = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku) === product)).length
   }
   const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
@@ -282,13 +293,19 @@ export async function exportChinaImportDocument(
     sheet.getRow(row).height = 21
     sheet.getCell(`K${row}`).value = documentBoxMarks(invoice.marks)
     sheet.getCell(`L${row}`).value = packing.boxCount || null
-    sheet.getCell(`M${row}`).value = packing.locations.join(', ')
+    sheet.getCell(`M${row}`).value = packing.looseBoxCount ? `${packing.looseBoxCount} BOX` : null
     sheet.getCell(`O${row}`).value = packing.packageCount || null
     sheet.getCell(`R${row}`).value = invoice.quantity
     sheet.getCell(`S${row}`).value = 'ea'
     sheet.getCell(`V${row}`).value = packing.gross || null
     sheet.getCell(`W${row}`).value = 'kg'
     sheet.getCell(`Y${row}`).value = item.productName
+    if (template === 'tapeoff') {
+      const texts = prepared.items.filter((candidate) => importDocumentProductCode(candidate.sku) === importDocumentProductCode(item.sku))
+        .map((candidate) => candidate.quarantineText?.trim()).filter(Boolean)
+      sheet.getCell(`X${row}`).value = [...new Set(texts)].join(', ') || null
+      sheet.getCell(`X${row}`).alignment = { ...sheet.getCell(`X${row}`).alignment, wrapText: true }
+    }
   }
   let totalAmount = 0
   for (const [index, invoice] of invoiceRows.entries()) {
@@ -296,7 +313,8 @@ export async function exportChinaImportDocument(
     const item = itemById.get(invoice.itemId)!
     const source = options.items[item.id]
     sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
-    sheet.getCell(`B${row}`).value = groups[invoice.groupIndex].no
+    const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
+    sheet.getCell(`B${row}`).value = packing.looseBoxCount ? `${packing.looseBoxCount} BOX` : null
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
     sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null
@@ -311,7 +329,7 @@ export async function exportChinaImportDocument(
       const product = importDocumentProductCode(item.sku)
       editCells[`C${row}`] = [{ key: `product:${product}:englishName`, label: `${product} 영문명`, value: source.englishName }]
       editCells[`D${row}`] = [{ key: `product:${product}:hsCode`, label: `${product} HS CODE`, value: hsByProduct.get(product) ?? '' }]
-      editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
+      if (template !== 'tapeoff') editCells[`G${row}`] = [{ key: `product:${product}:unitPriceCny`, label: `${product} Unit Price`, value: Number.isFinite(unitPrice) ? unitPrice.toFixed(2) : '', type: 'number' }]
     }
     totalAmount += amount
     sheet.getCell(`J${row}`).value = Number.isFinite(amount) ? { formula: `ROUND(G${row}*E${row},2)`, result: amount } : null

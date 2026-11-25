@@ -16,6 +16,7 @@ const ImportDocumentTable = memo(function ImportDocumentTable({ html, zoom }: { 
 })
 
 export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'document' }: { shipmentId: string; onDirtyChange: (dirty: boolean) => void; mode?: 'document' | 'cost' }) {
+  const [template, setTemplate] = useState<'ssj' | 'tapeoff'>('ssj')
   const [data, setData] = useState<Prepared | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [items, setItems] = useState<Record<string, { englishName: string; unitPriceCny: string; hsCode?: string }>>({})
@@ -89,7 +90,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
   }, [load])
 
   const payload = JSON.stringify({
-    ...settings, snapshot: data?.snapshot,
+    ...settings, template, snapshot: data?.snapshot,
     palletTareKg: 5,
     palletExtraCbm: data?.palletCount && data.pallets.some((pallet) => calculateChinaOutboundBoxCbm(pallet) == null) ? Number(settings.palletExtraCbm) : 0,
     items: Object.fromEntries(Object.entries(items).map(([id, value]) => [id, { ...value, unitPriceCny: value.unitPriceCny.trim() ? Number(value.unitPriceCny) : null }])),
@@ -157,7 +158,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       const blobUrl = URL.createObjectURL(await response.blob())
       const anchor = document.createElement('a')
       anchor.href = blobUrl
-      anchor.download = `${data.shipmentNo}_INV_PL.xlsx`
+      anchor.download = `${data.shipmentNo}_INV_PL_${template.toUpperCase()}.xlsx`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -173,7 +174,7 @@ export function ImportDocumentEditor({ shipmentId, onDirtyChange, mode = 'docume
       {busy && !data ? <p className="py-8">불러오는 중 / 加载中...</p> : null}
       {!data && !busy ? <button type="button" onClick={() => void load()} className="rounded border px-3 py-2">다시 확인 / 重试</button> : null}
       {data && <section aria-label="인보이스·패킹리스트 미리보기" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><p className="text-xs text-muted-foreground">파란 칸을 클릭해 수정 후 저장하세요. 수량·박스번호·합계는 자동 계산됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm disabled:opacity-50"><Save className="size-4" />{busy ? '처리 중…' : '저장'}</button><button type="button" disabled={busy || previewBusy} onClick={() => void download()} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">INVOICE · PACKING LIST</h2><div role="group" aria-label="문서 양식" className="my-2 flex gap-4">{(['ssj', 'tapeoff'] as const).map((value) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name="import-template" value={value} checked={template === value} disabled={busy} onChange={() => { setPreviewHtml(''); setTemplate(value) }} />{value.toUpperCase()}용</label>)}</div><p className="text-xs text-muted-foreground">{template === 'tapeoff' ? 'TAPEOFF: 기준 단가 × 1.3 (현지 수수료 포함) · Measurement에 검역 문구 표시. 단가 수정은 SSJ용에서 하세요.' : 'SSJ: 기존 기준 단가 사용'}</p><p className="text-xs text-muted-foreground">파란 칸을 클릭해 수정 후 저장하세요. 수량·박스번호·합계는 자동 계산됩니다.</p></div><div className="flex items-center gap-2"><label className="text-xs">확대 <select aria-label="문서 미리보기 배율" value={previewZoom} onChange={(event) => setPreviewZoom(event.target.value)} className="rounded border bg-background px-2 py-2">{[['0.5', '50%'], ['0.65', '65%'], ['0.8', '80%'], ['1', '100%']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm disabled:opacity-50"><Save className="size-4" />{busy ? '처리 중…' : '저장'}</button><button type="button" disabled={busy || previewBusy} onClick={() => void download()} className="inline-flex items-center gap-2 rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Download className="size-4" />엑셀 다운로드</button></div></div>
         {previewBusy && <p role="status" className="text-sm text-muted-foreground">양식 미리보기 불러오는 중…</p>}
         {previewError && <p role="alert" className="text-sm text-red-700">{previewError}</p>}
         {saveNotice && <p role="status" className="text-sm text-emerald-700">{saveNotice}</p>}

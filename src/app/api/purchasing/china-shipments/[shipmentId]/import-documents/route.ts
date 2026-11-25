@@ -23,6 +23,7 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 })
 const schema = z.object({
+  template: z.enum(['ssj', 'tapeoff']).default('ssj'),
   snapshot: z.string().length(64),
   invoiceNo: text, invoiceDate: date, sailingDate: date,
   exporter: text, importer: text, importerAddress: text,
@@ -141,7 +142,7 @@ export async function POST(request: Request, context: Context) {
       boxes: Object.fromEntries(loaded.prepared.boxes.map((box) => [box.id, { grossWeightKg: parsed.data.boxes[box.id]?.grossWeightKg ?? Number.NaN, cbm: parsed.data.boxes[box.id]?.cbm ?? null }])),
     }
     const buffer = await exportChinaImportDocument(loaded.detail, loaded.metadata, options, { productImages, existingHsItems }, true)
-    const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL.xlsx`
+    const filename = `${loaded.prepared.shipmentNo.replace(/[\\/:*?"<>|]/g, '_')}_INV_PL_${parsed.data.template.toUpperCase()}.xlsx`
     return new NextResponse(new Uint8Array(buffer), { headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

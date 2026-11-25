@@ -52,3 +52,14 @@ it('shows cost calculation separately without requesting an invoice preview', as
   expect(screen.queryByRole('button', { name: '엑셀 다운로드' })).not.toBeInTheDocument()
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
+it('switches preview templates without mutating the base price', async () => {
+  const data = { ...prepared, items: [{ id: 'a', sku: '100457-0001', englishName: 'Glass', hsCode: '7013', quantity: 1, unitPriceCny: 10 }] }
+  const fetcher = vi.fn(async (_url: string, request?: RequestInit) => request?.method ? { ok: true, json: async () => ({ html: '<table><tbody><tr><td>preview</td></tr></tbody></table>' }) } : { ok: true, json: async () => data })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ImportDocumentEditor shipmentId="shipment" onDirtyChange={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('radio', { name: 'TAPEOFF용' }))
+  await waitFor(() => expect(fetcher.mock.calls.some(([, request]) => request?.body && JSON.parse(request.body as string).template === 'tapeoff')).toBe(true))
+  const body = JSON.parse(fetcher.mock.calls.find(([, request]) => request?.body && JSON.parse(request.body as string).template === 'tapeoff')![1]!.body as string)
+  expect(body.items.a.unitPriceCny).toBe(10)
+  expect(screen.getByRole('radio', { name: 'TAPEOFF용' })).toBeChecked()
+})

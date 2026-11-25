@@ -1326,6 +1326,7 @@ export async function getPurchaseReviewList(input: {
         : sql<Record<string, unknown>>`'{}'::jsonb`,
       rawDataSource: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'source', '')`,
       rawStockCoverageMonths: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'stockCoverageMonths', '')`,
+      rawMoqStockReview: sql<unknown>`${purchaseRequestItems.rawData}->'moqStockReview'`,
     }).from(purchaseRequestItems).where(and(
       eq(purchaseRequestItems.userId, input.userId),
       eq(purchaseRequestItems.status, 'requested'),
@@ -1371,7 +1372,11 @@ export async function getPurchaseReviewList(input: {
       chinaReceivedQuantity: source?.chinaReceivedQuantity ?? null,
       rawData: includeFullRawData
         ? source?.rawData ?? {}
-        : purchaseReviewRawDataSummary(source?.rawDataSource, source?.rawStockCoverageMonths),
+        : purchaseReviewRawDataSummary(
+          source?.rawDataSource,
+          source?.rawStockCoverageMonths,
+          source?.rawMoqStockReview,
+        ),
       requestDate: source?.requestDate ?? null,
       outboundExpectedDate: source?.outboundExpectedDate ?? null,
       purchaseManagementCode: source?.purchaseManagementCode ?? null,
@@ -1527,6 +1532,7 @@ function normalizePurchaseReviewListStatuses(value: readonly PurchaseReviewListS
 function purchaseReviewRawDataSummary(
   source: string | null | undefined,
   stockCoverageMonths: string | null | undefined,
+  moqStockReview: unknown,
 ): Record<string, unknown> {
   if (source !== 'auto_purchase_recommendation') return {}
 
@@ -1534,6 +1540,7 @@ function purchaseReviewRawDataSummary(
   if (stockCoverageMonths !== null && stockCoverageMonths !== undefined) {
     rawData.stockCoverageMonths = stockCoverageMonths
   }
+  if (moqStockReview != null) rawData.moqStockReview = moqStockReview
   return rawData
 }
 

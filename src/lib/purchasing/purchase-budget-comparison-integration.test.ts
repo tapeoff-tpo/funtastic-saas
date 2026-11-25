@@ -4,6 +4,11 @@ import { getTableName, type Table } from 'drizzle-orm'
 
 const state = vi.hoisted(() => ({
   current: {} as Record<string, unknown>,
+  sku: '100001-0001',
+  productName: '테스트 상품',
+  domesticStock: 50,
+  pipelineQuantity: 0,
+  monthlyOutgoing: 100,
   snapshot: null as Record<string, unknown> | null,
   transactionReads: 0,
   ensure: vi.fn(),
@@ -26,7 +31,13 @@ vi.mock('@/lib/db', () => {
       from: () => ({
         where: async () => {
           state.transactionReads += 1
-          return [{ ...state.current, rawData: { ...(state.current.rawData as Record<string, unknown>) } }]
+          return [
+            { ...state.current, rawData: { ...(state.current.rawData as Record<string, unknown>) } },
+            ...(state.pipelineQuantity > 0 ? [{
+              id: 'inbound', sku: state.sku, status: 'purchase_completed',
+              actualPurchaseQuantity: state.pipelineQuantity, rawData: {},
+            }] : []),
+          ]
         },
       }),
     }),
@@ -44,14 +55,14 @@ vi.mock('@/lib/db', () => {
       select: (selection: Record<string, unknown>) => ({
         from: (table: Table) => {
           if (getTableName(table) === 'china_warehouse_inventory') return query([])
-          if ('specialPriceCny' in selection) return query([{ sku: '100001-0001', specialPriceCny: '10', newCostCny: null }])
+          if ('specialPriceCny' in selection) return query([{ sku: state.sku, specialPriceCny: '10', newCostCny: null }])
           if ('metadata' in selection) return query([{
-            sku: '100001-0001', productName: '테스트 상품',
+            sku: state.sku, productName: state.productName,
             metadata: { esa009m: { '특가(元)': '10' } }, purchasingStatus: null,
           }])
           if (!('availableStock' in selection)) return query([], [])
           if (!('optionName' in selection)) return query([])
-          return query([{ sku: '100001-0001', productName: '테스트 상품', optionName: '단품', availableStock: 50 }])
+          return query([{ sku: state.sku, productName: state.productName, optionName: '단품', availableStock: state.domesticStock }])
         },
       }),
       transaction: async (callback: (transaction: typeof tx) => unknown) => callback(tx),
@@ -62,26 +73,32 @@ vi.mock('./purchase-budget-comparison-store', () => ({ ensurePurchaseBudgetCompa
 vi.mock('./purchase-order-retention', () => ({ cleanupExpiredEcountPurchaseOrderRows: async () => ({}) }))
 vi.mock('@/lib/new-products/cny-cost', () => ({ getLatestCnyKrwReferenceRate: async () => ({ rate: 200 }) }))
 vi.mock('./items', () => ({
-  getSkuOutgoingMetrics: async () => new Map([['100001-0001', {
-    currentMonthOutgoing: 100, threeMonthAverageOutgoing: 100,
+  getSkuOutgoingMetrics: async () => new Map([[state.sku, {
+    currentMonthOutgoing: state.monthlyOutgoing, threeMonthAverageOutgoing: state.monthlyOutgoing,
   }]]),
 }))
 
 import { generatePurchaseRecommendations } from './purchase-recommendations'
+import { getRecommendationBasis } from './recommendation-basis'
+
+beforeEach(() => {
+  state.sku = '100001-0001'
+  state.productName = '테스트 상품'
+  state.domesticStock = 50
+  state.pipelineQuantity = 0
+  state.monthlyOutgoing = 100
+  state.current = {
+    id: 'existing', sku: state.sku, productName: state.productName, optionName: '단품',
+    status: 'requested', batchId: 'batch', requestedQuantity: 100,
+    actualPurchaseQuantity: null, chinaReceivedQuantity: null, costExchangeRateKrw: null,
+    rawData: { source: 'auto_purchase_recommendation' },
+  }
+  state.snapshot = null
+  state.transactionReads = 0
+  state.ensure.mockClear()
+})
 
 describe('budget recommendation comparison capture', () => {
-  beforeEach(() => {
-    state.current = {
-      id: 'existing', sku: '100001-0001', productName: '테스트 상품', optionName: '단품',
-      status: 'requested', batchId: 'batch', requestedQuantity: 100,
-      actualPurchaseQuantity: null, chinaReceivedQuantity: null, costExchangeRateKrw: null,
-      rawData: { source: 'auto_purchase_recommendation' },
-    }
-    state.snapshot = null
-    state.transactionReads = 0
-    state.ensure.mockClear()
-  })
-
   it('captures actual review quantities before and after the normal budget allocation in the same transaction', async () => {
     const result = await generatePurchaseRecommendations({
       userId: 'workspace', requestedByUserId: 'actor', targetStockMonths: 1.5,
@@ -117,5 +134,55 @@ describe('budget recommendation comparison capture', () => {
     expect(state.ensure).not.toHaveBeenCalled()
     expect(state.transactionReads).toBe(1)
     expect(state.snapshot).toBeNull()
+  })
+})
+
+describe('Mini Stepper 60 percent MOQ gate', () => {
+  it('preserves the shortage, holds a small top-up, and explains the domestic stock warning', async () => {
+    state.sku = '101542-0001'
+    state.productName = 'CABOSS 미니스텝퍼'
+    state.current = { ...state.current, sku: state.sku, productName: state.productName, requestedQuantity: 300 }
+    state.monthlyOutgoing = 275
+    state.domesticStock = -47
+    state.pipelineQuantity = 400
+
+    await generatePurchaseRecommendations({
+      userId: 'workspace', requestedByUserId: 'actor', targetStockMonths: 1.3, budgetKrw: 1_000_000,
+    })
+
+    expect(state.current).toMatchObject({
+      requestedQuantity: 0,
+      rawData: {
+        targetStockQuantity: 358, availableStockWithPipeline: 353, baseRecommendedQuantity: 5,
+        moqAdjustedQuantity: 0, allocatedQuantity: 0,
+        moqStockReview: { reorderStockPercent: 60, deferred: true, domesticOutOfStock: true, pipelineQuantity: 400 },
+      },
+    })
+    expect(getRecommendationBasis(state.current.rawData as Record<string, unknown>, null)?.notes
+      .map((note) => note.label)).toEqual([
+      '판매 유지',
+      'MOQ 발주 보류 · 목표재고의 98.6% 확보 · 60% 이하에서 발주검토',
+      '국내재고 부족 · 진행 중 400개 국내 입고 예정일 확인',
+      '진행 중 발주 400',
+    ])
+  })
+
+  it.each([
+    { sku: '101542-0001', name: 'CABOSS 미니스텝퍼', stock: 181, quantity: 0 },
+    { sku: '101542-0001', name: 'CABOSS 미니스텝퍼', stock: 180, quantity: 300 },
+    { sku: '101542-0001', name: 'CABOSS 미니스텝퍼', stock: 179, quantity: 300 },
+    { sku: '123456-0001', name: '테피 USB 캔들라이터', stock: 290, quantity: 200 },
+  ])('recommends $quantity for $name with $stock of 300 units available', async ({ sku, name, stock, quantity }) => {
+    state.sku = sku
+    state.productName = name
+    state.current = { ...state.current, sku, productName: name }
+    state.monthlyOutgoing = 250
+    state.domesticStock = stock
+
+    await generatePurchaseRecommendations({
+      userId: 'workspace', requestedByUserId: 'actor', targetStockMonths: 1.2,
+    })
+
+    expect(state.current.requestedQuantity).toBe(quantity)
   })
 })

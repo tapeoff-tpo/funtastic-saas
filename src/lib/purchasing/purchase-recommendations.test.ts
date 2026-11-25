@@ -229,6 +229,7 @@ describe('product-specific purchasing rules', () => {
 
     const calculation = calculatePurchaseRecommendation({
       averageMonthlyOutgoing: 36.7,
+      currentMonthOutgoing: 14,
       availableStock: 28,
       targetStockMonths: 1.3,
     })

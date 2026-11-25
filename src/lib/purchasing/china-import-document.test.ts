@@ -252,7 +252,7 @@ describe('China import documents', () => {
     expect(sheet.getCell('V112').value).toEqual({ formula: 'SUM(V20:V111)', result: 18 })
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 345.16 })
     expect(sheet.getCell('X112').value).toBeCloseTo(0.38)
-    expect(sheet.getCell('R14').value).toBe('1plt + 1ctn')
+    expect(sheet.getCell('R14').value).toBe('1 PLT + 1 BOX')
     expect(sheet.getCell('W14').value).toBe(2)
     expect(JSON.stringify(detail)).toBe(original)
     expect(workbook.worksheets.map((worksheet) => worksheet.name)).toEqual(['sheet', '신상품_HS미등록', '기존_HS코드'])
@@ -516,7 +516,7 @@ it.each(['ssj', 'tapeoff'] as const)('shows only loose-box counts for a product 
   expect(sheet.getCell('E20').value).toBe(60)
   expect(sheet.getCell('R20').value).toBe(60)
   expect(sheet.getCell('O20').value).toBe(1)
-  expect(sheet.getCell('R14').value).toBe('2plt + 1ctn')
+  expect(sheet.getCell('R14').value).toBe('2 PLT + 1 BOX')
   expect(sheet.getCell('W14').value).toBe(3)
 })
 

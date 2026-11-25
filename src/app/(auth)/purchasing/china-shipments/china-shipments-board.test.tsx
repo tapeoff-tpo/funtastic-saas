@@ -1529,14 +1529,13 @@ describe('ChinaShipmentsBoard', () => {
     await waitFor(() => expect(createShipment).toHaveBeenCalledWith(expect.objectContaining({ lines: [], destinationName: '인천' })))
   })
 
-  it('allows loose-box dispatch and shows PLT + BOX totals', () => {
+  it('allows loose-box dispatch and shows pallet, loose box and carton totals', () => {
     const detail = makeFullyPackedInProgressShipment()
     detail.boxes.forEach((box) => { box.palletId = null })
     renderShipment(detail, 'summary')
     expect(screen.getByRole('button', { name: '출고완료' })).toBeEnabled()
-    expect(screen.getByText('낱박스 1개')).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: '박스 1 적재 상품·중량' })).toBeVisible()
-    expect(screen.getAllByText('0 PLT + 1 BOX').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /4단계.*0 PLT \+ 1 BOX, 1 CTN/ })).toBeVisible()
+    expect(screen.getByRole('article', { name: '낱박스 적재' })).toBeVisible()
   })
 
   it('automatically totals each physical box once plus editable pallet tare while dimensions stay manual', () => {

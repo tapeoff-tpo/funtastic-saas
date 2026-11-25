@@ -322,7 +322,7 @@ export async function exportChinaImportDocument(
     A10: options.importerAddress.split('\n').slice(1).join(' '), K10: options.importerAddress.split('\n').slice(1).join(' '),
     E14: options.paymentTerms, A15: options.loadingPort, K15: options.loadingPort,
     O15: options.destinationPort,
-    R14: `${prepared.palletCount}plt + ${prepared.looseBoxCount}ctn`, W14: prepared.packageCount, X14: 'CTN',
+    R14: `${prepared.palletCount} PLT + ${prepared.looseBoxCount} BOX`, W14: prepared.packageCount, X14: 'CTN',
   })) sheet.getCell(address).value = value
   if (editCells) {
     const field = (key: string, label: string, value: string, type: 'text' | 'date' = 'text') => ({ key, label, value, type })

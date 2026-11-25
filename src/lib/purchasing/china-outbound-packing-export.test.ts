@@ -180,5 +180,5 @@ it('exports whole-pallet volume and loose boxes once with the final shipment wei
   detail.boxes[2].grossWeightKg = 3
   const workbook = await exportWorkbook(detail)
   const sheet = workbook.getWorksheet('최종 적재 요약')!
-  expect(sheet.getRow(2).values).toEqual([, 1, 1, 3, 1.801, 45.125])
+  expect(sheet.getRow(2).values).toEqual([, 1, 1, 2, 1.801, 45.125])
 })

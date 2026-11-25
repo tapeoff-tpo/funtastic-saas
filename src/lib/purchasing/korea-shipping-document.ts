@@ -5,11 +5,15 @@ export { koreaShippingRows, formatKoreaBoxNumbers } from './korea-shipping-rows'
 
 export async function exportKoreaShippingDocument(detail: ImportDocumentDetail, first: 'pallet' | 'box' = 'pallet', title?: string, singleSheet = false) {
   const workbook = new ExcelJS.Workbook()
+  const rows = koreaShippingRows(detail, 'pallet')
+  const palletCount = new Set(rows.filter((row) => row.pallet !== 'BOX').map((row) => row.pallet)).size
+  const looseCount = new Set(rows.filter((row) => row.pallet === 'BOX').flatMap((row) => row.boxes)).size
+  const packageSummary = `${palletCount} PLT + ${looseCount} BOX, ${palletCount + looseCount} CTN`
   for (const by of singleSheet ? [first] as const : [first, first === 'pallet' ? 'box' : 'pallet'] as const) {
     const sheet = workbook.addWorksheet(by === 'pallet' ? '파레트별 한국 출고서류' : '박스별 한국 출고서류')
     const headers = ['파레트', '박스번호', '박스수', '품목코드', '상품명', '옵션', '수량', '창고', '쿠팡', '대량', '로케이션', 'CBM (m³)', '총중량(kg)']
     sheet.mergeCells('A1:M1')
-    sheet.getCell('A1').value = title ?? `${detail.shipment.plannedOutboundDate ?? ''} 한국 출고서류 · ${detail.shipment.shipmentNo}`
+    sheet.getCell('A1').value = (title ?? `${detail.shipment.plannedOutboundDate ?? ''} 한국 출고서류 · ${detail.shipment.shipmentNo}`) + ' · ' + packageSummary
     sheet.getCell('A1').font = { bold: true, size: 16 }
     sheet.addRow(headers)
     const widths = [12, 28, 10, 20, 38, 24, 12, 12, 12, 12, 22, 14, 16]

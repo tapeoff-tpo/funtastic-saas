@@ -719,7 +719,9 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
   const boxesWithItems = boxes.filter((box) => (boxItemsByBox.get(box.id)?.length ?? 0) > 0)
   const palletSummaries = buildPalletSummaries({ pallets, boxes: boxesWithItems, boxItemsByBox, itemById, palletById })
   const hasIncompleteBoxSplit = items.some((item) => item.packedQuantity !== item.reservedQuantity)
-  const hasUnassignedPalletBox = boxesWithItems.some((box) => !box.palletId)
+  const looseBoxes = boxesWithItems.filter((box) => !box.palletId || !palletById.has(box.palletId))
+  const hasUnassignedPalletBox = looseBoxes.length > 0
+  const packageSummary = `${palletSummaries.length} PLT + ${looseBoxes.length} BOX, ${palletSummaries.length + looseBoxes.length} CTN`
   const cannotDispatch = items.length === 0 || hasIncompleteBoxSplit || items.some((item) => (boxItemsByItem.get(item.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0) !== item.reservedQuantity)
   const canDownloadPalletLabels = boxesWithItems.some((box) => box.palletId && palletById.has(box.palletId))
   function run(action: () => Promise<{ ok: boolean; error?: string }>, successMessage: string, afterSuccess?: () => void) {
@@ -764,9 +766,9 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
 
       <nav className="grid gap-1 rounded-lg border bg-muted/20 p-1 sm:grid-cols-2 xl:grid-cols-4" aria-label="중국출고 작업 단계">
         <StageButton active={stage === 'items'} step="1단계" title="출고품목·박스분할" detail={`${items.length.toLocaleString('ko-KR')}종 · ${totalPackedQuantity.toLocaleString('ko-KR')} / ${totalOutboundQuantity.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('items')} />
-        <StageButton active={stage === 'boxes'} step="2단계" title="저장된 박스현황" detail={`박스 ${boxesWithItems.length.toLocaleString('ko-KR')}개`} onClick={() => onStageChange('boxes')} />
-        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트 배정" detail={`${palletSummaries.length} PLT + ${boxesWithItems.filter((box) => !box.palletId).length} BOX`} onClick={() => onStageChange('pallets')} />
-        <StageButton active={stage === 'summary'} step="4단계" title="파렛트 최종 리스트" detail={`${palletSummaries.length} PLT · ${boxesWithItems.length.toLocaleString('ko-KR')} BOX`} onClick={() => onStageChange('summary')} />
+        <StageButton active={stage === 'boxes'} step="2단계" title="저장된 박스현황" detail="" onClick={() => onStageChange('boxes')} />
+        <StageButton active={stage === 'pallets'} step="3단계" title="파렛트 배정" detail="" onClick={() => onStageChange('pallets')} />
+        <StageButton active={stage === 'summary'} step="4단계" title="파렛트 최종 리스트" detail={packageSummary} onClick={() => onStageChange('summary')} />
       </nav>
 
       {stage === 'items' ? <section className="space-y-3">
@@ -829,7 +831,7 @@ function ShipmentDetailPanel({ detail, inventoryItems, warehouseCodes, stage, is
             {hasUnassignedPalletBox && <p className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">파렛트에 배정하지 않은 박스는 낱박스로 출고됩니다.</p>}
           </StageHelp>
         </div></div>
-        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={boxesWithItems.filter((box) => !box.palletId)} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
+        {boxesWithItems.length > 0 ? <PalletContentsPanel shipmentId={shipment.id} summaries={palletSummaries} unassignedBoxes={looseBoxes} boxItems={detail.boxItems} items={items} editable={false} dimensionsEditable={editable} isPending={isPending} /> : <EmptyStage title="최종 확인할 박스가 없습니다." description="3단계에서 박스별 파렛트 번호를 입력하면 최종 적재리스트가 만들어집니다." onMove={() => onStageChange('pallets')} moveLabel="3단계로 이동" />}
         {(editable || shipment.status === 'ready') && <div className="flex items-center justify-between gap-4 border-t pt-4"><p className="text-xs text-muted-foreground">적재 내역과 서류를 모두 확인한 뒤 마지막에 출고완료를 눌러주세요. 재고가 차감됩니다.</p><button type="button" disabled={isPending || guard.busy || cannotDispatch} onClick={requestDispatch} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60"><Send className="size-4" />출고완료</button></div>}
 
       </section> : null}

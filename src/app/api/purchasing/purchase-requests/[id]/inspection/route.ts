@@ -27,7 +27,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const inspection = await issueSavedInspectionBoxNumbers(await getWorkspaceUserId(user.id), id.data)
       return NextResponse.json({ inspection }, { headers: { 'Cache-Control': 'private, no-store' } })
     } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : '박스번호 발급에 실패했습니다.' }, { status: 409 })
+      const cause = error instanceof Error ? error.cause ?? error : error
+      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
+      console.error('Purchase inspection box number issuance failed', code ?? (cause instanceof Error ? cause.name : 'unknown'))
+      return NextResponse.json({ error: code ? '박스번호를 발급하지 못했습니다. 잠시 후 다시 시도해주세요.' : error instanceof Error ? error.message : '박스번호 발급에 실패했습니다.' }, { status: 409 })
     }
   }
   const body = purchaseInspectionInputSchema.safeParse(payload)

@@ -62,6 +62,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
   const [acknowledgeMismatch, setAcknowledgeMismatch] = useState(false)
+  const [boxNumberError, setBoxNumberError] = useState('')
   const [dirty, setDirty] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [boxCopySource, setBoxCopySource] = useState<BoxCopySource | null>(null)
@@ -160,6 +161,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       if (!response.ok) throw new Error(body.error || '검수 저장에 실패했습니다.')
       setData((current) => current ? { ...current, status: 'inspecting', inspection: body.inspection } : current)
       setDirty(false)
+      setBoxNumberError('')
       if (complete) {
         const moved = await fetch(`/api/purchasing/purchase-requests/${id}/status`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'china_arrived' }),
@@ -217,18 +219,19 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
 
   async function issueBoxNumbers() {
     if (dirty || pending) return
+    setBoxNumberError('')
     setPending(true)
     try {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}/inspection`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'issue-box-numbers' }),
       })
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.error)
+      const body = await response.json().catch(() => null)
+      if (!response.ok || !body?.inspection) throw new Error(body?.error || '박스번호 발급에 실패했습니다. 다시 시도해주세요.')
       setData((current) => current ? { ...current, inspection: body.inspection } : current)
       toast.success('검수 박스번호를 발급했습니다.')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '박스번호 발급에 실패했습니다.')
+      setBoxNumberError(error instanceof Error ? error.message : '박스번호 발급에 실패했습니다.')
     } finally {
       setPending(false)
     }
@@ -371,6 +374,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
         {inspection.parcels.length && summary.hasError ? <p role="status" className="font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p>입고수량 미입력</p> : null}
       </div>
+      {boxNumberError && <p role="alert" className="text-sm text-red-700">{boxNumberError}</p>}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {editable && <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장</Button>}
         {inspection.revision > 0 && savedBoxes.length > 0 && <>

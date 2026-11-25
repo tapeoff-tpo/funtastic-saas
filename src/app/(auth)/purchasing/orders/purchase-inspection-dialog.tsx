@@ -167,7 +167,7 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         if (!moved.ok) { const detail = await moved.json(); throw new Error(detail.error || '중국창고도착 처리에 실패했습니다.') }
         toast.success('검수를 완료하고 실제 입고수량을 반영했습니다.')
         ref.current?.close()
-      } else toast.success('송장·박스를 저장하고 검수 단계로 이동했습니다.')
+      } else toast.success('송장·박스를 임시저장했습니다.')
       router.refresh()
     } catch (failure) { toast.error(failure instanceof Error ? failure.message : '검수 저장에 실패했습니다.') }
     finally { setPending(false) }
@@ -241,10 +241,6 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
       <div className="flex items-center justify-between gap-3"><h2 id="purchase-inspection-title" className="text-lg font-semibold">송장·검수</h2><Button type="button" variant="outline" disabled={pending} onClick={close}>닫기</Button></div>
       {data && inspection && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <p data-no-translate>{data.sku} · {data.productName}</p>
-        {needsBoxNumbers && inspection.revision > 0 && <Button type="button" variant="outline" size="sm" disabled={pending || dirty} onClick={issueBoxNumbers}>박스번호 발급</Button>}
-        <Button type="button" variant="outline" size="sm" disabled={pending || dirty || !savedBoxes.length || needsBoxNumbers}
-          title={dirty ? '송장·박스를 저장한 뒤 인쇄할 수 있습니다.' : undefined}
-          onClick={printBoxStickers}>박스 스티커 인쇄</Button>
         <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
           스티커 부착 상태
           <select value={inspection.stickerStatus ?? ''} disabled={pending || !editable} className="h-8 rounded-md border bg-background px-2 text-sm"
@@ -375,10 +371,17 @@ function InspectionDialog({ id, onClose }: { id: string; onClose: () => void }) 
         <p>구매수량 <strong>{inspection.expectedQuantity}</strong> · 실제 입고수량 <strong>{summary.receivedQuantity}</strong> · 총 <strong>{summary.boxCount}</strong>박스</p>
         {inspection.parcels.length && summary.hasError ? <p role="status" className="font-semibold">입고오류 · {summary.difference < 0 ? '부족' : '초과'} {Math.abs(summary.difference)}개</p> : summary.quantityPending ? <p>입고수량 미입력</p> : null}
       </div>
-      {editable && <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장 · 검수로 이동</Button>
-        <Button type="button" disabled={pending} onClick={() => void save(true)}>{pending ? '저장 중…' : '검수완료 · 중국창고도착'}</Button>
-      </div>}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {editable && <Button type="button" variant="outline" disabled={pending} onClick={() => void save(false)}>임시저장</Button>}
+        {inspection.revision > 0 && savedBoxes.length > 0 && <>
+          {needsBoxNumbers ? (
+            <Button type="button" variant="outline" disabled={pending || dirty} onClick={issueBoxNumbers}>박스번호 발급</Button>
+          ) : <span className="text-sm text-muted-foreground">박스번호 발급 완료</span>}
+          <Button type="button" variant="outline" disabled={pending || dirty || needsBoxNumbers}
+            onClick={printBoxStickers}>박스 스티커 인쇄</Button>
+        </>}
+        {editable && <Button type="button" disabled={pending} onClick={() => void save(true)}>검수완료</Button>}
+      </div>
     </div>}
   </dialog>
 }

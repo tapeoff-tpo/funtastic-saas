@@ -98,7 +98,7 @@ describe('China import documents', () => {
     const { shipment, overrides } = splitAcrossPallets([...quantities])
     const sheet = await exportedSheet(shipment, overrides)
     expect(sheet.getCell('A20').value).toBe('BOX-1, BOX-2, BOX-3')
-    expect(sheet.getCell('B20').value).toBeNull()
+    expect(sheet.getCell('B20').value).toBe('P1, P2, P3')
     expect(sheet.getCell('C20').value).toBe('Glass')
     expect(sheet.getCell('D20').value).toBe('7013')
     expect(sheet.getCell('E20').value).toBe(90)
@@ -106,7 +106,7 @@ describe('China import documents', () => {
     for (const row of [21, 22]) {
       for (let column = 1; column <= 10; column++) expect(sheet.getRow(row).getCell(column).value).toBeNull()
     }
-    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual([null, null, null])
+    expect([20, 21, 22].map((row) => sheet.getCell(`M${row}`).value)).toEqual(['P1, P2, P3', null, null])
     expect([20, 21, 22].map((row) => sheet.getCell(`R${row}`).value)).toEqual([90, null, null])
     expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
     expect(sheet.getCell('E112').value).toEqual({ formula: 'SUM(E20:E111)', result: 90 })
@@ -150,7 +150,7 @@ describe('China import documents', () => {
     }
     const overrides = { ...options, items: { 'item-a': { englishName: 'Glass', unitPriceCny: 1.25 }, 'item-b': { englishName: 'Glass', unitPriceCny: 1.25 } } }
     const sheet = await exportedSheet(shipment, overrides)
-    expect(sheet.getCell('B20').value).toBeNull()
+    expect(sheet.getCell('B20').value).toBe('P1, P2')
     expect(sheet.getCell('E20').value).toBe(130)
     expect(sheet.getCell('C21').value).toBeNull()
     expect(sheet.getCell('J112').value).toEqual({ formula: 'SUM(J20:J111)', result: 162.5 })
@@ -164,7 +164,7 @@ describe('China import documents', () => {
     const sheet = await exportedSheet(detail, { ...options, items: { ...options.items, 'item-b': { englishName: 'Glass', unitPriceCny: 2 } } })
     expect([sheet.getCell('C20').value, sheet.getCell('C21').value]).toEqual(['Glass', 'Glass'])
     expect([sheet.getCell('E20').value, sheet.getCell('E21').value]).toEqual([20, 5])
-    expect(sheet.getCell('B21').value).toBe('1 BOX')
+    expect(sheet.getCell('B21').value).toBe('BOX')
     expect(sheet.getCell('C22').value).toBeNull()
   })
   it('rounds the combined invoice amount once and totals the displayed lines', async () => {
@@ -392,10 +392,10 @@ it('combines option suffixes by product on both documents while preserving optio
   expect(sheet.getCell('C21').value).toBeNull()
   expect(sheet.getCell('R20').value).toBe(25)
   expect(sheet.getCell('R21').value).toBeNull()
-  expect(sheet.getCell('L20').value).toBe(2)
+  expect(sheet.getCell('L20').value).toBe(1)
   expect(sheet.getCell('L21').value).toBeNull()
-  expect(sheet.getCell('K20').value).toBe(sheet.getCell('A20').value)
-  expect(sheet.getCell('M20').value).toBe('1 BOX')
+  expect(sheet.getCell('K20').value).toBe('2')
+  expect(sheet.getCell('M20').value).toBe('BOX')
   expect(sheet.getCell('O20').value).toBe(2)
   expect(sheet.getCell('O112').value).toMatchObject({ result: 2 })
   expect(sheet.getCell('V112').value).toMatchObject({ result: 18 })
@@ -427,10 +427,11 @@ it('displays unit prices with exactly two decimal places while preserving calcul
 it('aligns every invoice and packing product row without repeating mixed packages', async () => {
   const sheet = await exportedSheet(detail, options)
   for (const row of [20, 21]) {
-    expect(sheet.getCell(`K${row}`).value).toBe(sheet.getCell(`A${row}`).value)
+    if (row === 20) expect(sheet.getCell(`K${row}`).value).toBe(sheet.getCell(`A${row}`).value)
+    else expect(sheet.getCell(`K${row}`).value).toBe('2')
     expect(sheet.getCell(`R${row}`).value).toBe(sheet.getCell(`E${row}`).value)
   }
-  expect(sheet.getCell('M21').value).toBe('1 BOX')
+  expect(sheet.getCell('M21').value).toBe('BOX')
   expect(sheet.getCell('O20').value).toBe(1)
   expect(sheet.getCell('O21').value).toBe(1)
   expect(sheet.getCell('L20').value).toBe(1)
@@ -509,8 +510,12 @@ it.each(['ssj', 'tapeoff'] as const)('shows only loose-box counts for a product 
   const { shipment, overrides } = splitAcrossPallets([10, 20, 30])
   shipment.boxes[2].palletId = null
   const sheet = await exportedSheet(shipment, { ...overrides, template })
-  expect(sheet.getCell('M20').value).toBe('1 BOX')
-  expect(sheet.getCell('B20').value).toBe('1 BOX')
+  expect(sheet.getCell('M20').value).toBe('BOX')
+  expect(sheet.getCell('B20').value).toBe('BOX')
+  expect(sheet.getCell('L20').value).toBe(1)
+  expect(sheet.getCell('K20').value).toBe('BOX-3')
+  expect(sheet.getCell('E20').value).toBe(60)
+  expect(sheet.getCell('R20').value).toBe(60)
   expect(sheet.getCell('O20').value).toBe(3)
   expect(sheet.getCell('R14').value).toBe('2plt + 1ctn')
   expect(sheet.getCell('W14').value).toBe(3)

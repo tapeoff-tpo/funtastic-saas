@@ -148,8 +148,8 @@ export async function exportChinaImportDocument(
   sheet.unMergeCells('C18:D18')
   sheet.getCell('C18').value = 'NAME'
   sheet.getCell('D18').value = 'HS CODE'
-  sheet.getCell('B18').value = 'BOX'
-  sheet.getCell('M18').value = 'BOX'
+  sheet.getCell('B18').value = 'pallet / BOX'
+  sheet.getCell('M18').value = 'pallet / BOX'
   sheet.getCell('X18').value = 'Measurement'
   sheet.getCell('D18').style = structuredClone(sheet.getCell('C18').style)
   const rowStyle = Array.from({ length: 25 }, (_, index) => structuredClone(sheet.getRow(20).getCell(index + 1).style))
@@ -250,6 +250,7 @@ export async function exportChinaImportDocument(
   for (const [product, packing] of packingByProduct) {
     packing.looseBoxCount = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku) === product)).length
   }
+  const packingLocation = (packing: { looseBoxCount: number; locations: string[] }) => packing.looseBoxCount ? 'BOX' : packing.locations.join(', ')
   const count = invoiceRows.length
   const extra = Math.max(0, count - 92)
   if (extra) sheet.duplicateRow(111, extra, true)
@@ -291,9 +292,10 @@ export async function exportChinaImportDocument(
     const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
     for (let column = 1; column <= 25; column++) sheet.getRow(row).getCell(column).style = structuredClone(rowStyle[column - 1])
     sheet.getRow(row).height = 21
-    sheet.getCell(`K${row}`).value = documentBoxMarks(invoice.marks)
-    sheet.getCell(`L${row}`).value = packing.boxCount || null
-    sheet.getCell(`M${row}`).value = packing.looseBoxCount ? `${packing.looseBoxCount} BOX` : null
+    const looseMarks = prepared.boxes.filter((box) => !box.palletId && detail.boxItems.some((line) => line.boxId === box.id && importDocumentProductCode(itemById.get(line.shipmentItemId)!.sku) === importDocumentProductCode(item.sku))).map((box) => box.boxNo)
+    sheet.getCell(`K${row}`).value = documentBoxMarks(packing.looseBoxCount ? looseMarks : invoice.marks)
+    sheet.getCell(`L${row}`).value = (packing.looseBoxCount || packing.boxCount) || null
+    sheet.getCell(`M${row}`).value = packingLocation(packing) || null
     sheet.getCell(`O${row}`).value = packing.packageCount || null
     sheet.getCell(`R${row}`).value = invoice.quantity
     sheet.getCell(`S${row}`).value = 'ea'
@@ -314,7 +316,7 @@ export async function exportChinaImportDocument(
     const source = options.items[item.id]
     sheet.getCell(`A${row}`).value = documentBoxMarks(invoice.marks)
     const packing = packingByProduct.get(importDocumentProductCode(item.sku))!
-    sheet.getCell(`B${row}`).value = packing.looseBoxCount ? `${packing.looseBoxCount} BOX` : null
+    sheet.getCell(`B${row}`).value = packingLocation(packing) || null
     sheet.getCell(`C${row}`).value = source.englishName
     // Keep this as text. HS codes can contain punctuation or leading zeroes.
     sheet.getCell(`D${row}`).value = hsByProduct.get(importDocumentProductCode(item.sku)) || null

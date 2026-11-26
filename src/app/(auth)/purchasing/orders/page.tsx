@@ -10,7 +10,7 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
-import { getDomesticStockoutLabel, getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
+import { getDomesticStockoutDays, getDomesticStockoutLabel, getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
@@ -613,6 +613,7 @@ export async function PurchasingOrdersView({
                   <th scope="col" className="px-3 py-2">상품</th>
                   <th scope="col" className="whitespace-nowrap px-3 py-2 text-right">국내재고</th>
                   <th scope="col" className="px-3 py-2">국내 재고 소진 예상</th>
+                  <th scope="col" className="px-3 py-2">발주 우선순위</th>
                 </tr>
               </thead>
               <tbody>
@@ -624,10 +625,15 @@ export async function PurchasingOrdersView({
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatNumber(item.purchaseReviewMetrics?.domesticCurrentStock)}</td>
                     <td className="min-w-48 px-3 py-2 font-medium text-amber-800">{getDomesticStockoutLabel(item.rawData)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {'purchasePriorityRank' in item && item.purchasePriorityRank !== null
+                        ? <span className="font-medium">{item.purchasePriorityRank}순위 · {formatNumber(item.requestedQuantity)}개</span>
+                        : <span className="text-muted-foreground">입고 일정 확인</span>}
+                    </td>
                   </tr>
                 ))}
                 {items.length === 0 && (
-                  <tr><td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">조건에 맞는 국내 재고 소진 예상 품목이 없습니다.</td></tr>
+                  <tr><td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">조건에 맞는 국내 재고 소진 예상 품목이 없습니다.</td></tr>
                 )}
               </tbody>
             </table>
@@ -788,6 +794,8 @@ export async function PurchasingOrdersView({
                     const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
+                    const priorityRank = 'purchasePriorityRank' in item ? item.purchasePriorityRank : null
+                    const stockoutDays = priorityRank !== null ? getDomesticStockoutDays(item.rawData) : null
                     return (
                       <tr
                         key={item.id ?? item.sku}
@@ -803,6 +811,16 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
+                        {priorityRank !== null && (
+                          <div className="mt-1 text-xs font-medium">
+                            {priorityRank}순위
+                            {stockoutDays !== null && (
+                              <div className="mt-0.5 whitespace-nowrap text-amber-800">
+                                {stockoutDays === 0 ? '국내 당일 소진' : `국내 ${stockoutDays}일 후 소진`}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {item.id && inspectionIssueCount > 0 && <div className="mt-1">
                           <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                         </div>}

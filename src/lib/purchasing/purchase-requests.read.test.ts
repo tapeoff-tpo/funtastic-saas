@@ -38,8 +38,16 @@ describe('purchase list summary reads', () => {
           rawDomesticStockoutDays: 0, rawDomesticStockoutCalculatedOn: '2026-11-26',
         }, {
           id: 'manual-review', sku: '100001-0001', productName: '다른 상품', requestedQuantity: 20, rawData: {},
+        }, {
+          id: 'priority-review', sku: '109999-0001', productName: '우선 발주 상품', requestedQuantity: 10, rawData: {},
+          rawDataSource: 'auto_purchase_recommendation',
+          rawDomesticStockoutDays: 2, rawDomesticStockoutCalculatedOn: '2026-11-26',
         }]
-        : 'purchasingStatusNote' in fields ? [{ sku, productName }, { sku: '100001-0001', productName: '다른 상품' }] : []
+        : 'purchasingStatusNote' in fields ? [
+          { sku, productName },
+          { sku: '100001-0001', productName: '다른 상품' },
+          { sku: '109999-0001', productName: '우선 발주 상품' },
+        ] : []
       const builder = {
         from: () => builder, where: () => builder, orderBy: () => builder,
         groupBy: () => builder,
@@ -49,9 +57,13 @@ describe('purchase list summary reads', () => {
     })
 
     const normal = await getPurchaseReviewList({ userId: 'owner' })
-    expect(normal.items.map((item) => item.sku)).toEqual(['100001-0001', sku])
+    expect(normal.items.map((item) => [item.sku, item.purchasePriorityRank])).toEqual([
+      ['109999-0001', 1],
+      ['100001-0001', 2],
+      [sku, null],
+    ])
     const { items } = await getPurchaseReviewList({ userId: 'owner', stockoutOnly: true })
-    expect(items).toHaveLength(1)
+    expect(items.map((item) => [item.sku, item.purchasePriorityRank])).toEqual([[sku, null], ['109999-0001', 1]])
     expect(items[0]).toMatchObject({ sku, id: null, requestedQuantity: 0, reviewStatus: 'not_required' })
     expect(getDomesticStockoutLabel(items[0].rawData)).toBe('국내 재고 당일 소진 예상 · 국내 입고일 확인 필요 (2026-11-26 계산)')
     expect(getRecommendationBasis(items[0].rawData, items[0].purchaseReviewMetrics)?.notes.map(({ label }) => label)).toEqual([

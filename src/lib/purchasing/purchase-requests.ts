@@ -28,6 +28,7 @@ import { CHAMBERT_FIXED_SET_SKUS, purchasePipelineQuantity } from './purchase-re
 import { getDomesticStockoutDays } from './recommendation-basis'
 import {
   getProductGroupPurchaseUrgencyStatus,
+  getPurchaseStockCoverageMonths,
   getUrgentPurchaseProductNames,
   type PurchaseUrgencyStatus,
 } from './purchase-urgency'
@@ -170,11 +171,12 @@ export type PurchaseReviewListItem = {
   purchaseReviewMetrics: PurchaseReviewOperationalMetrics | null
   purchaseReviewHistory: PurchaseReviewHistory | null
   purchaseUrgencyStatus: PurchaseUrgencyStatus | null
+  purchasePriorityRank: number | null
 }
 
 type PurchaseReviewListBaseItem = Omit<
   PurchaseReviewListItem,
-  'purchaseReviewMetrics' | 'purchaseReviewHistory' | 'purchaseUrgencyStatus'
+  'purchaseReviewMetrics' | 'purchaseReviewHistory' | 'purchaseUrgencyStatus' | 'purchasePriorityRank'
 > & {
   metadata: Record<string, unknown> | null
 }
@@ -1417,6 +1419,10 @@ export async function getPurchaseReviewList(input: {
       metadata: product.metadata,
     }
   })
+  const priorityBySku = new Map(
+    sortPurchaseReviewListRows(baseRows.filter((row) => row.reviewStatus === 'review'))
+      .map((row, index) => [row.sku, index + 1]),
+  )
   const requestedStatuses = normalizePurchaseReviewListStatuses(input.statuses)
   const filteredRows = baseRows.filter((row) => (
     requestedStatuses.includes(row.reviewStatus)
@@ -1482,6 +1488,7 @@ export async function getPurchaseReviewList(input: {
       chinaCurrentStock: metrics.chinaCurrentStock,
       purchaseReviewMetrics: metrics,
       purchaseReviewHistory: purchaseReviewHistoryFromMetrics(metrics),
+      purchasePriorityRank: priorityBySku.get(row.sku) ?? null,
       purchaseUrgencyStatus: getProductGroupPurchaseUrgencyStatus({
         sku: row.sku,
         productName: row.productName,
@@ -1605,6 +1612,9 @@ function sortPurchaseReviewListRows<T extends {
   const direction = order === 'desc' ? -1 : 1
   const compareText = (left: string, right: string) => left.localeCompare(right, 'ko-KR')
   const compareNumber = (left: number | null, right: number | null) => (left ?? -1) - (right ?? -1)
+  const compareStockout = (left: T, right: T) =>
+    (getDomesticStockoutDays(left.rawData) ?? Number.MAX_SAFE_INTEGER)
+    - (getDomesticStockoutDays(right.rawData) ?? Number.MAX_SAFE_INTEGER)
   return [...rows].sort((left, right) => {
     let compared = 0
     switch (sort) {
@@ -1633,13 +1643,18 @@ function sortPurchaseReviewListRows<T extends {
         compared = compareNumber(left.totalCostKrw, right.totalCostKrw)
         break
       case 'domesticStockout':
-        compared = (getDomesticStockoutDays(left.rawData) ?? Number.MAX_SAFE_INTEGER)
-          - (getDomesticStockoutDays(right.rawData) ?? Number.MAX_SAFE_INTEGER)
+        compared = compareStockout(left, right)
         if (compared !== 0) return compared
         return compareText(left.sku, right.sku) || compareText(left.optionName ?? '', right.optionName ?? '')
       default:
         compared = Number(left.reviewStatus === 'not_required') - Number(right.reviewStatus === 'not_required')
         if (compared !== 0) return compared
+        if (left.reviewStatus === 'review') {
+          compared = compareStockout(left, right)
+            || ((getPurchaseStockCoverageMonths(left.rawData) ?? Number.MAX_SAFE_INTEGER)
+              - (getPurchaseStockCoverageMonths(right.rawData) ?? Number.MAX_SAFE_INTEGER))
+          if (compared !== 0) return compared
+        }
         compared = compareText(left.sku, right.sku)
         if (compared !== 0) return compared
         return compareText(left.optionName ?? '', right.optionName ?? '')

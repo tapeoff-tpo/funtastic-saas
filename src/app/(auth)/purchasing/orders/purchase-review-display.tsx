@@ -4,13 +4,15 @@ import type { PurchaseReviewHistory } from '@/lib/purchasing/purchase-requests'
 export function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHistory | null }) {
   if (!history) return <span className="text-xs text-muted-foreground">구매 이력 없음</span>
 
-  const date = history.lastPurchaseDate.replaceAll('-', '.')
+  const stage = history.stageDate ?? { label: '최근 구매일', date: history.lastPurchaseDate }
   return (
     <div className="space-y-0.5 text-xs tabular-nums">
       <div className="whitespace-nowrap font-medium text-foreground">
-        최근 구매일 <time dateTime={history.lastPurchaseDate}>{date}</time>
+        {stage.label} {stage.date ? <time dateTime={stage.date}>{stage.date.replaceAll('-', '.')}</time> : '–'}
       </div>
-      <div className="text-muted-foreground">구매 {history.lastPurchaseQuantity.toLocaleString('ko-KR')}개</div>
+      <div className="text-muted-foreground">
+        {stage.label === '최근 발주일' ? '발주' : '구매'} {history.lastPurchaseQuantity.toLocaleString('ko-KR')}개
+      </div>
     </div>
   )
 }

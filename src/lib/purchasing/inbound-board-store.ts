@@ -48,6 +48,24 @@ export async function getInboundPost(userId: string, id: string) {
   return post ?? null
 }
 
+export async function getDomesticReceivedDatesByPurchaseId(userId: string, purchaseIds: readonly string[]) {
+  if (!purchaseIds.length || !await exists()) return new Map<string, string>()
+
+  const ids = sql.join(purchaseIds.map((id) => sql`${id}::uuid`), sql`, `)
+  const rows = await db.execute<{ purchaseId: string; receivedDate: string }>(sql`
+    SELECT link.purchase_request_item_id AS "purchaseId", MAX(post.received_date)::text AS "receivedDate"
+    FROM saas_china_purchase_links link
+    JOIN saas_china_shipment_purchase_allocations allocation
+      ON allocation.user_id = link.user_id AND allocation.purchase_link_id = link.id
+    JOIN purchasing_inbound_posts post
+      ON post.user_id = link.user_id AND post.shipment_id = allocation.shipment_id
+    WHERE link.user_id = ${userId} AND link.purchase_request_item_id IN (${ids})
+      AND allocation.dispatched_quantity > 0 AND post.received_date IS NOT NULL
+    GROUP BY link.purchase_request_item_id
+  `)
+  return new Map(rows.map((row) => [row.purchaseId, row.receivedDate]))
+}
+
 export type ScheduledDomesticInbound = { sku: string; daysUntilArrival: number; quantity: number }
 
 export async function listScheduledDomesticInbound(userId: string, today: string) {

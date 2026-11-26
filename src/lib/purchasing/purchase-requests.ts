@@ -24,7 +24,8 @@ import {
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
 import { purchaseMasterPriceKeys, readPurchasePriceComparison, type ActualPurchasePrices } from './purchase-price-comparison'
-import { CHAMBERT_FIXED_SET_SKUS, purchasePipelineQuantity } from './purchase-recommendations'
+import { CHAMBERT_FIXED_SET_SKUS, formatSeoulDate, purchasePipelineQuantity } from './purchase-recommendations'
+import { getDomesticReceivedDatesByPurchaseId } from './inbound-board-store'
 import { getDomesticStockoutDays } from './recommendation-basis'
 import {
   getProductGroupPurchaseUrgencyStatus,
@@ -90,11 +91,14 @@ export type PurchaseReviewHistory = {
   lastPurchaseDate: string
   lastPurchaseQuantity: number
   threeMonthAverageOutgoingAtLastPurchase: number
+  stageDate?: { label: '최근 발주일' | '최근 구매일' | '중국 창고 도착일' | '국내 입고일'; date: string | null }
 }
 
 export type PurchaseReviewHistoryCandidate = {
+  id?: string
   sku: string
   status?: PurchaseRequestStatus
+  chinaReceivedAt?: Date | null
   requestedQuantity: number
   actualPurchaseQuantity: number | null
   requestDate: string | null
@@ -107,6 +111,7 @@ export type PurchaseReviewOperationalMetrics = {
   lastPurchaseDate: string | null
   lastPurchaseQuantity: number | null
   lastPurchaseThreeMonthAverageOutgoing: number | null
+  purchaseStageDate?: PurchaseReviewHistory['stageDate']
   purchaseInProgressQuantity: number
   chinaOutboundScheduledQuantity: number
   domesticCurrentStock: number
@@ -1680,6 +1685,7 @@ function sortPurchaseReviewListRows<T extends {
 }
 
 const PURCHASE_REVIEW_HISTORY_STATUSES = [
+  'purchased',
   'purchase_completed',
   'inspecting',
   'china_arrived',
@@ -1696,8 +1702,10 @@ export async function getPurchaseReviewHistoryBySku(
 
   const historyRows = await db
     .select({
+      id: purchaseRequestItems.id,
       sku: purchaseRequestItems.sku,
       status: purchaseRequestItems.status,
+      chinaReceivedAt: purchaseRequestItems.chinaReceivedAt,
       requestedQuantity: purchaseRequestItems.requestedQuantity,
       actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
       requestDate: purchaseRequestItems.requestDate,
@@ -1709,23 +1717,22 @@ export async function getPurchaseReviewHistoryBySku(
     .where(and(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.sku, uniqueSkus),
-      or(
-        inArray(purchaseRequestItems.status, [...PURCHASE_REVIEW_HISTORY_STATUSES]),
-        and(
-          eq(purchaseRequestItems.status, 'purchased'),
-          eq(purchaseRequestItems.purchaseConfirmed, true),
-        ),
-      )!,
+      inArray(purchaseRequestItems.status, [...PURCHASE_REVIEW_HISTORY_STATUSES]),
     ))
 
   const latestHistoryBySku = getLatestPurchaseReviewHistoryCandidates(historyRows)
   if (latestHistoryBySku.size === 0) return new Map()
+  const completedPurchaseIds = Array.from(latestHistoryBySku.values()).flatMap((row) =>
+    row.status === 'completed' && row.rawData.saasChinaMode === true && row.id ? [row.id] : [],
+  )
 
   const historyValues = sql.join(
     Array.from(latestHistoryBySku.values()).map((row) => sql`(${row.sku}, ${purchaseReviewHistoryDate(row)}::date)`),
     sql`, `,
   )
-  const threeMonthAverageResult = await db.execute<{
+  const [domesticReceivedDates, threeMonthAverageResult] = await Promise.all([
+    getDomesticReceivedDatesByPurchaseId(userId, completedPurchaseIds),
+    db.execute<{
     sku: string
     threeMonthAverageOutgoing: string | number | null
   }>(sql`
@@ -1745,7 +1752,8 @@ export async function getPurchaseReviewHistoryBySku(
       AND line.shipment_date >= (date_trunc('month', history.purchase_date) - INTERVAL '3 months')::date
       AND line.shipment_date < date_trunc('month', history.purchase_date)::date
     GROUP BY history.sku
-  `)
+  `),
+  ])
   const calculatedAverageBySku = new Map(resultRows<{
     sku: string
     threeMonthAverageOutgoing: string | number | null
@@ -1755,7 +1763,8 @@ export async function getPurchaseReviewHistoryBySku(
     sku,
     {
       lastPurchaseDate: purchaseReviewHistoryDate(row),
-      lastPurchaseQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
+      lastPurchaseQuantity: row.status === 'purchased' ? row.requestedQuantity : row.actualPurchaseQuantity ?? row.requestedQuantity,
+      stageDate: getPurchaseReviewHistoryStageDate(row, row.id ? domesticReceivedDates.get(row.id) : undefined),
       threeMonthAverageOutgoingAtLastPurchase: getStoredPurchaseReviewAverage(row.rawData)
         ?? calculatedAverageBySku.get(sku)
         ?? 0,
@@ -1841,6 +1850,7 @@ export async function getPurchaseReviewOperationalMetricsBySku(input: {
       lastPurchaseDate: history?.lastPurchaseDate ?? null,
       lastPurchaseQuantity: history?.lastPurchaseQuantity ?? null,
       lastPurchaseThreeMonthAverageOutgoing: history?.threeMonthAverageOutgoingAtLastPurchase ?? null,
+      purchaseStageDate: history?.stageDate,
       purchaseInProgressQuantity: pipeline.purchaseInProgressQuantity,
       chinaOutboundScheduledQuantity: pipeline.chinaOutboundScheduledQuantity,
       domesticCurrentStock,
@@ -1961,6 +1971,7 @@ function purchaseReviewHistoryFromMetrics(
     lastPurchaseDate: metrics.lastPurchaseDate,
     lastPurchaseQuantity: metrics.lastPurchaseQuantity,
     threeMonthAverageOutgoingAtLastPurchase: metrics.lastPurchaseThreeMonthAverageOutgoing ?? 0,
+    stageDate: metrics.purchaseStageDate,
   }
 }
 
@@ -2008,11 +2019,24 @@ function comparePurchaseReviewHistoryCandidates(
 }
 
 function purchaseReviewHistoryDate(row: PurchaseReviewHistoryCandidate) {
+  if (row.status === 'purchased') return row.requestDate ?? formatSeoulDate(row.createdAt)
   const storedPurchaseDate = row.rawData.purchaseDate
   if (typeof storedPurchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(storedPurchaseDate)) return storedPurchaseDate
   const isOutbound = row.status === 'outbound_requested' || row.status === 'completed'
   const purchaseDate = row.status && !isOutbound ? row.outboundExpectedDate : null
   return purchaseDate ?? row.requestDate ?? (isOutbound ? null : row.outboundExpectedDate) ?? row.createdAt.toISOString().slice(0, 10)
+}
+
+export function getPurchaseReviewHistoryStageDate(
+  row: PurchaseReviewHistoryCandidate,
+  domesticReceivedDate?: string,
+): NonNullable<PurchaseReviewHistory['stageDate']> {
+  if (row.status === 'purchased') return { label: '최근 발주일', date: purchaseReviewHistoryDate(row) }
+  if (row.status === 'completed') return { label: '국내 입고일', date: domesticReceivedDate ?? null }
+  if (row.status === 'china_arrived' || row.status === 'outbound_requested') {
+    return { label: '중국 창고 도착일', date: row.chinaReceivedAt ? formatSeoulDate(row.chinaReceivedAt) : null }
+  }
+  return { label: '최근 구매일', date: purchaseReviewHistoryDate(row) }
 }
 
 export async function getCompletedOutboundDateOptions(userId: string) {

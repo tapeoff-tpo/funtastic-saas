@@ -542,7 +542,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByRole('row', { name: `${row.name} 상품등록정보` })).toHaveTextContent('18,000원')
   })
 
-  it('saves a manual completion date, shows it in the enlarged third stage and restores an unchecked product', async () => {
+  it('saves a manual completion date and uses third-stage checkboxes only for selection before an explicit return', async () => {
     const first = confirmPricing({ ...createRegistrationRow(source, '베이지'), fields: { 브랜드: '직접 확인 브랜드' } })
     const other = confirmPricing(createRegistrationRow(second, '블랙'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [first, other] })
@@ -560,17 +560,24 @@ describe('registration pricing workbench', () => {
     const dialog = await screen.findByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })
     fireEvent.click(within(dialog).getByRole('tab', { name: /3단계 등록완료/ }))
     const completed = within(dialog).getByRole('row', { name: `${first.name} 등록완료 정보` })
-    expect(within(completed).getByRole('checkbox', { name: `${first.name} 등록완료` })).toBeChecked()
+    const selectCompleted = within(completed).getByRole('checkbox', { name: `${first.name} 선택` })
+    expect(selectCompleted).not.toBeChecked()
     expect(within(completed).getByLabelText(`${first.name} 등록완료일`)).toHaveValue('2026-11-24')
     expect(within(dialog).queryByRole('link', { name: /허브/ })).not.toBeInTheDocument()
     fireEvent.change(within(completed).getByLabelText(`${first.name} 등록완료일`), { target: { value: '2026-11-23' } })
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0].registrationCompletedAt).toBe('2026-11-23'))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-    fireEvent.click(within(completed).getByRole('checkbox', { name: `${first.name} 등록완료` }))
+    const savesBeforeSelection = savedBodies().length
+    fireEvent.click(selectCompleted)
+    expect(selectCompleted).toBeChecked()
+    fireEvent.click(selectCompleted)
+    expect(selectCompleted).not.toBeChecked()
+    expect(savedBodies()).toHaveLength(savesBeforeSelection)
+    expect(within(dialog).getByRole('row', { name: `${first.name} 등록완료 정보` })).toBeInTheDocument()
+    fireEvent.click(within(completed).getByRole('button', { name: `${first.name} 2단계로 되돌리기` }))
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: first.id, stage: 'information', fields: { 브랜드: '직접 확인 브랜드' } }))
     expect(savedBodies().at(-1)?.draft.rows[0].registrationCompletedAt).toBeUndefined()
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-    fireEvent.click(within(dialog).getByRole('tab', { name: /2단계 상품등록정보/ }))
     const restored = within(dialog).getByRole('row', { name: `${first.name} 상품등록정보` })
     expect(within(restored).getByLabelText('브랜드')).toHaveValue('직접 확인 브랜드')
     expect(within(restored).getByRole('checkbox', { name: `${first.name} 등록완료` })).not.toBeChecked()
@@ -594,7 +601,11 @@ describe('registration pricing workbench', () => {
     ]))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
-    expect(within(screen.getByRole('table', { name: '등록완료 목록' })).getAllByRole('checkbox')).toHaveLength(2)
+    const completedTable = screen.getByRole('table', { name: '등록완료 목록' })
+    expect(within(completedTable).getAllByRole('checkbox')).toHaveLength(2)
+    expect(screen.getByRole('checkbox', { name: '등록완료 상품 전체 선택' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: `${first.name} 선택` })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: `${other.name} 선택` })).not.toBeChecked()
   })
 
   it('filters each stage by its own date using the shared start and end dates', async () => {
@@ -956,6 +967,118 @@ describe('registration pricing workbench', () => {
       expect(saved.id).toBe('draft-1')
     })
 
+    it('selects completed products without saving and returns only selected products in one save', async () => {
+      const fixture = downloadFixture()
+      const first = confirmRegistration(fixture.first, '2026-11-24')
+      const other = confirmRegistration(fixture.other, '2026-11-23')
+      const untouched = confirmRegistration({ ...fixture.other, id: crypto.randomUUID(), name: '선택하지 않은 완료 상품' }, '2026-11-22')
+      const initial = { ...fixture.draft, rows: [first, other, untouched] }
+      const pending = deferSavedDraft(initial)
+      await loadSavedWorkbench()
+      const all = screen.getByRole('checkbox', { name: '등록완료 상품 전체 선택' })
+      expect(all).not.toBeChecked()
+      expect(screen.getByRole('button', { name: '선택 0개 2단계로 되돌리기' })).toBeDisabled()
+      fireEvent.click(all)
+      for (const row of initial.rows) expect(screen.getByRole('checkbox', { name: `${row.name} 선택` })).toBeChecked()
+      fireEvent.click(all)
+      for (const row of initial.rows) expect(screen.getByRole('checkbox', { name: `${row.name} 선택` })).not.toBeChecked()
+      expect(savedBodies()).toHaveLength(0)
+      fireEvent.click(screen.getByRole('checkbox', { name: `${first.name} 선택` }))
+      fireEvent.click(screen.getByRole('checkbox', { name: `${other.name} 선택` }))
+      fireEvent.click(screen.getByRole('button', { name: '선택 2개 2단계로 되돌리기' }))
+
+      expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('row', { name: `${first.name} 상품등록정보` })).toBeInTheDocument()
+      expect(screen.getByRole('row', { name: `${other.name} 상품등록정보` })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveTextContent('1개')
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      expect(savedBodies()[0].draft.rows).toEqual([
+        { ...first, stage: 'information', registrationCompletedAt: undefined },
+        { ...other, stage: 'information', registrationCompletedAt: undefined },
+        untouched,
+      ])
+      expect(savedBodies()[0].draft.templates).toEqual(initial.templates)
+      expect(savedBodies()[0].draft.labels).toEqual(initial.labels)
+      pending.release()
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
+      expect(screen.getByRole('row', { name: `${untouched.name} 등록완료 정보` })).toBeInTheDocument()
+      expect(screen.queryByRole('row', { name: `${first.name} 등록완료 정보` })).not.toBeInTheDocument()
+    })
+
+    it('restores completed products and their completion dates when a bulk return cannot be saved', async () => {
+      const fixture = downloadFixture()
+      const first = confirmRegistration(fixture.first, '2026-11-24')
+      const other = confirmRegistration(fixture.other, '2026-11-23')
+      const pending = deferSavedDraft({ ...fixture.draft, rows: [first, other] }, true)
+      await loadSavedWorkbench()
+      fireEvent.click(screen.getByRole('checkbox', { name: '등록완료 상품 전체 선택' }))
+      fireEvent.click(screen.getByRole('button', { name: '선택 2개 2단계로 되돌리기' }))
+      expect(screen.getByRole('row', { name: `${first.name} 상품등록정보` })).toBeInTheDocument()
+      expect(screen.getByRole('row', { name: `${other.name} 상품등록정보` })).toBeInTheDocument()
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      pending.release()
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveAttribute('aria-selected', 'true')
+      for (const row of [first, other]) {
+        const restored = screen.getByRole('row', { name: `${row.name} 등록완료 정보` })
+        expect(within(restored).getByLabelText(`${row.name} 등록완료일`)).toHaveValue(row.registrationCompletedAt)
+        expect(within(restored).getByText('17,700원')).toBeInTheDocument()
+        expect(within(restored).getByText('29,500원')).toBeInTheDocument()
+      }
+    })
+
+    it.each([false, true])('shows price confirmation immediately and preserves entered prices when save fails: %s', async fail => {
+      const fixture = downloadFixture()
+      const pricing = { ...fixture.first, stage: 'pricing' as const, priceConfirmedAt: undefined, manualSupplyPrice: 18000, manualSalePrice: 31000 }
+      const pending = deferSavedDraft({ ...fixture.draft, rows: [pricing] }, fail)
+      await loadSavedWorkbench()
+      fireEvent.click(screen.getByRole('button', { name: `${pricing.name} 가격설정 완료` }))
+      expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+      const information = screen.getByRole('row', { name: `${pricing.name} 상품등록정보` })
+      expect(within(information).getByText('18,000원')).toBeInTheDocument()
+      expect(within(information).getByText('31,000원')).toBeInTheDocument()
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      expect(screen.getByRole('status')).toBeInTheDocument()
+      const listsBefore = draftListRequests().length
+      pending.release()
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      expect(draftListRequests()).toHaveLength(listsBefore)
+      if (fail) {
+        expect(screen.getByRole('tab', { name: /1단계 판매가설정/ })).toHaveAttribute('aria-selected', 'true')
+        expect(screen.getByLabelText(`${pricing.name} 쿠팡공급가`)).toHaveValue(18000)
+        expect(screen.getByLabelText(`${pricing.name} 쿠팡판매가`)).toHaveValue(31000)
+      } else {
+        expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+        expect(screen.getByRole('row', { name: `${pricing.name} 상품등록정보` })).toHaveTextContent('31,000원')
+      }
+    })
+
+    it.each([false, true])('updates completion immediately and restores information after a failed save: %s', async fail => {
+      const fixture = downloadFixture()
+      const pending = deferSavedDraft(fixture.draft, fail)
+      await loadSavedWorkbench()
+      fireEvent.click(screen.getByRole('checkbox', { name: `${fixture.first.name} 등록완료` }))
+      expect(screen.getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByRole('row', { name: `${fixture.first.name} 상품등록정보` })).not.toBeInTheDocument()
+      expect(screen.getByRole('row', { name: `${fixture.other.name} 상품등록정보` })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveTextContent('1개')
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      expect(savedBodies()[0].draft.rows[0]).toMatchObject({ stage: 'registered', fields: fixture.first.fields, manualSupplyPrice: 17700, manualSalePrice: 29500 })
+      pending.release()
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      if (fail) {
+        const restored = screen.getByRole('row', { name: `${fixture.first.name} 상품등록정보` })
+        expect(within(restored).getByLabelText('검색태그 *')).toHaveValue(fixture.first.fields[SEARCH_TAGS_FIELD])
+        expect(within(restored).getByText('17,700원')).toBeInTheDocument()
+        expect(within(restored).getByText('29,500원')).toBeInTheDocument()
+        expect(screen.getByRole('tab', { name: /3단계 등록완료/ })).toHaveTextContent('0개')
+      } else {
+        fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
+        expect(screen.getByRole('row', { name: `${fixture.first.name} 등록완료 정보` })).toBeInTheDocument()
+      }
+    })
+
     it('deletes only the confirmed completed row, persists explicit deletion metadata and keeps it deleted after reloading', async () => {
       const fixture = downloadFixture()
       const completed = confirmRegistration(fixture.first, '2026-11-24')
@@ -1103,6 +1226,25 @@ function manualTemplate(id: string, name: string, sheetName: string, columns: Te
 
 function savedBodies(): Array<{ draft: RegistrationDraft; deleteCompletedRowIds?: string[] }> {
   return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST').map(([, init]) => JSON.parse(String(init!.body)))
+}
+
+function draftListRequests() {
+  return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method !== 'POST')
+}
+
+function deferSavedDraft(initial: RegistrationDraft, fail = false) {
+  mockSavedDraft(initial)
+  const fallback = vi.mocked(fetch)
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/drafts') && init?.method === 'POST') {
+      await pending
+      if (fail) return { ok: false, status: 409, json: async () => ({ error: '새로운 저장 내용이 있습니다.' }) }
+    }
+    return fallback(url, init)
+  }))
+  return { release }
 }
 
 function downloadFixture() {

@@ -4,14 +4,25 @@ import type { RegistrationDraft } from './model'
 
 const rows = <T>(result: unknown): T[] => Array.isArray(result) ? result as T[] : (result as { rows?: T[] }).rows ?? []
 
-export async function ensureCoupangDrafts() {
-  await db.execute(sql`CREATE TABLE IF NOT EXISTS coupang_registration_drafts (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL,
-    name text NOT NULL, payload jsonb NOT NULL, revision integer NOT NULL DEFAULT 1,
-    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
-  )`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS coupang_registration_drafts_workspace ON coupang_registration_drafts (user_id, updated_at DESC)`)
-  await db.execute(sql`ALTER TABLE coupang_registration_drafts ENABLE ROW LEVEL SECURITY`)
+let draftInitialization: Promise<void> | undefined
+
+export function ensureCoupangDrafts(): Promise<void> {
+  if (!draftInitialization) {
+    // Warm requests share initialization, including the RLS step, before any data access.
+    draftInitialization = (async () => {
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS coupang_registration_drafts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL,
+        name text NOT NULL, payload jsonb NOT NULL, revision integer NOT NULL DEFAULT 1,
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+      )`)
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS coupang_registration_drafts_workspace ON coupang_registration_drafts (user_id, updated_at DESC)`)
+      await db.execute(sql`ALTER TABLE coupang_registration_drafts ENABLE ROW LEVEL SECURITY`)
+    })().catch((error) => {
+      draftInitialization = undefined
+      throw error
+    })
+  }
+  return draftInitialization
 }
 
 export async function listDrafts(userId: string) {

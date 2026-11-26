@@ -28,6 +28,7 @@ const steps: Array<{ stage: RegistrationStage; title: string }> = [
   { stage: 'registered', title: '등록완료' },
 ]
 const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '') || getRegistrationStage(row) === 'registered'
+const completionInFlight = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')
 const completedDeletionLocked = (row: RegistrationRow) => hasVerifiedSupplierRegistration(row) || ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date())
 function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
@@ -185,7 +186,6 @@ export function CoupangRegistrationWorkbench() {
   function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
   function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setProductQuery(''); setInformationLimit(20); setInformationSheet('all') }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
-  async function refreshDrafts() { const response = await jsonRequest('/drafts'); setSaved(response.drafts) }
   useEffect(() => {
     let cancelled = false
     void jsonRequest('/drafts').then((response) => { if (!cancelled) setSaved(response.drafts) }).catch((error) => { toast.error(error.message) })
@@ -366,7 +366,7 @@ export function CoupangRegistrationWorkbench() {
       const matched: CatalogProduct[] = []
       for (let start = 0; start < targets.length; start += 30) {
         const chunk = targets.slice(start, start + 30)
-        const response = await postJson('/catalog', { names: chunk.map((row) => row.sourceName || row.name), codes: chunk.map((row) => row.sourceCode).filter(Boolean) })
+        const response = await postJson('/catalog', { names: [], codes: [...new Set(chunk.map((row) => row.sourceCode).filter(Boolean))] })
         matched.push(...response.products)
       }
       const products = [...new Map(matched.map((product) => [product.code, product])).values()]
@@ -384,7 +384,7 @@ export function CoupangRegistrationWorkbench() {
       const pdfs = [...new Map(conversionRows.flatMap((row) => row.productMaster?.qualityPdf ? [[row.productMaster.qualityPdf.id, row.productMaster.qualityPdf] as const] : [])).values()]
       const convertedByPdf = new Map<string, SavedFile[]>()
       const conversionErrors = new Map<string, string>()
-      for (const qualityPdf of pdfs) {
+      for (let index = 0; index < pdfs.length; index += 4) await Promise.all(pdfs.slice(index, index + 4).map(async (qualityPdf) => {
         try {
           const response = await jsonRequest('/quality-label', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attachmentId: qualityPdf.id }),
@@ -397,8 +397,8 @@ export function CoupangRegistrationWorkbench() {
         } catch (error) {
           conversionErrors.set(qualityPdf.id, error instanceof Error ? error.message : '품질표시 PDF를 JPG로 변환하지 못했습니다.')
         }
-      }
-      const generatedLabels = [...convertedByPdf.values()].flat()
+      }))
+      const generatedLabels = pdfs.flatMap(qualityPdf => convertedByPdf.get(qualityPdf.id) ?? [])
       const labels = [...new Map([...draft.labels, ...generatedLabels].map((file) => [file.name.normalize('NFC'), file])).values()]
       const rows = linkedRows.map((row) => {
         if (!targetIds.has(row.id)) return row
@@ -429,9 +429,22 @@ export function CoupangRegistrationWorkbench() {
       const response = await postJson('/drafts', { draft: nextDraft, ...(!asNew && currentId ? { id: currentId, revision: revision.current } : {}), ...(deleteCompletedRowIds?.length ? { deleteCompletedRowIds } : {}) })
       if (asNew) draftSession.current++
       setDraft(response.payload ?? nextDraft); setCurrentId(response.id); setRevision(response.revision); setDirty(false)
-      await refreshDrafts()
+      setSaved(value => [{ id: response.id, name: (response.payload ?? nextDraft).name, revision: response.revision, updatedAt: new Date().toISOString() }, ...value.filter(item => item.id !== response.id)].slice(0, 100))
       return response
     })
+  }
+  async function persistTransition(nextDraft: RegistrationDraft, nextStage?: RegistrationStage) {
+    setDraft(nextDraft); setDirty(true)
+    if (nextStage) { setDateFrom(''); setDateTo(''); changeStage(nextStage) }
+    try { return await persist(nextDraft) } catch (error) {
+      setDraft(draft); setDirty(dirty); setSelected(selected)
+      if (nextStage) {
+        navigate({ stage, activeId, catalogTarget })
+        setDateFrom(dateFrom); setDateTo(dateTo); setOnlyIssues(onlyIssues)
+        setProductQuery(productQuery); setInformationLimit(informationLimit); setInformationSheet(informationSheet)
+      }
+      throw error
+    }
   }
   async function save(asNew = false) {
     await run('저장 중', async () => { await persist(draft, asNew); toast.success('가격·상품등록정보·품질표시를 저장했습니다.') })
@@ -469,19 +482,25 @@ export function CoupangRegistrationWorkbench() {
   async function completeRegistration(ids: string[]) {
     await run('등록완료 저장 중', async () => {
       const selectedIds = new Set(ids)
-      await persist({ ...draft, rows: draft.rows.map((row) => selectedIds.has(row.id) ? confirmRegistration(row, completionDate) : row) })
+      await persistTransition({ ...draft, rows: draft.rows.map((row) => selectedIds.has(row.id) ? confirmRegistration(row, completionDate) : row) })
       setSelected(new Set())
       toast.success(`${ids.length}개 상품을 등록완료로 표시했습니다.`)
     })
   }
-  async function changeCompletion(row: RegistrationRow, date?: string, moveToInformation = false) {
+  async function changeCompletion(row: RegistrationRow, date: string) {
     await run('등록완료 정보 저장 중', async () => {
-      const revised = date ? confirmRegistration(reopenRegistration(row), date) : reopenRegistration(row)
-      await persist({ ...draft, rows: draft.rows.map((item) => item.id === row.id ? revised : item) })
-      if (moveToInformation) {
-        setDateFrom(''); setDateTo(''); changeStage('information')
-        toast.success('상품을 2단계 상품등록정보로 되돌렸습니다.')
-      }
+      const revised = confirmRegistration(reopenRegistration(row), date)
+      await persistTransition({ ...draft, rows: draft.rows.map((item) => item.id === row.id ? revised : item) })
+    })
+  }
+  async function returnCompleted(ids: string[]) {
+    if (!ids.length) return
+    await run('2단계로 되돌리는 중', async () => {
+      const targetIds = new Set(ids)
+      const targets = draft.rows.filter(row => targetIds.has(row.id))
+      if (targets.length !== targetIds.size || targets.some(row => getRegistrationStage(row) !== 'registered' || completionInFlight(row))) throw new Error('등록완료 상품을 선택해주세요.')
+      await persistTransition({ ...draft, rows: draft.rows.map(row => targetIds.has(row.id) ? reopenRegistration(row) : row) }, 'information')
+      toast.success(`${ids.length}개 상품을 2단계 상품등록정보로 되돌렸습니다.`)
     })
   }
   async function deleteCompleted(row: RegistrationRow) {
@@ -511,16 +530,14 @@ export function CoupangRegistrationWorkbench() {
     await run('가격 확정 저장 중', async () => {
       const chosenIds = new Set(ids)
       const next = { ...draft, rows: draft.rows.map((row) => chosenIds.has(row.id) ? connectedDefaults(confirmPricing(row, draft.rounding), draft.templates) : row) }
-      await persist(next)
-      changeStage('information')
+      await persistTransition(next, 'information')
       toast.success(`${ids.length}개 상품을 상품등록정보 단계로 이동했습니다.`)
     })
   }
   async function reopenPricing(row: RegistrationRow) {
     await run('판매가설정으로 이동 중', async () => {
       const next = { ...draft, rows: draft.rows.map((item) => item.id === row.id ? returnToPricing(item) : item) }
-      await persist(next)
-      changeStage('pricing')
+      await persistTransition(next, 'pricing')
     })
   }
   async function load(id: string) {
@@ -783,14 +800,15 @@ export function CoupangRegistrationWorkbench() {
       {informationRows(expandedWorkbench)}
     </section>}
     {stage === 'registered' && <section id="coupang-step-registered" role="tabpanel" aria-label="등록완료" className={`${expandedWorkbench ? 'min-h-0 flex-1' : ''} overflow-auto rounded-lg border bg-card`}>
+      <div className="flex flex-wrap items-center gap-3 border-b bg-muted/30 p-3"><label className="flex items-center gap-1.5 text-xs"><input aria-label="등록완료 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected(value => { const next = new Set(value); for (const row of visible) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(completionInFlight)} onClick={() => void returnCompleted(selectedRows.map(row => row.id))}><RotateCcw className="size-3.5" />선택 {selectedRows.length}개 2단계로 되돌리기</button></div>
       <table aria-label="등록완료 목록" className="w-full min-w-[1000px] text-left text-xs">
-        <thead className="sticky top-0 z-10 border-b bg-muted"><tr><th className="w-20 p-3">등록완료</th><th className="p-3">상품명</th><th className="p-3">SKU</th><th className="p-3">등록완료일</th><th className="p-3 text-right">공급가</th><th className="p-3 text-right">판매가</th><th className="w-56 p-3">관리</th></tr></thead>
+        <thead className="sticky top-0 z-10 border-b bg-muted"><tr><th className="w-20 p-3">선택</th><th className="p-3">상품명</th><th className="p-3">SKU</th><th className="p-3">등록완료일</th><th className="p-3 text-right">공급가</th><th className="p-3 text-right">판매가</th><th className="w-56 p-3">관리</th></tr></thead>
         <tbody>{visible.map((row) => <tr key={row.id} aria-label={row.name + ' 등록완료 정보'} className="border-b last:border-0">
-          <td className="p-3 text-center"><input aria-label={row.name + ' 등록완료'} type="checkbox" checked onChange={() => void changeCompletion(row)} /></td>
+          <td className="p-3 text-center"><input aria-label={row.name + ' 선택'} type="checkbox" checked={selected.has(row.id)} onChange={() => toggle(row.id)} /></td>
           <td className="p-3 font-medium">{row.name}</td><td className="p-3">{row.internalSku || '—'}</td>
           <td className="p-3"><input aria-label={row.name + ' 등록완료일'} type="date" className={inputClass} value={row.registrationCompletedAt ?? ''} onChange={(event) => { if (event.target.value) void changeCompletion(row, event.target.value) }} /></td>
           <td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).supply)}</td><td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).sale)}</td>
-          <td className="p-3"><div className="flex gap-2"><button className={buttonClass} aria-label={row.name + ' 2단계로 되돌리기'} disabled={['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')} onClick={() => void changeCompletion(row, undefined, true)}><RotateCcw className="size-3.5" />2단계로 되돌리기</button><button className={`${buttonClass} text-red-600 hover:bg-red-50`} aria-label={row.name + ' 등록완료 목록에서 삭제'} title={completedDeletionLocked(row) ? '등록 처리 중이거나 허브 등록 이력이 있는 상품은 삭제할 수 없습니다.' : '등록완료 목록에서 삭제'} disabled={completedDeletionLocked(row)} onClick={() => void deleteCompleted(row)}><Trash2 className="size-3.5" />삭제</button></div></td>
+          <td className="p-3"><div className="flex gap-2"><button className={buttonClass} aria-label={row.name + ' 2단계로 되돌리기'} disabled={completionInFlight(row)} onClick={() => void returnCompleted([row.id])}><RotateCcw className="size-3.5" />2단계로 되돌리기</button><button className={`${buttonClass} text-red-600 hover:bg-red-50`} aria-label={row.name + ' 등록완료 목록에서 삭제'} title={completedDeletionLocked(row) ? '등록 처리 중이거나 허브 등록 이력이 있는 상품은 삭제할 수 없습니다.' : '등록완료 목록에서 삭제'} disabled={completedDeletionLocked(row)} onClick={() => void deleteCompleted(row)}><Trash2 className="size-3.5" />삭제</button></div></td>
         </tr>)}</tbody>
       </table>
       {!visible.length && <p className="p-10 text-center text-sm text-muted-foreground">등록완료 상품이 없습니다.</p>}

@@ -376,7 +376,15 @@ describe('registration pricing workbench', () => {
     expect(secondBrand).toHaveFocus()
     expect(screen.queryByRole('button', { name: '등록정보 입력' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '상품등록' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeInTheDocument()
+    const tools = screen.getByRole('region', { name: '상품등록정보 도구' })
+    expect(within(tools).getByText('전체 2개')).toBeInTheDocument()
+    expect(within(tools).getByLabelText('등록완료일')).toBeInTheDocument()
+    expect(within(tools).getByRole('button', { name: '선택 0개 등록완료' })).toBeInTheDocument()
+    expect(within(tools).getByRole('button', { name: '등록정보 저장' })).toBeInTheDocument()
+    expect(within(tools).getByRole('button', { name: '엑셀 다운로드' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '일괄 카테고리' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '카테고리 적용' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tablist', { name: '카테고리 시트' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
     for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
     expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
@@ -844,7 +852,7 @@ describe('registration pricing workbench', () => {
     expect(savedBodies().at(-1)?.draft.templates).toEqual([older, latest])
   })
 
-  it('uses every original worksheet header in its own category table and preserves edits while changing sheet filters', async () => {
+  it('shows every original worksheet in its own category table and preserves edits while saving and reloading', async () => {
     const firstSheet: TemplateSheet = { name: 'QF_101_가방', columns: [
       { column: 1, label: '상품명', requirement: '필수', guide: '' },
       { column: 2, label: '가방종류', requirement: '필수', guide: '' },
@@ -873,16 +881,11 @@ describe('registration pricing workbench', () => {
     const optional = within(within(bagGroup).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')
     expect(optional).toHaveValue('')
     fireEvent.change(optional, { target: { value: '선택항목도 입력' } })
-    const sheetTabs = screen.getByRole('tablist', { name: '카테고리 시트' })
-    fireEvent.click(within(sheetTabs).getByRole('tab', { name: /^가구\s*1개$/ }))
-    expect(screen.queryByRole('region', { name: '가방 입력표' })).not.toBeInTheDocument()
-    const visibleFurniture = screen.getByRole('region', { name: '가구 입력표' })
-    const installation = within(visibleFurniture).getByLabelText('설치방식')
+    expect(screen.queryByRole('tablist', { name: '카테고리 시트' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '상품등록정보 도구' })).getByText('전체 3개')).toBeInTheDocument()
+    const installation = within(furnitureGroup).getByLabelText('설치방식')
     fireEvent.change(installation, { target: { value: '고객 조립' } })
-    fireEvent.click(within(sheetTabs).getByRole('tab', { name: /^가방\s*2개$/ }))
-    const restoredBag = screen.getByRole('region', { name: '가방 입력표' })
-    expect(within(within(restoredBag).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')).toHaveValue('선택항목도 입력')
-    fireEvent.click(within(sheetTabs).getByRole('tab', { name: '전체 3개' }))
+    expect(within(within(bagGroup).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')).toHaveValue('선택항목도 입력')
     expect(screen.getAllByRole('table', { name: '상품등록정보 입력표' })).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => {
@@ -892,6 +895,12 @@ describe('registration pricing workbench', () => {
       expect(rows?.[1]).toMatchObject({ id: sameSheet.id, fields: { 가방종류: '토트백' } })
       expect(rows?.[2]).toMatchObject({ id: furniture.id, fields: { 가구재질: '철제', 설치방식: '고객 조립' } })
     })
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    const restoredBag = await screen.findByRole('region', { name: '가방 입력표' })
+    expect(within(within(restoredBag).getByRole('row', { name: `${first.name} 상품등록정보` })).getByLabelText('가방선택정보')).toHaveValue('선택항목도 입력')
+    expect(within(screen.getByRole('region', { name: '가구 입력표' })).getByLabelText('설치방식')).toHaveValue('고객 조립')
+    expect(screen.getAllByRole('table', { name: '상품등록정보 입력표' })).toHaveLength(2)
   })
 
   it('automatically connects only the precise Funtastic category and remembers a manual ambiguous choice for the next draft', async () => {

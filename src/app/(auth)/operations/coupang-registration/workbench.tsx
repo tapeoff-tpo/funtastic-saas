@@ -117,11 +117,9 @@ export function CoupangRegistrationWorkbench() {
   const [catalogSelections, setCatalogSelections] = useState<CatalogSelection[]>([])
   const [searched, setSearched] = useState(false)
   const [productQuery, setProductQuery] = useState('')
-  const [templateChoice, setTemplateChoice] = useState('')
   const [templateLibrary, setTemplateLibrary] = useState<CategoryTemplate[]>([])
   const [onlyIssues, setOnlyIssues] = useState(false)
   const [informationLimit, setInformationLimit] = useState(20)
-  const [informationSheet, setInformationSheet] = useState('all')
   const [expandedWorkbench, setExpandedWorkbench] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -139,16 +137,13 @@ export function CoupangRegistrationWorkbench() {
   const bundleEditor = useRef<HTMLDivElement>(null)
   const informationEditor = useRef<HTMLDivElement>(null)
   const stageRows = draft.rows.filter((row) => getRegistrationStage(row) === stage)
-  const informationGroups = groupInformationRows(stageRows, draft.templates)
-  const currentInformationSheet = informationGroups.some((group) => group.key === informationSheet) ? informationSheet : 'all'
-  const sheetRowIds = currentInformationSheet === 'all' ? null : new Set(informationGroups.find((group) => group.key === currentInformationSheet)!.rows.map((row) => row.id))
   const active = stageRows.find((row) => row.id === activeId)
   const issueMap = new Map(draft.rows.map((row) => [row.id, rowIssues(row, draft)]))
   const pricingIssueMap = new Map(draft.rows.map((row) => [row.id, priceIssues(row, draft.rounding)]))
   const stageIssueMap = stage === 'pricing' ? pricingIssueMap : issueMap
   const visible = stageRows.filter((row) => {
     const date = getRegistrationDate(row)
-    return (stage !== 'information' || !sheetRowIds || sheetRowIds.has(row.id)) && (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
+    return (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
   })
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
   const selectedRows = stageRows.filter((row) => selected.has(row.id))
@@ -185,7 +180,7 @@ export function CoupangRegistrationWorkbench() {
   }
   function setActiveId(activeId: string) { navigate({ activeId }) }
   function setCatalogTarget(catalogTarget: { bundleId?: string } | null) { navigate({ catalogTarget }) }
-  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setProductQuery(''); setInformationLimit(20); setInformationSheet('all') }
+  function changeStage(next: RegistrationStage) { navigate({ stage: next, activeId: '', catalogTarget: null }); setSelected(new Set()); setOnlyIssues(false); setProductQuery(''); setInformationLimit(20) }
   function toggle(id: string) { setSelected((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   useEffect(() => {
     let cancelled = false
@@ -262,7 +257,6 @@ export function CoupangRegistrationWorkbench() {
     for (const id of rowIds ?? []) manualSheetRows.current.add(`${draftSession.current}:${id}`)
     if (!choice) {
       if (rowIds) update((value) => ({ ...value, rows: value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? { ...row, templateId: '', sheetName: '' } : row) }))
-      else setTemplateChoice('')
       return
     }
     const separator = choice.indexOf(':')
@@ -284,7 +278,6 @@ export function CoupangRegistrationWorkbench() {
         templates: value.templates.some((item) => item.id === connected.id) ? value.templates : [...value.templates, connected],
         rows: rowIds ? value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? applyRegistrationDefaults({ ...row, templateId, sheetName }, registrationInformationSheet(connected.sheets.find((sheet) => sheet.name === sheetName)!)) : row) : value.rows,
       }))
-      if (!rowIds) setTemplateChoice(choice)
       const codes = [...new Set(draft.rows.filter((row) => rowIds?.includes(row.id) && !submissionLocked(row) && !row.bundleComponents && /^\d{1,100}$/.test(row.sourceCode)).map((row) => row.sourceCode))]
       let failures = 0
       for (let index = 0; index < codes.length; index += 30) {
@@ -305,7 +298,6 @@ export function CoupangRegistrationWorkbench() {
     const session = draftSession.current
     await run('카테고리 엑셀 읽는 중', async () => {
       let templates = draft.templates
-      let uploaded: ConnectedTemplate | undefined
       for (const file of chosenFiles) {
         const form = new FormData(); form.set('file', file)
         const response = await jsonRequest('/template', { method: 'POST', body: form })
@@ -313,13 +305,11 @@ export function CoupangRegistrationWorkbench() {
         if (!template?.file || !template.sheets?.length) throw new Error('카테고리 엑셀의 입력항목을 확인하지 못했습니다.')
         if (!templates.some((item) => item.id === template.id) && templates.length >= 6) throw new Error('작업당 카테고리 엑셀은 6개까지 연결할 수 있습니다. 새 작업으로 나눠주세요.')
         templates = [...templates.filter((item) => item.id !== template.id), template]
-        uploaded = template
       }
       if (session !== draftSession.current) return
       update((value) => ({
         ...value, templates,
       }))
-      if (uploaded?.sheets.length === 1) setTemplateChoice(uploaded.id + ':' + uploaded.sheets[0].name)
       toast.success('카테고리 엑셀을 읽었습니다.')
     })
     if (templateInput.current) templateInput.current.value = ''
@@ -447,7 +437,7 @@ export function CoupangRegistrationWorkbench() {
       if (nextStage) {
         navigate({ stage, activeId, catalogTarget })
         setDateFrom(dateFrom); setDateTo(dateTo); setOnlyIssues(onlyIssues)
-        setProductQuery(productQuery); setInformationLimit(informationLimit); setInformationSheet(informationSheet)
+        setProductQuery(productQuery); setInformationLimit(informationLimit)
       }
       throw error
     }
@@ -554,14 +544,14 @@ export function CoupangRegistrationWorkbench() {
       const payload: RegistrationDraft = response.payload
       const costs = await fillMissingCostsOnOpen(payload.rows)
       const rows = costs.rows.map((row) => connectedDefaults(row, payload.templates))
-      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set()); setTemplateChoice(''); setInformationSheet('all')
+      setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set())
       resetNavigation({ stage: !payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered', activeId: '', catalogTarget: null })
     })
   }
   function newDraft() {
     if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')) return
     draftSession.current++
-    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); setTemplateChoice(''); setInformationSheet('all'); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
+    setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
   }
   function closeCatalog() {
     if (busy) return
@@ -701,17 +691,17 @@ export function CoupangRegistrationWorkbench() {
     })
   }
 
-  function informationToolbar(expanded = false) {
+  function informationToolbar() {
     const downloadRows = selectedRows.length ? selectedRows : visible.filter(row => !submissionLocked(row))
-    return <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
-      <label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span><CategorySelect label="일괄 카테고리" value={templateChoice} templates={categoryTemplates} onChange={setTemplateChoice} /><button className={buttonClass} disabled={!selectedRows.length || !templateChoice} onClick={() => void chooseCategory(templateChoice, selectedRows.map((row) => row.id))}>카테고리 적용</button><button className={buttonClass} onClick={openTemplateInput}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button>{expanded && <button className={buttonClass} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button>}
-      <label className="ml-auto flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(submissionLocked) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={buttonClass} disabled={!downloadRows.length || selectedRows.some(submissionLocked)} title={`현재 목록의 ${downloadRows.length}개 상품을 저장한 뒤 원본 양식에 채워 다운로드합니다.`} onClick={() => void downloadInformation(downloadRows.map(row => row.id))}><Download className="size-3.5" />{selectedRows.length ? `선택 ${downloadRows.length}개 엑셀 다운로드` : '엑셀 다운로드'}</button>
+    return <div role="region" aria-label="상품등록정보 도구" className="flex shrink-0 flex-wrap items-center gap-3">
+      <span className="inline-flex h-8 items-center rounded-md border border-blue-600 bg-blue-50 px-3 text-xs font-medium text-blue-700">전체 {stageRows.length}개</span>
+      <label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span>
+      <div className="ml-auto flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(submissionLocked) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={buttonClass} disabled={!downloadRows.length || selectedRows.some(submissionLocked)} title={`현재 목록의 ${downloadRows.length}개 상품을 저장한 뒤 원본 양식에 채워 다운로드합니다.`} onClick={() => void downloadInformation(downloadRows.map(row => row.id))}><Download className="size-3.5" />{selectedRows.length ? `선택 ${downloadRows.length}개 엑셀 다운로드` : '엑셀 다운로드'}</button></div>
     </div>
   }
   function informationRows(expanded = false) {
     const groups = groupInformationRows(visible.slice(0, informationLimit), draft.templates)
     return <>
-      {informationGroups.length > 1 && <nav role="tablist" aria-label="카테고리 시트" className="flex shrink-0 flex-wrap gap-2"><button role="tab" aria-selected={currentInformationSheet === 'all'} className={`${buttonClass} ${currentInformationSheet === 'all' ? 'border-blue-600 bg-blue-50 text-blue-800' : ''}`} onClick={() => { setInformationSheet('all'); setInformationLimit(20) }}>전체 {stageRows.length}개</button>{informationGroups.map((group) => <button key={group.key} role="tab" aria-selected={currentInformationSheet === group.key} title={group.fileName || undefined} className={`${buttonClass} max-w-80 ${currentInformationSheet === group.key ? 'border-blue-600 bg-blue-50 text-blue-800' : ''}`} onClick={() => { setInformationSheet(group.key); setInformationLimit(20) }}><span className="truncate">{group.name}</span><span>{group.rows.length}개</span></button>)}</nav>}
       {!visible.length && <p className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">{draft.rows.length ? '검색 조건에 맞는 상품이 없습니다.' : '1단계에서 상품을 추가하고 가격설정을 완료해주세요.'}</p>}
       {groups.length > 0 && <div className={expanded ? 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto' : 'space-y-4'}>{groups.map((group) => <section key={group.key} role="region" aria-label={group.name + ' 입력표'} className={expanded && groups.length === 1 ? 'flex min-h-0 flex-1 flex-col gap-2' : 'shrink-0 space-y-2'}><header className="flex shrink-0 items-center gap-3 px-1"><h3 className="text-sm font-semibold">{group.name}</h3><span className="text-xs text-muted-foreground">{group.rows.length}개</span>{group.fileName && <span className="truncate text-[10px] text-muted-foreground" title={group.fileName}>{group.fileName}</span>}</header><InformationGrid sheetStatus={sheetStatus} expanded={expanded && groups.length === 1} rows={group.rows} columnRows={group.rows} draft={draft} categoryTemplates={categoryTemplates} issues={issueMap} selected={selected} onToggle={toggle} onPatch={patchRow} onCategory={(rowId, choice) => void chooseCategory(choice, [rowId])} onUpload={(rowId, files) => void importTemplates(files, rowId)} onOpen={setActiveId} onPrice={(row) => void reopenPricing(row)} onComplete={(row) => void completeRegistration([row.id])} /></section>)}</div>}
       {visible.length > informationLimit && <button className={`${buttonClass} shrink-0 self-start`} onClick={() => setInformationLimit((value) => value + 20)}>다음 상품 20개 더 보기 ({informationLimit}/{visible.length})</button>}
@@ -802,7 +792,7 @@ export function CoupangRegistrationWorkbench() {
     </section>}
 
     {stage === 'information' && <section id="coupang-step-information" role="tabpanel" aria-label="상품등록정보" className={expandedWorkbench ? 'flex min-h-80 flex-1 flex-col gap-3' : 'space-y-4'}>
-      {informationToolbar(expandedWorkbench)}
+      {informationToolbar()}
       {informationRows(expandedWorkbench)}
     </section>}
     {stage === 'registered' && <section id="coupang-step-registered" role="tabpanel" aria-label="등록완료" className={`${expandedWorkbench ? 'min-h-0 flex-1' : ''} overflow-auto rounded-lg border bg-card`}>

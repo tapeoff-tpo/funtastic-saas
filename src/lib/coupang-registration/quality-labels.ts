@@ -5,6 +5,9 @@ export const QUALITY_LABEL_MAX_PAGES = 4
 export const QUALITY_LABEL_MAX_TOTAL_BYTES = 2_400_000
 export const QUALITY_LABEL_MAX_FILE_BYTES = 1_500_000
 export const QUALITY_LABEL_RENDER_SCALE = 2.5
+export const QUALITY_LABEL_RENDER_VERSION = 2
+export const QUALITY_LABEL_MIN_EDGE = 600
+export const QUALITY_LABEL_MAX_EDGE = 8_000
 export const QUALITY_LABEL_MAX_PIXELS = 12_000_000
 
 function labelNames(value: string) {
@@ -37,7 +40,7 @@ export function qualityPdfNeedsConversion(
 ) {
   if (!canReplaceWithQualityPdfLabel(row)) return false
   const automatic = row.autoQualityLabel
-  if (!automatic || automatic.sourcePdfId !== qualityPdfId) return true
+  if (!automatic || automatic.sourcePdfId !== qualityPdfId || automatic.rendererVersion !== QUALITY_LABEL_RENDER_VERSION) return true
   const present = new Set(labels.map((file) => file.name.normalize('NFC')))
   return labelNames(automatic.value).some((name) => !present.has(name.normalize('NFC')))
 }
@@ -52,7 +55,7 @@ export function applyConvertedQualityLabels(
   return {
     ...row,
     label: value,
-    autoQualityLabel: { sourcePdfId: qualityPdfId, value },
+    autoQualityLabel: { sourcePdfId: qualityPdfId, value, rendererVersion: QUALITY_LABEL_RENDER_VERSION },
     qualityLabelIssue: undefined,
   }
 }

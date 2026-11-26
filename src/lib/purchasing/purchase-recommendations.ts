@@ -42,6 +42,24 @@ const PRODUCT_GROUP_MOQ_RULES: readonly ProductGroupMoqRule[] = [
   { productName: '미니스텝퍼', sku: '101542-0001', minimumOrderQuantity: 300, roundingUnit: 10, reorderStockPercent: 60 },
 ] as const
 
+const CHAMBERT_SET_BUDGET_GROUP = '112226 세트 발주'
+const CHAMBERT_SET_DEMAND_SKU = '112226-0001'
+const CHAMBERT_SET_COMPONENTS = new Map<string, number>([
+  [CHAMBERT_SET_DEMAND_SKU, 1],
+  ['112226-0002', 1],
+  ['112226-0003', 1],
+  ['112226-0004', 1],
+  ['112226-0005', 1],
+  ['112226-0006', 1],
+  ['112226-0007', 6],
+])
+export const CHAMBERT_FIXED_SET_SKUS: ReadonlySet<string> = new Set(CHAMBERT_SET_COMPONENTS.keys())
+
+type FixedSetPurchaseBasis = { unitsPerSet: number } & (
+  | { incomplete: true }
+  | { availableSets: number; targetSets: number; recommendedSets: number; averageMonthlyOutgoingSets: number }
+)
+
 const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
   '\uC138\uC81C',
   '\uC138\uD0C1\uBE44\uB204',
@@ -755,6 +773,8 @@ export async function generatePurchaseRecommendations(input: {
     input.userId,
     canonicalProductRows.map((row) => row.sku),
     now,
+    'full',
+    CHAMBERT_FIXED_SET_SKUS,
   )
   const inventoryRows = includeDemandOnlyRecommendationInventoryRows({
     inventoryRows: [...inventoryBySku.values()],
@@ -949,8 +969,11 @@ export async function generatePurchaseRecommendations(input: {
       productMoqAdjustedRows,
       targetStockMonths,
     )
-    const allRecommendationRows = applyPurchaseMinimumQuantities(
-      applySiblingOptionPurchaseBundles(nearTargetAdjustedRows, targetStockMonths),
+    const allRecommendationRows = applyChambertSetRecommendation(
+      applyPurchaseMinimumQuantities(
+        applySiblingOptionPurchaseBundles(nearTargetAdjustedRows, targetStockMonths),
+      ),
+      targetStockMonths,
     )
     const recommendationCandidates = allRecommendationRows.filter((item) => item.recommendedQuantity > 0)
     const allocation = budgetKrw === null
@@ -978,6 +1001,7 @@ export async function generatePurchaseRecommendations(input: {
         autoReviewRowBySku.has(item.row.sku)
         || allocatedQuantityBySku.has(item.row.sku)
         || item.moqStockReview?.deferred
+        || item.fixedSetPurchase !== null
         || (item.isNewProduct && item.currentMonthOutgoing > 0)
         || item.oneOffCurrentMonthSpikeDetected
       ))
@@ -1179,6 +1203,7 @@ function buildAutoRecommendationRawData(input: {
     siblingOptionBundleGroupName: string | null
     siblingOptionBundleQuantity: number | null
     siblingOptionBundleAddedQuantity: number
+    fixedSetPurchase: FixedSetPurchaseBasis | null
     purchaseMinimumQuantity: number
     purchaseRoundingUnit: number
     purchaseMinimumAdjustedQuantity: number
@@ -1242,6 +1267,7 @@ function buildAutoRecommendationRawData(input: {
     siblingOptionBundleGroupName: input.item.siblingOptionBundleGroupName,
     siblingOptionBundleQuantity: input.item.siblingOptionBundleQuantity,
     siblingOptionBundleAddedQuantity: input.item.siblingOptionBundleAddedQuantity,
+    ...(input.item.fixedSetPurchase ? { fixedSetPurchase: input.item.fixedSetPurchase } : {}),
     purchaseMinimumQuantity: input.item.purchaseMinimumQuantity,
     purchaseRoundingUnit: input.item.purchaseRoundingUnit,
     purchaseMinimumAdjustedQuantity: input.item.purchaseMinimumAdjustedQuantity,
@@ -1386,7 +1412,8 @@ function applySiblingOptionPurchaseBundles<T extends AssessedPurchaseRow & {
   moqProductGroupName: string | null
   nearTargetDeferred: boolean
 }>(items: T[], targetStockMonths: number) {
-  const bundleSkus = getSiblingOptionBundleSkus(items.map((item) => ({
+  const genericBundleItems = items.filter((item) => !CHAMBERT_FIXED_SET_SKUS.has(item.sku))
+  const bundleSkus = getSiblingOptionBundleSkus(genericBundleItems.map((item) => ({
     sku: item.row.sku,
     productName: item.row.productName,
     isNewProduct: item.isNewProduct,
@@ -1452,6 +1479,118 @@ function applyPurchaseMinimumQuantities<T extends {
       purchaseRoundingUnit: item.isNewProduct ? 1 : DEFAULT_PURCHASE_ROUNDING_UNIT,
       purchaseMinimumAdjustedQuantity,
       recommendedQuantity: purchaseMinimumAdjustedQuantity,
+    }
+  })
+}
+
+function applyChambertSetRecommendation<T extends AssessedPurchaseRow & {
+  availableStockWithPipeline: number
+  baseRecommendedQuantity: number
+  moqAdjustedQuantity: number
+  nearTargetDeferred: boolean
+  nearTargetShortfallQuantity: number
+  nearTargetDeferThreshold: number | null
+  siblingOptionBundleGroupName: string | null
+  siblingOptionBundleQuantity: number | null
+  siblingOptionBundleAddedQuantity: number
+  purchaseMinimumQuantity: number
+  purchaseRoundingUnit: number
+  purchaseMinimumAdjustedQuantity: number
+}>(items: T[], targetStockMonths: number) {
+  const components = items.flatMap((item) => {
+    const unitsPerSet = CHAMBERT_SET_COMPONENTS.get(item.sku)
+    return unitsPerSet === undefined ? [] : [{ item, unitsPerSet }]
+  })
+  const reference = components.find(({ item }) => item.sku === CHAMBERT_SET_DEMAND_SKU)?.item
+  if (!reference || components.length !== CHAMBERT_SET_COMPONENTS.size) {
+    return items.map((item) => {
+      const unitsPerSet = CHAMBERT_SET_COMPONENTS.get(item.sku)
+      if (unitsPerSet === undefined) return { ...item, fixedSetPurchase: null }
+      return {
+        ...item,
+        recommendedQuantity: 0,
+        moqAdjustedQuantity: 0,
+        siblingOptionBundleGroupName: null,
+        siblingOptionBundleQuantity: null,
+        siblingOptionBundleAddedQuantity: 0,
+        purchaseMinimumAdjustedQuantity: 0,
+        fixedSetPurchase: { unitsPerSet, incomplete: true } satisfies FixedSetPurchaseBasis,
+      }
+    })
+  }
+
+  // One reference envelope is shipped per set. The limiting component
+  // determines how many sets can be filled from stock and counted pipeline.
+  const availableSets = Math.min(...components.map(({ item, unitsPerSet }) => (
+    Math.floor(item.availableStockWithPipeline / unitsPerSet)
+  )))
+  const calculation = calculatePurchaseRecommendationWithSpikeGuard({
+    averageMonthlyOutgoing: reference.averageMonthlyOutgoing,
+    effectiveMonthlyOutgoing: reference.effectiveMonthlyOutgoing,
+    currentMonthOutgoing: reference.currentMonthOutgoing,
+    availableStock: availableSets,
+    targetStockMonths,
+  })
+  const shortfallSets = calculation.recommendedQuantity
+  const nearTargetDeferred = shouldDeferNearTargetPurchaseRecommendation({
+    shortfallQuantity: shortfallSets,
+    effectiveMonthlyOutgoing: reference.effectiveMonthlyOutgoing,
+    availableStockWithPipeline: availableSets,
+    targetStockMonths,
+    isNewProduct: reference.isNewProduct,
+    hasProductGroupMoq: false,
+  })
+  const unitCostKrw = components.reduce((total, { item, unitsPerSet }) => (
+    total + (item.unitCostKrw ?? 0) * unitsPerSet
+  ), 0)
+  const purchaseMinimumOptions = {
+    isNewProduct: reference.isNewProduct,
+    unitCostKrw,
+  }
+  const minimumSets = reference.isNewProduct && shortfallSets > 3
+    ? shortfallSets
+    : applyPurchaseMinimumQuantity(1, purchaseMinimumOptions)
+  const recommendedSets = nearTargetDeferred ? 0 : applyPurchaseMinimumQuantity(shortfallSets, purchaseMinimumOptions)
+  const roundingSets = reference.isNewProduct ? 1 : DEFAULT_PURCHASE_ROUNDING_UNIT
+
+  return items.map((item) => {
+    const unitsPerSet = CHAMBERT_SET_COMPONENTS.get(item.sku)
+    if (unitsPerSet === undefined) return { ...item, fixedSetPurchase: null }
+    const recommendedQuantity = recommendedSets * unitsPerSet
+    return {
+      ...item,
+      calculation: {
+        ...calculation,
+        targetStockQuantity: calculation.targetStockQuantity * unitsPerSet,
+        recommendedQuantity: shortfallSets * unitsPerSet,
+        originalRecommendedQuantity: calculation.originalRecommendedQuantity * unitsPerSet,
+      },
+      stockCoverageMonths: calculation.stockCoverageMonths,
+      salesTrend: reference.salesTrend,
+      effectiveMonthlyOutgoing: roundToOneDecimal(reference.effectiveMonthlyOutgoing * unitsPerSet),
+      baseRecommendedQuantity: shortfallSets * unitsPerSet,
+      moqAdjustedQuantity: recommendedQuantity,
+      nearTargetDeferred,
+      nearTargetShortfallQuantity: shortfallSets * unitsPerSet,
+      nearTargetDeferThreshold: nearTargetDeferred
+        ? getNearTargetDeferShortfallThreshold(reference.effectiveMonthlyOutgoing) * unitsPerSet
+        : null,
+      // Use the existing atomic budget grouping without the generic sibling
+      // minimum/rounding, which has already been replaced by set rounding.
+      siblingOptionBundleGroupName: CHAMBERT_SET_BUDGET_GROUP,
+      siblingOptionBundleQuantity: null,
+      siblingOptionBundleAddedQuantity: 0,
+      purchaseMinimumQuantity: minimumSets * unitsPerSet,
+      purchaseRoundingUnit: roundingSets * unitsPerSet,
+      purchaseMinimumAdjustedQuantity: recommendedQuantity,
+      recommendedQuantity,
+      fixedSetPurchase: {
+        unitsPerSet,
+        availableSets,
+        targetSets: calculation.targetStockQuantity,
+        recommendedSets,
+        averageMonthlyOutgoingSets: reference.averageMonthlyOutgoing,
+      } satisfies FixedSetPurchaseBasis,
     }
   })
 }

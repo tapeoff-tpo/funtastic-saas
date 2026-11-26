@@ -757,6 +757,7 @@ export async function getSkuOutgoingMetrics(
   skus: string[],
   now = new Date(),
   detail: 'full' | 'summary' | 'historical-summary' = 'full',
+  actualBaselineSkus?: ReadonlySet<string>,
 ): Promise<Map<string, PurchasingItemOutgoingMetrics>> {
   const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
   if (uniqueSkus.length === 0) return new Map()
@@ -860,6 +861,7 @@ export async function getSkuOutgoingMetrics(
     ]),
   )
   for (const row of storedRows) {
+    if (actualBaselineSkus?.has(row.internalSku)) continue
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
     metricsBySku.set(
       row.internalSku,

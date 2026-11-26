@@ -39,6 +39,19 @@ describe('outgoing queries for inventory search', () => {
     expect(result.get('SKU-1')).toEqual({ currentMonthOutgoing: 20, threeMonthAverageOutgoing: 74 })
   })
 
+  it('uses the ledger average and full order signals for explicitly selected SKUs', async () => {
+    const now = new Date('2026-11-09T00:00:00Z')
+    const result = await getSkuOutgoingMetrics('owner', ['SKU-1'], now, 'full', new Set(['SKU-1']))
+    expect(result.get('SKU-1')).toMatchObject({
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 11,
+      recentCompletedMonthOutgoing: [7, 9],
+      currentMonthOrderCount: 2,
+    })
+    const ordinary = await getSkuOutgoingMetrics('owner', ['SKU-1'], now, 'full', new Set(['another-sku']))
+    expect(ordinary.get('SKU-1')?.threeMonthAverageOutgoing).toBe(42)
+  })
+
   it('uses historical ledger averages instead of copying an undated live manual average into every month', async () => {
     const result = await getSkuOutgoingMetrics('owner', ['SKU-1'], new Date('2026-10-01T00:00:00+09:00'), 'historical-summary')
     expect(result.get('SKU-1')).toEqual({ currentMonthOutgoing: 20, threeMonthAverageOutgoing: 11 })

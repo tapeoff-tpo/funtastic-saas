@@ -24,6 +24,17 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
     { label: '재고 보유개월', value: coverage == null ? '-' : `${formatNumber(coverage)}개월` },
   ]
   const notes: Note[] = []
+  const fixedSetPurchase = rawData.fixedSetPurchase && typeof rawData.fixedSetPurchase === 'object'
+    ? rawData.fixedSetPurchase as Record<string, unknown> : null
+  const recommendedSets = fixedSetPurchase?.recommendedSets
+  const unitsPerSet = fixedSetPurchase?.unitsPerSet
+  const fixedSetQuantity = typeof recommendedSets === 'number' && typeof unitsPerSet === 'number'
+    ? recommendedSets * unitsPerSet : null
+  if (fixedSetPurchase?.incomplete === true) {
+    notes.push({ label: '세트 발주 보류 · 구성품 확인 필요', className: 'text-amber-700' })
+  } else if (fixedSetPurchase && fixedSetQuantity !== null) {
+    notes.push({ label: `세트 발주 · 3개월 실출고 평균 ${formatNumber(fixedSetPurchase.averageMonthlyOutgoingSets)}세트 · 확보 ${formatNumber(fixedSetPurchase.availableSets)}세트 / 목표 ${formatNumber(fixedSetPurchase.targetSets)}세트 · 추천 ${formatNumber(recommendedSets)}세트 × ${formatNumber(unitsPerSet)}개`, className: 'text-cyan-700' })
+  }
   const stockReview = rawData.moqStockReview && typeof rawData.moqStockReview === 'object'
     ? rawData.moqStockReview as Record<string, unknown> : null
   const moqDeferred = stockReview?.deferred === true
@@ -41,10 +52,10 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
   }
   const pipeline = Number(rawData.pipelineQuantity)
   if (!metrics && Number.isFinite(pipeline) && pipeline > 0) notes.push({ label: `진행 중 발주 ${formatNumber(pipeline)}`, className: 'text-slate-700' })
-  const adjusted = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
+  const adjusted = fixedSetQuantity ?? Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
   if (!moqDeferred && typeof rawData.moqProductGroupName === 'string') notes.push({ label: `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · 보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(adjusted)}`, className: 'text-violet-700' })
   const bundle = Number(rawData.siblingOptionBundleQuantity)
-  if (typeof rawData.siblingOptionBundleGroupName === 'string' && rawData.siblingOptionBundleGroupName.trim() && Number.isFinite(bundle) && bundle > 0) notes.push({ label: `동일상품 옵션 동시 발주 · ${formatNumber(bundle)}개`, className: 'text-cyan-700' })
+  if (!fixedSetPurchase && typeof rawData.siblingOptionBundleGroupName === 'string' && rawData.siblingOptionBundleGroupName.trim() && Number.isFinite(bundle) && bundle > 0) notes.push({ label: `동일상품 옵션 동시 발주 · ${formatNumber(bundle)}개`, className: 'text-cyan-700' })
   if (rawData.salesAnomalyDetected === true) notes.push({ label: rawData.oneOffCurrentMonthSpikeDetected === true
     ? `단일 주문 급증 ${formatNumber(Number(rawData.currentMonthLargestOrderQuantity))}개 / ${formatNumber(Number(rawData.currentMonthOrderCount))}건 · 평균 제외`
     : `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`, className: 'text-amber-700' })
@@ -52,7 +63,7 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
   if (Number.isFinite(season) && season !== 1) notes.push({ label: season < 1 ? `여름 시즌 감산 ${formatNumber(season * 100)}%` : `겨울 시즌 증산 +${formatNumber((season - 1) * 100)}%`, className: season < 1 ? 'text-sky-700' : 'text-rose-700' })
   const bulk = specialBulkOutgoingText(rawData.specialBulkOutgoingAdjustment)
   if (bulk) notes.push({ label: bulk, className: 'text-fuchsia-700' })
-  if (!moqDeferred && adjusted > Number(rawData.allocatedQuantity)) notes.push({ label: `예산 조정 ${formatNumber(adjusted)} → ${formatNumber(rawData.allocatedQuantity)}`, className: 'text-blue-700' })
+  if (!moqDeferred && fixedSetPurchase?.incomplete !== true && adjusted > Number(rawData.allocatedQuantity)) notes.push({ label: `예산 조정 ${formatNumber(adjusted)} → ${formatNumber(rawData.allocatedQuantity)}`, className: 'text-blue-700' })
   return { items, notes }
 }
 

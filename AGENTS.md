@@ -83,6 +83,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Current-month outgoing quantity for purchasing review must be calculated from Sabangnet review files applied through `출고반영`, not from the manually entered item master values.
 - Use the Sabangnet review file's `출고완료일자` as the primary date for assigning outgoing quantity to a month. Order date and collection date are fallbacks only when the shipment completion date is unavailable.
 - The manually entered three-month average outgoing quantity is authoritative for now and must not be overwritten automatically.
+- Calculate the `챔버트 씰링스티커 종이봉투 세트` (`112226`) recommendation once in complete sets from the reflected outbound ledger, preserving stored manual averages. A set uses one of each envelope SKU `112226-0001` through `112226-0006` and six stickers `112226-0007`. Keep the component ratios together in budget allocation and hold incomplete sets.
 - The manual three-month average is a completed-period baseline through the previous month. Never subtract current-month outgoing quantity from that baseline to reconstruct prior-month demand.
 - When a new monthly Sabangnet review file is applied through `출고반영`, update the current-month outgoing quantity for matching SKUs from that month's reviewed data.
 - For July 2026, the current-month outgoing quantity should come from July Sabangnet review data, while the three-month average remains the user's manually entered average through June 2026.

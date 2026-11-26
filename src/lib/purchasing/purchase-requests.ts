@@ -24,7 +24,7 @@ import {
 } from './purchase-delay'
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
 import { purchaseMasterPriceKeys, readPurchasePriceComparison, type ActualPurchasePrices } from './purchase-price-comparison'
-import { purchasePipelineQuantity } from './purchase-recommendations'
+import { CHAMBERT_FIXED_SET_SKUS, purchasePipelineQuantity } from './purchase-recommendations'
 import {
   getProductGroupPurchaseUrgencyStatus,
   getUrgentPurchaseProductNames,
@@ -1326,6 +1326,8 @@ export async function getPurchaseReviewList(input: {
       rawDataSource: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'source', '')`,
       rawStockCoverageMonths: sql<string | null>`NULLIF(${purchaseRequestItems.rawData}->>'stockCoverageMonths', '')`,
       rawMoqStockReview: sql<unknown>`${purchaseRequestItems.rawData}->'moqStockReview'`,
+      rawFixedSetPurchase: sql<unknown>`${purchaseRequestItems.rawData}->'fixedSetPurchase'`,
+      rawAllocatedQuantity: sql<unknown>`${purchaseRequestItems.rawData}->'allocatedQuantity'`,
     }).from(purchaseRequestItems).where(and(
       eq(purchaseRequestItems.userId, input.userId),
       eq(purchaseRequestItems.status, 'requested'),
@@ -1371,11 +1373,7 @@ export async function getPurchaseReviewList(input: {
       chinaReceivedQuantity: source?.chinaReceivedQuantity ?? null,
       rawData: includeFullRawData
         ? source?.rawData ?? {}
-        : purchaseReviewRawDataSummary(
-          source?.rawDataSource,
-          source?.rawStockCoverageMonths,
-          source?.rawMoqStockReview,
-        ),
+        : purchaseReviewRawDataSummary(source),
       requestDate: source?.requestDate ?? null,
       outboundExpectedDate: source?.outboundExpectedDate ?? null,
       purchaseManagementCode: source?.purchaseManagementCode ?? null,
@@ -1528,18 +1526,22 @@ function normalizePurchaseReviewListStatuses(value: readonly PurchaseReviewListS
   return selected.length > 0 ? selected : [...PURCHASE_REVIEW_LIST_STATUSES]
 }
 
-function purchaseReviewRawDataSummary(
-  source: string | null | undefined,
-  stockCoverageMonths: string | null | undefined,
-  moqStockReview: unknown,
-): Record<string, unknown> {
-  if (source !== 'auto_purchase_recommendation') return {}
+function purchaseReviewRawDataSummary(row?: {
+  rawDataSource: string | null
+  rawStockCoverageMonths: string | null
+  rawMoqStockReview: unknown
+  rawFixedSetPurchase: unknown
+  rawAllocatedQuantity: unknown
+}): Record<string, unknown> {
+  if (row?.rawDataSource !== 'auto_purchase_recommendation') return {}
 
-  const rawData: Record<string, unknown> = { source }
-  if (stockCoverageMonths !== null && stockCoverageMonths !== undefined) {
-    rawData.stockCoverageMonths = stockCoverageMonths
+  const rawData: Record<string, unknown> = { source: row.rawDataSource }
+  if (row.rawStockCoverageMonths != null) rawData.stockCoverageMonths = row.rawStockCoverageMonths
+  if (row.rawMoqStockReview != null) rawData.moqStockReview = row.rawMoqStockReview
+  if (row.rawFixedSetPurchase != null) {
+    rawData.fixedSetPurchase = row.rawFixedSetPurchase
+    if (row.rawAllocatedQuantity != null) rawData.allocatedQuantity = row.rawAllocatedQuantity
   }
-  if (moqStockReview != null) rawData.moqStockReview = moqStockReview
   return rawData
 }
 
@@ -1767,7 +1769,7 @@ export async function getPurchaseReviewOperationalMetricsBySku(input: {
         inArray(purchaseRequestItems.sku, uniqueSkus),
         inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
       )),
-    getSkuOutgoingMetrics(input.userId, uniqueSkus),
+    getSkuOutgoingMetrics(input.userId, uniqueSkus, undefined, 'full', CHAMBERT_FIXED_SET_SKUS),
     getPurchaseReviewHistoryBySku(input.userId, uniqueSkus),
   ])
 

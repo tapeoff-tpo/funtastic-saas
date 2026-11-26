@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
+import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, Loader2, Maximize2, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationProductMaster, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationProductMaster, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
 import { matchCategorySheet, type SavedSheetMapping } from '@/lib/coupang-registration/sheet-matching'
@@ -97,17 +97,6 @@ async function fillMissingCostsOnOpen(rows: RegistrationRow[]) {
     return { rows, filled: 0 }
   }
 }
-async function savedFile(file: File): Promise<SavedFile> {
-  if (file.size > 3_000_000) throw new Error('파일은 3MB 이하로 선택해주세요.')
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result).split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-  return { name: file.name.normalize('NFC'), data }
-}
-
 export function CoupangRegistrationWorkbench() {
   const [draft, setDraft] = useState<RegistrationDraft>(blankDraft)
   const [currentId, setCurrentId] = useState<string>()
@@ -126,8 +115,6 @@ export function CoupangRegistrationWorkbench() {
   const [onlyIssues, setOnlyIssues] = useState(false)
   const [informationLimit, setInformationLimit] = useState(20)
   const [expandedWorkbench, setExpandedWorkbench] = useState(false)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
   const [completionDate, setCompletionDate] = useState(today)
   const [sheetMappings, setSheetMappings] = useState<SavedSheetMapping[]>([])
   const [sheetMappingsReady, setSheetMappingsReady] = useState(false)
@@ -137,8 +124,6 @@ export function CoupangRegistrationWorkbench() {
   const connectedRows = useRef(new Set<string>())
   const submissionEvents = useRef<Promise<void>>(Promise.resolve())
   const draftSession = useRef(0)
-  const templateInput = useRef<HTMLInputElement>(null)
-  const labelInput = useRef<HTMLInputElement>(null)
   const bundleEditor = useRef<HTMLDivElement>(null)
   const informationEditor = useRef<HTMLDivElement>(null)
   const stageRows = draft.rows.filter((row) => getRegistrationStage(row) === stage)
@@ -146,10 +131,7 @@ export function CoupangRegistrationWorkbench() {
   const issueMap = new Map(draft.rows.map((row) => [row.id, rowIssues(row, draft)]))
   const pricingIssueMap = new Map(draft.rows.map((row) => [row.id, priceIssues(row, draft.rounding)]))
   const stageIssueMap = stage === 'pricing' ? pricingIssueMap : issueMap
-  const visible = stageRows.filter((row) => {
-    const date = getRegistrationDate(row)
-    return (!onlyIssues || stageIssueMap.get(row.id)!.length) && (!dateFrom || date >= dateFrom) && (!dateTo || !!date && date <= dateTo)
-  })
+  const visible = stageRows.filter((row) => !onlyIssues || stageIssueMap.get(row.id)!.length)
   const allVisibleSelected = visible.length > 0 && visible.every((row) => selected.has(row.id))
   const selectedRows = stageRows.filter((row) => selected.has(row.id))
   const selectedSingleRows = selectedRows.filter((row) => !row.bundleComponents)
@@ -257,7 +239,6 @@ export function CoupangRegistrationWorkbench() {
     try { await action() } catch (error) { toast.error(error instanceof Error ? error.message : '처리하지 못했습니다.') } finally { setBusy('') }
   }
 
-  function openTemplateInput() { templateInput.current?.click() }
   async function chooseCategory(choice: string, rowIds?: string[]) {
     for (const id of rowIds ?? []) manualSheetRows.current.add(`${draftSession.current}:${id}`)
     if (!choice) {
@@ -317,7 +298,6 @@ export function CoupangRegistrationWorkbench() {
       }))
       toast.success('카테고리 엑셀을 읽었습니다.')
     })
-    if (templateInput.current) templateInput.current.value = ''
   }
 
   async function reloadCosts() {
@@ -331,28 +311,6 @@ export function CoupangRegistrationWorkbench() {
       }))
       toast.success(`원가 ${result.filled}개 입력 · 확인 필요 ${result.unresolved}개`)
     })
-  }
-
-  async function importLabels(files: FileList | null) {
-    if (!files?.length) return
-    await run('품질표시 불러오는 중', async () => {
-      const labels: SavedFile[] = []
-      for (const file of Array.from(files)) {
-        if (!/\.(jpe?g|png)$/i.test(file.name)) throw new Error('품질표시는 JPG·PNG 파일로 선택해주세요.')
-        labels.push(await savedFile(file))
-      }
-      update((value) => {
-        const merged = [...new Map([...value.labels, ...labels].map((file) => [file.name, file])).values()]
-        return { ...value, labels: merged, rows: value.rows.map((row) => {
-          if (row.label) return row
-          const expected = imageStem(`${row.sourceName || row.name} 품질`)
-          const matches = merged.filter((file) => imageStem(file.name) === expected)
-          return matches.length === 1 ? { ...row, label: matches[0].name } : row
-        }) }
-      })
-      toast.success(`품질표시 ${labels.length}개를 추가했습니다.`)
-    })
-    if (labelInput.current) labelInput.current.value = ''
   }
 
   async function syncImages(ids: Set<string>) {
@@ -436,12 +394,12 @@ export function CoupangRegistrationWorkbench() {
   }
   async function persistTransition(nextDraft: RegistrationDraft, nextStage?: RegistrationStage) {
     setDraft(nextDraft); setDirty(true)
-    if (nextStage) { setDateFrom(''); setDateTo(''); changeStage(nextStage) }
+    if (nextStage) changeStage(nextStage)
     try { return await persist(nextDraft) } catch (error) {
       setDraft(draft); setDirty(dirty); setSelected(selected)
       if (nextStage) {
         navigate({ stage, activeId, catalogTarget })
-        setDateFrom(dateFrom); setDateTo(dateTo); setOnlyIssues(onlyIssues)
+        setOnlyIssues(onlyIssues)
         setProductQuery(productQuery); setInformationLimit(informationLimit)
       }
       throw error
@@ -716,20 +674,15 @@ export function CoupangRegistrationWorkbench() {
   const workbenchContents = <fieldset disabled={!!busy} className={expandedWorkbench ? 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3' : 'min-w-0 space-y-4 pb-8'}>
     <section aria-label="작업 불러오기" className="shrink-0 rounded-lg border bg-card px-4 py-3">
       <div className="overflow-x-auto"><div className="flex min-w-max items-center gap-2">
-        <input aria-label="작업 이름" className={`${inputClass} w-52 shrink-0 font-medium`} value={draft.name} onChange={(event) => update((value) => ({ ...value, name: event.target.value }))} />
         <select aria-label="저장된 작업 불러오기" className={`${inputClass} w-60 shrink-0`} value={currentId ?? ''} onChange={(event) => void load(event.target.value)}><option value="">저장된 작업 불러오기</option>{saved.map((item) => <option key={item.id} value={item.id}>{item.name} · {new Date(item.updatedAt).toLocaleDateString('ko-KR')}</option>)}</select>
         {currentId && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => void save(true)}>새 작업으로 저장</button>}
-        {stage !== 'registered' && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => openTemplateInput()}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button>}
-        {stage === 'information' && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button>}
         <a className="ml-auto inline-flex shrink-0 items-center gap-1 pl-2 text-xs text-blue-700 hover:underline" href="https://supplier.coupang.com/qvt/registration" target="_blank" rel="noreferrer">쿠팡 최신 양식 받기<ExternalLink className="size-3" /></a>
       </div></div>
-      <input ref={templateInput} aria-label="카테고리 엑셀 파일" type="file" multiple accept=".xlsx" hidden onChange={(event) => void importTemplates(event.target.files)} /><input ref={labelInput} type="file" multiple accept="image/jpeg,image/png" hidden onChange={(event) => void importLabels(event.target.files)} />
       {draft.templates.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{draft.templates.map((template) => <span key={template.id} className="max-w-full truncate rounded bg-muted px-2 py-1 text-[11px]" title={template.name}>{template.name} · {template.sheets.length}개 카테고리</span>)}</div>}
     </section>
 
-    <section aria-label="검색 및 날짜" className="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
+    <section aria-label="상품 검색" className="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
       <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void searchProducts() }}><Search aria-hidden="true" className="size-4 text-muted-foreground" /><input aria-label="상품 검색어" className={`${inputClass} w-64`} placeholder="추가할 상품명·B2B코드 검색" value={productQuery} onChange={(event) => setProductQuery(event.target.value)} /><button className={buttonClass} disabled={!productQuery.trim()}>상품 검색</button></form>
-      <span className="text-xs font-medium">{stage === 'pricing' ? '추가일' : stage === 'information' ? '가격확정일' : '등록완료일'}</span><label className="flex items-center gap-2 text-xs">시작일<input aria-label="시작일" type="date" className={inputClass} value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><span className="text-muted-foreground">~</span><label className="flex items-center gap-2 text-xs">종료일<input aria-label="종료일" type="date" className={inputClass} value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>{(dateFrom || dateTo) && <button className={buttonClass} onClick={() => { setDateFrom(''); setDateTo('') }}>전체 날짜</button>}
       {stage !== 'registered' && <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={onlyIssues} onChange={(event) => { setOnlyIssues(event.target.checked); setInformationLimit(20) }} />확인 필요만 보기</label>}
     </section>
 

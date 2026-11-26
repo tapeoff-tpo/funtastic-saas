@@ -384,6 +384,10 @@ describe('registration pricing workbench', () => {
     expect(within(tools).getByRole('button', { name: '엑셀 다운로드' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '일괄 카테고리' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '카테고리 적용' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('작업 이름')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('카테고리 엑셀 파일', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '품질표시 이미지 추가' })).not.toBeInTheDocument()
+    expect(within(firstCard).getByLabelText(`${first.name} 카테고리 엑셀 파일`)).toBeEnabled()
     expect(screen.queryByRole('tablist', { name: '카테고리 시트' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
     for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
@@ -679,7 +683,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByRole('checkbox', { name: `${other.name} 선택` })).not.toBeChecked()
   })
 
-  it('filters each stage by its own date using the shared start and end dates', async () => {
+  it('shows every dated product in its stage without date query controls', async () => {
     const earlier = { ...createRegistrationRow(source, '베이지'), name: '먼저 추가한 상품', addedAt: '2026-11-15T00:00:00.000Z' }
     const later = { ...createRegistrationRow(source, '베이지'), name: '나중 추가한 상품', addedAt: '2026-11-20T00:00:00.000Z' }
     const earlyInfo = confirmPricing({ ...createRegistrationRow(source, '베이지'), name: '먼저 가격확정한 상품' }, 1, '2026-11-10T00:00:00.000Z')
@@ -690,20 +694,17 @@ describe('registration pricing workbench', () => {
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     await screen.findByLabelText(`${later.name} 쿠팡공급가`)
-    fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-11-19' } })
-    fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-21' } })
-    expect(screen.queryByLabelText(`${earlier.name} 쿠팡공급가`)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('시작일')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('종료일')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '전체 날짜' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText(`${earlier.name} 쿠팡공급가`)).toBeInTheDocument()
     expect(screen.getByLabelText(`${later.name} 쿠팡공급가`)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /2단계 상품등록정보/ }))
     expect(await screen.findByRole('row', { name: `${laterInfo.name} 상품등록정보` })).toBeInTheDocument()
-    expect(screen.queryByRole('row', { name: `${earlyInfo.name} 상품등록정보` })).not.toBeInTheDocument()
+    expect(screen.getByRole('row', { name: `${earlyInfo.name} 상품등록정보` })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
-    expect(screen.queryByRole('row', { name: `${completed.name} 등록완료 정보` })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-22' } })
     expect(screen.getByRole('row', { name: `${completed.name} 등록완료 정보` })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '전체 날짜' }))
-    expect(screen.getByLabelText('시작일')).toHaveValue('')
-    expect(screen.getByLabelText('종료일')).toHaveValue('')
+    expect(screen.getByLabelText(`${completed.name} 등록완료일`)).toHaveValue('2026-11-22')
     fireEvent.click(screen.getByRole('tab', { name: /1단계 판매가설정/ }))
     expect(screen.getByLabelText(`${earlier.name} 쿠팡공급가`)).toBeInTheDocument()
     expect(screen.getByLabelText(`${later.name} 쿠팡공급가`)).toBeInTheDocument()
@@ -804,18 +805,18 @@ describe('registration pricing workbench', () => {
     })
   })
 
-  it('treats the global category upload as metadata only and requires an explicit row assignment', async () => {
+  it('treats a product category upload as metadata only and requires an explicit sheet assignment', async () => {
     const row = confirmPricing(createRegistrationRow(source, '베이지'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [row] })
-    const template = manualTemplate('global-template', '전체연결원본.xlsx', 'QF_3_가방', [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '전용정보', requirement: '필수', guide: '' }])
+    const template = manualTemplate('product-template', '상품연결원본.xlsx', 'QF_3_가방', [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '전용정보', requirement: '필수', guide: '' }])
     const fallback = vi.mocked(fetch)
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/template') ? { ok: true, json: async () => ({ template, rows: [createRegistrationRow(second, '파일 속 예시')] }) } : fallback(url, init)))
     render(<CoupangRegistrationWorkbench />)
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     await screen.findByRole('row', { name: `${row.name} 상품등록정보` })
-    await waitFor(() => expect(screen.getByLabelText('카테고리 엑셀 파일', { exact: true })).toBeEnabled())
-    fireEvent.change(screen.getByLabelText('카테고리 엑셀 파일', { exact: true }), { target: { files: [new File(['global'], template.name)] } })
+    await waitFor(() => expect(screen.getByLabelText(`${row.name} 카테고리 엑셀 파일`)).toBeEnabled())
+    fireEvent.change(screen.getByLabelText(`${row.name} 카테고리 엑셀 파일`), { target: { files: [new File(['product'], template.name)] } })
     const picker = await openCategoryPicker(screen.getByRole('row', { name: `${row.name} 상품등록정보` }))
     expect(await within(picker).findByRole('button', { name: `${template.sheets[0].name} · ${template.name} 선택` })).toBeEnabled()
     fireEvent.click(within(picker).getByRole('button', { name: '양식 선택 닫기' }))
@@ -1034,14 +1035,12 @@ describe('registration pricing workbench', () => {
       vi.unstubAllGlobals()
     })
 
-    it('returns a completed product to stage two inside fullscreen and clears completion-date filtering without losing saved information', async () => {
+    it('returns a completed product to stage two inside fullscreen without losing saved information', async () => {
       const fixture = downloadFixture()
       const completed = confirmRegistration(fixture.first, '2026-11-24')
       const other = confirmRegistration(fixture.other, '2026-11-23')
       const initial = { ...fixture.draft, rows: [completed, other] }
       const saved = await openSavedWorkbench(initial)
-      fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-11-24' } })
-      fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-24' } })
       fireEvent.click(screen.getByRole('button', { name: '크게 보기' }))
       const dialog = await screen.findByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })
       fireEvent.click(within(dialog).getByRole('button', { name: `${completed.name} 2단계로 되돌리기` }))
@@ -1049,8 +1048,6 @@ describe('registration pricing workbench', () => {
       const restored = await within(dialog).findByRole('row', { name: `${completed.name} 상품등록정보` })
       await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
       expect(within(dialog).getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
-      expect(within(dialog).getByLabelText('시작일')).toHaveValue('')
-      expect(within(dialog).getByLabelText('종료일')).toHaveValue('')
       expect(within(restored).getByText('17,700원')).toBeInTheDocument()
       expect(within(restored).getByText('29,500원')).toBeInTheDocument()
       expect(within(restored).getByLabelText('품질표시 파일명 또는 공개 URL')).toHaveValue(completed.label)
@@ -1243,11 +1240,12 @@ describe('registration pricing workbench', () => {
       expect(savedBodies()).toHaveLength(0)
     })
 
-    it('waits for save and downloads the server-saved draft for only the currently visible stage-two products', async () => {
+    it('waits for save and downloads all stage-two products from the server-saved draft, excluding other stages', async () => {
       const fixture = downloadFixture()
-      const hidden = { ...fixture.other, priceConfirmedAt: '2026-11-21T00:00:00.000Z' }
+      const otherInformation = { ...fixture.other, priceConfirmedAt: '2026-11-21T00:00:00.000Z' }
       const completed = confirmRegistration({ ...fixture.other, id: crypto.randomUUID(), name: '완료된 별도 상품' }, '2026-11-20')
-      const initial = { ...fixture.draft, rows: [fixture.first, hidden, completed] }
+      const pricing = { ...createRegistrationRow(second, '블랙'), name: '가격 설정 중 상품' }
+      const initial = { ...fixture.draft, rows: [fixture.first, otherInformation, completed, pricing] }
       mockSavedDraft(initial)
       const fallback = vi.mocked(fetch)
       let releaseSave!: () => void
@@ -1266,16 +1264,17 @@ describe('registration pricing workbench', () => {
       }))
       const browser = mockDownloadBrowser()
       await loadSavedWorkbench()
-      fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-11-20' } })
-      fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-20' } })
-      expect(screen.queryByRole('row', { name: `${hidden.name} 상품등록정보` })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: /2단계 상품등록정보/ }))
+      expect(await screen.findByRole('row', { name: `${otherInformation.name} 상품등록정보` })).toBeInTheDocument()
+      expect(screen.queryByRole('row', { name: `${completed.name} 상품등록정보` })).not.toBeInTheDocument()
+      expect(screen.queryByRole('row', { name: `${pricing.name} 상품등록정보` })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }))
       await waitFor(() => expect(savedBodies()).toHaveLength(1))
       expect(exportBodies()).toHaveLength(0)
       expect(browser.createObjectURL).not.toHaveBeenCalled()
       releaseSave()
       await waitFor(() => expect(browser.clicks).toHaveLength(1))
-      expect(exportBodies()).toEqual([{ draft: { ...savedBodies()[0].draft, name: serverName }, rowIds: [fixture.first.id] }])
+      expect(exportBodies()).toEqual([{ draft: { ...savedBodies()[0].draft, name: serverName }, rowIds: [fixture.first.id, otherInformation.id] }])
       expect(savedBodies()[0].draft.rows.map(row => row.id)).toEqual(initial.rows.map(row => row.id))
       expect(browser.clicks[0]).toEqual({ download: filename, href: 'blob:official-download' })
       expect(browser.revokeObjectURL).toHaveBeenCalledWith('blob:official-download')

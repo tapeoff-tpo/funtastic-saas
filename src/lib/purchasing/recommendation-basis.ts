@@ -18,6 +18,61 @@ export function getDomesticStockoutLabel(rawData: Record<string, unknown>): stri
   return `국내 재고 ${forecast} · ${inbound}${typeof date === 'string' ? ` (${date} 계산)` : ''}`
 }
 
+export function getPurchaseReviewReason(rawData: Record<string, unknown>, requestedQuantity: number) {
+  if (rawData.source !== 'auto_purchase_recommendation') {
+    return requestedQuantity > 0 ? { main: '수동 등록' } : null
+  }
+
+  const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null
+  const moq = rawData.moqStockReview as { deferred?: boolean; availableStockPercent?: number; reorderStockPercent?: number } | undefined
+  if (moq?.deferred) {
+    return {
+      main: '최소발주수량 적용 보류',
+      detail: `목표 재고 ${formatNumber(moq.availableStockPercent)}% 확보 · ${formatNumber(moq.reorderStockPercent)}% 이하에서 발주`,
+    }
+  }
+  const set = rawData.fixedSetPurchase as { incomplete?: boolean; recommendedSets?: number } | undefined
+  if (set?.incomplete) return { main: '세트 발주 보류', detail: '구성품 확인 필요' }
+  if (rawData.nearTargetDeferred === true || rawData.recommendationState === 'near_target_deferred') {
+    return { main: '목표 재고에 근접해 보류' }
+  }
+
+  const target = number(rawData.targetStockQuantity)
+  const stock = number(rawData.availableStockWithPipeline)
+  const shortage = number(rawData.baseRecommendedQuantity)
+    ?? (target !== null && stock !== null ? Math.max(0, target - stock) : null)
+  const unbudgetedQuantity = number(rawData.purchaseMinimumAdjustedQuantity)
+  const allocated = number(rawData.allocatedQuantity)
+  const budgetAdjusted = number(rawData.budgetKrw) !== null && unbudgetedQuantity !== null
+    && allocated !== null && allocated < unbudgetedQuantity
+  const targetReason = target !== null && stock !== null
+    ? `목표 ${formatNumber(target)}개 · 확보 ${formatNumber(stock)}개`
+    : undefined
+
+  if (requestedQuantity <= 0) {
+    if (budgetAdjusted) return { main: '예산 기준으로 보류', detail: targetReason }
+    if (rawData.recommendationState === 'new_product_first_sale') return { main: '신규상품 첫 판매 · 추이 관찰' }
+    if (target !== null && target > 0 && stock !== null && stock >= target) {
+      return { main: '목표 재고 확보', detail: targetReason }
+    }
+    return { main: '현재 발주 보류', detail: targetReason }
+  }
+
+  return {
+    main: typeof set?.recommendedSets === 'number' && set.recommendedSets > 0
+      ? `세트 발주 · ${formatNumber(set.recommendedSets)}세트`
+      : shortage !== null && shortage > 0 ? `목표 재고까지 ${formatNumber(shortage)}개 부족`
+      : rawData.siblingOptionBundleGroupName ? '동일 상품 옵션과 함께 발주' : '재고 보충 추천',
+    detail: budgetAdjusted ? `예산 반영 · ${formatNumber(unbudgetedQuantity)}개에서 ${formatNumber(allocated)}개로 조정`
+      : rawData.moqProductGroupName ? `최소발주수량 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 적용`
+      : rawData.newProductFirstSaleDetected === true ? '신규상품 첫 판매 반영'
+      : rawData.salesAnomalyDetected === true ? '일회성 출고 급증 제외'
+      : shortage !== null && unbudgetedQuantity !== null && unbudgetedQuantity > shortage
+        ? `발주 단위 적용 · ${formatNumber(shortage)}개에서 ${formatNumber(unbudgetedQuantity)}개로 조정`
+      : targetReason,
+  }
+}
+
 // Shared by the review screen and its Excel download so both show the same basis.
 export function getRecommendationBasis(rawData: Record<string, unknown>, metrics: PurchaseReviewOperationalMetrics | null | undefined) {
   if (rawData.source !== 'auto_purchase_recommendation' && !metrics) return null

@@ -184,6 +184,21 @@ describe('purchase review history', () => {
     expect(history.get('109733-9999')?.actualPurchaseQuantity).toBe(20)
   })
 
+  it('uses recorded purchase dates instead of request or later outbound dates', () => {
+    const base = {
+      sku: '109733-9999', requestedQuantity: 10, actualPurchaseQuantity: 10,
+      requestDate: '2026-11-01', createdAt: new Date('2026-11-01T00:00:00Z'),
+    }
+    const outbound = {
+      ...base, status: 'completed' as const, outboundExpectedDate: '2026-11-25',
+      rawData: { purchaseDate: '2026-11-12' },
+    }
+    const latest = {
+      ...base, status: 'inspecting' as const, outboundExpectedDate: '2026-11-19', rawData: {},
+    }
+    expect(getLatestPurchaseReviewHistoryCandidates([latest, outbound]).get(base.sku)).toEqual(latest)
+  })
+
   it('uses the recommendation average saved with the historical purchase', () => {
     expect(getStoredPurchaseReviewAverage({ averageMonthlyOutgoing: 31.26 })).toBe(31.3)
     expect(getStoredPurchaseReviewAverage({ averageMonthlyOutgoing: 0 })).toBe(0)

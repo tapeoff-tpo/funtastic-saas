@@ -10,7 +10,8 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
-import { getDomesticStockoutDays, getDomesticStockoutLabel, getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
+import { getDomesticStockoutLabel, getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
+import { PurchaseReviewAmount, PurchaseReviewHistorySummary, PurchaseReviewPriority, PurchaseReviewReason, PurchaseReviewSalesHistory } from './purchase-review-display'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
@@ -20,7 +21,6 @@ import {
   getPurchaseRequests,
   PURCHASE_REVIEW_LIST_STATUS_LABELS,
   PURCHASE_REVIEW_LIST_STATUSES,
-  type PurchaseReviewHistory,
   type PurchaseReviewListStatus,
   type PurchaseReviewOperationalMetrics,
 } from '@/lib/purchasing/purchase-requests'
@@ -233,7 +233,7 @@ export async function PurchasingOrdersView({
   const isSsj = authorization?.email?.trim().toLowerCase().split('@')[0] === 'ssj'
   const showPaymentControls = !isSsj && (status === 'purchased' || status === 'purchase_completed')
   const showPurchaseDateColumn = isMainOrders && ['china_arrived', 'outbound_requested', 'completed'].includes(status)
-  const showCostColumns = isMainOrders || showCosts
+  const showCostColumns = !isPurchaseReviewList && (isMainOrders || showCosts)
   const newProductFirstSaleItems = isRequestedStatus
     ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
     : []
@@ -250,8 +250,11 @@ export async function PurchasingOrdersView({
     { id: 'product', label: '상품' },
     ...(showPurchaseUrlColumn ? [{ id: 'url', label: 'URL' }] : []),
     { id: 'quantity', label: isPurchaseReviewList ? '발주수량' : quantityColumn.label },
+    ...(isPurchaseReviewList ? [{ id: 'domestic-stock', label: '국내 현재고' }] : []),
     ...(showArrivalWarehouse ? [{ id: 'warehouse', label: '입고 창고' }] : []),
-    ...(isRequestedStatus ? [{ id: 'history', label: '최근 구매 이력' }, { id: 'amount', label: '총 금액(₩)' }] : []),
+    ...(isRequestedStatus ? [{ id: 'history', label: '최근 구매 이력' }] : []),
+    ...(isPurchaseReviewList ? [{ id: 'sales-history', label: '판매이력' }] : []),
+    ...(isRequestedStatus ? [{ id: 'amount', label: '총 금액(₩)' }] : []),
     ...(showCostColumns ? [
       { id: 'unit-yuan', label: '개당 원가(元)', initiallyHidden: !showCosts },
       { id: 'unit-krw', label: '개당 원가(₩)', initiallyHidden: !showCosts },
@@ -368,7 +371,7 @@ export async function PurchasingOrdersView({
               ) : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               <PurchaseColumnPicker />
-              {!isMainOrders && <Link
+              {!isMainOrders && !isPurchaseReviewList && <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
@@ -699,8 +702,10 @@ export async function PurchasingOrdersView({
                   <th data-purchase-column="quantity" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={isPurchaseReviewList ? '발주수량' : quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
                   </th>
+                  {isPurchaseReviewList ? <th data-purchase-column="domestic-stock" className="whitespace-nowrap px-3 py-2 text-center font-medium">국내 현재고</th> : null}
                   {showArrivalWarehouse && <th data-purchase-column="warehouse" className="min-w-36 whitespace-nowrap px-3 py-2 text-center font-medium">입고 창고</th>}
                   {isRequestedStatus ? <th data-purchase-column="history" className="min-w-[176px] px-3 py-2 text-center font-medium">최근 구매 이력</th> : null}
+                  {isPurchaseReviewList ? <th data-purchase-column="sales-history" className="px-3 py-2 text-center font-medium">판매이력</th> : null}
                   {isRequestedStatus ? (
                     <th data-purchase-column="amount" className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                       <SortHeader label="총 금액(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
@@ -724,7 +729,7 @@ export async function PurchasingOrdersView({
                       )}
                     </>
                   ) : null}
-                  {showBasisColumn ? <th data-purchase-column="basis" className="min-w-[520px] px-3 py-2 text-center font-medium">추천근거</th> : null}
+                  {showBasisColumn ? <th data-purchase-column="basis" className={`${isPurchaseReviewList ? 'min-w-48 text-left' : 'min-w-[520px] text-center'} px-3 py-2 font-medium`}>추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th data-purchase-column="management" className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
@@ -802,7 +807,6 @@ export async function PurchasingOrdersView({
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
                     const priorityRank = 'purchasePriorityRank' in item ? item.purchasePriorityRank : null
-                    const stockoutDays = priorityRank !== null ? getDomesticStockoutDays(item.rawData) : null
                     return (
                       <tr
                         key={item.id ?? item.sku}
@@ -818,16 +822,7 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
-                        {priorityRank !== null && (
-                          <div className="mt-1 text-xs font-medium">
-                            {priorityRank}순위
-                            {stockoutDays !== null && (
-                              <div className="mt-0.5 whitespace-nowrap text-amber-800">
-                                {stockoutDays === 0 ? '국내 당일 소진' : `국내 ${stockoutDays}일 후 소진`}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {priorityRank !== null && <PurchaseReviewPriority rank={priorityRank} rawData={item.rawData} />}
                         {item.id && inspectionIssueCount > 0 && <div className="mt-1">
                           <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                         </div>}
@@ -844,7 +839,7 @@ export async function PurchasingOrdersView({
                             이카운트 확인 {formatNumber(ecountConfirmedWithoutRemainingStock)}개 · 잔량 0개
                           </div>
                         )}
-                        {purchaseUrgencyStatus ? (
+                        {!isPurchaseReviewList && purchaseUrgencyStatus ? (
                           <div className="mt-1">
                             <Badge
                               className="border-orange-300 bg-orange-100 px-1.5 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
@@ -925,7 +920,7 @@ export async function PurchasingOrdersView({
                             field={quantityColumn.field}
                             quantity={stageQuantity}
                             stockLimit={item.status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
-                            costSummary={isRequestedStatus ? {
+                            costSummary={isRequestedStatus && !isPurchaseReviewList ? {
                               unitCostYuan: costs.unitCostYuan,
                               unitCostKrw: costs.unitCostKrw,
                             } : undefined}
@@ -944,6 +939,11 @@ export async function PurchasingOrdersView({
                             </div>
                           ) : null}
                       </td>
+                      {isPurchaseReviewList ? (
+                        <td data-purchase-column="domestic-stock" className="whitespace-nowrap px-3 py-2 text-center tabular-nums align-middle">
+                          {formatNumber(item.purchaseReviewMetrics?.domesticCurrentStock)}
+                        </td>
+                      ) : null}
                       {showArrivalWarehouse && <td data-purchase-column="warehouse" className="whitespace-nowrap px-3 py-2 text-center align-middle">
                         {item.id && ['purchased', 'purchase_completed', 'inspecting'].includes(item.status)
                           ? <PurchaseArrivalWarehouseField key={arrivalWarehouse} id={item.id} warehouse={arrivalWarehouse} />
@@ -954,9 +954,17 @@ export async function PurchasingOrdersView({
                           <PurchaseReviewHistorySummary history={item.purchaseReviewHistory} />
                         </td>
                       ) : null}
+                      {isPurchaseReviewList ? (
+                        <td data-purchase-column="sales-history" className="px-3 py-2 text-center align-middle">
+                          <PurchaseReviewSalesHistory
+                            threeMonthAverage={item.purchaseReviewMetrics?.threeMonthAverageOutgoing ?? null}
+                            effectiveMonthlyOutgoing={item.rawData.effectiveMonthlyOutgoing}
+                          />
+                        </td>
+                      ) : null}
                       {isRequestedStatus ? (
                         <td data-purchase-column="amount" className="px-3 py-2 text-right font-medium tabular-nums align-middle">
-                          {formatCost(costs.totalCostKrw, 0)}
+                          {isPurchaseReviewList ? <PurchaseReviewAmount {...costs} /> : formatCost(costs.totalCostKrw, 0)}
                         </td>
                       ) : null}
                       {showCostColumns ? (
@@ -969,10 +977,9 @@ export async function PurchasingOrdersView({
                       ) : null}
                       {showBasisColumn ? (
                         <td data-purchase-column="basis" className="px-3 py-2 text-xs text-muted-foreground align-middle">
-                          <RecommendationBasisGrid
-                            rawData={item.rawData}
-                            metrics={item.purchaseReviewMetrics}
-                          />
+                          {isPurchaseReviewList
+                            ? <PurchaseReviewReason rawData={item.rawData} requestedQuantity={item.requestedQuantity} />
+                            : <RecommendationBasisGrid rawData={item.rawData} metrics={item.purchaseReviewMetrics} />}
                         </td>
                       ) : null}
                       {isRequestedStatus ? null : (
@@ -1307,23 +1314,6 @@ function getStageQuantity(
   return item.requestedQuantity
 }
 
-function PurchaseReviewHistorySummary({ history }: { history: PurchaseReviewHistory | null }) {
-  if (!history) {
-    return <span className="text-xs text-muted-foreground">구매 이력 없음</span>
-  }
-
-  return (
-    <div
-      className="space-y-0.5 text-xs tabular-nums"
-      title="최근 구매 이력과 발주 당시 직전 완료 3개월 평균 출고수량입니다. 자동 추천으로 생성된 이력은 당시 저장된 평균값을 우선 표시합니다."
-    >
-      <div className="font-medium text-foreground">구매 {formatNumber(history.lastPurchaseQuantity)}개</div>
-      <div className="text-muted-foreground">발주 {formatPurchaseHistoryDate(history.lastPurchaseDate)}</div>
-      <div className="text-muted-foreground">당시 3개월 평균 {formatNumber(history.threeMonthAverageOutgoingAtLastPurchase)}개</div>
-    </div>
-  )
-}
-
 function RecommendationBasisGrid({
   rawData,
   metrics,
@@ -1461,10 +1451,6 @@ function readArrivedPurchaseDate(item: {
   if (typeof recordedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(recordedDate)) return recordedDate
   if (item.rawData.source === ECOUNT_CHINA_ARRIVED_SOURCE) return item.requestDate
   return item.status === 'china_arrived' ? item.outboundExpectedDate : null
-}
-
-function formatPurchaseHistoryDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.replaceAll('-', '.') : value
 }
 
 function numericRawDataValue(rawData: Record<string, unknown>, key: string) {

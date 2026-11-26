@@ -94,6 +94,7 @@ export type PurchaseReviewHistory = {
 
 export type PurchaseReviewHistoryCandidate = {
   sku: string
+  status?: PurchaseRequestStatus
   requestedQuantity: number
   actualPurchaseQuantity: number | null
   requestDate: string | null
@@ -1332,6 +1333,17 @@ export async function getPurchaseReviewList(input: {
       rawMoqStockReview: sql<unknown>`${purchaseRequestItems.rawData}->'moqStockReview'`,
       rawFixedSetPurchase: sql<unknown>`${purchaseRequestItems.rawData}->'fixedSetPurchase'`,
       rawAllocatedQuantity: sql<unknown>`${purchaseRequestItems.rawData}->'allocatedQuantity'`,
+      rawHoldReason: sql<Record<string, unknown> | null>`CASE
+        WHEN ${purchaseRequestItems.requestedQuantity} = 0 THEN jsonb_strip_nulls(jsonb_build_object(
+          'recommendationState', ${purchaseRequestItems.rawData}->'recommendationState',
+          'targetStockQuantity', ${purchaseRequestItems.rawData}->'targetStockQuantity',
+          'availableStockWithPipeline', ${purchaseRequestItems.rawData}->'availableStockWithPipeline',
+          'effectiveMonthlyOutgoing', ${purchaseRequestItems.rawData}->'effectiveMonthlyOutgoing',
+          'purchaseMinimumAdjustedQuantity', ${purchaseRequestItems.rawData}->'purchaseMinimumAdjustedQuantity',
+          'allocatedQuantity', ${purchaseRequestItems.rawData}->'allocatedQuantity',
+          'budgetKrw', ${purchaseRequestItems.rawData}->'budgetKrw'
+        ))
+      END`,
       rawDomesticStockoutDays: sql<unknown>`${purchaseRequestItems.rawData}->'domesticStockoutDays'`,
       rawDomesticStockoutGapDays: sql<unknown>`${purchaseRequestItems.rawData}->'domesticStockoutGapDays'`,
       rawDomesticStockoutCalculatedOn: sql<string | null>`${purchaseRequestItems.rawData}->>'domesticStockoutCalculatedOn'`,
@@ -1556,10 +1568,11 @@ function purchaseReviewRawDataSummary(row?: {
   rawMoqStockReview: unknown
   rawFixedSetPurchase: unknown
   rawAllocatedQuantity: unknown
+  rawHoldReason: Record<string, unknown> | null
 }): Record<string, unknown> {
   if (row?.rawDataSource !== 'auto_purchase_recommendation') return {}
 
-  const rawData: Record<string, unknown> = { source: row.rawDataSource }
+  const rawData: Record<string, unknown> = { source: row.rawDataSource, ...row.rawHoldReason }
   if (row.rawStockCoverageMonths != null) rawData.stockCoverageMonths = row.rawStockCoverageMonths
   if (row.rawMoqStockReview != null) rawData.moqStockReview = row.rawMoqStockReview
   if (row.rawFixedSetPurchase != null) {
@@ -1684,6 +1697,7 @@ export async function getPurchaseReviewHistoryBySku(
   const historyRows = await db
     .select({
       sku: purchaseRequestItems.sku,
+      status: purchaseRequestItems.status,
       requestedQuantity: purchaseRequestItems.requestedQuantity,
       actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
       requestDate: purchaseRequestItems.requestDate,
@@ -1994,7 +2008,11 @@ function comparePurchaseReviewHistoryCandidates(
 }
 
 function purchaseReviewHistoryDate(row: PurchaseReviewHistoryCandidate) {
-  return row.requestDate ?? row.outboundExpectedDate ?? row.createdAt.toISOString().slice(0, 10)
+  const storedPurchaseDate = row.rawData.purchaseDate
+  if (typeof storedPurchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(storedPurchaseDate)) return storedPurchaseDate
+  const isOutbound = row.status === 'outbound_requested' || row.status === 'completed'
+  const purchaseDate = row.status && !isOutbound ? row.outboundExpectedDate : null
+  return purchaseDate ?? row.requestDate ?? (isOutbound ? null : row.outboundExpectedDate) ?? row.createdAt.toISOString().slice(0, 10)
 }
 
 export async function getCompletedOutboundDateOptions(userId: string) {

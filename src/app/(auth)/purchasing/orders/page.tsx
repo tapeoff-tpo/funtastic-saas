@@ -785,6 +785,10 @@ export async function PurchasingOrdersView({
                     const ecountMismatchQuantity = item.status === 'inspecting'
                       ? numericRawDataValue(item.rawData, 'ecountInspectionMismatchQuantity')
                       : null
+                    const ecountConfirmedWithoutRemainingStock = item.status === 'china_arrived'
+                      && stageQuantity === 0 && item.rawData.ecountInspectionArrival === true
+                      ? numericRawDataValue(item.rawData, 'ecountInspectionConfirmedQuantity')
+                      : null
                     const inspectionIssueCount = 'inspectionIssueCount' in item ? Number(item.inspectionIssueCount ?? 0) : 0
                     const storedPurchasePrices = showPriceComparison ? readPurchasePriceComparison(item.rawData) : null
                     const purchasePrices = storedPurchasePrices && 'masterPurchasePriceCny' in item
@@ -833,6 +837,11 @@ export async function PurchasingOrdersView({
                             <Badge className="whitespace-normal border-red-300 bg-red-100 text-red-800">
                               이카운트 {formatNumber(ecountMismatchQuantity)}개 · 검수 {formatNumber(receiptSummary.receivedQuantity)}개
                             </Badge>
+                          </div>
+                        )}
+                        {ecountConfirmedWithoutRemainingStock !== null && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            이카운트 확인 {formatNumber(ecountConfirmedWithoutRemainingStock)}개 · 잔량 0개
                           </div>
                         )}
                         {purchaseUrgencyStatus ? (

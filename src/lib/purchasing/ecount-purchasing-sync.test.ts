@@ -253,16 +253,18 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(protectedRefresh).not.toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-OWN' }))
     expect(protectedRefresh).toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-FALLBACK', inboundWarehouseCode: '쿠팡창고' }))
 
-    for (const [counted, expectedQuantity, shouldMove] of [[null, 5, true], [5, 5, true], [4, 5, false]] as const) {
+    for (const [counted, remaining, shouldMove] of [[null, 3, true], [5, 3, true], [4, 3, false], [5, 0, true], [4, 0, false]] as const) {
       const updated: Array<Record<string, unknown>> = []
       const result = await syncWarehouseFixture({
         ...snapshot,
-        chinaArrived: snapshot.chinaArrived.map((item) => ({ ...item, quantity: 3 })),
+        chinaArrived: remaining > 0
+          ? snapshot.chinaArrived.map((item) => ({ ...item, quantity: remaining }))
+          : [],
       }, [{
         id: 'existing-row', status: 'inspecting', sku: '100005-0001', purchaseManagementCode: 'P-HISTORY',
         rawData: { prior: 'preserved' },
         purchaseInspection: {
-          expectedQuantity,
+          expectedQuantity: 5,
           parcels: [{ trackingNumber: 'tracking', boxes: [{ quantity: counted }] }],
         },
       }], updated)
@@ -272,7 +274,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       expect(updated[0]).not.toHaveProperty('trackingNumber')
       if (shouldMove) {
         expect(updated[0]).toMatchObject({
-          status: 'china_arrived', chinaReceivedQuantity: 3,
+          status: 'china_arrived', chinaReceivedQuantity: remaining,
           rawData: { prior: 'preserved', ecountInspectionConfirmedQuantity: 5 },
         })
       } else {

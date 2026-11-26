@@ -207,6 +207,8 @@ export type EcountPurchasingSnapshot = {
    * purchase/order identity needed by the China-arrival screen.
    */
   chinaArrived: EcountChinaArrivedItem[]
+  /** Confirmed receipts before outbound and China-stock adjustments. */
+  confirmedChinaArrivals?: EcountPurchaseCompletedItem[]
   chinaInventory: EcountChinaInventoryItem[]
   outboundCompleted: EcountOutboundPendingItem[]
   outboundPending: EcountOutboundPendingItem[]
@@ -736,6 +738,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     activeRequests,
     purchaseCompleted,
     chinaArrived,
+    confirmedChinaArrivals: historyItems,
     chinaInventory: chinaInventoryItems,
     outboundCompleted,
     outboundPending,
@@ -1802,14 +1805,15 @@ export async function syncEcountPurchasingSnapshot(input: {
           ? getPurchaseHistoryBridgeKey(item)
           : `${item.sourceDateNo}|${item.sourceRowNumber}`,
       }))
-    const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : [])
-      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
+    const isIncludedChinaArrival = (item: EcountPurchaseCompletedItem) =>
+      !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
         source: ECOUNT_CHINA_ARRIVED_SOURCE,
         sku: item.sku,
         purchaseManagementCode: item.purchaseManagementCode,
         supplierOrderNumber: item.supplierOrderNumber,
         fallbackDiscriminator: getPurchaseHistoryBridgeKey(item),
-      }))
+      })
+    const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : []).filter(isIncludedChinaArrival)
     const selectedOutboundPending = (refreshOutbound ? input.snapshot.outboundPending : [])
       .map((item) => removeIgnoredOutboundComponents(item, ignoredPurchasingItemKeys))
       .filter((item): item is EcountOutboundPendingItem => item !== null)
@@ -1927,6 +1931,13 @@ export async function syncEcountPurchasingSnapshot(input: {
     let autoArrivedInspectionRows = 0
     let inspectionArrivalMismatchRows = 0
     if (refreshChinaArrivals) {
+      const confirmedByKey = new Map<string, EcountPurchaseCompletedItem | null>()
+      for (const receipt of input.snapshot.confirmedChinaArrivals ?? input.snapshot.chinaArrived) {
+        const key = saasChinaPurchaseKey(receipt)
+        if (key && isIncludedChinaArrival(receipt)) {
+          confirmedByKey.set(key, confirmedByKey.has(key) ? null : receipt)
+        }
+      }
       const arrivalByKey = new Map<string, EcountChinaArrivedItem | null>()
       for (const arrival of selectedChinaArrived) {
         const key = saasChinaPurchaseKey(arrival)
@@ -1941,10 +1952,11 @@ export async function syncEcountPurchasingSnapshot(input: {
         const key = saasChinaPurchaseKey(row)
         const arrival = key ? arrivalByKey.get(key) : undefined
         if (arrival === null) continue
+        const confirmed = key ? confirmedByKey.get(key) : undefined
         const rawData = row.rawData ?? {}
         const match = and(eq(purchaseRequestItems.id, row.id), eq(purchaseRequestItems.userId, input.userId))
-        if (row.status === 'inspecting' && row.purchaseInspection && arrival) {
-          const confirmedQuantity = arrival.confirmedQuantity ?? arrival.quantity
+        if (row.status === 'inspecting' && row.purchaseInspection && confirmed) {
+          const confirmedQuantity = arrival?.confirmedQuantity ?? confirmed.quantity
           const counted = inspectionSummary(row.purchaseInspection).receivedQuantity
           const hasCount = row.purchaseInspection.parcels.some((parcel) => parcel.boxes.some((box) => typeof box.quantity === 'number'))
           if (hasCount && counted !== confirmedQuantity) {
@@ -1960,18 +1972,18 @@ export async function syncEcountPurchasingSnapshot(input: {
           const { ecountInspectionMismatchQuantity: _previousMismatch, ...preservedRawData } = rawData
           await tx.update(purchaseRequestItems).set({
             status: 'china_arrived',
-            chinaReceivedQuantity: arrival.quantity,
-            chinaReceivedAt: row.chinaReceivedAt ?? (arrival.purchaseDate
-              ? new Date(`${arrival.purchaseDate}T00:00:00.000Z`)
+            chinaReceivedQuantity: arrival?.quantity ?? 0,
+            chinaReceivedAt: row.chinaReceivedAt ?? (confirmed.purchaseDate
+              ? new Date(`${confirmed.purchaseDate}T00:00:00.000Z`)
               : now),
             updatedAt: now,
             rawData: {
               ...preservedRawData,
               ecountInspectionArrival: true,
-              ecountInspectionArrivalDate: arrival.purchaseDate ?? input.snapshot.asOfDate,
+              ecountInspectionArrivalDate: confirmed.purchaseDate ?? input.snapshot.asOfDate,
               ecountInspectionConfirmedQuantity: confirmedQuantity,
-              pendingChinaInventorySnapshot: arrival.pendingChinaInventoryQuantity > 0,
-              pendingChinaInventoryQuantity: arrival.pendingChinaInventoryQuantity,
+              pendingChinaInventorySnapshot: (arrival?.pendingChinaInventoryQuantity ?? 0) > 0,
+              pendingChinaInventoryQuantity: arrival?.pendingChinaInventoryQuantity ?? 0,
             },
           }).where(match)
           autoArrivedInspectionRows++

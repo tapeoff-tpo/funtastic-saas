@@ -1260,6 +1260,7 @@ export async function getPurchaseReviewList(input: {
   userId: string
   search?: string
   statuses?: readonly PurchaseReviewListStatus[]
+  stockoutOnly?: boolean
   page?: number
   pageSize?: number
   sort?: string
@@ -1419,9 +1420,10 @@ export async function getPurchaseReviewList(input: {
   const requestedStatuses = normalizePurchaseReviewListStatuses(input.statuses)
   const filteredRows = baseRows.filter((row) => (
     requestedStatuses.includes(row.reviewStatus)
+    && (!input.stockoutOnly || getDomesticStockoutDays(row.rawData) !== null)
     && matchesPurchaseReviewSearch(row, normalizedSearch)
   ))
-  const sortedRows = sortPurchaseReviewListRows(filteredRows, input.sort, input.order)
+  const sortedRows = sortPurchaseReviewListRows(filteredRows, input.stockoutOnly ? 'domesticStockout' : input.sort, input.order)
   const reviewRows = filteredRows.filter((row) => row.reviewStatus === 'review')
   const costRows = reviewRows.map((row) => ({
     status: row.status,
@@ -1630,16 +1632,17 @@ function sortPurchaseReviewListRows<T extends {
       case 'totalCostKrw':
         compared = compareNumber(left.totalCostKrw, right.totalCostKrw)
         break
-      default: {
+      case 'domesticStockout':
         compared = (getDomesticStockoutDays(left.rawData) ?? Number.MAX_SAFE_INTEGER)
           - (getDomesticStockoutDays(right.rawData) ?? Number.MAX_SAFE_INTEGER)
         if (compared !== 0) return compared
+        return compareText(left.sku, right.sku) || compareText(left.optionName ?? '', right.optionName ?? '')
+      default:
         compared = Number(left.reviewStatus === 'not_required') - Number(right.reviewStatus === 'not_required')
         if (compared !== 0) return compared
         compared = compareText(left.sku, right.sku)
         if (compared !== 0) return compared
         return compareText(left.optionName ?? '', right.optionName ?? '')
-      }
     }
     if (compared !== 0) return compared * direction
     const skuComparison = compareText(left.sku, right.sku)

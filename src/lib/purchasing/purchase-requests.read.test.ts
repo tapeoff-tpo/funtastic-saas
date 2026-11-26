@@ -14,12 +14,12 @@ vi.mock('./items', async (importOriginal) => ({
   getSkuOutgoingMetrics: mocks.outgoing,
 }))
 import { getPurchaseRequests, getPurchaseReviewList } from './purchase-requests'
-import { getRecommendationBasis } from './recommendation-basis'
+import { getDomesticStockoutLabel, getRecommendationBasis } from './recommendation-basis'
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('purchase list summary reads', () => {
-  it('prioritizes a domestic stockout warning even with no orderable row ID', async () => {
+  it('filters the domestic stockout tab independently of orderable rows', async () => {
     const sku = '101542-0001'
     const productName = 'CABOSS 미니스텝퍼'
     const stockReview = {
@@ -48,11 +48,13 @@ describe('purchase list summary reads', () => {
       return builder
     })
 
-    const { items } = await getPurchaseReviewList({ userId: 'owner' })
-    expect(items).toHaveLength(2)
+    const normal = await getPurchaseReviewList({ userId: 'owner' })
+    expect(normal.items.map((item) => item.sku)).toEqual(['100001-0001', sku])
+    const { items } = await getPurchaseReviewList({ userId: 'owner', stockoutOnly: true })
+    expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ sku, id: null, requestedQuantity: 0, reviewStatus: 'not_required' })
+    expect(getDomesticStockoutLabel(items[0].rawData)).toBe('국내 재고 당일 소진 예상 · 국내 입고일 확인 필요 (2026-11-26 계산)')
     expect(getRecommendationBasis(items[0].rawData, items[0].purchaseReviewMetrics)?.notes.map(({ label }) => label)).toEqual([
-      '국내 재고 당일 소진 예상 · 국내 입고일 확인 필요 (2026-11-26 계산)',
       'MOQ 발주 보류 · 목표재고의 98.6% 확보 · 60% 이하에서 발주검토',
       '국내재고 부족 · 진행 중 400개 국내 입고 예정일 확인',
     ])

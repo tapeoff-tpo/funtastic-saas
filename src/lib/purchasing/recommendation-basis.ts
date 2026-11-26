@@ -39,8 +39,6 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
     { label: '재고 보유개월', value: coverage == null ? '-' : `${formatNumber(coverage)}개월` },
   ]
   const notes: Note[] = []
-  const stockout = getDomesticStockoutLabel(rawData)
-  if (stockout) notes.push({ label: stockout, className: 'text-amber-700' })
   const fixedSetPurchase = rawData.fixedSetPurchase && typeof rawData.fixedSetPurchase === 'object'
     ? rawData.fixedSetPurchase as Record<string, unknown> : null
   const recommendedSets = fixedSetPurchase?.recommendedSets

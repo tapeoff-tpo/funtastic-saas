@@ -130,7 +130,8 @@ export async function PurchasingOrdersView({
   const selectedOutboundDates = parseOutboundDates(params.outboundDate)
   const outboundDates = status === 'completed' ? selectedOutboundDates : []
   const isPurchaseReviewList = !overdueOnly && basePath === '/purchasing/purchases' && status === 'requested'
-  const selectedReviewStatuses = isPurchaseReviewList
+  const stockoutOnly = isPurchaseReviewList && stringParam(params.reviewTab) === 'stockout'
+  const selectedReviewStatuses = isPurchaseReviewList && !stockoutOnly
     ? parsePurchaseReviewStatuses(params.reviewStatus)
     : []
 
@@ -158,6 +159,7 @@ export async function PurchasingOrdersView({
       userId: workspaceUserId,
       search: search ?? undefined,
       statuses: selectedReviewStatuses,
+      stockoutOnly,
       page: targetPage,
       pageSize,
       sort: sort ?? undefined,
@@ -304,7 +306,16 @@ export async function PurchasingOrdersView({
   if (overdueOnly) excelExportParams.set('overdueOnly', '1')
   if (search) excelExportParams.set('search', search)
   appendPurchaseReviewStatusParams(excelExportParams, selectedReviewStatuses)
+  if (stockoutOnly) excelExportParams.set('reviewTab', 'stockout')
   const excelExportHref = `/api/purchasing/purchase-requests/export?${excelExportParams.toString()}`
+  const reviewTabHref = (tab: 'all' | 'stockout', targetPage = 1) => {
+    const query = new URLSearchParams()
+    if (search) query.set('search', search)
+    if (tab === 'stockout') query.set('reviewTab', tab)
+    if (pageSize !== 50) query.set('pageSize', String(pageSize))
+    if (targetPage > 1) query.set('page', String(targetPage))
+    return query.size ? `${basePath}?${query}` : basePath
+  }
   const sortHeaderProps = {
     status: selectedStatus,
     search,
@@ -320,6 +331,7 @@ export async function PurchasingOrdersView({
 
   const searchControls = (
     <form className="flex w-full min-w-0 items-center gap-2 md:w-auto" action={basePath}>
+          {stockoutOnly && <input type="hidden" name="reviewTab" value="stockout" />}
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
           {selectedOutboundDates.map((date) => <input key={date} type="hidden" name="outboundDate" value={date} />)}
           {selectedReviewStatuses.map((reviewStatus) => (
@@ -523,7 +535,7 @@ export async function PurchasingOrdersView({
         </section>
       ) : null}
 
-      {newProductFirstSaleItems.length > 0 ? (
+      {!stockoutOnly && newProductFirstSaleItems.length > 0 ? (
         <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
           <strong>신규상품 첫 판매 확인</strong>
           <span className="ml-2">
@@ -563,13 +575,72 @@ export async function PurchasingOrdersView({
         </section>
       ) : null}
 
-      {!isMainOrders ? costSummary : null}
+      {!isMainOrders && !stockoutOnly ? costSummary : null}
 
       {isMainOrders ? <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         {statusNavigation}
         {costSummary}
       </div> : statusNavigation}
 
+      {isPurchaseReviewList && (
+        <nav aria-label="발주검토 보기" className="flex flex-wrap gap-2">
+          {(['all', 'stockout'] as const).map((tab) => {
+            const active = (tab === 'stockout') === stockoutOnly
+            return (
+              <Link
+                key={tab}
+                href={reviewTabHref(tab)}
+                aria-current={active ? 'page' : undefined}
+                className={`rounded-md border px-3 py-2 text-sm font-medium ${active ? 'border-foreground bg-foreground text-background' : 'bg-background hover:bg-muted'}`}
+              >
+                {tab === 'stockout' ? '국내 재고 소진 예상' : '전체 발주검토'}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
+
+      {stockoutOnly ? (
+        <section className="min-w-0 rounded-md border bg-background">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+            <span className="text-sm text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</span>
+            <a href={excelExportHref} className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted">엑셀 다운로드</a>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-muted/60 text-xs text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-3 py-2">상품</th>
+                  <th scope="col" className="whitespace-nowrap px-3 py-2 text-right">국내재고</th>
+                  <th scope="col" className="px-3 py-2">국내 재고 소진 예상</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.sku} className="border-t align-middle">
+                    <td className="px-3 py-2">
+                      <div data-no-translate className="font-medium">{item.productName}</div>
+                      <div data-no-translate className="text-xs text-muted-foreground">{item.sku}{item.optionName ? ` · ${item.optionName}` : ''}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatNumber(item.purchaseReviewMetrics?.domesticCurrentStock)}</td>
+                    <td className="min-w-48 px-3 py-2 font-medium text-amber-800">{getDomesticStockoutLabel(item.rawData)}</td>
+                  </tr>
+                ))}
+                {items.length === 0 && (
+                  <tr><td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">조건에 맞는 국내 재고 소진 예상 품목이 없습니다.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <nav aria-label="소진 예상 페이지" className="flex items-center justify-end gap-3 border-t px-3 py-2 text-sm">
+              {page > 1 && <Link href={reviewTabHref('stockout', page - 1)} className="rounded-md border px-3 py-1 hover:bg-muted">이전</Link>}
+              <span className="tabular-nums">{page} / {totalPages}</span>
+              {page < totalPages && <Link href={reviewTabHref('stockout', page + 1)} className="rounded-md border px-3 py-1 hover:bg-muted">다음</Link>}
+            </nav>
+          )}
+        </section>
+      ) : (
         <section className="min-w-0 rounded-md border bg-background">
           {!isMainOrders && (
           <div className="flex min-w-0 flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
@@ -714,7 +785,6 @@ export async function PurchasingOrdersView({
                         item.masterPurchaseShippingCny,
                       )
                       : null
-                    const stockout = isPurchaseReviewList ? getDomesticStockoutLabel(item.rawData) : null
                     const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
@@ -733,9 +803,6 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
-                        {stockout && <div className="mt-1">
-                          <Badge className="whitespace-normal border-amber-300 bg-amber-100 text-amber-900">{stockout}</Badge>
-                        </div>}
                         {item.id && inspectionIssueCount > 0 && <div className="mt-1">
                           <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                         </div>}
@@ -986,6 +1053,7 @@ export async function PurchasingOrdersView({
             />
           </div>
         </section>
+      )}
     </div>
         </PurchaseColumns>
       </PurchaseBulkSelectionProvider>

@@ -18,15 +18,17 @@ export async function GET(request: NextRequest) {
   const overdueOnly = params.get('overdueOnly') === '1'
   const search = params.get('search')?.trim() || undefined
   const reviewStatuses = parseReviewStatuses(params.getAll('reviewStatus'))
+  const stockoutOnly = status === 'requested' && !overdueOnly && params.get('reviewTab') === 'stockout'
   const buffer = await exportPurchaseRequestsExcel({
     userId: await getWorkspaceUserId(user.id),
     status,
     overdueOnly,
     search,
     reviewStatuses,
+    stockoutOnly,
   })
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
-  const name = overdueOnly ? '구매입고지연' : status ? `발주_${status}` : '발주전체'
+  const name = stockoutOnly ? '국내재고소진예상' : overdueOnly ? '구매입고지연' : status ? `발주_${status}` : '발주전체'
 
   return new NextResponse(buffer, {
     headers: {

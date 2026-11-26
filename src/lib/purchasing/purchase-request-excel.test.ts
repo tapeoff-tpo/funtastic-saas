@@ -146,6 +146,7 @@ describe('exportPurchaseRequestsExcel', () => {
         currentMonthLargestOrderQuantity: 80, currentMonthOrderCount: 1,
         moqProductGroupName: '테스트', moqMinimumOrderQuantity: 200, baseRecommendedQuantity: 20,
         moqAdjustedQuantity: 200, allocatedQuantity: 100,
+        domesticStockoutDays: 2, domesticStockoutGapDays: 5,
       },
     }]
     mocks.metrics = new Map([['100001-0001', {
@@ -159,8 +160,12 @@ describe('exportPurchaseRequestsExcel', () => {
     const sheet = workbook.getWorksheet('발주')!
     expect(sheet.getCell('A1').value).toBe('ID')
     expect(sheet.getCell('B1').value).toBe('추천근거')
+    expect(sheet.getCell('C1').value).toBe('국내 재고 소진 예상')
+    expect(sheet.getCell('C2').value).toBe('국내 재고 2일 후 소진 예상 · 국내 입고까지 5일 공백')
+    expect(sheet.getCell('C2').alignment.wrapText).toBe(true)
     expect(sheet.getCell('A2').value).toBe('review-id')
     const basis = String(sheet.getCell('B2').value)
+    expect(basis).not.toContain('소진 예상')
     expect(basis).not.toContain('총 현재고')
     expect(basis).not.toContain('목표수량')
     expect(basis).not.toContain('최근 발주수량')

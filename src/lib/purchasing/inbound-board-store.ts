@@ -47,6 +47,25 @@ export async function getInboundPost(userId: string, id: string) {
   const [post] = await db.execute<InboundPost>(sql`SELECT ${columns}, detail FROM purchasing_inbound_posts WHERE user_id=${userId} AND id=${id}`)
   return post ?? null
 }
+
+export type ScheduledDomesticInbound = { sku: string; daysUntilArrival: number; quantity: number }
+
+export async function listScheduledDomesticInbound(userId: string, today: string) {
+  if (!await exists()) return []
+  return db.execute<ScheduledDomesticInbound>(sql`
+    SELECT item->>'sku' AS sku, (post.expected_date - ${today}::date) AS "daysUntilArrival",
+      SUM((box_line->>'quantity')::integer)::integer AS quantity
+    FROM purchasing_inbound_posts post
+    CROSS JOIN LATERAL jsonb_array_elements(post.detail->'boxItems') AS box_line
+    JOIN LATERAL jsonb_array_elements(post.detail->'items') AS item
+      ON item->>'id' = box_line->>'shipmentItemId'
+    WHERE post.user_id = ${userId} AND post.received_date IS NULL
+      AND post.expected_date >= ${today}::date
+      AND (box_line->>'quantity')::integer > 0
+    GROUP BY item->>'sku', post.expected_date
+    ORDER BY post.expected_date
+  `)
+}
 export async function publishInboundPost(input: {
   userId: string; actorId: string; shipmentId: string; title: string; expectedDate: string; receivedDate: string | null; note: string; detail: ImportDocumentDetail
 }) {

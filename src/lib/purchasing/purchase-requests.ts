@@ -25,6 +25,7 @@ import {
 import { getSkuOutgoingMetrics, PURCHASE_URL_HEADER } from './items'
 import { purchaseMasterPriceKeys, readPurchasePriceComparison, type ActualPurchasePrices } from './purchase-price-comparison'
 import { CHAMBERT_FIXED_SET_SKUS, purchasePipelineQuantity } from './purchase-recommendations'
+import { getDomesticStockoutDays } from './recommendation-basis'
 import {
   getProductGroupPurchaseUrgencyStatus,
   getUrgentPurchaseProductNames,
@@ -1328,6 +1329,9 @@ export async function getPurchaseReviewList(input: {
       rawMoqStockReview: sql<unknown>`${purchaseRequestItems.rawData}->'moqStockReview'`,
       rawFixedSetPurchase: sql<unknown>`${purchaseRequestItems.rawData}->'fixedSetPurchase'`,
       rawAllocatedQuantity: sql<unknown>`${purchaseRequestItems.rawData}->'allocatedQuantity'`,
+      rawDomesticStockoutDays: sql<unknown>`${purchaseRequestItems.rawData}->'domesticStockoutDays'`,
+      rawDomesticStockoutGapDays: sql<unknown>`${purchaseRequestItems.rawData}->'domesticStockoutGapDays'`,
+      rawDomesticStockoutCalculatedOn: sql<string | null>`${purchaseRequestItems.rawData}->>'domesticStockoutCalculatedOn'`,
     }).from(purchaseRequestItems).where(and(
       eq(purchaseRequestItems.userId, input.userId),
       eq(purchaseRequestItems.status, 'requested'),
@@ -1335,6 +1339,9 @@ export async function getPurchaseReviewList(input: {
   ])
 
   const reviewRowBySku = latestPurchaseReviewRowBySku(requestedRows)
+  const autoReviewRowBySku = latestPurchaseReviewRowBySku(
+    requestedRows.filter((row) => row.rawDataSource === 'auto_purchase_recommendation'),
+  )
   const productSkus = new Set(productRows.map((product) => product.sku))
   const allProductRows = [
     ...productRows,
@@ -1354,6 +1361,7 @@ export async function getPurchaseReviewList(input: {
   ]
   const baseRows: PurchaseReviewListBaseItem[] = allProductRows.map((product): PurchaseReviewListBaseItem => {
     const source = reviewRowBySku.get(product.sku)
+    const autoReview = autoReviewRowBySku.get(product.sku)
     const requestedQuantity = Math.max(0, source?.requestedQuantity ?? 0)
     const costs = calculatePurchaseCosts({
       requestedQuantity,
@@ -1371,9 +1379,16 @@ export async function getPurchaseReviewList(input: {
       requestedQuantity,
       actualPurchaseQuantity: source?.actualPurchaseQuantity ?? null,
       chinaReceivedQuantity: source?.chinaReceivedQuantity ?? null,
-      rawData: includeFullRawData
-        ? source?.rawData ?? {}
-        : purchaseReviewRawDataSummary(source),
+      rawData: {
+        ...(includeFullRawData
+          ? source?.rawData ?? {}
+          : purchaseReviewRawDataSummary(source)),
+        ...(autoReview?.rawDomesticStockoutDays != null ? {
+          domesticStockoutDays: autoReview.rawDomesticStockoutDays,
+          domesticStockoutGapDays: autoReview.rawDomesticStockoutGapDays,
+          domesticStockoutCalculatedOn: autoReview.rawDomesticStockoutCalculatedOn,
+        } : {}),
+      },
       requestDate: source?.requestDate ?? null,
       outboundExpectedDate: source?.outboundExpectedDate ?? null,
       purchaseManagementCode: source?.purchaseManagementCode ?? null,
@@ -1458,10 +1473,10 @@ export async function getPurchaseReviewList(input: {
   const urgentProductNames = getUrgentPurchaseProductNames(baseRows)
   const items: PurchaseReviewListItem[] = pageRows.map((row) => {
     const metrics = metricsBySku.get(row.sku) ?? emptyPurchaseReviewOperationalMetrics()
-    const rawData = row.id ? pageRawDataById.get(row.id) ?? row.rawData : row.rawData
+    const fullRawData = row.id ? pageRawDataById.get(row.id) : undefined
     return {
       ...row,
-      rawData,
+      rawData: fullRawData ? { ...row.rawData, ...fullRawData } : row.rawData,
       chinaCurrentStock: metrics.chinaCurrentStock,
       purchaseReviewMetrics: metrics,
       purchaseReviewHistory: purchaseReviewHistoryFromMetrics(metrics),
@@ -1575,6 +1590,7 @@ function matchesPurchaseReviewSearch(row: {
 
 function sortPurchaseReviewListRows<T extends {
   reviewStatus: PurchaseReviewListStatus
+  rawData: Record<string, unknown>
   sku: string
   productName: string
   optionName: string | null
@@ -1614,12 +1630,16 @@ function sortPurchaseReviewListRows<T extends {
       case 'totalCostKrw':
         compared = compareNumber(left.totalCostKrw, right.totalCostKrw)
         break
-      default:
+      default: {
+        compared = (getDomesticStockoutDays(left.rawData) ?? Number.MAX_SAFE_INTEGER)
+          - (getDomesticStockoutDays(right.rawData) ?? Number.MAX_SAFE_INTEGER)
+        if (compared !== 0) return compared
         compared = Number(left.reviewStatus === 'not_required') - Number(right.reviewStatus === 'not_required')
         if (compared !== 0) return compared
         compared = compareText(left.sku, right.sku)
         if (compared !== 0) return compared
         return compareText(left.optionName ?? '', right.optionName ?? '')
+      }
     }
     if (compared !== 0) return compared * direction
     const skuComparison = compareText(left.sku, right.sku)

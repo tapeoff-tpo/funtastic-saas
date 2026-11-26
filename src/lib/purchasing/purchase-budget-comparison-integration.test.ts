@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTableName, type Table } from 'drizzle-orm'
 
+vi.mock('./inbound-board-store', () => ({ listScheduledDomesticInbound: async () => [] }))
+
 const state = vi.hoisted(() => ({
   current: {} as Record<string, unknown>,
   sku: '100001-0001',
@@ -160,6 +162,7 @@ describe('Mini Stepper 60 percent MOQ gate', () => {
     })
     expect(getRecommendationBasis(state.current.rawData as Record<string, unknown>, null)?.notes
       .map((note) => note.label)).toEqual([
+      '국내 재고 당일 소진 예상 · 국내 입고일 확인 필요 (2026-11-26 계산)',
       '판매 유지',
       'MOQ 발주 보류 · 목표재고의 98.6% 확보 · 60% 이하에서 발주검토',
       '국내재고 부족 · 진행 중 400개 국내 입고 예정일 확인',

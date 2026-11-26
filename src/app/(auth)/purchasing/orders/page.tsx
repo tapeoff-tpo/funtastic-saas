@@ -10,7 +10,7 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { findSavedNewProductImagesBatch } from '@/lib/new-products/catalogue-images'
 import type { ProductImageResult } from '@/lib/purchasing/product-image-catalogue'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
-import { getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
+import { getDomesticStockoutLabel, getRecommendationBasis } from '@/lib/purchasing/recommendation-basis'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
@@ -714,6 +714,7 @@ export async function PurchasingOrdersView({
                         item.masterPurchaseShippingCny,
                       )
                       : null
+                    const stockout = isPurchaseReviewList ? getDomesticStockoutLabel(item.rawData) : null
                     const displayStatusLabel = isPurchaseReviewList && item.reviewStatus
                       ? PURCHASE_REVIEW_LIST_STATUS_LABELS[item.reviewStatus]
                       : PURCHASE_REQUEST_STATUS_LABELS[item.status]
@@ -732,6 +733,9 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {displayStatusLabel}
                         </Badge>
+                        {stockout && <div className="mt-1">
+                          <Badge className="whitespace-normal border-amber-300 bg-amber-100 text-amber-900">{stockout}</Badge>
+                        </div>}
                         {item.id && inspectionIssueCount > 0 && <div className="mt-1">
                           <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                         </div>}

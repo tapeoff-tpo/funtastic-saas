@@ -3,6 +3,21 @@ import { getPurchaseStockCoverageMonths } from './purchase-urgency'
 
 type Note = { label: string; className: string }
 
+export function getDomesticStockoutDays(rawData: Record<string, unknown>): number | null {
+  const days = rawData.domesticStockoutDays
+  return typeof days === 'number' && Number.isInteger(days) && days >= 0 && days <= 7 ? days : null
+}
+
+export function getDomesticStockoutLabel(rawData: Record<string, unknown>): string | null {
+  const days = getDomesticStockoutDays(rawData)
+  if (days === null) return null
+  const date = rawData.domesticStockoutCalculatedOn
+  const forecast = days === 0 ? '당일 소진 예상' : `${days}일 후 소진 예상`
+  const gap = rawData.domesticStockoutGapDays
+  const inbound = typeof gap === 'number' && gap > 0 ? `국내 입고까지 ${gap}일 공백` : '국내 입고일 확인 필요'
+  return `국내 재고 ${forecast} · ${inbound}${typeof date === 'string' ? ` (${date} 계산)` : ''}`
+}
+
 // Shared by the review screen and its Excel download so both show the same basis.
 export function getRecommendationBasis(rawData: Record<string, unknown>, metrics: PurchaseReviewOperationalMetrics | null | undefined) {
   if (rawData.source !== 'auto_purchase_recommendation' && !metrics) return null
@@ -24,6 +39,8 @@ export function getRecommendationBasis(rawData: Record<string, unknown>, metrics
     { label: '재고 보유개월', value: coverage == null ? '-' : `${formatNumber(coverage)}개월` },
   ]
   const notes: Note[] = []
+  const stockout = getDomesticStockoutLabel(rawData)
+  if (stockout) notes.push({ label: stockout, className: 'text-amber-700' })
   const fixedSetPurchase = rawData.fixedSetPurchase && typeof rawData.fixedSetPurchase === 'object'
     ? rawData.fixedSetPurchase as Record<string, unknown> : null
   const recommendedSets = fixedSetPurchase?.recommendedSets

@@ -20,6 +20,42 @@ describe('registration pricing workbench', () => {
     vi.mocked(startSupplierRegistration).mockResolvedValue({ started: true })
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => url.includes('/drafts') ? init?.method === 'POST' ? { id: 'draft-1', revision: 1 } : { drafts: [] } : init?.method === 'POST' && url.endsWith('/catalog') ? { products: [source] } : url.includes('?code=') ? { product: source } : { products: [{ ...source, costCandidates: [] }] } })))
   })
+  it('starts a blank pricing job beside saved work selection and preserves saved work when cancelled or reset in fullscreen', async () => {
+    const fixture = downloadFixture()
+    await openSavedWorkbench(fixture.draft)
+    const row = screen.getByRole('row', { name: `${fixture.first.name} 상품등록정보` })
+    const changedName = '아직 저장하지 않은 상품명'
+    fireEvent.change(within(row).getByLabelText('등록 상품명'), { target: { value: changedName } })
+    fireEvent.click(screen.getByRole('checkbox', { name: `${changedName} 선택` }))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      const savedSelect = screen.getByLabelText('저장된 작업 불러오기')
+      const tools = savedSelect.closest('section')!
+      expect(screen.queryByRole('button', { name: '임시저장' })).not.toBeInTheDocument()
+      fireEvent.click(within(tools).getByRole('button', { name: '새 작업하기' }))
+      expect(confirm).toHaveBeenCalledWith('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')
+      expect(savedSelect).toHaveValue('draft-1')
+      expect(within(row).getByLabelText('등록 상품명')).toHaveValue(changedName)
+      expect(screen.getByRole('checkbox', { name: `${changedName} 선택` })).toBeChecked()
+
+      fireEvent.click(screen.getByRole('button', { name: '크게 보기' }))
+      const dialog = await screen.findByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })
+      expect(within(dialog).queryByRole('button', { name: '임시저장' })).not.toBeInTheDocument()
+      confirm.mockReturnValue(true)
+      fireEvent.click(within(dialog).getByRole('button', { name: '새 작업하기' }))
+      expect(within(dialog).getByRole('tab', { name: /1단계 판매가설정/ })).toHaveAttribute('aria-selected', 'true')
+      expect(within(dialog).getByLabelText('저장된 작업 불러오기')).toHaveValue('')
+      for (const stage of ['1단계 판매가설정', '2단계 상품등록정보', '3단계 등록완료']) expect(within(dialog).getByRole('tab', { name: new RegExp(stage) })).toHaveTextContent('0개')
+      expect(savedBodies()).toHaveLength(0)
+
+      fireEvent.click(within(dialog).getByRole('button', { name: '닫기', exact: true }))
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })).not.toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: 'draft-1' } })
+      const restored = await screen.findByRole('row', { name: `${fixture.first.name} 상품등록정보` })
+      expect(within(restored).getByLabelText('등록 상품명')).toHaveValue(fixture.first.name)
+      expect(screen.getByRole('checkbox', { name: `${fixture.first.name} 선택` })).not.toBeChecked()
+    } finally { confirm.mockRestore() }
+  })
   it('edits a saved set through component search and saves its quantities', async () => {
     const bundle = { ...createRegistrationRow(), name: '저장된 세트', bundleComponents: [] }
     const saved = mockSavedDraft({ ...blankDraft(), rows: [bundle] })
@@ -48,7 +84,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByLabelText('마미백 3개입 쿠팡판매가')).toHaveValue(70000)
     fireEvent.click(screen.getByRole('button', { name: '공급가 자동계산' }))
     expect(supply).toHaveValue(45000)
-    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await saveDraftFromInformation()
     await waitFor(() => {
       const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
       expect(call).toBeDefined()
@@ -118,7 +154,7 @@ describe('registration pricing workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '마미백 플러스 베이지 판매가 자동계산' }))
     expect(sale).toHaveValue(30000)
     fireEvent.change(sale, { target: { value: '29000' } })
-    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await saveDraftFromInformation()
     await waitFor(() => {
       const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
       expect(call).toBeDefined()
@@ -221,7 +257,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByLabelText('마미백 플러스 베이지 쿠팡판매가')).toHaveValue(31000)
     expect(screen.getByLabelText('루멘 철제 사이드 테이블 블랙 원가')).toHaveValue(12000)
     expect(screen.getByLabelText('상품 검색어')).toHaveValue('')
-    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await saveDraftFromInformation()
     await waitFor(() => expect(savedBodies()).toHaveLength(1))
     expect(savedBodies()[0].draft.rows).toEqual([
       expect.objectContaining({ sourceCode: source.code, manualSupplyPrice: 18000, manualSalePrice: 31000 }),
@@ -229,6 +265,7 @@ describe('registration pricing workbench', () => {
     ])
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
 
+    fireEvent.click(screen.getByRole('tab', { name: /1단계 판매가설정/ }))
     const reopened = await openCatalogSearch('마미백')
     expect(await within(reopened).findByLabelText('마미백 플러스 베이지 선택')).toBeDisabled()
   })
@@ -296,7 +333,7 @@ describe('registration pricing workbench', () => {
     expect(screen.getByText('선택 0개')).toBeInTheDocument()
     expect(screen.getByLabelText('등록 상품명')).toHaveValue('')
 
-    fireEvent.click(screen.getByRole('button', { name: '임시저장' }))
+    await saveDraftFromInformation()
     await waitFor(() => {
       const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST')
       expect(call).toBeDefined()
@@ -874,6 +911,7 @@ describe('registration pricing workbench', () => {
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     const bagGroup = await screen.findByRole('region', { name: '가방 입력표' })
     const furnitureGroup = screen.getByRole('region', { name: '가구 입력표' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
     expect(within(bagGroup).getByRole('row', { name: `${first.name} 상품등록정보` })).toBeInTheDocument()
     expect(within(bagGroup).getByRole('row', { name: `${sameSheet.name} 상품등록정보` })).toBeInTheDocument()
     expect(within(bagGroup).getAllByRole('table')).toHaveLength(1)
@@ -1187,8 +1225,8 @@ describe('registration pricing workbench', () => {
       expect(savedBodies().at(-1)!.draft.rows).toEqual([retained, fixture.other])
       expect(savedBodies().at(-1)!.draft.labels).toEqual(initial.labels)
       expect(savedBodies().at(-1)!.draft.templates).toEqual(initial.templates)
-      await waitFor(() => expect(screen.getByRole('button', { name: '새 작업', exact: true })).toBeEnabled())
-      fireEvent.click(screen.getByRole('button', { name: '새 작업', exact: true }))
+      await waitFor(() => expect(screen.getByRole('button', { name: '새 작업하기', exact: true })).toBeEnabled())
+      fireEvent.click(screen.getByRole('button', { name: '새 작업하기', exact: true }))
       fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
       await screen.findByRole('row', { name: `${fixture.other.name} 상품등록정보` })
       fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
@@ -1325,6 +1363,13 @@ function savedBodies(): Array<{ draft: RegistrationDraft; deleteCompletedRowIds?
 
 function draftListRequests() {
   return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method !== 'POST')
+}
+
+async function saveDraftFromInformation() {
+  fireEvent.click(screen.getByRole('tab', { name: /2단계 상품등록정보/ }))
+  const save = screen.getByRole('button', { name: '등록정보 저장' })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
 }
 
 function deferSavedDraft(initial: RegistrationDraft, fail = false) {

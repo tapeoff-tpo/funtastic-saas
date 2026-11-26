@@ -675,6 +675,7 @@ export function CoupangRegistrationWorkbench() {
     <section aria-label="작업 불러오기" className="shrink-0 rounded-lg border bg-card px-4 py-3">
       <div className="overflow-x-auto"><div className="flex min-w-max items-center gap-2">
         <select aria-label="저장된 작업 불러오기" className={`${inputClass} w-60 shrink-0`} value={currentId ?? ''} onChange={(event) => void load(event.target.value)}><option value="">저장된 작업 불러오기</option>{saved.map((item) => <option key={item.id} value={item.id}>{item.name} · {new Date(item.updatedAt).toLocaleDateString('ko-KR')}</option>)}</select>
+        <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={newDraft}><Plus className="size-3.5" />새 작업하기</button>
         {currentId && <button className={`${buttonClass} shrink-0`} disabled={!!busy} onClick={() => void save(true)}>새 작업으로 저장</button>}
         <a className="ml-auto inline-flex shrink-0 items-center gap-1 pl-2 text-xs text-blue-700 hover:underline" href="https://supplier.coupang.com/qvt/registration" target="_blank" rel="noreferrer">쿠팡 최신 양식 받기<ExternalLink className="size-3" /></a>
       </div></div>
@@ -781,7 +782,7 @@ export function CoupangRegistrationWorkbench() {
     <div className="min-w-0 space-y-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div><div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground"><span>상품등록·광고</span><ChevronRight className="size-3" /><span>로켓배송</span></div><h1 className="text-2xl font-semibold tracking-tight">쿠팡상품등록</h1></div>
-        <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><Dialog.Trigger render={(props) => <button {...props} type="button" className={buttonClass}><Maximize2 aria-hidden="true" className="size-3.5" />크게 보기</button>} /><button className={buttonClass} disabled={!!busy} onClick={newDraft}><Plus className="size-3.5" />새 작업</button><button className={buttonClass} disabled={!!busy} onClick={() => void save()}><Save className="size-3.5" />임시저장</button></div>
+        <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><Dialog.Trigger render={(props) => <button {...props} type="button" className={buttonClass}><Maximize2 aria-hidden="true" className="size-3.5" />크게 보기</button>} /></div>
       </header>
       {!expandedWorkbench && workbenchContents}
     </div>
@@ -790,7 +791,7 @@ export function CoupangRegistrationWorkbench() {
       <Dialog.Popup className="fixed inset-0 z-[101] flex h-[100dvh] w-screen flex-col bg-background text-foreground shadow-xl focus:outline-none">
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div><Dialog.Title className="text-lg font-semibold">쿠팡상품등록 · 크게 보기</Dialog.Title><Dialog.Description className="sr-only">판매가설정, 상품등록정보, 등록완료 목록</Dialog.Description></div>
-          <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><button className={buttonClass} disabled={!!busy} onClick={() => void save()}><Save className="size-3.5" />임시저장</button><Dialog.Close render={(props) => <button {...props} type="button" className={buttonClass}><X aria-hidden="true" className="size-3.5" />닫기</button>} /></div>
+          <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경사항' : currentId ? '저장됨' : '새 작업'}</span><Dialog.Close render={(props) => <button {...props} type="button" className={buttonClass}><X aria-hidden="true" className="size-3.5" />닫기</button>} /></div>
         </header>
         {expandedWorkbench && workbenchContents}
       </Dialog.Popup>

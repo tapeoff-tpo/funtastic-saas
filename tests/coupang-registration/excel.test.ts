@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
-import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
+import { buildRegistrationArchive, buildRegistrationDownload, readTemplate } from '@/lib/coupang-registration/excel'
 import { AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, calculatePrice, LABEL_FIELD, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
 import { draftSchema } from '@/lib/coupang-registration/schema'
 
@@ -97,6 +97,72 @@ describe('official Coupang template round trip', () => {
     await expect(buildRegistrationArchive(draft, [])).rejects.toThrow('선택해주세요')
     await expect(buildRegistrationArchive(draft, ['missing'])).rejects.toThrow('찾을 수 없습니다')
   })
+  it('downloads one original workbook directly and excludes unfinished and completed rows', async () => {
+    const { draft } = await fixture()
+    draft.rows[0].stage = 'information'
+    draft.rows.push({ ...draft.rows[0], id: 'pricing', name: '미완료 가격설정', stage: 'pricing', label: '' }, { ...draft.rows[0], id: 'registered', name: '이전 등록상품', stage: 'registered', registrationCompletedAt: '2026-11-26', label: '' })
+    const download = await buildRegistrationDownload(draft)
+    expect(download.contentType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    expect(download.fileName).toBe('sample_등록용.xlsx')
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(download.buffer as unknown as ExcelJS.Buffer)
+    expect(workbook.getWorksheet('HQF_100')?.state).toBe('veryHidden')
+    const sheet = workbook.getWorksheet('QF_100_test')!
+    expect(sheet.getCell('B1').value).toBe('Retail_Categorized_Excel:Version186')
+    expect(sheet.getCell('B9').value).toBe('샘플 베이지')
+    expect(sheet.getCell('B10').value).toBeNull()
+    expect(sheet.getCell('I9').dataValidation.type).toBe('list')
+    expect(sheet.getCell('J9').formula).toBe('"기타 재화"')
+    expect((await buildRegistrationDownload(draft, [draft.rows[0].id])).contentType).toBe(download.contentType)
+  })
+
+  it('bundles different original workbooks or used quality-label images in a ZIP', async () => {
+    const { draft } = await fixture()
+    draft.rows[0].stage = 'information'
+    const original = new ExcelJS.Workbook()
+    await original.xlsx.load(Buffer.from(draft.templates[0].file.data, 'base64') as unknown as ExcelJS.Buffer)
+    original.getWorksheet('QF_100_test')!.getCell('B1').value = 'other original workbook'
+    const other = await readTemplate(Buffer.from(await original.xlsx.writeBuffer()), '다른카테고리.xlsx')
+    draft.templates.push(other.template)
+    draft.rows.push({ ...draft.rows[0], id: 'other', templateId: other.template.id })
+    const many = await buildRegistrationDownload(draft)
+    expect(many.contentType).toBe('application/zip')
+    const zip = await JSZip.loadAsync(many.buffer)
+    expect(zip.file('견적서/sample_등록용.xlsx')).not.toBeNull()
+    expect(zip.file('견적서/다른카테고리_등록용.xlsx')).not.toBeNull()
+    draft.templates[1].name = 'sample.xlsx'
+    draft.templates[1].file.name = 'sample.xlsx'
+    const sameNames = await JSZip.loadAsync((await buildRegistrationDownload(draft)).buffer)
+    expect(sameNames.file('견적서/sample_등록용.xlsx')).not.toBeNull()
+    expect(sameNames.file('견적서/sample_2_등록용.xlsx')).not.toBeNull()
+    const second = new ExcelJS.Workbook()
+    await second.xlsx.load(await sameNames.file('견적서/sample_2_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    expect(second.getWorksheet('QF_100_test')!.getCell('B1').value).toBe('other original workbook')
+
+    const label = { name: '사용한라벨.jpg', data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64') }
+    draft.labels = [label, { name: '미사용라벨.jpg', data: '' }]
+    draft.rows[0].label = label.name
+    const withLabel = await buildRegistrationDownload(draft, [draft.rows[0].id])
+    expect(withLabel.contentType).toBe('application/zip')
+    const labels = await JSZip.loadAsync(withLabel.buffer)
+    expect(labels.file(`품질표시/${label.name}`)).not.toBeNull()
+    expect(labels.file('품질표시/미사용라벨.jpg')).toBeNull()
+    expect(labels.file('견적서/다른카테고리_등록용.xlsx')).toBeNull()
+  })
+
+  it('rejects invalid download selection and rows outside the information stage', async () => {
+    const { draft } = await fixture()
+    const id = draft.rows[0].id
+    await expect(buildRegistrationDownload(draft)).rejects.toThrow('2단계')
+    await expect(buildRegistrationDownload(draft, [id])).rejects.toThrow('2단계')
+    draft.rows[0].stage = 'information'
+    await expect(buildRegistrationDownload(draft, [])).rejects.toThrow('선택해주세요')
+    await expect(buildRegistrationDownload(draft, ['missing'])).rejects.toThrow('찾을 수 없습니다')
+    await expect(buildRegistrationDownload(draft, [id, id])).rejects.toThrow('중복')
+    draft.rows[0].stage = 'registered'
+    await expect(buildRegistrationDownload(draft, [id])).rejects.toThrow('2단계')
+  })
+
   it('exports direct price edits and blocks missing or below-supply retail', async () => {
     const { draft } = await fixture()
     Object.assign(draft.rows[0], { manualSupplyPrice: 12000, manualSalePrice: 19000 })

@@ -1,14 +1,25 @@
 import { calculatePrice, confirmPricing, confirmRegistration, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isRegistrationDate, isRegistrationSubmissionActive, priceIssues, type RegistrationDraft } from './model'
 
+type DraftSaveOptions = { deleteCompletedRowIds?: readonly string[] }
+
 /** Browser saves may edit preparation, but may never manufacture a Hub receipt. */
-export function prepareDraftSave(incoming: RegistrationDraft, existing?: RegistrationDraft): RegistrationDraft {
+export function prepareDraftSave(incoming: RegistrationDraft, existing?: RegistrationDraft, options: DraftSaveOptions = {}): RegistrationDraft {
   if (new Set(incoming.rows.map((row) => row.id)).size !== incoming.rows.length) throw new Error('같은 상품 행이 중복되었습니다. 작업을 다시 불러와주세요.')
   if (new Set(incoming.templates.map((template) => template.id)).size !== incoming.templates.length) throw new Error('견적서가 중복되었습니다. 작업을 다시 불러와주세요.')
   if (new Set(incoming.labels.map((label) => imageStem(label.name))).size !== incoming.labels.length) throw new Error('품질표시 파일명이 중복되었습니다.')
   const previous = new Map(existing?.rows.map((row) => [row.id, row]) ?? [])
   const inFlight = (row: RegistrationDraft['rows'][number]) => isRegistrationSubmissionActive(row) || row.submission?.status === 'login_required'
   const locked = (row: RegistrationDraft['rows'][number]) => getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row) || inFlight(row)
-  const rows = incoming.rows.map((row) => {
+  const deletedIds = new Set(options.deleteCompletedRowIds ?? [])
+  if (deletedIds.size !== (options.deleteCompletedRowIds?.length ?? 0)) throw new Error('삭제할 상품 행이 중복되었습니다. 다시 선택해주세요.')
+  if (deletedIds.size && !existing) throw new Error('저장된 등록완료 상품만 삭제할 수 있습니다.')
+  for (const id of deletedIds) {
+    const old = previous.get(id)
+    if (!old) throw new Error('삭제할 등록완료 상품을 찾을 수 없습니다. 최신 작업을 다시 불러와주세요.')
+    if (inFlight(old) || hasVerifiedSupplierRegistration(old)) throw new Error('진행 중이거나 쿠팡 등록 결과가 있는 상품은 삭제할 수 없습니다.')
+    if (getRegistrationStage(old) !== 'registered') throw new Error('등록완료 상품만 삭제할 수 있습니다.')
+  }
+  const rows = incoming.rows.filter((row) => !deletedIds.has(row.id)).map((row) => {
     const old = previous.get(row.id)
     if (old && inFlight(old)) return old
     const { submission: _submission, registeredAt: _registeredAt, ...editable } = row
@@ -41,7 +52,7 @@ export function prepareDraftSave(incoming: RegistrationDraft, existing?: Registr
     return { ...source, stage: 'pricing' as const, priceConfirmedAt: undefined, registrationCompletedAt: undefined }
   })
   for (const old of previous.values()) {
-    if (locked(old) && !rows.some((row) => row.id === old.id)) rows.push(old)
+    if (!deletedIds.has(old.id) && locked(old) && !rows.some((row) => row.id === old.id)) rows.push(old)
   }
   if (rows.length > 500) throw new Error('진행 중이거나 등록완료된 상품을 포함해 한 작업에는 최대 500개까지 저장할 수 있습니다.')
   // Template/label bytes used by an in-flight or registered row must remain available.

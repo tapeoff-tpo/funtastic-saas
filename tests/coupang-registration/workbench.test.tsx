@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CoupangRegistrationWorkbench } from '@/app/(auth)/operations/coupang-registration/workbench'
-import { blankDraft, confirmPricing, confirmRegistration, createRegistrationRow, registrationFieldKey, type RegistrationDraft, type TemplateSheet } from '@/lib/coupang-registration/model'
+import { AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, confirmPricing, confirmRegistration, createRegistrationRow, registrationFieldKey, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD, type RegistrationDraft, type RegistrationRow, type TemplateSheet } from '@/lib/coupang-registration/model'
 import { getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration } from '@/lib/coupang-registration/supplier-bridge'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -349,7 +349,7 @@ describe('registration pricing workbench', () => {
     expect(await screen.findByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' })).toBeDisabled()
   })
 
-  it('shows each information product as an editable horizontal grid row without Hub automation or Excel output', async () => {
+  it('shows each information product as an editable horizontal grid row with manual Excel download and no Hub automation', async () => {
     const first = confirmPricing(createRegistrationRow(source, '베이지'))
     const other = confirmPricing(createRegistrationRow(second, '블랙'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [first, other] })
@@ -376,7 +376,7 @@ describe('registration pricing workbench', () => {
     expect(secondBrand).toHaveFocus()
     expect(screen.queryByRole('button', { name: '등록정보 입력' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '상품등록' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /엑셀.*출력|엑셀.*생성|엑셀.*다운로드/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
     for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
     expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
@@ -921,14 +921,239 @@ describe('registration pricing workbench', () => {
     expect(within(restored).getAllByLabelText('색상 *')[0]).toHaveValue('')
     expect(within(restored).getAllByLabelText('색상 *')[1]).toHaveValue('흰색')
   })
+  describe('completed rows and saved official downloads', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+    })
+
+    it('returns a completed product to stage two inside fullscreen and clears completion-date filtering without losing saved information', async () => {
+      const fixture = downloadFixture()
+      const completed = confirmRegistration(fixture.first, '2026-11-24')
+      const other = confirmRegistration(fixture.other, '2026-11-23')
+      const initial = { ...fixture.draft, rows: [completed, other] }
+      const saved = await openSavedWorkbench(initial)
+      fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-11-24' } })
+      fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-24' } })
+      fireEvent.click(screen.getByRole('button', { name: '크게 보기' }))
+      const dialog = await screen.findByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })
+      fireEvent.click(within(dialog).getByRole('button', { name: `${completed.name} 2단계로 되돌리기` }))
+
+      const restored = await within(dialog).findByRole('row', { name: `${completed.name} 상품등록정보` })
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      expect(within(dialog).getByRole('tab', { name: /2단계 상품등록정보/ })).toHaveAttribute('aria-selected', 'true')
+      expect(within(dialog).getByLabelText('시작일')).toHaveValue('')
+      expect(within(dialog).getByLabelText('종료일')).toHaveValue('')
+      expect(within(restored).getByText('17,700원')).toBeInTheDocument()
+      expect(within(restored).getByText('29,500원')).toBeInTheDocument()
+      expect(within(restored).getByLabelText('품질표시 파일명 또는 공개 URL')).toHaveValue(completed.label)
+      const body = savedBodies().at(-1)!
+      expect(body.draft.rows[0]).toEqual({ ...completed, stage: 'information', registrationCompletedAt: undefined })
+      expect(body.draft.rows[1]).toEqual(other)
+      expect(body.draft.labels).toEqual(initial.labels)
+      expect(body.draft.templates).toEqual(initial.templates)
+      expect(screen.getByRole('dialog', { name: '쿠팡상품등록 · 크게 보기' })).toBe(dialog)
+      expect(saved.id).toBe('draft-1')
+    })
+
+    it('deletes only the confirmed completed row, persists explicit deletion metadata and keeps it deleted after reloading', async () => {
+      const fixture = downloadFixture()
+      const completed = confirmRegistration(fixture.first, '2026-11-24')
+      const retained = confirmRegistration({ ...fixture.other, name: '남길 완료 상품' }, '2026-11-23')
+      const initial = { ...fixture.draft, rows: [completed, retained, fixture.other] }
+      const saved = await openSavedWorkbench(initial)
+      fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      fireEvent.click(screen.getByRole('button', { name: `${completed.name} 등록완료 목록에서 삭제` }))
+      await waitFor(() => expect(screen.queryByRole('row', { name: `${completed.name} 등록완료 정보` })).not.toBeInTheDocument())
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining(completed.name))
+      expect(savedBodies().at(-1)).toMatchObject({ deleteCompletedRowIds: [completed.id] })
+      expect(savedBodies().at(-1)!.draft.rows).toEqual([retained, fixture.other])
+      expect(savedBodies().at(-1)!.draft.labels).toEqual(initial.labels)
+      expect(savedBodies().at(-1)!.draft.templates).toEqual(initial.templates)
+      await waitFor(() => expect(screen.getByRole('button', { name: '새 작업', exact: true })).toBeEnabled())
+      fireEvent.click(screen.getByRole('button', { name: '새 작업', exact: true }))
+      fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+      await screen.findByRole('row', { name: `${fixture.other.name} 상품등록정보` })
+      fireEvent.click(screen.getByRole('tab', { name: /3단계 등록완료/ }))
+      expect(screen.queryByRole('row', { name: `${completed.name} 등록완료 정보` })).not.toBeInTheDocument()
+      expect(screen.getByRole('row', { name: `${retained.name} 등록완료 정보` })).toBeInTheDocument()
+    })
+
+    it('keeps a completed row without posting when its deletion is cancelled', async () => {
+      const fixture = downloadFixture()
+      const completed = confirmRegistration(fixture.first, '2026-11-24')
+      await openSavedWorkbench({ ...fixture.draft, rows: [completed] })
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      fireEvent.click(screen.getByRole('button', { name: `${completed.name} 등록완료 목록에서 삭제` }))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(savedBodies()).toHaveLength(0)
+      expect(screen.getByRole('row', { name: `${completed.name} 등록완료 정보` })).toBeInTheDocument()
+    })
+
+    it('keeps the completed list intact when deletion cannot be saved', async () => {
+      const fixture = downloadFixture()
+      const completed = confirmRegistration(fixture.first, '2026-11-24')
+      const other = confirmRegistration(fixture.other, '2026-11-23')
+      mockSavedDraft({ ...fixture.draft, rows: [completed, other] })
+      const fallback = vi.mocked(fetch)
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/drafts') && init?.method === 'POST'
+        ? { ok: false, status: 409, json: async () => ({ error: '새로운 저장 내용이 있습니다.' }) }
+        : fallback(url, init)))
+      await loadSavedWorkbench()
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      fireEvent.click(screen.getByRole('button', { name: `${completed.name} 등록완료 목록에서 삭제` }))
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      expect(screen.getByRole('row', { name: `${completed.name} 등록완료 정보` })).toBeInTheDocument()
+      expect(screen.getByRole('row', { name: `${other.name} 등록완료 정보` })).toBeInTheDocument()
+    })
+
+    it('disables completed-row deletion for a verified legacy Supplier Hub receipt', async () => {
+      const fixture = downloadFixture()
+      const completed = {
+        ...confirmRegistration(fixture.first, '2026-11-24'),
+        submission: { status: 'succeeded' as const, completedAt: '2026-11-24T01:00:00.000Z', receiptId: 'verified-receipt' },
+      }
+      await openSavedWorkbench({ ...fixture.draft, rows: [completed] })
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const button = screen.getByRole('button', { name: `${completed.name} 등록완료 목록에서 삭제` })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+      expect(confirm).not.toHaveBeenCalled()
+      expect(savedBodies()).toHaveLength(0)
+    })
+
+    it('waits for save and downloads the server-saved draft for only the currently visible stage-two products', async () => {
+      const fixture = downloadFixture()
+      const hidden = { ...fixture.other, priceConfirmedAt: '2026-11-21T00:00:00.000Z' }
+      const completed = confirmRegistration({ ...fixture.other, id: crypto.randomUUID(), name: '완료된 별도 상품' }, '2026-11-20')
+      const initial = { ...fixture.draft, rows: [fixture.first, hidden, completed] }
+      mockSavedDraft(initial)
+      const fallback = vi.mocked(fetch)
+      let releaseSave!: () => void
+      const pendingSave = new Promise<void>(resolve => { releaseSave = resolve })
+      const serverName = '서버가 저장한 작업 이름'
+      const filename = '쿠팡등록_원본.xlsx'
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/export')) return downloadResponse(filename)
+        if (url.endsWith('/drafts') && init?.method === 'POST') {
+          await pendingSave
+          const response = await fallback(url, init)
+          const body = await response.json()
+          return { ...response, json: async () => ({ ...body, payload: { ...body.payload, name: serverName } }) }
+        }
+        return fallback(url, init)
+      }))
+      const browser = mockDownloadBrowser()
+      await loadSavedWorkbench()
+      fireEvent.change(screen.getByLabelText('시작일'), { target: { value: '2026-11-20' } })
+      fireEvent.change(screen.getByLabelText('종료일'), { target: { value: '2026-11-20' } })
+      expect(screen.queryByRole('row', { name: `${hidden.name} 상품등록정보` })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }))
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      expect(exportBodies()).toHaveLength(0)
+      expect(browser.createObjectURL).not.toHaveBeenCalled()
+      releaseSave()
+      await waitFor(() => expect(browser.clicks).toHaveLength(1))
+      expect(exportBodies()).toEqual([{ draft: { ...savedBodies()[0].draft, name: serverName }, rowIds: [fixture.first.id] }])
+      expect(savedBodies()[0].draft.rows.map(row => row.id)).toEqual(initial.rows.map(row => row.id))
+      expect(browser.clicks[0]).toEqual({ download: filename, href: 'blob:official-download' })
+      expect(browser.revokeObjectURL).toHaveBeenCalledWith('blob:official-download')
+    })
+
+    it('exports only selected stage-two row IDs and uses a ZIP filename returned by the server', async () => {
+      const fixture = downloadFixture()
+      mockSavedDraft(fixture.draft)
+      const fallback = vi.mocked(fetch)
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/export') ? downloadResponse('카테고리별_엑셀.zip', true) : fallback(url, init)))
+      const browser = mockDownloadBrowser()
+      await loadSavedWorkbench()
+      fireEvent.click(screen.getByRole('checkbox', { name: `${fixture.other.name} 선택` }))
+      fireEvent.click(screen.getByRole('button', { name: '선택 1개 엑셀 다운로드' }))
+      await waitFor(() => expect(browser.clicks).toHaveLength(1))
+      expect(exportBodies()).toHaveLength(1)
+      expect(exportBodies()[0].rowIds).toEqual([fixture.other.id])
+      expect(exportBodies()[0].draft.rows).toHaveLength(2)
+      expect(browser.clicks[0].download).toBe('카테고리별_엑셀.zip')
+    })
+
+    it('does not export or create a download when saving the draft fails with a revision conflict', async () => {
+      const fixture = downloadFixture()
+      mockSavedDraft(fixture.draft)
+      const fallback = vi.mocked(fetch)
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/drafts') && init?.method === 'POST'
+        ? { ok: false, status: 409, json: async () => ({ error: '새로운 저장 내용이 있습니다.' }) }
+        : fallback(url, init)))
+      const browser = mockDownloadBrowser()
+      await loadSavedWorkbench()
+      fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }))
+      await waitFor(() => expect(savedBodies()).toHaveLength(1))
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+      expect(exportBodies()).toHaveLength(0)
+      expect(browser.createObjectURL).not.toHaveBeenCalled()
+      expect(screen.getByRole('row', { name: `${fixture.first.name} 상품등록정보` })).toBeInTheDocument()
+    })
+  })
 })
 
 function manualTemplate(id: string, name: string, sheetName: string, columns: TemplateSheet['columns']): RegistrationDraft['templates'][number] {
   return { id, name, file: { name, data: '' }, sheets: [{ name: sheetName, columns }] }
 }
 
-function savedBodies(): Array<{ draft: RegistrationDraft }> {
+function savedBodies(): Array<{ draft: RegistrationDraft; deleteCompletedRowIds?: string[] }> {
   return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/drafts') && init?.method === 'POST').map(([, init]) => JSON.parse(String(init!.body)))
+}
+
+function downloadFixture() {
+  const template = manualTemplate('download-template', '저장한_원본.xlsx', 'QF_99_저장양식', [
+    { column: 1, label: '상품명', requirement: '필수', guide: '' },
+    { column: 2, label: '공급가', requirement: '필수', guide: '' },
+    { column: 3, label: '쿠팡 판매가', requirement: '필수', guide: '' },
+  ])
+  template.file.data = 'b3JpZ2luYWw='
+  const makeRow = (name: string): RegistrationRow => ({
+    ...confirmPricing({ ...createRegistrationRow(source, '베이지'), name, sourceCode: '', priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500 }, 1, '2026-11-20T00:00:00.000Z'),
+    templateId: template.id, sheetName: template.sheets[0].name, label: '보존할_품질표시.jpg',
+    fields: { 브랜드: '보존할 브랜드', [SEARCH_TAGS_FIELD]: '보존할 검색태그', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT },
+  })
+  const first = makeRow('먼저 완료할 상품')
+  const other = makeRow('다른 상품')
+  const draft = { ...blankDraft(), name: '다운로드할 작업', rows: [first, other], templates: [template], labels: [{ name: '보존할_품질표시.jpg', data: 'aW1hZ2U=' }] }
+  expect(rowIssues(first, draft)).toEqual([])
+  expect(rowIssues(other, draft)).toEqual([])
+  return { draft, first, other }
+}
+
+async function openSavedWorkbench(initial: RegistrationDraft) {
+  const saved = mockSavedDraft(initial)
+  await loadSavedWorkbench()
+  return saved
+}
+
+async function loadSavedWorkbench() {
+  render(<CoupangRegistrationWorkbench />)
+  await screen.findByRole('option', { name: /단계 작업/ })
+  fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: 'draft-1' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: '새 작업으로 저장' })).toBeEnabled())
+}
+
+function exportBodies(): Array<{ draft: RegistrationDraft; rowIds: string[] }> {
+  return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/export') && init?.method === 'POST').map(([, init]) => JSON.parse(String(init!.body)))
+}
+
+function downloadResponse(filename: string, zip = false) {
+  const type = zip ? 'application/zip' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  return { ok: true, headers: new Headers({ 'Content-Type': type, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}` }), blob: async () => new Blob(['official-download-bytes'], { type }) }
+}
+
+function mockDownloadBrowser() {
+  const createObjectURL = vi.fn(() => 'blob:official-download')
+  const revokeObjectURL = vi.fn()
+  vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL, revokeObjectURL }))
+  const clicks: Array<{ download: string; href: string }> = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function(this: HTMLAnchorElement) { clicks.push({ download: this.download, href: this.href }) })
+  return { clicks, createObjectURL, revokeObjectURL }
 }
 
 async function openCatalogSearch(query: string) {

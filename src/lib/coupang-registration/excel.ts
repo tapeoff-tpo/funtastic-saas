@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { createHash, randomUUID } from 'node:crypto'
-import { createRegistrationRow, imageStem, isAutomaticTemplateColumn, LABEL_FIELD, money, registrationFieldKey, registrationFieldValue, rowFields, rowIssues, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateInfo } from './model'
+import { createRegistrationRow, getRegistrationStage, imageStem, isAutomaticTemplateColumn, LABEL_FIELD, money, registrationFieldKey, registrationFieldValue, rowFields, rowIssues, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateInfo } from './model'
 import { loadRegistrationWorkbook } from './xlsx-compat'
 
 function cellText(cell: ExcelJS.Cell): string {
@@ -125,7 +125,9 @@ export async function readTemplate(buffer: Buffer, name: string) {
 
 const numericFields = new Set(['공급가', '쿠팡 판매가', '박스 내 SKU 수량', '한 개 단품 포장 무게', '유통기간 *식품의 경우 소비기간\n(일수기재)'])
 
-export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?: readonly string[]): Promise<Buffer> {
+type RegistrationFile = { name: string; data: Buffer }
+
+async function buildRegistrationFiles(draft: RegistrationDraft, rowIds?: readonly string[]): Promise<RegistrationFile[]> {
   if (rowIds !== undefined) {
     const selected = new Set(rowIds)
     if (!selected.size) throw new Error('엑셀로 출력할 상품을 선택해주세요.')
@@ -134,7 +136,7 @@ export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?
     draft = { ...draft, rows }
   }
   if (!draft.rows.length) throw new Error('등록할 상품을 추가해주세요.')
-  const zip = new JSZip()
+  const files: RegistrationFile[] = []
   const usedTemplates = draft.templates.filter((template) => draft.rows.some((row) => row.templateId === template.id))
   if (!usedTemplates.length) throw new Error('쿠팡 견적서를 먼저 불러와주세요.')
   // Re-read the actual uploaded template rather than trusting client-supplied columns.
@@ -198,14 +200,45 @@ export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?
       }
     }
     const safeName = template.name.normalize('NFC').replace(/[\\/]/g, '_').replace(/\.xlsx$/i, '')
-    zip.file(`견적서/${safeName}_등록용.xlsx`, await workbook.xlsx.writeBuffer())
+    let fileName = `견적서/${safeName}_등록용.xlsx`
+    for (let suffix = 2; files.some(file => file.name === fileName); suffix++) fileName = `견적서/${safeName}_${suffix}_등록용.xlsx`
+    files.push({ name: fileName, data: Buffer.from(await workbook.xlsx.writeBuffer()) })
   }
   const neededLabels = new Set(draft.rows.flatMap((row) => row.label.split(',').map(imageStem)))
   for (const file of draft.labels) {
-    if (neededLabels.has(imageStem(file.name))) zip.file(`품질표시/${file.name.normalize('NFC')}`, checkedLabel(file))
+    if (neededLabels.has(imageStem(file.name))) files.push({ name: `품질표시/${file.name.normalize('NFC')}`, data: checkedLabel(file) })
   }
+  return files
+}
+
+async function archiveRegistrationFiles(files: RegistrationFile[]): Promise<Buffer> {
+  const zip = new JSZip()
+  for (const file of files) zip.file(file.name, file.data)
   zip.file('사용방법.txt', '견적서 폴더의 엑셀 파일을 쿠팡 서플라이어 허브에 업로드하세요.\n이미지는 공개 URL과 HTML로 연결되어 있습니다. 품질표시 폴더가 있으면 해당 이미지도 첨부하세요.\n내부 필수항목 검사를 통과한 파일이며 쿠팡 자체 검증·등록 승인은 별도로 진행해야 합니다.\n')
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
+export async function buildRegistrationArchive(draft: RegistrationDraft, rowIds?: readonly string[]): Promise<Buffer> {
+  return archiveRegistrationFiles(await buildRegistrationFiles(draft, rowIds))
+}
+
+/** Download only the chosen information-stage rows using their original uploaded workbooks. */
+export async function buildRegistrationDownload(draft: RegistrationDraft, rowIds?: readonly string[]) {
+  const requested = rowIds ?? draft.rows.filter(row => getRegistrationStage(row) === 'information').map(row => row.id)
+  const selected = new Set(requested)
+  if (!selected.size) throw new Error('2단계에서 엑셀로 다운로드할 상품을 선택해주세요.')
+  if (selected.size !== requested.length) throw new Error('다운로드할 상품을 중복 선택할 수 없습니다.')
+  const rows = draft.rows.filter(row => selected.has(row.id))
+  if (rows.length !== selected.size) throw new Error('선택한 상품을 현재 작업에서 찾을 수 없습니다.')
+  if (rows.some(row => getRegistrationStage(row) !== 'information')) throw new Error('2단계 상품등록정보의 상품만 다운로드할 수 있습니다.')
+  const files = await buildRegistrationFiles(draft, requested)
+  if (files.length === 1 && files[0].name.startsWith('견적서/')) {
+    return { buffer: files[0].data, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName: files[0].name.slice('견적서/'.length) }
+  }
+  return {
+    buffer: await archiveRegistrationFiles(files), contentType: 'application/zip',
+    fileName: `쿠팡상품등록_${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' })}.zip`,
+  }
 }
 
 export function checkedLabel(file: SavedFile): Buffer {

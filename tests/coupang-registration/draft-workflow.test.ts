@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { prepareDraftSave } from '@/lib/coupang-registration/draft-workflow'
-import { applyRegistrationSubmission, blankDraft, calculatePrice, confirmPricing, createRegistrationRow, getRegistrationStage, type RegistrationDraft } from '@/lib/coupang-registration/model'
+import { applyRegistrationSubmission, blankDraft, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, getRegistrationStage, type RegistrationDraft } from '@/lib/coupang-registration/model'
 
 const now = '2026-11-23T07:00:00.000Z'
 function fixture() {
@@ -75,6 +75,48 @@ describe('server-protected Coupang draft saving', () => {
     expect(() => prepareDraftSave({ ...draft, rows: [row, row] })).toThrow('중복')
     expect(() => prepareDraftSave({ ...draft, templates: [draft.templates[0], draft.templates[0]] })).toThrow('중복')
     expect(() => prepareDraftSave({ ...draft, labels: [draft.labels[0], { name: '라벨.png', data: 'same-stem' }] })).toThrow('중복')
+  })
+
+  it('retains omitted manually completed rows until their exact ids are explicitly deleted', () => {
+    const { row, draft } = fixture()
+    const completed = confirmRegistration(confirmPricing(row, 1, now), '2026-11-23')
+    const kept = { ...completed, id: 'keep-row', name: '보존할 등록완료 상품' }
+    const existing = { ...draft, rows: [completed, kept] }
+    expect(prepareDraftSave(blankDraft(), existing).rows).toEqual([completed, kept])
+
+    // The deletion intent wins even if the submitted snapshot still contains that row.
+    const saved = prepareDraftSave({ ...blankDraft(), rows: [completed, kept] }, existing, { deleteCompletedRowIds: [completed.id] })
+    expect(saved.rows).toHaveLength(1)
+    expect(saved.rows[0]).toMatchObject(kept)
+    expect(saved.templates).toEqual(existing.templates)
+    expect(saved.labels).toEqual(existing.labels)
+    expect(existing.rows).toEqual([completed, kept])
+  })
+
+  it('requires an existing completed row and rejects unknown or duplicate deletion ids atomically', () => {
+    const { row, draft } = fixture()
+    const completed = confirmRegistration(confirmPricing(row, 1, now), '2026-11-23')
+    const existing = { ...draft, rows: [completed] }
+    const before = structuredClone(existing)
+    expect(() => prepareDraftSave(blankDraft(), undefined, { deleteCompletedRowIds: [completed.id] })).toThrow('저장된 등록완료')
+    expect(() => prepareDraftSave(blankDraft(), existing, { deleteCompletedRowIds: [completed.id, completed.id] })).toThrow('중복')
+    expect(() => prepareDraftSave(blankDraft(), existing, { deleteCompletedRowIds: [completed.id, 'not-in-this-draft'] })).toThrow('찾을 수 없습니다')
+    expect(existing).toEqual(before)
+  })
+
+  it.each(['pricing', 'information'] as const)('uses the saved %s state rather than a forged completion when authorizing deletion', (stage) => {
+    const { row, draft } = fixture()
+    const savedRow = stage === 'information' ? confirmPricing(row, 1, now) : row
+    const incoming = { ...draft, rows: [{ ...savedRow, stage: 'registered' as const, registrationCompletedAt: '2026-11-23' }] }
+    expect(() => prepareDraftSave(incoming, { ...draft, rows: [savedRow] }, { deleteCompletedRowIds: [row.id] })).toThrow('등록완료 상품만')
+  })
+
+  it.each(['queued', 'running', 'login_required', 'succeeded'] as const)('rejects explicit deletion of %s work and preserves its receipt and assets', (status) => {
+    const { row, draft: existing } = lockedFixture(status)
+    const before = structuredClone(existing)
+    expect(() => prepareDraftSave(blankDraft(), existing, { deleteCompletedRowIds: [row.id] })).toThrow('삭제할 수 없습니다')
+    expect(existing).toEqual(before)
+    expect(prepareDraftSave(blankDraft(), existing).rows).toEqual([row])
   })
 
   it('preserves locked data without silently exceeding saved-draft limits', () => {

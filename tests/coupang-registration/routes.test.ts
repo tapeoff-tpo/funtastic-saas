@@ -6,7 +6,15 @@ vi.mock('@/lib/coupang-registration/auth', () => ({ registrationWorkspace: mocks
 vi.mock('@/lib/coupang-registration/store', () => ({ saveDraft: mocks.save, listDrafts: mocks.list, loadDraft: mocks.load }))
 vi.mock('@/lib/coupang-registration/excel', async (importOriginal) => ({ ...await importOriginal<object>(), readTemplate: mocks.readTemplate }))
 import { GET, POST } from '@/app/api/operations/coupang-registration/drafts/route'
-import { blankDraft, createRegistrationRow } from '@/lib/coupang-registration/model'
+import { applyRegistrationSubmission, blankDraft, confirmPricing, confirmRegistration, createRegistrationRow } from '@/lib/coupang-registration/model'
+
+const draftId = 'dcaf2711-a627-44ab-93cd-0645b706b6c4'
+function completedRow() {
+  return confirmRegistration(confirmPricing({ ...createRegistrationRow(), name: '등록완료 상품', priceMode: 'manual', manualSupplyPrice: 1000, saleMode: 'manual', manualSalePrice: 2000 }), '2026-11-25')
+}
+function saveRequest(body: unknown) {
+  return new NextRequest('http://test/api/operations/coupang-registration/drafts', { method: 'POST', body: JSON.stringify(body) })
+}
 
 describe('shared registration drafts', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -28,6 +36,90 @@ describe('shared registration drafts', () => {
     const response = await POST(new NextRequest('http://test/api/operations/coupang-registration/drafts', { method: 'POST', body: JSON.stringify({ id: 'dcaf2711-a627-44ab-93cd-0645b706b6c4', revision: 1, draft: blankDraft() }) }))
     expect(response.status).toBe(409)
     expect(mocks.save).toHaveBeenCalledTimes(1)
+  })
+  it('requires authentication for explicit completed-row deletion', async () => {
+    mocks.workspace.mockResolvedValue(null)
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: blankDraft(), deleteCompletedRowIds: ['completed-row'] }))
+    expect(response.status).toBe(403)
+    expect(mocks.load).not.toHaveBeenCalled()
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it('deletes only explicitly selected manually completed rows in the canonical saved draft', async () => {
+    const row = completedRow()
+    const other = { ...row, id: 'keep-row', name: '보존할 상품', fields: { 브랜드: '보존할 브랜드' } }
+    const payload = { ...blankDraft(), rows: [row, other] }
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload })
+    mocks.save.mockResolvedValue({ id: draftId, revision: 4 })
+    const response = await POST(saveRequest({ userId: 'another-owner', id: draftId, revision: 3, draft: payload, deleteCompletedRowIds: [row.id] }))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.revision).toBe(4)
+    expect(body.payload.rows).toHaveLength(1)
+    expect(body.payload.rows[0]).toEqual(JSON.parse(JSON.stringify(other)))
+    expect(mocks.load).toHaveBeenCalledWith('workspace-owner', draftId)
+    expect(mocks.save).toHaveBeenCalledWith('workspace-owner', expect.objectContaining({ rows: [expect.objectContaining({ id: other.id, fields: other.fields })] }), draftId, 3)
+  })
+  it('does not treat a completed row omitted by an ordinary browser save as deletion', async () => {
+    const row = completedRow()
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: { ...blankDraft(), rows: [row] } })
+    mocks.save.mockResolvedValue({ id: draftId, revision: 4 })
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: blankDraft() }))
+    expect(response.status).toBe(200)
+    expect((await response.json()).payload.rows).toEqual([row])
+  })
+  it('requires an existing saved draft id for deletion', async () => {
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    const response = await POST(saveRequest({ draft: blankDraft(), deleteCompletedRowIds: ['completed-row'] }))
+    expect(response.status).toBe(400)
+    expect(mocks.load).not.toHaveBeenCalled()
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it.each([
+    { ids: 'completed-row' },
+    { ids: [null] },
+    { ids: [''] },
+    { ids: ['not-in-this-draft'] },
+    { ids: ['completed-row', 'completed-row'] },
+  ])('rejects invalid deletion intents without saving: $ids', async ({ ids }) => {
+    const row = { ...completedRow(), id: 'completed-row' }
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: { ...blankDraft(), rows: [row] } })
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: blankDraft(), deleteCompletedRowIds: ids }))
+    expect(response.status).toBe(400)
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it.each(['pricing', 'information', 'verified', 'running'] as const)('does not authorize deletion of a saved %s row from client completion metadata', async (kind) => {
+    const completed = completedRow()
+    const information = { ...completed, stage: 'information' as const, registrationCompletedAt: undefined }
+    const row = kind === 'pricing' ? { ...completed, stage: 'pricing' as const, registrationCompletedAt: undefined, priceConfirmedAt: undefined }
+      : kind === 'information' ? information
+        : applyRegistrationSubmission(applyRegistrationSubmission(information, { status: 'queued', jobId: 'job-1' }), kind === 'verified'
+          ? { status: 'succeeded', jobId: 'job-1', completedAt: '2026-11-25T00:00:00.000Z', receiptId: 'receipt-1' }
+          : { status: 'running', jobId: 'job-1' })
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: { ...blankDraft(), rows: [row] } })
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: { ...blankDraft(), rows: [completed] }, deleteCompletedRowIds: [completed.id] }))
+    expect(response.status).toBe(400)
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it('rejects completed-row deletion when the saved revision has already changed', async () => {
+    const row = completedRow()
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 4, payload: { ...blankDraft(), rows: [row] } })
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: blankDraft(), deleteCompletedRowIds: [row.id] }))
+    expect(response.status).toBe(409)
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it('keeps the revision compare-and-swap on explicit deletion', async () => {
+    const row = completedRow()
+    mocks.workspace.mockResolvedValue('workspace-owner')
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: { ...blankDraft(), rows: [row] } })
+    mocks.save.mockResolvedValue(null)
+    const response = await POST(saveRequest({ id: draftId, revision: 3, draft: blankDraft(), deleteCompletedRowIds: [row.id] }))
+    expect(response.status).toBe(409)
+    expect(mocks.save).toHaveBeenCalledWith('workspace-owner', blankDraft(), draftId, 3)
   })
   it('refreshes official choices for old saved templates without changing products or writing the draft', async () => {
     const id = 'dcaf2711-a627-44ab-93cd-0645b706b6c4'

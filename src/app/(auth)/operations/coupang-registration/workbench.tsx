@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Check, ChevronRight, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
+import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
 import { matchCategorySheet, type SavedSheetMapping } from '@/lib/coupang-registration/sheet-matching'
@@ -28,6 +28,7 @@ const steps: Array<{ stage: RegistrationStage; title: string }> = [
   { stage: 'registered', title: '등록완료' },
 ]
 const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '') || getRegistrationStage(row) === 'registered'
+const completedDeletionLocked = (row: RegistrationRow) => hasVerifiedSupplierRegistration(row) || ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date())
 function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
   const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
@@ -423,9 +424,9 @@ export function CoupangRegistrationWorkbench() {
     void syncImages(new Set(targets.map((row) => row.id)))
   })
 
-  async function persist(nextDraft = draft, asNew = false) {
+  async function persist(nextDraft = draft, asNew = false, deleteCompletedRowIds?: string[]) {
     return queueServerWrite(async () => {
-      const response = await postJson('/drafts', { draft: nextDraft, ...(!asNew && currentId ? { id: currentId, revision: revision.current } : {}) })
+      const response = await postJson('/drafts', { draft: nextDraft, ...(!asNew && currentId ? { id: currentId, revision: revision.current } : {}), ...(deleteCompletedRowIds?.length ? { deleteCompletedRowIds } : {}) })
       if (asNew) draftSession.current++
       setDraft(response.payload ?? nextDraft); setCurrentId(response.id); setRevision(response.revision); setDirty(false)
       await refreshDrafts()
@@ -435,6 +436,36 @@ export function CoupangRegistrationWorkbench() {
   async function save(asNew = false) {
     await run('저장 중', async () => { await persist(draft, asNew); toast.success('가격·상품등록정보·품질표시를 저장했습니다.') })
   }
+  async function downloadInformation(rowIds: string[]) {
+    if (!rowIds.length) return
+    await run('등록정보 저장·엑셀 다운로드 중', async () => {
+      const targets = draft.rows.filter(row => rowIds.includes(row.id))
+      if (targets.length !== rowIds.length || targets.some(row => getRegistrationStage(row) !== 'information' || submissionLocked(row))) throw new Error('2단계에서 다운로드할 상품을 선택해주세요.')
+      const invalid = targets.find(row => issueMap.get(row.id)?.length)
+      if (invalid) throw new Error(`${invalid.name}: ${issueMap.get(invalid.id)!.slice(0, 3).join(', ')}`)
+      const saved = await persist(draft)
+      const body = JSON.stringify({ draft: saved.payload ?? draft, rowIds })
+      if (new TextEncoder().encode(body).length > 4_000_000) throw new Error('작업 용량이 4MB를 초과했습니다. 상품을 나눠 다운로드해주세요.')
+      const response = await fetch(`${API}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+      if (!response.ok) {
+        const error = await response.json().catch(() => null)
+        throw new Error(error?.error ?? '엑셀을 다운로드하지 못했습니다.')
+      }
+      const type = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase()
+      if (!['application/zip', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(type ?? '')) throw new Error('엑셀 파일 응답을 확인하지 못했습니다. 페이지를 새로고침해 다시 시도해주세요.')
+      const disposition = response.headers.get('Content-Disposition') ?? ''
+      const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+      let filename = `쿠팡상품등록_${today()}.${type === 'application/zip' ? 'zip' : 'xlsx'}`
+      if (encodedName) { try { filename = decodeURIComponent(encodedName) } catch { /* Use the safe fallback name. */ } }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      try {
+        link.href = url; link.download = filename.replace(/[\\/\u0000-\u001f]/g, '_')
+        document.body.appendChild(link); link.click()
+      } finally { link.remove(); URL.revokeObjectURL(url) }
+      toast.success(`${rowIds.length}개 상품의 등록정보를 저장하고 다운로드했습니다.`)
+    })
+  }
   async function completeRegistration(ids: string[]) {
     await run('등록완료 저장 중', async () => {
       const selectedIds = new Set(ids)
@@ -443,10 +474,25 @@ export function CoupangRegistrationWorkbench() {
       toast.success(`${ids.length}개 상품을 등록완료로 표시했습니다.`)
     })
   }
-  async function changeCompletion(row: RegistrationRow, date?: string) {
+  async function changeCompletion(row: RegistrationRow, date?: string, moveToInformation = false) {
     await run('등록완료 정보 저장 중', async () => {
       const revised = date ? confirmRegistration(reopenRegistration(row), date) : reopenRegistration(row)
       await persist({ ...draft, rows: draft.rows.map((item) => item.id === row.id ? revised : item) })
+      if (moveToInformation) {
+        setDateFrom(''); setDateTo(''); changeStage('information')
+        toast.success('상품을 2단계 상품등록정보로 되돌렸습니다.')
+      }
+    })
+  }
+  async function deleteCompleted(row: RegistrationRow) {
+    if (busy || completedDeletionLocked(row)) return
+    if (!window.confirm(`${row.name} 상품을 등록완료 목록에서 삭제할까요? 이 작업에 저장된 해당 상품의 등록정보도 삭제됩니다.`)) return
+    await run('등록완료 상품 삭제 중', async () => {
+      const next = { ...draft, rows: draft.rows.filter(item => item.id !== row.id) }
+      const saved = await persist(next, false, [row.id])
+      if ((saved.payload?.rows ?? next.rows).some((item: RegistrationRow) => item.id === row.id)) throw new Error('해당 상품을 삭제하지 못했습니다. 최신 작업을 다시 불러와주세요.')
+      setSelected(value => { const next = new Set(value); next.delete(row.id); return next })
+      toast.success('등록완료 상품을 삭제했습니다.')
     })
   }
   async function searchProducts() {
@@ -633,9 +679,10 @@ export function CoupangRegistrationWorkbench() {
   }
 
   function informationToolbar(expanded = false) {
+    const downloadRows = selectedRows.length ? selectedRows : visible.filter(row => !submissionLocked(row))
     return <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
       <label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span><CategorySelect label="일괄 카테고리" value={templateChoice} templates={categoryTemplates} onChange={setTemplateChoice} /><button className={buttonClass} disabled={!selectedRows.length || !templateChoice} onClick={() => void chooseCategory(templateChoice, selectedRows.map((row) => row.id))}>카테고리 적용</button><button className={buttonClass} onClick={openTemplateInput}><FileSpreadsheet className="size-3.5" />카테고리 엑셀 업로드</button>{expanded && <button className={buttonClass} onClick={() => labelInput.current?.click()}><ImagePlus className="size-3.5" />품질표시 이미지 추가</button>}
-      <label className="ml-auto flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(submissionLocked) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button>
+      <label className="ml-auto flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(submissionLocked) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={buttonClass} disabled={!downloadRows.length || selectedRows.some(submissionLocked)} title={`현재 목록의 ${downloadRows.length}개 상품을 저장한 뒤 원본 양식에 채워 다운로드합니다.`} onClick={() => void downloadInformation(downloadRows.map(row => row.id))}><Download className="size-3.5" />{selectedRows.length ? `선택 ${downloadRows.length}개 엑셀 다운로드` : '엑셀 다운로드'}</button>
     </div>
   }
   function informationRows(expanded = false) {
@@ -736,7 +783,16 @@ export function CoupangRegistrationWorkbench() {
       {informationRows(expandedWorkbench)}
     </section>}
     {stage === 'registered' && <section id="coupang-step-registered" role="tabpanel" aria-label="등록완료" className={`${expandedWorkbench ? 'min-h-0 flex-1' : ''} overflow-auto rounded-lg border bg-card`}>
-      <table aria-label="등록완료 목록" className="w-full min-w-[800px] text-left text-xs"><thead className="sticky top-0 z-10 border-b bg-muted"><tr><th className="w-20 p-3">등록완료</th><th className="p-3">상품명</th><th className="p-3">SKU</th><th className="p-3">등록완료일</th><th className="p-3 text-right">공급가</th><th className="p-3 text-right">판매가</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id} aria-label={row.name + ' 등록완료 정보'} className="border-b last:border-0"><td className="p-3 text-center"><input aria-label={row.name + ' 등록완료'} type="checkbox" checked onChange={() => void changeCompletion(row)} /></td><td className="p-3 font-medium">{row.name}</td><td className="p-3">{row.internalSku || '—'}</td><td className="p-3"><input aria-label={row.name + ' 등록완료일'} type="date" className={inputClass} value={row.registrationCompletedAt ?? ''} onChange={(event) => { if (event.target.value) void changeCompletion(row, event.target.value) }} /></td><td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).supply)}</td><td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).sale)}</td></tr>)}</tbody></table>
+      <table aria-label="등록완료 목록" className="w-full min-w-[1000px] text-left text-xs">
+        <thead className="sticky top-0 z-10 border-b bg-muted"><tr><th className="w-20 p-3">등록완료</th><th className="p-3">상품명</th><th className="p-3">SKU</th><th className="p-3">등록완료일</th><th className="p-3 text-right">공급가</th><th className="p-3 text-right">판매가</th><th className="w-56 p-3">관리</th></tr></thead>
+        <tbody>{visible.map((row) => <tr key={row.id} aria-label={row.name + ' 등록완료 정보'} className="border-b last:border-0">
+          <td className="p-3 text-center"><input aria-label={row.name + ' 등록완료'} type="checkbox" checked onChange={() => void changeCompletion(row)} /></td>
+          <td className="p-3 font-medium">{row.name}</td><td className="p-3">{row.internalSku || '—'}</td>
+          <td className="p-3"><input aria-label={row.name + ' 등록완료일'} type="date" className={inputClass} value={row.registrationCompletedAt ?? ''} onChange={(event) => { if (event.target.value) void changeCompletion(row, event.target.value) }} /></td>
+          <td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).supply)}</td><td className="p-3 text-right tabular-nums">{won(calculatePrice(row, draft.rounding).sale)}</td>
+          <td className="p-3"><div className="flex gap-2"><button className={buttonClass} aria-label={row.name + ' 2단계로 되돌리기'} disabled={['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')} onClick={() => void changeCompletion(row, undefined, true)}><RotateCcw className="size-3.5" />2단계로 되돌리기</button><button className={`${buttonClass} text-red-600 hover:bg-red-50`} aria-label={row.name + ' 등록완료 목록에서 삭제'} title={completedDeletionLocked(row) ? '등록 처리 중이거나 허브 등록 이력이 있는 상품은 삭제할 수 없습니다.' : '등록완료 목록에서 삭제'} disabled={completedDeletionLocked(row)} onClick={() => void deleteCompleted(row)}><Trash2 className="size-3.5" />삭제</button></div></td>
+        </tr>)}</tbody>
+      </table>
       {!visible.length && <p className="p-10 text-center text-sm text-muted-foreground">등록완료 상품이 없습니다.</p>}
     </section>}
 

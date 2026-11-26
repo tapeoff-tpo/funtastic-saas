@@ -35,11 +35,12 @@ export async function POST(request: NextRequest) {
   try {
     const text = await request.text()
     if (Buffer.byteLength(text) > 4_000_000) throw new Error('저장 용량이 4MB를 초과했습니다. 작업을 나눠 저장해주세요.')
-    const parsed = z.object({ id: z.uuid().optional(), revision: z.number().int().positive().optional(), draft: draftSchema }).parse(JSON.parse(text))
+    const parsed = z.object({ id: z.uuid().optional(), revision: z.number().int().positive().optional(), draft: draftSchema, deleteCompletedRowIds: z.array(z.string().min(1).max(100)).max(500).optional() }).parse(JSON.parse(text))
+    if (parsed.deleteCompletedRowIds?.length && !parsed.id) throw new Error('저장된 작업의 등록완료 상품만 삭제할 수 있습니다.')
     parsed.draft.labels.forEach(checkedLabel)
     const existing = parsed.id ? await loadDraft(workspace, parsed.id) : null
     if (parsed.id && (!existing || existing.revision !== parsed.revision)) return NextResponse.json({ error: '다른 사용자가 수정한 작업입니다. 최신 작업을 다시 불러와주세요.' }, { status: 409 })
-    const payload = prepareDraftSave(parsed.draft, existing?.payload)
+    const payload = prepareDraftSave(parsed.draft, existing?.payload, { deleteCompletedRowIds: parsed.deleteCompletedRowIds })
     const saved = await saveDraft(workspace, payload, parsed.id, parsed.revision)
     if (!saved) return NextResponse.json({ error: '다른 사용자가 수정한 작업입니다. 새 작업으로 저장하거나 최신 작업을 다시 불러와주세요.' }, { status: 409 })
     return NextResponse.json({ ...saved, payload })

@@ -782,6 +782,9 @@ export async function PurchasingOrdersView({
                     })
                     const receipt = ('purchaseInspection' in item ? item.purchaseInspection : null) as PurchaseInspection | null
                     const receiptSummary = receipt ? inspectionSummary(receipt) : null
+                    const ecountMismatchQuantity = item.status === 'inspecting'
+                      ? numericRawDataValue(item.rawData, 'ecountInspectionMismatchQuantity')
+                      : null
                     const inspectionIssueCount = 'inspectionIssueCount' in item ? Number(item.inspectionIssueCount ?? 0) : 0
                     const storedPurchasePrices = showPriceComparison ? readPurchasePriceComparison(item.rawData) : null
                     const purchasePrices = storedPurchasePrices && 'masterPurchasePriceCny' in item
@@ -825,6 +828,13 @@ export async function PurchasingOrdersView({
                           <PurchaseInspectionIssueButton purchaseItemId={item.id} issueCount={inspectionIssueCount} />
                         </div>}
                         {item.status === 'inspecting' && receiptSummary?.hasError && <div className="mt-1"><Badge className="border-red-300 bg-red-100 text-red-800">입고오류 · {receiptSummary.difference < 0 ? '부족' : '초과'} {Math.abs(receiptSummary.difference)}개</Badge></div>}
+                        {ecountMismatchQuantity !== null && receiptSummary && receiptSummary.receivedQuantity !== ecountMismatchQuantity && (
+                          <div className="mt-1">
+                            <Badge className="whitespace-normal border-red-300 bg-red-100 text-red-800">
+                              이카운트 {formatNumber(ecountMismatchQuantity)}개 · 검수 {formatNumber(receiptSummary.receivedQuantity)}개
+                            </Badge>
+                          </div>
+                        )}
                         {purchaseUrgencyStatus ? (
                           <div className="mt-1">
                             <Badge

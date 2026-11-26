@@ -115,6 +115,10 @@ export async function cleanupExpiredEcountPurchaseOrderRowsInTransaction(
           AND NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL
           AND COALESCE(${purchaseRequestItems.bulkPaymentPending}, false) = false
           AND COALESCE(${purchaseRequestItems.purchaseInspection}->>'hasReportedIssue', 'false') <> 'true'
+          AND NOT (
+            ${purchaseRequestItems.status} = 'inspecting'
+            AND COALESCE(${purchaseRequestItems.rawData} ? 'ecountInspectionMismatchQuantity', false)
+          )
           AND ${purchaseRequestItems.status} <> 'completed'
           AND (
             starts_with(

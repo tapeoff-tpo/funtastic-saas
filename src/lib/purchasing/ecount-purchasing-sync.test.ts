@@ -252,6 +252,34 @@ describe('parseEcountPurchasingSnapshot', () => {
     }])
     expect(protectedRefresh).not.toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-OWN' }))
     expect(protectedRefresh).toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-FALLBACK', inboundWarehouseCode: '쿠팡창고' }))
+
+    for (const [counted, expectedQuantity, shouldMove] of [[null, 5, true], [5, 5, true], [4, 5, false]] as const) {
+      const updated: Array<Record<string, unknown>> = []
+      const result = await syncWarehouseFixture({
+        ...snapshot,
+        chinaArrived: snapshot.chinaArrived.map((item) => ({ ...item, quantity: 3 })),
+      }, [{
+        id: 'existing-row', status: 'inspecting', sku: '100005-0001', purchaseManagementCode: 'P-HISTORY',
+        rawData: { prior: 'preserved' },
+        purchaseInspection: {
+          expectedQuantity,
+          parcels: [{ trackingNumber: 'tracking', boxes: [{ quantity: counted }] }],
+        },
+      }], updated)
+      expect(result).not.toContainEqual(expect.objectContaining({ purchaseManagementCode: 'P-HISTORY' }))
+      expect(updated).toHaveLength(1)
+      expect(updated[0]).not.toHaveProperty('purchaseInspection')
+      expect(updated[0]).not.toHaveProperty('trackingNumber')
+      if (shouldMove) {
+        expect(updated[0]).toMatchObject({
+          status: 'china_arrived', chinaReceivedQuantity: 3,
+          rawData: { prior: 'preserved', ecountInspectionConfirmedQuantity: 5 },
+        })
+      } else {
+        expect(updated[0]).not.toHaveProperty('status')
+        expect(updated[0]).toMatchObject({ rawData: { prior: 'preserved', ecountInspectionMismatchQuantity: 5 } })
+      }
+    }
   })
 
   it('does not guess a plan warehouse from ambiguous requests for the same management code and SKU', async () => {
@@ -1776,7 +1804,8 @@ describe('parseEcountPurchasingSnapshot', () => {
 
 async function syncWarehouseFixture(
   snapshot: Parameters<typeof syncEcountPurchasingSnapshot>[0]['snapshot'],
-  protectedRows: Array<{ sku: string; purchaseManagementCode: string; rawData: Record<string, unknown>; purchaseInspection: unknown }> = [],
+  protectedRows: Array<{ id?: string; status?: string; sku: string; purchaseManagementCode: string; rawData: Record<string, unknown>; purchaseInspection: unknown }> = [],
+  updated: Array<Record<string, unknown>> = [],
 ) {
   const [{ db }, reflected, retention, ignored, index, payment, ledger, currency] = await Promise.all([
     import('@/lib/db'), import('./reflected-outbound-items'), import('./purchase-order-retention'),
@@ -1788,9 +1817,10 @@ async function syncWarehouseFixture(
     execute: vi.fn(async () => []),
     select: vi.fn((fields: Record<string, unknown>) => ({ from: () => ({ where: () => Object.assign(
       Promise.resolve('maxRowNumber' in fields ? [{ maxRowNumber: 0 }] : 'purchaseInspection' in fields ? protectedRows : []),
-      { orderBy: async () => [] },
+      { orderBy: async () => [], for: async () => protectedRows },
     ) }) })),
     delete: vi.fn(() => ({ where: async () => [] })),
+    update: vi.fn(() => ({ set: (values: Record<string, unknown>) => ({ where: async () => { updated.push(values) } }) })),
     insert: vi.fn(() => ({ values: async (values: Array<Record<string, unknown>>) => { inserted.push(...values) } })),
   }
   try {

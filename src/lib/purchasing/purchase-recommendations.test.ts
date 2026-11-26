@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPurchaseMinimumQuantity,
   allocatePurchaseBudget,
+  calculateDomesticStockout,
   calculatePurchaseRecommendation,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculatePurchaseSalesTrend,
@@ -22,6 +23,26 @@ import {
   shouldDeferNearTargetPurchaseRecommendation,
 } from './purchase-recommendations'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
+
+describe('domestic stockout forecast', () => {
+  it.each([
+    [-1, 300, 0],
+    [9, 300, 0],
+    [20, 300, 2],
+    [70, 300, 7],
+    [71, 300, null],
+    [0, 0, null],
+  ])('uses domestic stock %s and monthly demand %s', (stock, demand, expected) => {
+    expect(calculateDomesticStockout(stock, demand)).toEqual(expected === null ? null : { days: expected, gapDays: null })
+  })
+
+  it('uses posted quantities and finds the first gap across multiple inbound dates', () => {
+    const arrival = (daysUntilArrival: number, quantity: number) => ({ sku: 'sku', daysUntilArrival, quantity })
+    expect(calculateDomesticStockout(20, 300, [arrival(7, 50)])).toEqual({ days: 2, gapDays: 5 })
+    expect(calculateDomesticStockout(20, 300, [arrival(2, 20), arrival(6, 50)])).toEqual({ days: 4, gapDays: 2 })
+    expect(calculateDomesticStockout(20, 300, [arrival(2, 60)])).toBeNull()
+  })
+})
 
 describe('purchase minimum quantities', () => {
   it('uses the cost-based existing-product minimum and the 3-unit 10-rounding rule', () => {

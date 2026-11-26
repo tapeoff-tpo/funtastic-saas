@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTableName, type SQL, type Table } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 
+vi.mock('./inbound-board-store', () => ({ listScheduledDomesticInbound: async () => [] }))
+
 type ReviewRow = {
   id: string
   sku: string

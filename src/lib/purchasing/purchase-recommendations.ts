@@ -9,6 +9,7 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
+import { listScheduledDomesticInbound, type ScheduledDomesticInbound } from './inbound-board-store'
 import {
   getSkuOutgoingMetrics,
   type PurchasingItemOutgoingMetrics,
@@ -691,6 +692,12 @@ export async function generatePurchaseRecommendations(input: {
     ? null
     : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
+  const domesticInboundBySku = new Map<string, ScheduledDomesticInbound[]>()
+  for (const arrival of await listScheduledDomesticInbound(input.userId, formatSeoulDate(now))) {
+    const arrivals = domesticInboundBySku.get(arrival.sku) ?? []
+    arrivals.push(arrival)
+    domesticInboundBySku.set(arrival.sku, arrivals)
+  }
 
   if (budgetKrw !== null) await ensurePurchaseBudgetComparisonSchema()
 
@@ -997,9 +1004,18 @@ export async function generatePurchaseRecommendations(input: {
       allocation.items.map((item) => [item.row.sku, item.allocatedQuantity]),
     )
     const reviewRows = allRecommendationRows
+      .map((item) => ({
+        ...item,
+        domesticStockout: calculateDomesticStockout(
+          item.row.domesticAvailableStock,
+          item.effectiveMonthlyOutgoing,
+          domesticInboundBySku.get(item.row.sku),
+        ),
+      }))
       .filter((item) => (
         autoReviewRowBySku.has(item.row.sku)
         || allocatedQuantityBySku.has(item.row.sku)
+        || item.domesticStockout !== null
         || item.moqStockReview?.deferred
         || item.fixedSetPurchase !== null
         || (item.isNewProduct && item.currentMonthOutgoing > 0)
@@ -1186,6 +1202,27 @@ function buildAssessedPurchaseRow(input: {
   }
 }
 
+export function calculateDomesticStockout(
+  domesticStock: number,
+  effectiveMonthlyOutgoing: number,
+  arrivals: readonly ScheduledDomesticInbound[] = [],
+) {
+  if (!Number.isFinite(domesticStock) || !Number.isFinite(effectiveMonthlyOutgoing) || effectiveMonthlyOutgoing <= 0) {
+    return null
+  }
+  const dailyOutgoing = effectiveMonthlyOutgoing / 30
+  let days = Math.max(0, domesticStock) / dailyOutgoing
+  for (const arrival of arrivals) {
+    if (days > 7) return null
+    if (arrival.daysUntilArrival > days) {
+      const stockoutDays = Math.floor(days)
+      return { days: stockoutDays, gapDays: arrival.daysUntilArrival - stockoutDays }
+    }
+    days += arrival.quantity / dailyOutgoing
+  }
+  return days <= 7 ? { days: Math.floor(days), gapDays: null } : null
+}
+
 function buildAutoRecommendationRawData(input: {
   item: AssessedPurchaseRow & {
     pipelineQuantity: number
@@ -1208,6 +1245,7 @@ function buildAutoRecommendationRawData(input: {
     purchaseRoundingUnit: number
     purchaseMinimumAdjustedQuantity: number
     allocatedQuantity: number
+    domesticStockout: ReturnType<typeof calculateDomesticStockout>
   }
   targetStockMonths: number
   budgetKrw: number | null
@@ -1248,6 +1286,11 @@ function buildAutoRecommendationRawData(input: {
     salesAnomalyDetected: input.item.salesAnomalyDetected,
     salesTrend: input.item.salesTrend,
     domesticAvailableStock: input.item.row.domesticAvailableStock,
+    ...(input.item.domesticStockout ? {
+      domesticStockoutDays: input.item.domesticStockout.days,
+      domesticStockoutGapDays: input.item.domesticStockout.gapDays,
+      domesticStockoutCalculatedOn: formatSeoulDate(input.now),
+    } : {}),
     chinaAvailableStock: input.item.row.chinaAvailableStock,
     availableStock: input.item.row.availableStock,
     pipelineQuantity: input.item.pipelineQuantity,

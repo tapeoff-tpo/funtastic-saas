@@ -157,6 +157,11 @@ async function buildRegistrationFiles(draft: RegistrationDraft, rowIds?: readonl
     const workbook = workbooks.get(template.id)!
     for (const definition of template.sheets) {
       const sheet = workbook.getWorksheet(definition.name)!
+      const entries = draft.rows.filter((row) => row.templateId === template.id && row.sheetName === definition.name)
+      if (!entries.length) {
+        workbook.removeWorksheet(sheet.id)
+        continue
+      }
       if (sheet.rowCount > 5000 || sheet.columnCount > 200) throw new Error('지원하는 견적서 크기를 초과했습니다.')
       const formulaSources = new Map<number, { address: string; formula: string }>()
       const translationSheet = new ExcelJS.Workbook().addWorksheet('translation')
@@ -175,7 +180,6 @@ async function buildRegistrationFiles(draft: RegistrationDraft, rowIds?: readonl
           if (cell.type !== ExcelJS.ValueType.Formula) cell.value = null
         }
       }
-      const entries = draft.rows.filter((row) => row.templateId === template.id && row.sheetName === definition.name)
       for (const [index, entry] of entries.entries()) {
         const fields = rowFields(entry, draft.rounding, draft.labels)
         for (const column of definition.columns) {

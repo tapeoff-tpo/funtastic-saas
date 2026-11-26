@@ -169,6 +169,54 @@ describe('official Coupang template round trip', () => {
     expect(labels.file('견적서/다른카테고리_등록용.xlsx')).toBeNull()
   })
 
+  it('keeps only exported category sheets in direct downloads and ZIPs while preserving hidden template dependencies', async () => {
+    const { draft } = await fixture()
+    const original = new ExcelJS.Workbook()
+    await original.xlsx.load(Buffer.from(draft.templates[0].file.data, 'base64') as unknown as ExcelJS.Buffer)
+    for (const name of ['QF_200_worked', 'QF_300_unused']) {
+      const sheet = original.addWorksheet(name)
+      sheet.getCell('B1').value = 'Retail_Categorized_Excel:Version186'
+      sheet.getRow(5).values = ['상품명', '공급가', '제조국', '고시명']
+      sheet.getRow(6).values = ['필수', '필수', '필수', '필수']
+      sheet.getRow(9).values = ['원본 예시 상품', 1000, '중국', { formula: 'HQF_100!$A$1', result: '기타 재화' }]
+      sheet.getCell('C9').dataValidation = { type: 'list', formulae: ['"중국,한국"'] }
+    }
+    const parsed = await readTemplate(Buffer.from(await original.xlsx.writeBuffer()), 'sample.xlsx')
+    draft.templates = [parsed.template]
+    const first = { ...draft.rows[0], stage: 'information' as const, templateId: parsed.template.id }
+    const second = { ...first, id: 'second-category', name: '두 번째 카테고리 상품', sheetName: 'QF_200_worked' }
+    draft.rows = [first, second, { ...first, id: 'unworked', stage: 'pricing', sheetName: 'QF_300_unused', label: '' }]
+    const savedFile = parsed.template.file.data
+    const all = await buildRegistrationDownload(draft)
+    expect(all.contentType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(all.buffer as unknown as ExcelJS.Buffer)
+    expect(workbook.worksheets.filter(sheet => sheet.name.startsWith('QF_')).map(sheet => sheet.name)).toEqual(['QF_100_test', 'QF_200_worked'])
+    expect(workbook.getWorksheet('HQF_100')?.state).toBe('veryHidden')
+    const worked = workbook.getWorksheet('QF_200_worked')!
+    expect(worked.getCell('A9').value).toBe(second.name)
+    expect(worked.getCell('C9').dataValidation.formulae).toEqual(['"중국,한국"'])
+    expect(worked.getCell('D9').formula).toBe('HQF_100!$A$1')
+
+    const selected = new ExcelJS.Workbook()
+    await selected.xlsx.load((await buildRegistrationDownload(draft, [second.id])).buffer as unknown as ExcelJS.Buffer)
+    expect(selected.worksheets.filter(sheet => sheet.name.startsWith('QF_')).map(sheet => sheet.name)).toEqual(['QF_200_worked'])
+    const label = { name: '품질표시.jpg', data: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64') }
+    draft.labels = [label]
+    draft.rows[1] = { ...second, label: label.name }
+    const download = await buildRegistrationDownload(draft, [second.id])
+    expect(download.contentType).toBe('application/zip')
+    const zip = await JSZip.loadAsync(download.buffer)
+    expect(zip.file(`품질표시/${label.name}`)).not.toBeNull()
+    const zipped = new ExcelJS.Workbook()
+    await zipped.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    expect(zipped.worksheets.filter(sheet => sheet.name.startsWith('QF_')).map(sheet => sheet.name)).toEqual(['QF_200_worked'])
+    expect(parsed.template.file.data).toBe(savedFile)
+    const unchanged = new ExcelJS.Workbook()
+    await unchanged.xlsx.load(Buffer.from(savedFile, 'base64') as unknown as ExcelJS.Buffer)
+    expect(unchanged.getWorksheet('QF_300_unused')!.getCell('A9').value).toBe('원본 예시 상품')
+  })
+
   it('rejects invalid download selection and rows outside the information stage', async () => {
     const { draft } = await fixture()
     const id = draft.rows[0].id

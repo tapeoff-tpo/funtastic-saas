@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, t
 import { Dialog } from '@base-ui/react/dialog'
 import { Check, ChevronRight, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, reopenRegistration, returnToPricing, rowFields, rowIssues, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
 import { matchCategorySheet, type SavedSheetMapping } from '@/lib/coupang-registration/sheet-matching'
@@ -31,7 +31,7 @@ const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date())
 function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
   const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
-  return applyRegistrationDefaults(row, sheet ?? registrationCommonSheet)
+  return applyRegistrationDefaults(row, registrationInformationSheet(sheet ?? registrationCommonSheet))
 }
 const gridTextStyle: CSSProperties = { fieldSizing: 'content', height: 'auto', minHeight: 32, maxHeight: 46, lineHeight: '16px', paddingBlock: 6, resize: 'none', overflowY: 'auto', overflowWrap: 'anywhere' }
 function GridTextInput({ singleLine = true, onChange, ...props }: ComponentProps<'textarea'> & { singleLine?: boolean }) {
@@ -47,7 +47,7 @@ function OfficialColumnInput({ column, value, listId, onChange, expandText = fal
     {value && !column.choices.includes(value) && <option value={value}>{value}</option>}
     {column.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
   </select>
-  if (expandText && !column.choices?.length) return <GridTextInput className={`${className} block w-full min-w-0`} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />
+  if (expandText && !column.choices?.length) return <GridTextInput singleLine={column.label !== SEARCH_TAGS_FIELD} className={`${className} block w-full min-w-0`} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />
   return <><input className={className} list={column.choices?.length ? listId : undefined} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />{column.choices?.length ? <datalist id={listId}>{column.choices.map((choice) => <option key={choice} value={choice} />)}</datalist> : null}</>
 }
 const submissionText = (row: RegistrationRow) => row.submission ? { queued: '등록 대기', running: '등록 중', login_required: '로그인 필요', failed: '등록 실패', succeeded: '등록 완료' }[row.submission.status] : '미등록'
@@ -230,7 +230,7 @@ export function CoupangRegistrationWorkbench() {
       const match = matches.get(row.id)
       if (!match || row.templateId && row.sheetName || submissionLocked(row)) return row
       const sheet = value.templates.find((template) => template.id === match.templateId)?.sheets.find((sheet) => sheet.name === match.sheetName)
-      return sheet ? applyRegistrationDefaults({ ...row, templateId: match.templateId, sheetName: match.sheetName }, sheet) : row
+      return sheet ? applyRegistrationDefaults({ ...row, templateId: match.templateId, sheetName: match.sheetName }, registrationInformationSheet(sheet)) : row
     }) }))
     setDirty(true)
   }, [busy, stage, sheetMappingsReady, draft.rows, draft.templates, categoryContexts, sheetMappings])
@@ -280,7 +280,7 @@ export function CoupangRegistrationWorkbench() {
       update((value) => ({
         ...value,
         templates: value.templates.some((item) => item.id === connected.id) ? value.templates : [...value.templates, connected],
-        rows: rowIds ? value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? applyRegistrationDefaults({ ...row, templateId, sheetName }, connected.sheets.find((sheet) => sheet.name === sheetName)!) : row) : value.rows,
+        rows: rowIds ? value.rows.map((row) => rowIds.includes(row.id) && !submissionLocked(row) ? applyRegistrationDefaults({ ...row, templateId, sheetName }, registrationInformationSheet(connected.sheets.find((sheet) => sheet.name === sheetName)!)) : row) : value.rows,
       }))
       if (!rowIds) setTemplateChoice(choice)
       const codes = [...new Set(draft.rows.filter((row) => rowIds?.includes(row.id) && !submissionLocked(row) && !row.bundleComponents && /^\d{1,100}$/.test(row.sourceCode)).map((row) => row.sourceCode))]
@@ -416,7 +416,7 @@ export function CoupangRegistrationWorkbench() {
   useEffect(() => {
     if (busy || stage !== 'information') return
     const targets = stageRows.filter((row) => !submissionLocked(row) && !row.bundleComponents && !!row.sourceCode
-      && (!row.productMaster || !row.detailImages.length || !!row.productMaster.qualityPdf && qualityPdfNeedsConversion(row, row.productMaster.qualityPdf.id, draft.labels))
+      && (!row.productMaster || !row.detailImages.length || row.productMaster.productKeywords === undefined && row.fields[SEARCH_TAGS_FIELD] === undefined || !!row.productMaster.qualityPdf && qualityPdfNeedsConversion(row, row.productMaster.qualityPdf.id, draft.labels))
       && !connectedRows.current.has(`${draftSession.current}:${row.id}:${row.sourceCode}`))
     if (!targets.length) return
     for (const row of targets) connectedRows.current.add(`${draftSession.current}:${row.id}:${row.sourceCode}`)
@@ -928,7 +928,7 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
   const [preview, setPreview] = useState(false)
   const categoryFileInput = useRef<HTMLInputElement>(null)
   const sheet = draft.templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
-  const displayedSheet = sheet ?? registrationCommonSheet
+  const displayedSheet = registrationInformationSheet(sheet ?? registrationCommonSheet)
   const computed = rowFields(row, draft.rounding, draft.labels)
   const prices = calculatePrice(row, draft.rounding)
   const automatic = new Set(['상품명', '공급가', '쿠팡 판매가', '대표이미지 파일명', '추가이미지 파일명', '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD])

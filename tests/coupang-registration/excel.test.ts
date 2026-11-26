@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
-import { blankDraft, calculatePrice, LABEL_FIELD, rowIssues } from '@/lib/coupang-registration/model'
+import { AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, calculatePrice, LABEL_FIELD, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
 import { draftSchema } from '@/lib/coupang-registration/schema'
+
+const requiredFields = { [SEARCH_TAGS_FIELD]: '선반,수납', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT }
 
 async function fixture(requiredNotice = false) {
   const workbook = new ExcelJS.Workbook()
@@ -26,7 +28,7 @@ async function fixture(requiredNotice = false) {
     sheet.getCell(index + 9, 9).dataValidation = { type: 'list', formulae: ['"중국,한국"'] }
   }
   const parsed = await readTemplate(Buffer.from(await workbook.xlsx.writeBuffer()), 'sample.xlsx')
-  const row = { ...parsed.rows[0], primaryImage: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], label: 'https://cdn.tapeoff.kr/label.jpg' }
+  const row = { ...parsed.rows[0], fields: { ...parsed.rows[0].fields, ...requiredFields }, primaryImage: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], label: 'https://cdn.tapeoff.kr/label.jpg' }
   return { draft: { ...blankDraft(), templates: [parsed.template], rows: [row] }, parsed }
 }
 

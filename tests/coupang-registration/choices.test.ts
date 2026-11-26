@@ -4,8 +4,10 @@ import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
-import { applyRegistrationDefaults, blankDraft, createRegistrationRow, rowIssues } from '@/lib/coupang-registration/model'
+import { applyRegistrationDefaults, AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, createRegistrationRow, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
 import { draftSchema } from '@/lib/coupang-registration/schema'
+
+const requiredFields = { [SEARCH_TAGS_FIELD]: '선반,수납', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT }
 
 function fixture() {
   const workbook = new ExcelJS.Workbook()
@@ -26,7 +28,7 @@ describe('official template choice metadata', () => {
     const paths = ['벽선반 (77939)', '스탠드선반 (77940)']
     sheet.getCell('C9').dataValidation = { type: 'list', formulae: ['"' + paths.join(',') + '"'], showErrorMessage: false }
     const { template } = await parse(workbook)
-    const row = applyRegistrationDefaults({ ...createRegistrationRow(), name: '선반 3단', templateId: template.id, sheetName: sheet.name, priceMode: 'manual', manualSupplyPrice: 13000, saleMode: 'manual', manualSalePrice: 21667 }, template.sheets[0])
+    const row = applyRegistrationDefaults({ ...createRegistrationRow(), name: '선반 3단', templateId: template.id, sheetName: sheet.name, priceMode: 'manual', manualSupplyPrice: 13000, saleMode: 'manual', manualSalePrice: 21667, fields: { ...requiredFields } }, template.sheets[0])
     expect(row.fields.카테고리).toBeUndefined()
     const draft = draftSchema.parse({ ...blankDraft(), templates: [template], rows: [{ ...row, fields: { ...row.fields, 카테고리: paths[1] } }] })
     expect(draft.templates[0].sheets[0].columns.find((column) => column.label === '카테고리')?.choices).toEqual(paths)

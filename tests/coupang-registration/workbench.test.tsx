@@ -382,6 +382,41 @@ describe('registration pricing workbench', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
   })
 
+  it('backfills Product Management keywords into required fields and saves manual changes with packaging units', async () => {
+    const cachedMaster = {
+      itemId: 'existing-master', match: 'sku' as const, noticeSize: '25*12*41cm', noticeWeight: '400g',
+      noticeMaterial: '캔버스', noticeManufacturer: '제조공장', noticeCountry: '중국',
+    }
+    const row = confirmPricing(createRegistrationRow({ ...source, productMaster: cachedMaster }, '베이지'))
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [row] })
+    const keywords = '수납가방,캔버스\n마미백'
+    const fallback = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/catalog') && init?.method === 'POST'
+      ? { ok: true, json: async () => ({ products: [{ ...source, productMaster: { ...cachedMaster, productKeywords: keywords } }] }) }
+      : fallback(url, init)))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    const information = await screen.findByRole('row', { name: `${row.name} 상품등록정보` })
+    await waitFor(() => expect(within(information).getByLabelText('검색태그 *')).toHaveValue(keywords))
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+    expect(within(information).getByLabelText('품질보증기준 *')).toHaveValue('제품 이상 시 공정거래위원회 고시 소비자 분쟁해결기준에 의거 보상합니다')
+    expect(within(information).getByLabelText('A/S 책임자와 전화번호 *')).toHaveValue('1577-7011')
+    expect(screen.getByRole('columnheader', { name: '한 개 단품 포장 무게 (g)' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '한 개 단품 포장 사이즈 (mm)' })).toBeInTheDocument()
+    expect(within(information).getByLabelText('한 개 단품 포장 무게')).toHaveValue('400')
+    expect(within(information).getByLabelText('한 개 단품 포장 사이즈')).toHaveValue('270*140*430')
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/catalog') && init?.method === 'POST')).toHaveLength(1)
+
+    fireEvent.change(within(information).getByLabelText('검색태그 *'), { target: { value: '직접 태그\n수납' } })
+    fireEvent.change(within(information).getByLabelText('품질보증기준 *'), { target: { value: '직접 확인한 보증기준' } })
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({
+      fields: { 검색태그: '직접 태그\n수납', 품질보증기준: '직접 확인한 보증기준', 'A/S 책임자와 전화번호': '1577-7011' },
+      productMaster: { productKeywords: keywords },
+    }))
+  })
+
   it('saves editable common information before an official file and renders only actual headers after upload', async () => {
     const row = confirmPricing({ ...createRegistrationRow(source, '베이지'), priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500, label: '내 라벨.jpg' })
     const initial = { ...blankDraft(), name: '내 수동 등록 정보', rows: [row], labels: [{ name: '내 라벨.jpg', data: 'kept' }] }

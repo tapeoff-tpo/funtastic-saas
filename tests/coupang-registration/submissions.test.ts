@@ -10,7 +10,7 @@ vi.mock('@/lib/coupang-registration/store', () => ({ loadDraft: mocks.load, ensu
 vi.mock('@/lib/coupang-registration/excel', () => ({ buildRegistrationArchive: mocks.archive }))
 
 import { assertCompletedEvidence, getSubmissions, recordSubmissionEvent, RegistrationConflict, submitRegistration, type SubmissionEvent } from '@/lib/coupang-registration/submissions'
-import { applyRegistrationSubmission, blankDraft, confirmPricing, createRegistrationRow, getRegistrationStage, type RegistrationDraft } from '@/lib/coupang-registration/model'
+import { applyRegistrationSubmission, AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, confirmPricing, createRegistrationRow, getRegistrationStage, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD, type RegistrationDraft } from '@/lib/coupang-registration/model'
 
 const workspace = '7c3ff1ad-3b8c-4fa1-9efe-961b048694c0'
 const draftId = 'f7b209a8-a3d7-41c5-b445-8d87e7a39f5d'
@@ -22,7 +22,9 @@ const dialect = new PgDialect()
 const query = (statement: SQL) => dialect.sqlToQuery(statement)
 
 function fixture(): RegistrationDraft {
-  const row = confirmPricing({ ...createRegistrationRow(), id: 'row-1', name: '샘플 옵션', templateId: 'template-1', sheetName: 'QF_test', priceMode: 'manual', manualSupplyPrice: 1000, saleMode: 'manual', manualSalePrice: 2000 }, 1, createdAt)
+  const row = confirmPricing({ ...createRegistrationRow(), id: 'row-1', name: '샘플 옵션', templateId: 'template-1', sheetName: 'QF_test', priceMode: 'manual', manualSupplyPrice: 1000, saleMode: 'manual', manualSalePrice: 2000,
+    fields: { [SEARCH_TAGS_FIELD]: '샘플,옵션', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT },
+  }, 1, createdAt)
   return {
     ...blankDraft(), rows: [row],
     templates: [{ id: 'template-1', name: 'template.xlsx', file: { name: 'template.xlsx', data: '' }, sheets: [{ name: 'QF_test', columns: ['상품명', '공급가', '쿠팡 판매가'].map((label, index) => ({ column: index + 1, label, requirement: '필수', guide: '' })) }] }],

@@ -3,8 +3,10 @@ import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import { buildRegistrationArchive, readTemplate } from '@/lib/coupang-registration/excel'
-import { applyRegistrationDefaults, blankDraft, createRegistrationRow, registrationFieldKey, registrationFieldValue, rowIssues, type RegistrationDraft, type TemplateSheet } from '@/lib/coupang-registration/model'
+import { applyRegistrationDefaults, AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, createRegistrationRow, registrationFieldKey, registrationFieldValue, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD, type RegistrationDraft, type TemplateSheet } from '@/lib/coupang-registration/model'
 import { draftSchema, rowSchema } from '@/lib/coupang-registration/schema'
+
+const requiredFields = { [SEARCH_TAGS_FIELD]: '선반,수납', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT }
 
 async function fixture() {
   const workbook = new ExcelJS.Workbook()
@@ -15,7 +17,7 @@ async function fixture() {
   sheet.getRow(9).values = ['선반 3단', 13000, 21667, '완전 조립', '고객직접설치', '브라운', '우드 브라운']
   const bytes = Buffer.from(await workbook.xlsx.writeBuffer())
   const parsed = await readTemplate(bytes, '공식 선반 양식.xlsx')
-  const draft: RegistrationDraft = { ...blankDraft(), templates: [parsed.template], rows: parsed.rows }
+  const draft: RegistrationDraft = { ...blankDraft(), templates: [parsed.template], rows: parsed.rows.map(row => ({ ...row, fields: { ...row.fields, ...requiredFields } })) }
   return { draft, row: draft.rows[0], sheet: parsed.template.sheets[0] }
 }
 
@@ -46,7 +48,7 @@ describe('independent official columns with duplicate labels', () => {
     const { draft, row, sheet } = await fixture()
     const firstColor = sheet.columns[5]
     const secondColor = sheet.columns[6]
-    const legacy = { ...row, fields: { 상품명: row.name, 색상: '기존 색상', 설치지원방식: '기존 설치 방식' } }
+    const legacy = { ...row, fields: { ...requiredFields, 상품명: row.name, 색상: '기존 색상', 설치지원방식: '기존 설치 방식' } }
     expect(registrationFieldValue(legacy, sheet, firstColor)).toBe('기존 색상')
     expect(registrationFieldValue(legacy, sheet, secondColor)).toBe('기존 색상')
     expect(rowIssues(legacy, { ...draft, rows: [legacy] })).toEqual([])

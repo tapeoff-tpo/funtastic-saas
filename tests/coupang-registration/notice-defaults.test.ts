@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyProductMasterDefaults, applyRegistrationDefaults, createRegistrationRow, PACKAGING_SIZE_FIELD, PACKAGING_WEIGHT_FIELD, registrationCommonSheet, registrationFieldKey, registrationFieldValue, type RegistrationProductMaster, type RegistrationRow, type TemplateSheet } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, createRegistrationRow, PACKAGING_SIZE_FIELD, PACKAGING_WEIGHT_FIELD, registrationCommonSheet, registrationFieldKey, registrationFieldValue, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD, type RegistrationProductMaster, type RegistrationRow, type TemplateSheet } from '@/lib/coupang-registration/model'
 import { rowSchema } from '@/lib/coupang-registration/schema'
 
 const master: RegistrationProductMaster = {
@@ -44,11 +44,13 @@ describe('known original notice data', () => {
     expect(result.fields).not.toHaveProperty('구성품')
   })
 
-  it('offers agreed common values without treating them as official requirements or guessing certifications', () => {
+  it('offers agreed common values and the three requested requirements without guessing certifications', () => {
     const result = applyRegistrationDefaults(row(), registrationCommonSheet)
     expect(result.fields).toMatchObject({ 브랜드: '생활살림', '상품 바코드': '바코드 없음(쿠팡 바코드 생성 요청)', 수입자: '테이포프주식회사', '박스 내 SKU 수량': '20', 크기: master.noticeSize, 구성품: master.noticeComponents })
-    expect(registrationCommonSheet.columns.every(column => column.requirement === '공통정보')).toBe(true)
-    for (const name of ['인증정보', 'KC 인증정보', '과세여부', '출시 연도', 'A/S 책임자와 전화번호']) expect(result.fields).not.toHaveProperty(name)
+    expect(registrationCommonSheet.columns.filter(column => column.requirement === '필수').map(column => column.label)).toEqual([SEARCH_TAGS_FIELD, WARRANTY_FIELD, AS_CONTACT_FIELD])
+    expect(registrationCommonSheet.columns.filter(column => ![SEARCH_TAGS_FIELD, WARRANTY_FIELD, AS_CONTACT_FIELD].includes(column.label)).every(column => column.requirement === '공통정보')).toBe(true)
+    expect(result.fields).toMatchObject({ [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT })
+    for (const name of ['인증정보', 'KC 인증정보', '과세여부', '출시 연도']) expect(result.fields).not.toHaveProperty(name)
     expect(applyRegistrationDefaults(row({ productMaster: { ...master, noticeSize: '50*30*30cm' } }), registrationCommonSheet).fields['박스 내 SKU 수량']).toBe('1')
   })
 

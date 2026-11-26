@@ -1,9 +1,12 @@
 import {
   isAutomaticTemplateColumn,
   LABEL_FIELD,
+  PACKAGING_SIZE_FIELD,
+  PACKAGING_WEIGHT_FIELD,
   registrationCommonSheet,
   registrationFieldKey,
   registrationFieldValue,
+  registrationInformationSheet,
   type RegistrationDraft,
   type RegistrationRow,
   type TemplateColumn,
@@ -50,6 +53,13 @@ const dedicatedFields = new Set([
   '상세이미지 파일명', 'HTML 상품 상세 컨텐츠', LABEL_FIELD,
 ])
 
+/** Units describe the screen header; official labels and saved field keys stay unchanged. */
+export function informationHeaderLabel(label: string): string {
+  if (label === PACKAGING_SIZE_FIELD) return `${label} (mm)`
+  if (label === PACKAGING_WEIGHT_FIELD) return `${label} (g)`
+  return label
+}
+
 /** Separate tables by the exact original file and sheet, retaining the original rows. */
 export function groupInformationRows(
   rows: readonly RegistrationRow[],
@@ -73,7 +83,7 @@ export function groupInformationRows(
   return [...groups.values()]
 }
 
-/** Keep every editable original header and each cell's original field key. */
+/** Keep original headers and keys alongside the shared required registration information. */
 export function buildInformationColumns(
   rows: readonly RegistrationRow[],
   templates: RegistrationDraft['templates'],
@@ -84,7 +94,7 @@ export function buildInformationColumns(
   for (const row of rows) {
     const officialSheet = templates.find(template => template.id === row.templateId)
       ?.sheets.find(sheet => sheet.name === row.sheetName)
-    const sheet = officialSheet ?? registrationCommonSheet
+    const sheet = registrationInformationSheet(officialSheet ?? registrationCommonSheet)
     const occurrences = new Map<string, number>()
     const cells = new Map<string, InformationCell>()
 
@@ -108,7 +118,7 @@ export function buildInformationColumns(
       } else {
         headers.set(key, {
           key, label: column.label, occurrence,
-          headerLabel: occurrence === 1 ? column.label : `${column.label} ${occurrence}`,
+          headerLabel: occurrence === 1 ? informationHeaderLabel(column.label) : `${informationHeaderLabel(column.label)} ${occurrence}`,
           requiredAny: required, conditionalAny: conditional,
         })
       }

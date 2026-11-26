@@ -27,6 +27,7 @@ const productMaster = z.object({
   noticeCountry: z.string().max(1000),
   noticeComponents: text.optional(),
   noticeCapacity: z.string().max(1000).optional(),
+  productKeywords: text.optional(),
   qualityPdf: z.object({ id: z.string().min(1).max(100), fileName: z.string().min(1).max(500), contentType: z.string().min(1).max(160) }).optional(),
 })
 export const rowSchema = z.object({

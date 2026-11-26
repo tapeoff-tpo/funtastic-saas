@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: { execute: mocks.execute } }))
@@ -32,6 +33,26 @@ describe('Coupang registration Product Management lookup', () => {
     ])
     const result = await findRegistrationProductMasters('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
     expect(result.has('1471')).toBe(false)
+  })
+
+  it('uses the matched product’s stored keywords without inventing or reformatting tags', async () => {
+    mocks.execute.mockResolvedValue([
+      { ...base, productKeywords: '  수납가방, 기저귀가방\n여행용 가방  ' },
+      { ...base, itemId: 'different-name-match', skuMatch: false, productKeywords: '다른 상품 키워드' },
+    ])
+    const result = await findRegistrationProductMasters('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+    expect(result.get('1471')).toMatchObject({ itemId: 'item-1', match: 'sku', productKeywords: '수납가방, 기저귀가방\n여행용 가방' })
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0][0])
+    expect(query.sql).toContain('item.product_keywords AS "productKeywords"')
+    expect(query.sql).toContain('source."productKeywords"')
+    expect(query.sql).toMatch(/WHERE item\.user_id = \$\d+::uuid/)
+    expect(query.params).toContain('workspace-owner')
+  })
+
+  it.each([null, '', '  ', undefined])('leaves missing product keywords empty for manual confirmation (%s)', async (productKeywords) => {
+    mocks.execute.mockResolvedValue([{ ...base, productKeywords }])
+    const result = await findRegistrationProductMasters('workspace-owner', [{ id: '1471', name: '마미백 플러스', skus: ['112361-0001'] }])
+    expect(result.get('1471')).not.toHaveProperty('productKeywords')
   })
 
   it('carries stored contents and capacity only when provided by the matching product', async () => {

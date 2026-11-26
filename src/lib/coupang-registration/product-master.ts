@@ -14,6 +14,7 @@ type MasterMatchRow = {
   noticeCountry: string | null
   noticeComponents?: string | null
   noticeCapacity?: string | null
+  productKeywords?: string | null
   qualityPdfId: string | null
   qualityPdfFileName: string | null
   qualityPdfContentType: string | null
@@ -42,6 +43,7 @@ function toMaster(row: MasterMatchRow, match: RegistrationProductMaster['match']
     noticeCountry: text(row.noticeCountry),
     ...(text(row.noticeComponents) ? { noticeComponents: text(row.noticeComponents) } : {}),
     ...(text(row.noticeCapacity) ? { noticeCapacity: text(row.noticeCapacity) } : {}),
+    ...(text(row.productKeywords) ? { productKeywords: text(row.productKeywords) } : {}),
     ...(row.qualityPdfId && row.qualityPdfFileName && row.qualityPdfContentType
       ? { qualityPdf: { id: row.qualityPdfId, fileName: row.qualityPdfFileName, contentType: row.qualityPdfContentType } }
       : {}),
@@ -83,6 +85,7 @@ export async function findRegistrationProductMasters(userId: string, products: M
           item.notice_country AS "noticeCountry",
           item.notice_components AS "noticeComponents",
           item.notice_capacity AS "noticeCapacity",
+          item.product_keywords AS "productKeywords",
           attachment.id::text AS "qualityPdfId",
           attachment.file_name AS "qualityPdfFileName",
           attachment.content_type AS "qualityPdfContentType"
@@ -123,6 +126,7 @@ export async function findRegistrationProductMasters(userId: string, products: M
         source."noticeCountry",
         source."noticeComponents",
         source."noticeCapacity",
+        source."productKeywords",
         source."qualityPdfId",
         source."qualityPdfFileName",
         source."qualityPdfContentType"

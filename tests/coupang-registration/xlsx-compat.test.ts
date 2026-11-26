@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { readTemplate, buildRegistrationArchive } from '@/lib/coupang-registration/excel'
-import { blankDraft } from '@/lib/coupang-registration/model'
+import { AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
 import { compatibleSpreadsheetXml, loadRegistrationWorkbook } from '@/lib/coupang-registration/xlsx-compat'
 
 const namespace = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -57,7 +57,9 @@ describe('Coupang SpreadsheetML namespace compatibility', () => {
     expect(loaded.getWorksheet('QF_2379_선반')?.getCell('F9').formula).toBe('"<x:formula>"')
     expect(loaded.getWorksheet('QF_2379_선반')?.getCell('E9').value).toMatchObject({ richText: [{ text: '문자열 <x:sheet> & x:row', font: { bold: true } }, { text: ' 보존' }] })
 
-    const draft = { ...blankDraft(), templates: [template], rows: rows.map((row) => ({ ...row, primaryImage: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], label: 'https://cdn.tapeoff.kr/label.jpg' })) }
+    const draft = { ...blankDraft(), templates: [template], rows: rows.map((row) => ({ ...row, primaryImage: 'https://cdn.tapeoff.kr/front.jpg', detailImages: ['https://cdn.tapeoff.kr/detail.jpg'], label: 'https://cdn.tapeoff.kr/label.jpg',
+      fields: { ...row.fields, [SEARCH_TAGS_FIELD]: '선반,수납장', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT },
+    })) }
     const archive = await JSZip.loadAsync(await buildRegistrationArchive(draft))
     const result = await loadRegistrationWorkbook(await archive.file('견적서/공식원본_등록용.xlsx')!.async('nodebuffer'))
     expect(result.getWorksheet('HQF_choices')?.state).toBe('veryHidden')

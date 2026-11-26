@@ -4,12 +4,13 @@ import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, t
 import { Dialog } from '@base-ui/react/dialog'
 import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationDate, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationProductMaster, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
 import { matchCategorySheet, type SavedSheetMapping } from '@/lib/coupang-registration/sheet-matching'
 import { useWorkbenchNavigation, type RegistrationStage } from './use-workbench-navigation'
 import { buildInformationColumns, groupInformationRows } from './information-columns'
+import { CategoryTemplatePicker } from './category-template-picker'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -364,10 +365,15 @@ export function CoupangRegistrationWorkbench() {
     if (!targets.length) return
     await run('상품·이미지·품질표시 연결 중', async () => {
       const matched: CatalogProduct[] = []
+      const rowMasters = new Map<string, RegistrationProductMaster>()
       for (let start = 0; start < targets.length; start += 30) {
         const chunk = targets.slice(start, start + 30)
-        const response = await postJson('/catalog', { names: [], codes: [...new Set(chunk.map((row) => row.sourceCode).filter(Boolean))] })
+        const response = await postJson('/catalog', {
+          names: [], codes: [...new Set(chunk.map((row) => row.sourceCode).filter(Boolean))],
+          rows: chunk.map(({ id, sourceCode, name, sourceName, optionName, internalSku }) => ({ id, sourceCode, name, sourceName, optionName, internalSku })),
+        })
         matched.push(...response.products)
+        for (const [id, master] of Object.entries(response.productMasters ?? {})) rowMasters.set(id, master as RegistrationProductMaster)
       }
       const products = [...new Map(matched.map((product) => [product.code, product])).values()]
       const targetIds = new Set(targets.map((row) => row.id))
@@ -375,7 +381,8 @@ export function CoupangRegistrationWorkbench() {
         if (!targetIds.has(row.id)) return row
         const match = matchCatalog(row, products)
         if (!match) return row
-        return applyProductMasterDefaults(attachCatalog(row, match))
+        const master = rowMasters.get(row.id)
+        return applyProductMasterDefaults(attachCatalog(row, master ? { ...match, productMaster: master } : match))
       })
       const conversionRows = linkedRows.filter((row) => {
         const qualityPdf = row.productMaster?.qualityPdf
@@ -417,7 +424,6 @@ export function CoupangRegistrationWorkbench() {
   useEffect(() => {
     if (busy || stage !== 'information') return
     const targets = stageRows.filter((row) => !submissionLocked(row) && !row.bundleComponents && !!row.sourceCode
-      && (!row.productMaster || !row.detailImages.length || row.productMaster.productKeywords === undefined && row.fields[SEARCH_TAGS_FIELD] === undefined || !!row.productMaster.qualityPdf && qualityPdfNeedsConversion(row, row.productMaster.qualityPdf.id, draft.labels))
       && !connectedRows.current.has(`${draftSession.current}:${row.id}:${row.sourceCode}`))
     if (!targets.length) return
     for (const row of targets) connectedRows.current.add(`${draftSession.current}:${row.id}:${row.sourceCode}`)
@@ -988,11 +994,7 @@ function BundleEditor({ components, prices, onAdd, onChange, readOnly = false }:
 }
 
 function CategorySelect({ label, value, templates, onChange }: { label: string; value: string; templates: CategoryTemplate[]; onChange: (value: string) => void }) {
-  const hasCategories = templates.some((template) => template.sheets.length > 0)
-  return <select className={`${inputClass} max-w-full`} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-    <option value="" disabled={!hasCategories}>{hasCategories ? '업로드한 양식 선택' : '카테고리 엑셀 업로드 필요'}</option>
-    {templates.flatMap((template) => template.sheets.map((sheet) => <option key={`${template.id}:${sheet.name}`} value={`${template.id}:${sheet.name}`}>{sheet.name.replace(/^QF_\d+_/, '')} · {template.name}</option>))}
-  </select>
+  return <CategoryTemplatePicker label={label} value={value} templates={templates} onChange={onChange} />
 }
 
 function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory, onUpload, onAddComponent }: { row: RegistrationRow; draft: RegistrationDraft; categoryTemplates: CategoryTemplate[]; issues: string[]; onPatch: (patch: Partial<RegistrationRow>) => void; onCategory: (choice: string) => void; onUpload: (files: FileList | null) => void; onAddComponent: () => void }) {

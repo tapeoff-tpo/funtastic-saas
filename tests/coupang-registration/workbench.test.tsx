@@ -417,6 +417,69 @@ describe('registration pricing workbench', () => {
     }))
   })
 
+  it('refreshes a fully cached selected option by its own SKU and fills search tags, duplicate colors and size without losing manual values', async () => {
+    const cachedMaster = {
+      itemId: 'cached-master', match: 'sku' as const, noticeSize: '20*10*30cm', noticeWeight: '400g',
+      noticeMaterial: '캔버스', noticeManufacturer: '제조공장', noticeCountry: '중국', productKeywords: '예전 검색태그',
+    }
+    const freshMaster = { ...cachedMaster, itemId: 'beige-master', noticeSize: '28*13*40cm', productKeywords: '기저귀가방,마미백\n캔버스' }
+    const sheet: TemplateSheet = { name: 'QF_101_기저귀가방', columns: [
+      { column: 1, label: '상품명', requirement: '필수', guide: '' },
+      { column: 2, label: '검색태그', requirement: '선택', guide: '' },
+      { column: 3, label: '색상', requirement: '필수', guide: '' },
+      { column: 4, label: '사이즈', requirement: '필수', guide: '' },
+      { column: 5, label: '색상', requirement: '선택', guide: '' },
+    ] }
+    const template = manualTemplate('beige-original', '기저귀가방_최신.xlsx', sheet.name, sheet.columns)
+    const initial = confirmPricing({
+      ...createRegistrationRow({ ...source, productMaster: cachedMaster }, '베이지'),
+      templateId: template.id, sheetName: sheet.name,
+      priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500,
+    })
+    const row = {
+      ...initial,
+      fields: { ...initial.fields, 검색태그: cachedMaster.productKeywords, 사이즈: cachedMaster.noticeSize },
+      defaultedFields: { ...initial.defaultedFields, 검색태그: cachedMaster.productKeywords, 사이즈: cachedMaster.noticeSize },
+    }
+    const saved = mockSavedDraft({ ...blankDraft(), rows: [row], templates: [template] })
+    const fallback = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => url.endsWith('/catalog') && init?.method === 'POST'
+      ? { ok: true, json: async () => ({ products: [source], productMasters: { [row.id]: freshMaster } }) }
+      : fallback(url, init)))
+    render(<CoupangRegistrationWorkbench />)
+    await screen.findByRole('option', { name: /단계 작업/ })
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    let information = await screen.findByRole('row', { name: row.name + ' 상품등록정보' })
+    await waitFor(() => expect(within(information).getByLabelText('검색태그')).toHaveValue(freshMaster.productKeywords))
+    expect(within(information).getByLabelText('사이즈')).toHaveValue(freshMaster.noticeSize)
+    for (const color of within(information).getAllByLabelText('색상')) expect(color).toHaveValue('베이지')
+    expect(within(information).getByText('17,700원')).toBeInTheDocument()
+    expect(within(information).getByText('29,500원')).toBeInTheDocument()
+    const refreshes = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/catalog') && init?.method === 'POST')
+    expect(refreshes()).toHaveLength(1)
+    expect(JSON.parse(String(refreshes()[0][1]!.body))).toMatchObject({ names: [], codes: ['1471'], rows: [{ id: row.id, sourceCode: '1471', internalSku: '112361-0001', optionName: '베이지' }] })
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+
+    const picker = await openCategoryPicker(information)
+    expect(within(picker).getByRole('button', { name: `${sheet.name} · ${template.name} 선택` })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(picker).getByRole('button', { name: '양식 선택 닫기' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '카테고리 엑셀 양식 선택' })).not.toBeInTheDocument())
+    fireEvent.change(within(information).getByLabelText('검색태그'), { target: { value: '내가 확인한 태그' } })
+    fireEvent.change(within(information).getByLabelText('사이즈'), { target: { value: '직접 확인한 치수' } })
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({
+      internalSku: '112361-0001', manualSupplyPrice: 17700, manualSalePrice: 29500,
+      fields: { 검색태그: '내가 확인한 태그', 사이즈: '직접 확인한 치수' }, productMaster: freshMaster,
+    }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
+    await waitFor(() => expect(refreshes()).toHaveLength(2))
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+    information = screen.getByRole('row', { name: row.name + ' 상품등록정보' })
+    expect(within(information).getByLabelText('검색태그')).toHaveValue('내가 확인한 태그')
+    expect(within(information).getByLabelText('사이즈')).toHaveValue('직접 확인한 치수')
+  })
+
   it('saves editable common information before an official file and renders only actual headers after upload', async () => {
     const row = confirmPricing({ ...createRegistrationRow(source, '베이지'), priceMode: 'manual', manualSupplyPrice: 17700, saleMode: 'manual', manualSalePrice: 29500, label: '내 라벨.jpg' })
     const initial = { ...blankDraft(), name: '내 수동 등록 정보', rows: [row], labels: [{ name: '내 라벨.jpg', data: 'kept' }] }
@@ -440,11 +503,11 @@ describe('registration pricing workbench', () => {
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     fireEvent.change(within(card).getByLabelText(`${row.name} 카테고리 엑셀 파일`), { target: { files: [new File(['official'], template.name)] } })
     await chooseUploadedSheet(row.name, template)
-    expect(await screen.findByLabelText('인증정보')).toHaveValue('')
+    expect(await screen.findByLabelText('인증정보')).toHaveValue('해당사항없음')
     card = screen.getByRole('row', { name: `${row.name} 상품등록정보` })
     expect(within(card).queryByLabelText('제조국')).not.toBeInTheDocument()
     expect(within(card).getByLabelText('브랜드')).toHaveValue('직접 입력한 브랜드')
-    expect(within(card).getByRole('list')).toHaveTextContent('인증정보 누락')
+    expect(within(card).queryByText('인증정보 누락')).not.toBeInTheDocument()
     fireEvent.change(within(card).getByLabelText('인증정보'), { target: { value: '사용자 확인 정보' } })
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
     await waitFor(() => {
@@ -745,7 +808,10 @@ describe('registration pricing workbench', () => {
     await screen.findByRole('row', { name: `${row.name} 상품등록정보` })
     await waitFor(() => expect(screen.getByLabelText('카테고리 엑셀 파일', { exact: true })).toBeEnabled())
     fireEvent.change(screen.getByLabelText('카테고리 엑셀 파일', { exact: true }), { target: { files: [new File(['global'], template.name)] } })
-    await screen.findAllByRole('option', { name: new RegExp(template.name.replace('.', '\\.')) })
+    const picker = await openCategoryPicker(screen.getByRole('row', { name: `${row.name} 상품등록정보` }))
+    expect(await within(picker).findByRole('button', { name: `${template.sheets[0].name} · ${template.name} 선택` })).toBeEnabled()
+    fireEvent.click(within(picker).getByRole('button', { name: '양식 선택 닫기' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '카테고리 엑셀 양식 선택' })).not.toBeInTheDocument())
     expect(screen.queryByLabelText('전용정보')).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
@@ -755,6 +821,27 @@ describe('registration pricing workbench', () => {
       expect(body?.draft.rows[0]).toMatchObject({ id: row.id, templateId: '', sheetName: '' })
       expect(body?.draft.templates).toHaveLength(1)
     })
+  })
+
+  it('distinguishes identically named category sheets by their original file in the popup and saves the chosen file', async () => {
+    const sheetName = 'QF_2379_가구_수납가구_선반'
+    const older = manualTemplate('older-file', '선반_20261120.xlsx', sheetName, [{ column: 1, label: '상품명', requirement: '필수', guide: '' }])
+    const latest = manualTemplate('latest-file', '선반_20261126.xlsx', sheetName, [{ column: 1, label: '상품명', requirement: '필수', guide: '' }, { column: 2, label: '새 양식 입력항목', requirement: '선택', guide: '' }])
+    const row = { ...confirmPricing(createRegistrationRow(source, '베이지')), sourceCode: '', templateId: older.id, sheetName }
+    mockSavedDraft({ ...blankDraft(), rows: [row], templates: [older, latest] })
+    await loadSavedWorkbench()
+    const picker = await openCategoryPicker(screen.getByRole('row', { name: row.name + ' 상품등록정보' }))
+    expect(within(picker).getByRole('button', { name: `${sheetName} · ${older.name} 선택` })).toBeInTheDocument()
+    expect(within(picker).getByRole('button', { name: `${sheetName} · ${latest.name} 선택` })).toBeInTheDocument()
+    fireEvent.change(within(picker).getByRole('textbox', { name: '카테고리 양식 검색' }), { target: { value: '20261126' } })
+    expect(within(picker).queryByRole('button', { name: `${sheetName} · ${older.name} 선택` })).not.toBeInTheDocument()
+    fireEvent.click(within(picker).getByRole('button', { name: `${sheetName} · ${latest.name} 선택` }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '카테고리 엑셀 양식 선택' })).not.toBeInTheDocument())
+    expect(await screen.findByLabelText('새 양식 입력항목')).toHaveValue('')
+    await waitFor(() => expect(screen.getByRole('button', { name: '등록정보 저장' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: row.id, templateId: latest.id, sheetName }))
+    expect(savedBodies().at(-1)?.draft.templates).toEqual([older, latest])
   })
 
   it('uses every original worksheet header in its own category table and preserves edits while changing sheet filters', async () => {
@@ -838,11 +925,11 @@ describe('registration pricing workbench', () => {
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     await screen.findByLabelText('선반단수')
     const automatic = screen.getByRole('row', { name: first.name + ' 상품등록정보' })
-    expect(within(automatic).getByLabelText('업로드한 카테고리 양식')).toHaveValue(template.id + ':' + shelf)
+    expect(within(automatic).getByRole('button', { name: '업로드한 카테고리 양식' })).toHaveTextContent(shelf.replace(/^QF_\d+_/, ''))
     const ambiguous = screen.getByRole('row', { name: other.name + ' 상품등록정보' })
-    expect(within(ambiguous).getByLabelText('업로드한 카테고리 양식')).toHaveValue('')
+    expect(within(ambiguous).getByRole('button', { name: '업로드한 카테고리 양식' })).toHaveTextContent('업로드한 양식 선택')
     expect(within(ambiguous).getByText(/후보 여러 개/)).toBeInTheDocument()
-    fireEvent.change(within(ambiguous).getByLabelText('업로드한 카테고리 양식'), { target: { value: template.id + ':' + cabinet } })
+    await chooseUploadedSheet(other.name, template, cabinet)
     await waitFor(() => expect(mappings).toHaveLength(1))
     expect(mappings[0]).toMatchObject({ sourceCode: other.sourceCode, targetSheetName: cabinet })
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
@@ -862,7 +949,7 @@ describe('registration pricing workbench', () => {
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: fresh.id } })
     await screen.findByLabelText('서랍단수')
-    expect(screen.getByLabelText('업로드한 카테고리 양식')).toHaveValue('new-download-hash:' + cabinet)
+    expect(screen.getByRole('button', { name: '업로드한 카테고리 양식' })).toHaveTextContent(cabinet.replace(/^QF_\d+_/, ''))
     expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/sheet-mappings') && init?.method === 'POST')).toHaveLength(0)
   })
 
@@ -1306,10 +1393,18 @@ async function openCatalogSearch(query: string) {
   return screen.findByRole('dialog', { name: 'B2B 상품 검색' })
 }
 
-async function chooseUploadedSheet(name: string, template: RegistrationDraft['templates'][number]) {
-  await screen.findAllByRole('option', { name: new RegExp(template.name.replace('.', '\\.')) })
-  await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-  fireEvent.change(within(screen.getByRole('row', { name: name + ' 상품등록정보' })).getByLabelText('업로드한 카테고리 양식'), { target: { value: template.id + ':' + template.sheets[0].name } })
+async function openCategoryPicker(row: HTMLElement) {
+  const trigger = within(row).getByRole('button', { name: '업로드한 카테고리 양식' })
+  await waitFor(() => expect(trigger).toBeEnabled())
+  fireEvent.click(trigger)
+  return screen.findByRole('dialog', { name: '카테고리 엑셀 양식 선택' })
+}
+
+async function chooseUploadedSheet(name: string, template: RegistrationDraft['templates'][number], sheetName = template.sheets[0].name) {
+  const picker = await openCategoryPicker(screen.getByRole('row', { name: name + ' 상품등록정보' }))
+  fireEvent.change(within(picker).getByRole('textbox', { name: '카테고리 양식 검색' }), { target: { value: template.name } })
+  fireEvent.click(await within(picker).findByRole('button', { name: `${sheetName} · ${template.name} 선택` }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '카테고리 엑셀 양식 선택' })).not.toBeInTheDocument())
   await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
 }
 

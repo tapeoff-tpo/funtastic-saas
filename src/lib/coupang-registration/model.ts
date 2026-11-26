@@ -360,6 +360,41 @@ function shouldApplyDefault(current: string | undefined, previousDefault: string
   return current === previousDefault
 }
 
+const optionColors = new Set([
+  '베이지', '블랙', '화이트', '검정', '검정색', '흰색', '그레이', '회색', '네이비', '브라운', '갈색',
+  '핑크', '분홍', '분홍색', '레드', '빨강', '빨간색', '블루', '파랑', '파란색', '그린', '초록', '초록색',
+  '옐로우', '노랑', '노란색', '아이보리', '크림', '퍼플', '보라', '보라색', '라벤더', '민트', '오렌지',
+  '주황', '주황색', '버건디', '카키', '차콜',
+  'beige', 'black', 'white', 'gray', 'grey', 'navy', 'brown', 'pink', 'red', 'blue', 'green', 'yellow',
+  'ivory', 'cream', 'purple', 'lavender', 'mint', 'orange', 'burgundy', 'khaki', 'charcoal',
+])
+
+/** Only a whole option that is a known color can supply a color default. */
+function colorFromOption(optionName: string): string {
+  const color = optionName.normalize('NFKC').trim()
+  return optionColors.has(color.toLowerCase()) ? color : ''
+}
+
+function normalizedDefaultLabel(label: string): string {
+  return label.normalize('NFKC').replace(/[\s()]/g, '')
+}
+
+function agreedColumnDefault(column: TemplateColumn): string | undefined {
+  const label = normalizedDefaultLabel(column.label)
+  let value: string | undefined
+  if (label === '과세여부') value = '과세'
+  else if (label === '거래타입' || label === '거래유형') value = '기타도소매업자'
+  else if (label.startsWith('유통기간')) value = '0'
+  else if (['취급주의사용', '취급주의사유'].includes(label)) value = '해당없음'
+  else if (label.includes('취급') && label.includes('주의') && label.includes('사항')) value = '상세페이지 참고'
+  else if (label.includes('인증')) value = '해당사항없음'
+  if (!value) return
+  const normalized = normalizedDefaultLabel(value)
+  return column.choices?.find(choice => normalizedDefaultLabel(choice) === normalized)
+    ?? (value === '해당없음' ? column.choices?.find(choice => normalizedDefaultLabel(choice) === '해당사항없음') : undefined)
+    ?? value
+}
+
 /**
  * Adds safe Product Management defaults without overwriting a value the user
  * imported or edited. Only a value still equal to a prior automatic default is
@@ -371,6 +406,7 @@ export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRo
   const master = row.bundleComponents ? undefined : row.productMaster
   const defaults: Record<string, string> = {
     품명: row.bundleComponents ? row.name : row.sourceName || row.name,
+    색상: row.bundleComponents ? '' : colorFromOption(row.optionName),
     ...(master ? {
       [PACKAGING_SIZE_FIELD]: packedSizeFromNoticeSize(master.noticeSize),
       [PACKAGING_WEIGHT_FIELD]: packedWeightFromNoticeWeight(master.noticeWeight),
@@ -381,6 +417,8 @@ export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRo
       소재: master.noticeMaterial,
       '주요 소재': master.noticeMaterial,
       크기: master.noticeSize,
+      사이즈: master.noticeSize,
+      치수: master.noticeSize,
       구성품: master.noticeComponents ?? '',
       용량: master.noticeCapacity ?? '',
       '개당 중량': master.noticeWeight,
@@ -431,8 +469,12 @@ export function applyRegistrationDefaults(row: RegistrationRow, sheet: TemplateS
   const fields = { ...row.fields }
   const defaultedFields = { ...(row.defaultedFields ?? {}) }
   let changed = false
+  const firstColorColumn = sheet.columns.find(column => normalizedDefaultLabel(column.label) === '색상')
   for (const column of getEditableRegistrationColumns(sheet.columns)) {
-    const suggested = defaults[column.label]
+    const normalizedLabel = normalizedDefaultLabel(column.label)
+    const colorAlias = normalizedLabel === '색상2' || normalizedLabel === '색상' && column !== firstColorColumn
+    const firstColor = firstColorColumn ? registrationFieldValue({ ...row, fields }, sheet, firstColorColumn) : undefined
+    const suggested = colorAlias ? firstColor : agreedColumnDefault(column) ?? defaults[column.label]
     const key = registrationFieldKey(row, sheet, column)
     const current = registrationFieldValue({ ...row, fields }, sheet, column)
     const previousDefault = registrationFieldValue({ ...row, fields: defaultedFields }, sheet, column)

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { buildRegistrationArchive, buildRegistrationDownload, readTemplate } from '@/lib/coupang-registration/excel'
-import { AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, calculatePrice, LABEL_FIELD, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
+import { applyRegistrationDefaults, AS_CONTACT_DEFAULT, AS_CONTACT_FIELD, blankDraft, calculatePrice, LABEL_FIELD, rowIssues, SEARCH_TAGS_FIELD, WARRANTY_DEFAULT, WARRANTY_FIELD } from '@/lib/coupang-registration/model'
 import { draftSchema } from '@/lib/coupang-registration/schema'
 
 const requiredFields = { [SEARCH_TAGS_FIELD]: '선반,수납', [WARRANTY_FIELD]: WARRANTY_DEFAULT, [AS_CONTACT_FIELD]: AS_CONTACT_DEFAULT }
@@ -33,6 +33,25 @@ async function fixture(requiredNotice = false) {
 }
 
 describe('official Coupang template round trip', () => {
+  it('writes the agreed model name, country and consumer contact into the original notice headers', async () => {
+    const { draft } = await fixture()
+    const original = new ExcelJS.Workbook()
+    await original.xlsx.load(Buffer.from(draft.templates[0].file.data, 'base64') as unknown as ExcelJS.Buffer)
+    const source = original.getWorksheet('QF_100_test')!
+    const headers = ['품명 및 모델명', '제조국(원산지)', '소비자상담 관련 전화번호']
+    headers.forEach((header, index) => { source.getCell(5, index + 11).value = header; source.getCell(6, index + 11).value = '필수' })
+    const parsed = await readTemplate(Buffer.from(await original.xlsx.writeBuffer()), 'sample.xlsx')
+    draft.templates = [parsed.template]
+    const entry = { ...draft.rows[0], name: '마미백 플러스 베이지', templateId: parsed.template.id, sheetName: parsed.template.sheets[0].name }
+    draft.rows = [applyRegistrationDefaults(entry, parsed.template.sheets[0])]
+    const zip = await JSZip.loadAsync(await buildRegistrationArchive(draft))
+    const result = new ExcelJS.Workbook()
+    await result.xlsx.load(await zip.file('견적서/sample_등록용.xlsx')!.async('nodebuffer') as unknown as ExcelJS.Buffer)
+    const sheet = result.getWorksheet('QF_100_test')!
+    expect(headers.map((_, index) => sheet.getCell(5, index + 11).value)).toEqual(headers)
+    expect(['B9', 'K9', 'L9', 'M9'].map(address => sheet.getCell(address).value)).toEqual(['마미백 플러스 베이지', '마미백 플러스 베이지', '중국', '1577-7011'])
+  })
+
   it('imports only populated products and preserves metadata, validation and formulas while replacing prices/images', async () => {
     const { draft, parsed } = await fixture()
     expect(parsed.rows).toHaveLength(2)

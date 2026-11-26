@@ -379,10 +379,13 @@ function normalizedDefaultLabel(label: string): string {
   return label.normalize('NFKC').replace(/[\s()]/g, '')
 }
 
-function agreedColumnDefault(column: TemplateColumn): string | undefined {
+function agreedColumnDefault(column: TemplateColumn, row: RegistrationRow): string | undefined {
   const label = normalizedDefaultLabel(column.label)
   let value: string | undefined
-  if (label === '과세여부') value = '과세'
+  if (label === '품명및모델명') value = row.name
+  else if (label === '제조국원산지') value = '중국'
+  else if (label === '소비자상담관련전화번호') value = AS_CONTACT_DEFAULT
+  else if (label === '과세여부') value = '과세'
   else if (label === '거래타입' || label === '거래유형') value = '기타도소매업자'
   else if (label.startsWith('유통기간')) value = '0'
   else if (['취급주의사용', '취급주의사유'].includes(label)) value = '해당없음'
@@ -474,7 +477,7 @@ export function applyRegistrationDefaults(row: RegistrationRow, sheet: TemplateS
     const normalizedLabel = normalizedDefaultLabel(column.label)
     const colorAlias = normalizedLabel === '색상2' || normalizedLabel === '색상' && column !== firstColorColumn
     const firstColor = firstColorColumn ? registrationFieldValue({ ...row, fields }, sheet, firstColorColumn) : undefined
-    const suggested = colorAlias ? firstColor : agreedColumnDefault(column) ?? defaults[column.label]
+    const suggested = colorAlias ? firstColor : agreedColumnDefault(column, row) ?? defaults[column.label]
     const key = registrationFieldKey(row, sheet, column)
     const current = registrationFieldValue({ ...row, fields }, sheet, column)
     const previousDefault = registrationFieldValue({ ...row, fields: defaultedFields }, sheet, column)

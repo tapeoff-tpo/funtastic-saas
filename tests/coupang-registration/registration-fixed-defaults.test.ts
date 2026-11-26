@@ -10,6 +10,33 @@ const sheet = (...labels: string[]): TemplateSheet => ({ name: 'QF_2_상품정�
 const row = (patch: Partial<RegistrationRow> = {}): RegistrationRow => ({ ...createRegistrationRow(), stage: 'information', templateId: 'original-file', optionName: '베이지', ...patch })
 
 describe('approved editable category defaults', () => {
+  it.each([
+    ['품명 및 모델명', '제조국(원산지)', '소비자상담관련전화번호'],
+    ['품명 및\n모델명', ' 제조국（원산지） ', '소비자상담 관련 전화번호'],
+  ])('fills the approved notice headers using the registration name and exact original keys: %s', (name, country, contact) => {
+    const selected = sheet(name, country, contact)
+    const original = structuredClone(selected)
+    const result = applyRegistrationDefaults(row({ name: '마미백 플러스 베이지', sourceName: '마미백 플러스', productMaster: { ...master, noticeCountry: '한국' } }), selected)
+    expect(result.fields).toEqual({ [name]: '마미백 플러스 베이지', [country]: '중국', [contact]: '1577-7011' })
+    expect(result.defaultedFields).toEqual(result.fields)
+    expect(selected).toEqual(original)
+    expect(applyRegistrationDefaults(result, selected)).toBe(result)
+  })
+
+  it('refreshes an automatic model name after a registration rename while preserving manual values and deliberate clears', () => {
+    const selected = sheet('품명 및 모델명', '제조국(원산지)', '소비자상담관련전화번호')
+    const initial = applyRegistrationDefaults(row({ name: '등록 상품명 베이지', sourceName: '원본 상품명' }), selected)
+    const renamed = applyRegistrationDefaults({ ...initial, name: '수정한 등록 상품명 베이지' }, selected)
+    expect(renamed.fields['품명 및 모델명']).toBe('수정한 등록 상품명 베이지')
+    expect(renamed.defaultedFields?.['품명 및 모델명']).toBe(renamed.fields['품명 및 모델명'])
+    for (const value of ['', '직접 확인한 값']) {
+      const edited = { ...initial, name: renamed.name, fields: Object.fromEntries(selected.columns.map(column => [column.label, value])) }
+      expect(applyRegistrationDefaults(edited, selected)).toBe(edited)
+    }
+    const imported = row({ fields: { '품명 및 모델명': '직접 모델명', '제조국(원산지)': '한국', 소비자상담관련전화번호: '02-1234-5678' } })
+    expect(applyRegistrationDefaults(imported, selected)).toBe(imported)
+  })
+
   it('uses the original dropdown spelling of approved values and the complete food-period header', () => {
     const original: TemplateSheet = { name: 'QF_2_상품정보', columns: [
       column(42, '과세여부', ['과세', '면세', '영세']),
@@ -102,7 +129,7 @@ describe('approved editable category defaults', () => {
   })
 
   it.each(['queued', 'running', 'login_required', 'succeeded'] as const)('never changes a %s submission or a manually registered record', status => {
-    const selected = sheet('과세여부', '인증정보', '색상', '색상')
+    const selected = sheet('과세여부', '인증정보', '색상', '색상', '품명 및 모델명', '제조국(원산지)', '소비자상담관련전화번호')
     const locked = row({ submission: { status, jobId: 'protected' } })
     expect(applyRegistrationDefaults(locked, selected)).toBe(locked)
     const completed = row({ stage: 'registered' })

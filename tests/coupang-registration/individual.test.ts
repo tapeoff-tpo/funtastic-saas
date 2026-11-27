@@ -162,6 +162,28 @@ describe('individual Supplier Hub product transfer', () => {
     expect(buildIndividualProducts(source, ['green'])[0].notices['제조국(원산지)']).toBe('대한민국')
   })
 
+  it('prefers confirmed individual values over equivalent template labels regardless of key order', () => {
+    const exact = '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입'
+    const variant = '전기용품 및 생활용품, 어린이(KC) 인증 마크 타입'
+    const sheet: TemplateSheet = { name: 'QF_1', columns: [
+      { column: 1, label: variant, requirement: '필수', guide: '' },
+    ] }
+    const original = row({ templateId: 'template', sheetName: sheet.name })
+    const confirmed = {
+      ...original,
+      fields: { [variant]: '해당사항없음', ...original.fields, [exact]: '안전확인' },
+      defaultedFields: { [variant]: '해당사항없음' },
+    }
+    const source = (productRow: RegistrationRow) => ({ ...draft(productRow), templates: [{ id: 'template', name: 'file.xlsx', sheets: [sheet], file: { name: 'file.xlsx', data: 'QQ==' } }] })
+    expect(buildIndividualProducts(source(confirmed), ['green'])[0].certifications[exact]).toBe('안전확인')
+
+    const cleared = { ...confirmed, fields: { ...confirmed.fields, [exact]: '' }, defaultedFields: { ...confirmed.defaultedFields, [exact]: '' } }
+    expect(individualRowIssues(cleared, source(cleared))).toContain(`${exact} 누락`)
+
+    const alternate = { ...confirmed, fields: { ...confirmed.fields, [exact]: '해당사항없음', [variant]: '안전확인' }, defaultedFields: { [exact]: '해당사항없음' } }
+    expect(buildIndividualProducts(source(alternate), ['green'])[0].certifications[exact]).toBe('안전확인')
+  })
+
   it('keeps public label URLs separate from small file attachments', () => {
     const productRow = row({ label: 'https://cdn.tapeoff.kr/quality/green.png' })
     const [product] = buildIndividualProducts(draft(productRow), ['green'])

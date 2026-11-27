@@ -24,8 +24,8 @@ const makeRow = (id: string, name: string) => ({
 })
 const fixture = (): RegistrationDraft => ({ ...blankDraft(), name: '등록 테스트', rows: [makeRow('first', '선택 상품'), makeRow('second', '선택하지 않은 상품')] })
 
-function mockRegistrationApi() {
-  let payload = fixture()
+function mockRegistrationApi(initial = fixture()) {
+  let payload = initial
   let revision = 1
   const requests: Array<{path: string; body: Record<string, unknown>}> = []
   const saved = () => ({ id: draftId, name: payload.name, updatedAt: '2026-11-26', revision, payload })
@@ -103,5 +103,30 @@ describe('workbench registration handoff', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: mode === 'excel' ? '엑셀 대량등록' : '개별등록 준비' })).toBeEnabled())
     expect(requests).toEqual([])
     expect(startSupplierRegistration).not.toHaveBeenCalled()
+  })
+
+  it('confirms only displayed nonempty automatic individual values when the user reviews them together', async () => {
+    const first = '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입'
+    const second = '방송통신 기자재 (EMC) 인증 번호'
+    const initial = fixture()
+    initial.rows[0] = {
+      ...initial.rows[0],
+      fields: { [first]: '해당사항없음', [second]: '해당사항없음', 유통기간: '' },
+      defaultedFields: { [first]: '해당사항없음', [second]: '해당사항없음', 유통기간: '', unrelated: '보존' },
+    }
+    const requests = mockRegistrationApi(initial)
+    await openSelection()
+    fireEvent.click(screen.getByRole('button', { name: '선택 상품 상세정보' }))
+    expect(screen.getByLabelText(`개별등록 ${first}`)).toHaveValue('해당사항없음')
+    expect(screen.getByLabelText('개별등록 유통기간')).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: /표시된 자동 입력값 \d+개를 모두 확인했습니다/ }))
+    expect(screen.queryByRole('button', { name: /표시된 자동 입력값 \d+개를 모두 확인했습니다/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '등록정보 저장' }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    const saved = requests[0].body.draft as RegistrationDraft
+    expect(saved.rows[0].fields).toMatchObject({ [first]: '해당사항없음', [second]: '해당사항없음', 유통기간: '' })
+    expect(saved.rows[0].defaultedFields).not.toHaveProperty(first)
+    expect(saved.rows[0].defaultedFields).not.toHaveProperty(second)
+    expect(saved.rows[0].defaultedFields).toMatchObject({ 유통기간: '', unrelated: '보존' })
   })
 })

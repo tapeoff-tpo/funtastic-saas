@@ -55,10 +55,14 @@ function fieldsFor(row: RegistrationRow, draft: RegistrationDraft) {
     // An explicit confirmation entered in the individual-registration form
     // takes precedence over any older scoped template default.
     if (requireConfirmed) for (const alias of aliases) {
-      const key = Object.keys(row.fields).find(key => !key.startsWith('@qf:') && normalize(key) === normalize(alias))
-      if (key === undefined) continue
-      const value = row.fields[key].trim()
-      if (!value || row.defaultedFields?.[key]?.trim() !== value) return value
+      const keys = Object.keys(row.fields).filter(key => !key.startsWith('@qf:') && normalize(key) === normalize(alias))
+      // The individual form writes its exact label; a differently spaced
+      // template label may also exist and retain its automatic default.
+      keys.sort((a, b) => Number(b === alias) - Number(a === alias))
+      for (const key of keys) {
+        const value = row.fields[key].trim()
+        if (!value || row.defaultedFields?.[key]?.trim() !== value) return value
+      }
     }
     for (const alias of aliases) {
       const column = sheet?.columns.find(column => normalize(column.label) === normalize(alias))

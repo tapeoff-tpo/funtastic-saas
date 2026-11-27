@@ -666,6 +666,7 @@ describe('registration pricing workbench', () => {
     await screen.findByRole('option', { name: /단계 작업/ })
     fireEvent.change(screen.getByLabelText('저장된 작업 불러오기'), { target: { value: saved.id } })
     await screen.findByRole('row', { name: `${first.name} 상품등록정보` })
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: `${first.name} 등록완료` })).toBeEnabled())
     fireEvent.change(screen.getByLabelText('등록완료일', { exact: true }), { target: { value: '2026-11-24' } })
     fireEvent.click(screen.getByRole('checkbox', { name: `${first.name} 등록완료` }))
     await waitFor(() => expect(savedBodies().at(-1)?.draft.rows[0]).toMatchObject({ id: first.id, stage: 'registered', registrationCompletedAt: '2026-11-24', fields: { 브랜드: '직접 확인 브랜드' } }))

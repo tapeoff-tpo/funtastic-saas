@@ -36,7 +36,7 @@ export type RegistrationProductMaster = {
   productKeywords?: string
   qualityPdf?: { id: string; fileName: string; contentType: string }
 }
-export type AutoQualityLabel = { sourcePdfId: string; value: string }
+export type AutoQualityLabel = { sourcePdfId: string; value: string; rendererVersion?: number }
 export type RegistrationRow = {
   id: string
   stage?: RegistrationStage

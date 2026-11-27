@@ -2,10 +2,12 @@ import { createCanvas, type Canvas } from '@napi-rs/canvas'
 import type { SavedFile } from './model'
 import {
   QUALITY_LABEL_MAX_FILE_BYTES,
+  QUALITY_LABEL_MAX_EDGE,
   QUALITY_LABEL_MAX_PAGES,
   QUALITY_LABEL_MAX_PIXELS,
   QUALITY_LABEL_MAX_PDF_BYTES,
   QUALITY_LABEL_MAX_TOTAL_BYTES,
+  QUALITY_LABEL_MIN_EDGE,
   QUALITY_LABEL_RENDER_SCALE,
   qualityLabelFileName,
 } from './quality-labels'
@@ -50,12 +52,33 @@ export async function renderQualityPdfLabels(input: PdfInput): Promise<SavedFile
     let totalBytes = 0
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
       const page = await document.getPage(pageNumber)
-      const sourceViewport = page.getViewport({ scale: QUALITY_LABEL_RENDER_SCALE })
-      const scale = Math.min(1, Math.sqrt(QUALITY_LABEL_MAX_PIXELS / (sourceViewport.width * sourceViewport.height)))
-      const viewport = scale === 1 ? sourceViewport : page.getViewport({ scale: QUALITY_LABEL_RENDER_SCALE * scale })
-      const width = Math.ceil(viewport.width)
-      const height = Math.ceil(viewport.height)
-      if (width < 1 || height < 1 || width * height > QUALITY_LABEL_MAX_PIXELS) throw new Error('품질표시 PDF 페이지 크기를 확인해주세요.')
+      const sourceViewport = page.getViewport({ scale: 1 })
+      const { width: sourceWidth, height: sourceHeight } = sourceViewport
+      if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+        throw new Error('품질표시 PDF 페이지 크기를 확인해주세요.')
+      }
+      // Small physical labels still need enough pixels for Supplier Hub upload.
+      // Render the PDF at the required scale instead of enlarging a low-res JPG.
+      let scale = Math.min(
+        Math.max(QUALITY_LABEL_RENDER_SCALE, QUALITY_LABEL_MIN_EDGE / Math.min(sourceWidth, sourceHeight)),
+        QUALITY_LABEL_MAX_EDGE / Math.max(sourceWidth, sourceHeight),
+        Math.sqrt(QUALITY_LABEL_MAX_PIXELS / (sourceWidth * sourceHeight)),
+      )
+      let viewport = page.getViewport({ scale })
+      let width = Math.ceil(viewport.width)
+      let height = Math.ceil(viewport.height)
+      // Leave a rounding margin when ceil would exceed a side/pixel limit.
+      if (width > QUALITY_LABEL_MAX_EDGE || height > QUALITY_LABEL_MAX_EDGE || width * height > QUALITY_LABEL_MAX_PIXELS) {
+        scale *= 0.999
+        viewport = page.getViewport({ scale })
+        width = Math.ceil(viewport.width)
+        height = Math.ceil(viewport.height)
+      }
+      if (!Number.isFinite(width) || !Number.isFinite(height)
+        || width < QUALITY_LABEL_MIN_EDGE || height < QUALITY_LABEL_MIN_EDGE
+        || width > QUALITY_LABEL_MAX_EDGE || height > QUALITY_LABEL_MAX_EDGE || width * height > QUALITY_LABEL_MAX_PIXELS) {
+        throw new Error('품질표시 PDF 페이지 크기를 확인해주세요. 비율을 유지한 이미지의 각 변이 600~8,000px 범위여야 합니다.')
+      }
 
       const canvas = createCanvas(width, height)
       const context = canvas.getContext('2d')

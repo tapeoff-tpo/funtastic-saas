@@ -51,27 +51,27 @@ const certHeaders = [
 /** Resolve an official scoped column before a legacy label, preserving explicit clears. */
 function fieldsFor(row: RegistrationRow, draft: RegistrationDraft) {
   const sheet = draft.templates.find(template => template.id === row.templateId)?.sheets.find(sheet => sheet.name === row.sheetName)
-  return (aliases: string[], fallback = '', requireConfirmed = false): string => {
+  return (aliases: string[], fallback = '', requireConfirmed = false, showUnconfirmed = false): string => {
     // An explicit confirmation entered in the individual-registration form
     // takes precedence over any older scoped template default.
     if (requireConfirmed) for (const alias of aliases) {
       const key = Object.keys(row.fields).find(key => !key.startsWith('@qf:') && normalize(key) === normalize(alias))
       if (key === undefined) continue
       const value = row.fields[key].trim()
-      if (row.defaultedFields?.[key]?.trim() !== value) return value
+      if (!value || row.defaultedFields?.[key]?.trim() !== value) return value
     }
     for (const alias of aliases) {
       const column = sheet?.columns.find(column => normalize(column.label) === normalize(alias))
       const scoped = column && registrationFieldValue(row, sheet!, column)
       if (scoped !== undefined) {
         const suggested = registrationFieldValue({ ...row, fields: row.defaultedFields ?? {} }, sheet!, column!)
-        if (requireConfirmed && scoped.trim() && suggested !== undefined && scoped.trim() === suggested.trim()) return fallback.trim()
+        if (requireConfirmed && !showUnconfirmed && scoped.trim() && suggested !== undefined && scoped.trim() === suggested.trim()) return fallback.trim()
         return scoped.trim()
       }
       const key = Object.keys(row.fields).find(key => !key.startsWith('@qf:') && normalize(key) === normalize(alias))
       if (key !== undefined) {
         const value = row.fields[key].trim()
-        if (requireConfirmed && value && row.defaultedFields?.[key]?.trim() === value) return fallback.trim()
+        if (requireConfirmed && !showUnconfirmed && value && row.defaultedFields?.[key]?.trim() === value) return fallback.trim()
         return value
       }
     }
@@ -201,8 +201,17 @@ export function individualRowIssues(row: RegistrationRow, draft: RegistrationDra
   if (!row.label.trim() || labels.missing.length) issues.push('상품에 맞는 품질표시 이미지 파일을 연결해주세요.')
   if (labels.files.length + labels.urls.length > 10 || labels.files.some(file => !validLabelFile(file))) issues.push('품질표시 파일 형식 또는 용량을 확인해주세요.')
   if (labels.files.reduce((sum, file) => sum + file.data.length * 3 / 4, 0) > QUALITY_LABEL_MAX_TOTAL_BYTES) issues.push('품질표시 이미지 총용량은 2.4MB 이하여야 합니다.')
-  for (const [header, text] of Object.entries(value.certifications)) if (!text) issues.push(`${header} 누락`)
-  for (const [header, text] of Object.entries(value.notices)) if (!text) issues.push(`${header} 누락`)
+  const displayedField = fieldsFor(row, draft)
+  for (const [header, text] of Object.entries(value.certifications)) {
+    if (!text) issues.push(displayedField([header], '', true, true) ? `${header} 자동 입력값 확인 필요` : `${header} 누락`)
+  }
+  for (const [header, text] of Object.entries(value.notices)) {
+    if (!text) {
+      const aliases = header === '인증/허가 사항' ? [header, '인증허가사항']
+        : header === '제조국(원산지)' ? [header, '제조국', '원산지'] : [header]
+      issues.push(displayedField(aliases, '', true, true) ? `${header} 자동 입력값 확인 필요` : `${header} 누락`)
+    }
+  }
   if (!Number.isFinite(value.logistics.boxQuantity)) issues.push('박스 내 SKU 수량을 입력해주세요.')
   if (!Number.isFinite(value.logistics.shelfLifeDays)) issues.push('유통기간은 0 이상의 일수로 입력해주세요.')
   if (!['해당사항없음', '유리'].includes(value.logistics.handlingReason)) issues.push('취급주의 사유를 확인해주세요.')

@@ -107,13 +107,45 @@ describe('individual Supplier Hub product transfer', () => {
     const productRow = row({ defaultedFields: { ...confirmedFields } })
     const issues = individualRowIssues(productRow, draft(productRow))
     expect(issues).toEqual(expect.arrayContaining([
-      '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입 누락', '인증/허가 사항 누락', '제조국(원산지) 누락',
+      '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입 자동 입력값 확인 필요', '인증/허가 사항 자동 입력값 확인 필요', '제조국(원산지) 자동 입력값 확인 필요',
       '박스 내 SKU 수량을 입력해주세요.', '유통기간은 0 이상의 일수로 입력해주세요.', '취급주의 사유를 확인해주세요.',
     ]))
-    expect(() => buildIndividualProducts(draft(productRow), ['green'])).toThrow('누락')
+    expect(() => buildIndividualProducts(draft(productRow), ['green'])).toThrow('자동 입력값 확인 필요')
     const master = { itemId: 'm', match: 'sku' as const, noticeSize: '', noticeWeight: '', noticeMaterial: '', noticeManufacturer: '', noticeCountry: '대한민국' }
     const withMaster = row({ defaultedFields: { 제조국: '중국' }, productMaster: master })
     expect(buildIndividualProducts(draft(withMaster), ['green'])[0].notices['제조국(원산지)']).toBe('대한민국')
+  })
+
+  it('distinguishes unconfirmed certification suggestions from missing values and transfers confirmed values', () => {
+    const labels = [
+      '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입',
+      '전기용품 및 생활용품, 어린이 (KC) 인증번호',
+      '방송통신 기자재 (EMC) 인증 번호',
+    ]
+    const sheet: TemplateSheet = { name: 'QF_1', columns: labels.flatMap((label, index) => [0, 1].map(copy => ({ column: index * 2 + copy + 1, label, requirement: '필수', guide: '' }))) }
+    const suggested = row({ templateId: 'template', sheetName: sheet.name, defaultedFields: Object.fromEntries(labels.map(label => [label, '해당사항없음'])) })
+    for (const column of sheet.columns) {
+      const key = registrationFieldKey(suggested, sheet, column)
+      suggested.fields[key] = '해당사항없음'
+      suggested.defaultedFields![key] = '해당사항없음'
+    }
+    const source = (productRow: RegistrationRow) => ({ ...draft(productRow), templates: [{ id: 'template', name: 'file.xlsx', sheets: [sheet], file: { name: 'file.xlsx', data: 'QQ==' } }] })
+    const issues = individualRowIssues(suggested, source(suggested))
+    for (const label of labels) {
+      expect(issues).toContain(`${label} 자동 입력값 확인 필요`)
+      expect(issues).not.toContain(`${label} 누락`)
+    }
+    expect(() => buildIndividualProducts(source(suggested), ['green'])).toThrow('자동 입력값 확인 필요')
+
+    const confirmed = { ...suggested, defaultedFields: Object.fromEntries(sheet.columns.map(column => [registrationFieldKey(suggested, sheet, column), '해당사항없음'])) }
+    expect(individualRowIssues(confirmed, source(confirmed))).toEqual([])
+    expect(buildIndividualProducts(source(confirmed), ['green'])[0].certifications).toMatchObject(
+      Object.fromEntries(labels.map(label => [label, '해당사항없음'])),
+    )
+
+    const missing = { ...confirmed, fields: { ...confirmed.fields, [labels[0]]: '' }, defaultedFields: { ...confirmed.defaultedFields, [labels[0]]: '' } }
+    expect(individualRowIssues(missing, source(missing))).toContain(`${labels[0]} 누락`)
+    expect(individualRowIssues(missing, source(missing))).not.toContain(`${labels[0]} 자동 입력값 확인 필요`)
   })
 
   it('uses the explicit individual confirmation ahead of an older scoped template default', () => {

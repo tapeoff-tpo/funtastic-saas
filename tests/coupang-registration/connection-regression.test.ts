@@ -23,17 +23,29 @@ function bridge(pathname = '/dashboard', response?: unknown) {
   vm.runInNewContext(source, { window: page, location, chrome })
   return {
     location, page, chrome,
-    send: (data: object, sender = page, eventOrigin = origin) => pageListener({ source: sender, origin: eventOrigin, data: { source: channel, requestId: 'request-1', ...data } }),
+    send: (data: object, sender: unknown = page, eventOrigin = origin) => pageListener({ source: sender, origin: eventOrigin, data: { source: channel, requestId: 'request-1', ...data } }),
     progress: (progress: object) => runtimeListener({ channel: channel + '-extension', type: 'PROGRESS', progress }),
   }
 }
 
 describe('Supplier bridge SPA connection regression', () => {
+  it('routes individual control commands and accepts progress only for the attached token', () => {
+    const instance = bridge('/operations/coupang-registration')
+    const job = { jobId: 'individual-1', token: '0123456789abcdef' }
+    instance.send({ type: 'OPEN_JOB', job, productId: 'item-1' })
+    expect(instance.chrome.runtime.sendMessage).toHaveBeenCalledWith({ channel, type: 'OPEN_JOB', job, productId: 'item-1' }, expect.any(Function))
+    instance.page.postMessage.mockClear()
+    instance.progress({ jobId: job.jobId, token: 'other', status: 'running', message: 'ignored' })
+    expect(instance.page.postMessage).not.toHaveBeenCalled()
+    const progress = { ...job, status: 'running', message: '확인 중' }
+    instance.progress(progress)
+    expect(instance.page.postMessage).toHaveBeenCalledWith({ source: `${channel}-extension`, type: 'PROGRESS', progress }, origin)
+  })
   it('loads on the SaaS entry document and starts working after client navigation to registration', () => {
     const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'))
     const matches = manifest.content_scripts.find((script: { js: string[] }) => script.js.includes('saas-bridge.js')).matches
     expect(matches).toContain(origin + '/*')
-    expect(manifest.version).toBe('1.1.3')
+    expect(manifest.version).toBe('1.2.0')
     const instance = bridge()
     instance.send({ type: 'PING' })
     expect(instance.chrome.runtime.sendMessage).not.toHaveBeenCalled()

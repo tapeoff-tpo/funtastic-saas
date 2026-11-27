@@ -1,16 +1,18 @@
 'use client'
 
-import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { Check, ChevronRight, Download, ExternalLink, FileSpreadsheet, Loader2, Maximize2, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationProductMaster, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
+import { applyProductMasterDefaults, applyRegistrationDefaults, attachCatalog, blankDraft, BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, detailHtml, getRegistrationStage, hasPreparedSupplierDraft, hasVerifiedSupplierRegistration, imageStem, isAutomaticTemplateColumn, isImageUrl, LABEL_FIELD, matchCatalog, money, priceIssues, registrationCommonSheet, registrationFieldKey, registrationFieldValue, registrationInformationSheet, reopenRegistration, returnToPricing, rowFields, rowIssues, SEARCH_TAGS_FIELD, type BundleComponent, type CatalogProduct, type RegistrationDraft, type RegistrationProductMaster, type RegistrationRow, type SavedFile, type TemplateColumn } from '@/lib/coupang-registration/model'
 import { applyConvertedQualityLabels, applyQualityLabelIssue, qualityPdfNeedsConversion } from '@/lib/coupang-registration/quality-labels'
 import type { CategoryContext } from '@/lib/coupang-registration/category-context'
 import { matchCategorySheet, type SavedSheetMapping } from '@/lib/coupang-registration/sheet-matching'
 import { useWorkbenchNavigation, type RegistrationStage } from './use-workbench-navigation'
 import { buildInformationColumns, groupInformationRows } from './information-columns'
 import { CategoryTemplatePicker } from './category-template-picker'
+import { SupplierRegistrationControls, type SupplierRegistrationMode, type SupplierRegistrationProgressItem } from './supplier-registration-controls'
+import { attachSupplierRegistration, checkSupplierRegistration, inspectSupplierRegistration, openSupplierRegistration, pingSupplierExtension, resumeSupplierRegistration, startSupplierRegistration, stopSupplierRegistration, subscribeSupplierRegistration, type SupplierJobReference, type SupplierRegistrationProgress, type SupplierTransferJob } from '@/lib/coupang-registration/supplier-bridge'
 
 const API = '/api/operations/coupang-registration'
 const inputClass = 'h-8 rounded-md border bg-background px-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
@@ -19,6 +21,11 @@ const won = (value: number | null) => value === null ? '—' : `${value.toLocale
 const inputWon = (value: number) => `${value.toLocaleString('ko-KR', { maximumFractionDigits: 6 })}원`
 const bundleKey = (component: BundleComponent) => JSON.stringify([component.sourceCode, component.optionName])
 const marginText = (value: number | null, digits: number) => value === null ? '—' : `${value.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
+const individualVerificationFields = [
+  '전기용품 및 생활용품, 어린이 (KC) 인증 마크 타입', '전기용품 및 생활용품, 어린이 (KC) 인증번호',
+  '방송통신 기자재 (EMC) 인증 번호', '안전기준적합확인 신고번호', '인증/허가 사항',
+  '제조국', '박스 내 SKU 수량', '유통기간', '취급주의 사유',
+] as const
 type DraftSummary = { id: string; name: string; revision: number; updatedAt: string }
 type CategoryTemplate = { id: string; name: string; sheets: Array<{ name: string }> }
 type ConnectedTemplate = RegistrationDraft['templates'][number]
@@ -33,9 +40,9 @@ const stepColors: Record<RegistrationStage, { active: string; inactive: string }
   information: { active: 'border-violet-600 bg-violet-600 text-white ring-1 ring-violet-600', inactive: 'border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100' },
   registered: { active: 'border-emerald-700 bg-emerald-700 text-white ring-1 ring-emerald-700', inactive: 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' },
 }
-const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '') || getRegistrationStage(row) === 'registered'
-const completionInFlight = (row: RegistrationRow) => ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')
-const completedDeletionLocked = (row: RegistrationRow) => hasVerifiedSupplierRegistration(row) || ['queued', 'running', 'login_required'].includes(row.submission?.status ?? '')
+const submissionLocked = (row: RegistrationRow) => ['queued', 'running', 'login_required', 'attention_required', 'prepared'].includes(row.submission?.status ?? '') || !!row.submission?.products?.some(product => product.id === row.id && product.status === 'prepared') || getRegistrationStage(row) === 'registered'
+const completionInFlight = (row: RegistrationRow) => ['queued', 'running', 'login_required', 'attention_required'].includes(row.submission?.status ?? '')
+const completedDeletionLocked = (row: RegistrationRow) => hasVerifiedSupplierRegistration(row) || hasPreparedSupplierDraft(row) || completionInFlight(row)
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date())
 function connectedDefaults(row: RegistrationRow, templates: RegistrationDraft['templates']) {
   const sheet = templates.find((template) => template.id === row.templateId)?.sheets.find((sheet) => sheet.name === row.sheetName)
@@ -58,7 +65,7 @@ function OfficialColumnInput({ column, value, listId, onChange, expandText = fal
   if (expandText && !column.choices?.length) return <GridTextInput singleLine={column.label !== SEARCH_TAGS_FIELD} className={`${className} block w-full min-w-0`} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />
   return <><input className={className} list={column.choices?.length ? listId : undefined} value={value} onChange={(event) => onChange(event.target.value)} title={column.guide} />{column.choices?.length ? <datalist id={listId}>{column.choices.map((choice) => <option key={choice} value={choice} />)}</datalist> : null}</>
 }
-const submissionText = (row: RegistrationRow) => row.submission ? { queued: '등록 대기', running: '등록 중', login_required: '로그인 필요', failed: '등록 실패', succeeded: '등록 완료' }[row.submission.status] : '미등록'
+const submissionText = (row: RegistrationRow) => row.submission ? { queued: '등록 대기', running: '등록 중', login_required: '로그인 필요', attention_required: '확인 필요', prepared: '입력·저장 완료', cancelled: '중지됨', failed: '등록 실패', succeeded: '등록 완료' }[row.submission.status] : '미등록'
 
 const catalogOptionKey = (productCode: string, optionName: string) => JSON.stringify([productCode, optionName])
 
@@ -119,6 +126,13 @@ export function CoupangRegistrationWorkbench() {
   const [sheetMappings, setSheetMappings] = useState<SavedSheetMapping[]>([])
   const [sheetMappingsReady, setSheetMappingsReady] = useState(false)
   const [categoryContexts, setCategoryContexts] = useState<Record<string, CategoryContext | null>>({})
+  const [registrationMode, setRegistrationMode] = useState<SupplierRegistrationMode>('excel')
+  const [registrationJobs, setRegistrationJobs] = useState<Array<{ jobId: string; mode: SupplierRegistrationMode; status: string; message: string; rowIds: string[]; control: SupplierJobReference; products?: NonNullable<RegistrationRow['submission']>['products'] }>>([])
+  const registrationTransfers = useRef(new Map<string, SupplierTransferJob>())
+  const registrationDrafts = useRef(new Map<string, string>())
+  const activeDraftId = useRef<string | undefined>(undefined)
+  const [registrationConflict, setRegistrationConflict] = useState(false)
+  const registrationConflictRef = useRef(false)
   const categoryRequests = useRef(new Set<string>())
   const manualSheetRows = useRef(new Set<string>())
   const connectedRows = useRef(new Set<string>())
@@ -144,6 +158,14 @@ export function CoupangRegistrationWorkbench() {
         : ''
   const selectedCatalogOptionKeys = new Set(catalogSelections.map((item) => catalogOptionKey(item.product.code, item.optionName)))
   const categoryTemplates = Array.from(new Map([...templateLibrary, ...draft.templates].map((template) => [template.id, template])).values())
+  const registrationItems: SupplierRegistrationProgressItem[] = registrationJobs.flatMap(job => {
+    const products = job.mode === 'individual' && job.products?.length ? job.products : job.rowIds.map(id => ({ id, name: draft.rows.find(row => row.id === id)?.name ?? '상품', status: job.status, message: job.message }))
+    return products.map(product => ({ id: `${job.jobId}:${product.id}`, name: product.name,
+      status: (product.status === 'attention_required' ? 'review_required' : product.status === 'cancelled' ? 'stopped' : product.status) as SupplierRegistrationProgressItem['status'],
+      message: product.message || job.message, canOpen: job.mode === 'individual' && !['cancelled', 'failed'].includes(job.status),
+      canStop: job.mode === 'individual' && ['queued', 'running', 'login_required', 'attention_required'].includes(job.status),
+      canCheck: ['queued', 'running', 'login_required', 'attention_required'].includes(job.status) }))
+  })
   const visibleSteps = steps
   const sheetStatus = new Map(stageRows.map((row) => {
     const context = categoryContexts[row.sourceCode]
@@ -157,11 +179,56 @@ export function CoupangRegistrationWorkbench() {
 
   function update(change: (value: RegistrationDraft) => RegistrationDraft) { setDraft(change); setDirty(true) }
   function setRevision(value: number | undefined) { revision.current = value }
-  function queueServerWrite<T,>(action: () => Promise<T>): Promise<T> {
+  const queueServerWrite = useCallback(<T,>(action: () => Promise<T>): Promise<T> => {
     const next = submissionEvents.current.catch(() => undefined).then(action)
     submissionEvents.current = next.then(() => undefined, () => undefined)
     return next
-  }
+  }, [])
+  const applySubmissionResponse = useCallback((response: { id: string; revision: number; payload: RegistrationDraft; submissions?: typeof registrationJobs; transfers?: SupplierTransferJob[]; eventBaseRevision?: number; eventAppliedRevision?: number }) => {
+    if (activeDraftId.current !== response.id) return
+    if (!response.submissions || !response.payload || response.revision < (revision.current ?? 0)) return
+    const expectedRevision = revision.current
+    const conflict = response.eventBaseRevision === undefined
+      ? expectedRevision !== undefined && response.revision !== expectedRevision
+      : response.eventBaseRevision !== expectedRevision || response.eventAppliedRevision !== response.revision
+    if (conflict || registrationConflictRef.current) {
+      registrationConflictRef.current = true; setRegistrationConflict(true)
+      return
+    }
+    revision.current = response.revision
+    const serverRows = new Map(response.payload.rows.filter(row => row.submission).map(row => [row.id, row]))
+    setDraft(value => ({ ...value, rows: value.rows.map(row => {
+      const server = serverRows.get(row.id)
+      if (!server) return row
+      return { ...row, submission: server.submission, ...(server.submission?.status === 'succeeded' ? { stage: server.stage, registeredAt: server.registeredAt, registrationCompletedAt: server.registrationCompletedAt } : {}) }
+    }) }))
+    if (response.submissions) {
+      setRegistrationJobs(response.submissions)
+      for (const job of response.submissions) registrationDrafts.current.set(job.jobId, response.id)
+    }
+    for (const transfer of response.transfers ?? []) registrationTransfers.current.set(transfer.jobId, transfer)
+  }, [])
+  useEffect(() => {
+    activeDraftId.current = currentId
+    if (!currentId) return
+    let cancelled = false
+    void jsonRequest(`/submissions?draftId=${encodeURIComponent(currentId)}`).then(async response => {
+      if (cancelled) return
+      applySubmissionResponse(response)
+      for (const job of response.submissions ?? []) if (job.mode === 'individual' && ['queued', 'running', 'login_required', 'attention_required'].includes(job.status)) {
+        await attachSupplierRegistration(job.control).catch(() => undefined)
+      }
+    }).catch(() => { if (!cancelled) toast.error('쿠팡 등록 진행 상태를 불러오지 못했습니다.') })
+    return () => { cancelled = true }
+  }, [currentId, applySubmissionResponse])
+  useEffect(() => subscribeSupplierRegistration((progress: SupplierRegistrationProgress) => {
+    const id = registrationDrafts.current.get(progress.jobId)
+    if (!id) return
+    void queueServerWrite(async () => {
+      const response = await postJson('/submissions', { ...progress, draftId: id })
+      applySubmissionResponse(response)
+    }).catch(() => toast.error('쿠팡 등록 진행 상태를 저장하지 못했습니다. 다시 확인을 눌러주세요.'))
+  }), [applySubmissionResponse, queueServerWrite])
   function patchRow(id: string, patch: Partial<RegistrationRow>) {
     update((value) => ({ ...value, rows: value.rows.map((row) => row.id === id && !submissionLocked(row) ? connectedDefaults({ ...row, ...patch }, value.templates) : row) }))
   }
@@ -384,9 +451,11 @@ export function CoupangRegistrationWorkbench() {
   })
 
   async function persist(nextDraft = draft, asNew = false, deleteCompletedRowIds?: string[]) {
+    if (!asNew && registrationConflictRef.current) throw new Error('다른 변경이 감지되었습니다. 현재 내용을 확인한 뒤 저장된 작업을 다시 불러와주세요.')
     return queueServerWrite(async () => {
       const response = await postJson('/drafts', { draft: nextDraft, ...(!asNew && currentId ? { id: currentId, revision: revision.current } : {}), ...(deleteCompletedRowIds?.length ? { deleteCompletedRowIds } : {}) })
       if (asNew) draftSession.current++
+      activeDraftId.current = response.id
       setDraft(response.payload ?? nextDraft); setCurrentId(response.id); setRevision(response.revision); setDirty(false)
       setSaved(value => [{ id: response.id, name: (response.payload ?? nextDraft).name, revision: response.revision, updatedAt: new Date().toISOString() }, ...value.filter(item => item.id !== response.id)].slice(0, 100))
       return response
@@ -407,6 +476,47 @@ export function CoupangRegistrationWorkbench() {
   }
   async function save(asNew = false) {
     await run('저장 중', async () => { await persist(draft, asNew); toast.success('가격·상품등록정보·품질표시를 저장했습니다.') })
+  }
+  async function startRegistration() {
+    if (!selectedRows.length) return
+    await run('쿠팡 등록 준비 중', async () => {
+      const extension = await pingSupplierExtension({ requireIndividual: registrationMode === 'individual' })
+      if (!extension.connected || registrationMode === 'individual' && !extension.supportsIndividual) throw new Error('쿠팡 등록 확장을 최신 버전으로 설치하거나 업데이트한 뒤 다시 시도해주세요.')
+      if (selectedRows.some(submissionLocked)) throw new Error('이미 등록 중이거나 중간 저장된 상품이 포함되어 있습니다. 진행 상태를 확인해주세요.')
+      const saved = await persist(draft)
+      const contexts = Object.fromEntries(selectedRows.flatMap(row => {
+        const context = categoryContexts[row.sourceCode]
+        return context ? [[row.sourceCode, context]] : []
+      }))
+      const response = await queueServerWrite(() => postJson('/submit', { draftId: saved.id, revision: saved.revision, rowIds: selectedRows.map(row => row.id), mode: registrationMode, ...(registrationMode === 'individual' ? { categoryContexts: contexts } : {}) }))
+      if (activeDraftId.current !== saved.id) return
+      setDraft(response.payload); setRevision(response.revision); setDirty(false)
+      setRegistrationJobs(value => [response.submission, ...value.filter(job => job.jobId !== response.submission.jobId)])
+      registrationDrafts.current.set(response.submission.jobId, saved.id)
+      if (!response.transfer) throw new Error('이미 진행한 등록 작업입니다. 아래 진행 상태를 확인해주세요.')
+      registrationTransfers.current.set(response.transfer.jobId, response.transfer)
+      await startSupplierRegistration(response.transfer)
+      toast.success('쿠팡 등록 작업을 시작했습니다. 진행 상태를 확인해주세요.')
+    })
+  }
+  async function controlRegistration(itemId: string, action: 'open' | 'stop' | 'check') {
+    const separator = itemId.indexOf(':')
+    const job = registrationJobs.find(value => value.jobId === itemId.slice(0, separator))
+    if (!job) return
+    const productId = itemId.slice(separator + 1)
+    await run('쿠팡 등록 상태 확인 중', async () => {
+      if (action === 'open') await openSupplierRegistration(job.control, productId)
+      else if (action === 'stop') await stopSupplierRegistration(job.control)
+      else {
+        const inspection = await inspectSupplierRegistration(job.control)
+        if (!inspection.found) throw new Error('이 Chrome에서 등록 작업을 찾을 수 없습니다. 중복 등록을 방지하기 위해 처음 작업을 시작한 Chrome에서 확인해주세요.')
+        if (inspection.mode !== job.mode) throw new Error('등록 방식이 일치하지 않습니다. 처음 작업을 시작한 Chrome을 확인해주세요.')
+        if (job.mode === 'individual') { await resumeSupplierRegistration(job.control); return }
+        const transfer = registrationTransfers.current.get(job.jobId)
+        if (!transfer) throw new Error('등록 작업을 다시 불러온 뒤 확인해주세요.')
+        await checkSupplierRegistration(transfer)
+      }
+    })
   }
   async function downloadInformation(rowIds: string[]) {
     if (!rowIds.length) return
@@ -507,6 +617,9 @@ export function CoupangRegistrationWorkbench() {
       const payload: RegistrationDraft = response.payload
       const costs = await fillMissingCostsOnOpen(payload.rows)
       const rows = costs.rows.map((row) => connectedDefaults(row, payload.templates))
+      setRegistrationJobs([]); registrationTransfers.current.clear()
+      activeDraftId.current = response.id
+      registrationConflictRef.current = false; setRegistrationConflict(false)
       setDraft({ ...payload, rows }); setCurrentId(response.id); setRevision(response.revision); setDirty(costs.filled > 0 || rows.some((row, index) => row !== costs.rows[index])); setSelected(new Set())
       resetNavigation({ stage: !payload.rows.length || payload.rows.some((row) => getRegistrationStage(row) === 'pricing') ? 'pricing' : payload.rows.some((row) => getRegistrationStage(row) === 'information') ? 'information' : 'registered', activeId: '', catalogTarget: null })
     })
@@ -514,6 +627,9 @@ export function CoupangRegistrationWorkbench() {
   function newDraft() {
     if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 새 작업을 시작할까요?')) return
     draftSession.current++
+    activeDraftId.current = undefined
+    setRegistrationJobs([]); registrationTransfers.current.clear()
+    registrationConflictRef.current = false; setRegistrationConflict(false)
     setDraft(blankDraft()); setCurrentId(undefined); setRevision(undefined); setDirty(false); setSelected(new Set()); resetNavigation({ stage: 'pricing', activeId: '', catalogTarget: null })
   }
   function closeCatalog() {
@@ -658,8 +774,8 @@ export function CoupangRegistrationWorkbench() {
     const downloadRows = selectedRows.length ? selectedRows : visible.filter(row => !submissionLocked(row))
     return <div role="region" aria-label="상품등록정보 도구" className="flex shrink-0 flex-wrap items-center gap-3">
       <span className="inline-flex h-8 items-center rounded-md border border-blue-600 bg-blue-50 px-3 text-xs font-medium text-blue-700">전체 {stageRows.length}개</span>
-      <label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!submissionLocked(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span>
-      <div className="ml-auto flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(submissionLocked) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={buttonClass} disabled={!downloadRows.length || selectedRows.some(submissionLocked)} title={`현재 목록의 ${downloadRows.length}개 상품을 저장한 뒤 원본 양식에 채워 다운로드합니다.`} onClick={() => void downloadInformation(downloadRows.map(row => row.id))}><Download className="size-3.5" />{selectedRows.length ? `선택 ${downloadRows.length}개 엑셀 다운로드` : '엑셀 다운로드'}</button></div>
+      <label className="flex items-center gap-1.5 text-xs"><input aria-label="보이는 상품 전체 선택" type="checkbox" checked={allVisibleSelected} onChange={() => setSelected((value) => { const next = new Set(value); for (const row of visible) if (!completionInFlight(row)) { if (allVisibleSelected) next.delete(row.id); else next.add(row.id) } return next })} />전체 선택</label><span className="text-xs">선택 {selectedRows.length}개</span>
+      <div className="ml-auto flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-xs">등록완료일<input aria-label="등록완료일" type="date" className={inputClass} value={completionDate} onChange={(event) => setCompletionDate(event.target.value)} /></label><button className={buttonClass} disabled={!selectedRows.length || selectedRows.some(completionInFlight) || !completionDate} onClick={() => void completeRegistration(selectedRows.map((row) => row.id))}>선택 {selectedRows.length}개 등록완료</button><button className={buttonClass} onClick={() => void save()}><Save className="size-3.5" />등록정보 저장</button><button className={buttonClass} disabled={!downloadRows.length || selectedRows.some(submissionLocked)} title={`현재 목록의 ${downloadRows.length}개 상품을 저장한 뒤 원본 양식에 채워 다운로드합니다.`} onClick={() => void downloadInformation(downloadRows.map(row => row.id))}><Download className="size-3.5" />{selectedRows.length ? `선택 ${downloadRows.length}개 엑셀 다운로드` : '엑셀 다운로드'}</button></div>
     </div>
   }
   function informationRows(expanded = false) {
@@ -752,6 +868,12 @@ export function CoupangRegistrationWorkbench() {
 
     {stage === 'information' && <section id="coupang-step-information" role="tabpanel" aria-label="상품등록정보" className={expandedWorkbench ? 'flex min-h-80 flex-1 flex-col gap-3' : 'space-y-4'}>
       {informationToolbar()}
+      {registrationConflict && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">다른 변경이 감지되어 저장을 잠시 중지했습니다. 현재 내용을 확인한 뒤 저장된 작업을 다시 불러와주세요.</p>}
+      <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+        <SupplierRegistrationControls mode={registrationMode} onModeChange={setRegistrationMode} selectedCount={selectedRows.length} busy={!!busy} onStart={() => void startRegistration()} items={registrationItems} onOpen={id => void controlRegistration(id, 'open')} onStop={id => void controlRegistration(id, 'stop')} onCheck={id => void controlRegistration(id, 'check')} />
+        <p className="mt-2 text-xs text-muted-foreground">쿠팡 등록 확장이 필요합니다. 개별등록은 입력 후 쿠팡에 중간 저장하며 최종 등록은 쿠팡 화면에서 확인합니다.</p>
+        <a className="mt-1 inline-block text-xs text-blue-700 underline" href={`${API}/extension`}>쿠팡 등록 확장 다운로드</a>
+      </div>
       {informationRows(expandedWorkbench)}
     </section>}
     {stage === 'registered' && <section id="coupang-step-registered" role="tabpanel" aria-label="등록완료" className={`${expandedWorkbench ? 'min-h-0 flex-1' : ''} overflow-auto rounded-lg border bg-card`}>
@@ -856,14 +978,14 @@ function InformationGrid({ expanded = false, sheetStatus, rows, columnRows, draf
           const prices = calculatePrice(row, draft.rounding)
           const rowColumns = grid.rows.get(row.id)
           return <tr key={row.id} aria-label={row.name + ' 상품등록정보'} className="group bg-card hover:bg-blue-50/30">
-            <td className={`${cellClass} sticky left-0 z-10 w-10 min-w-10 bg-card text-center`}><input aria-label={row.name + ' 선택'} type="checkbox" checked={selected.has(row.id)} disabled={locked} onChange={() => onToggle(row.id)} /></td>
+            <td className={`${cellClass} sticky left-0 z-10 w-10 min-w-10 bg-card text-center`}><input aria-label={row.name + ' 선택'} type="checkbox" checked={selected.has(row.id)} disabled={completionInFlight(row)} onChange={() => onToggle(row.id)} /></td>
             <td className={`${cellClass} sticky left-10 z-10 bg-card shadow-[2px_0_3px_-2px_#94a3b8]`}>
               <GridTextInput aria-label="등록 상품명" className={`${gridInput} block font-medium`} value={row.name} disabled={locked} onChange={(event) => onPatch(row.id, { name: event.target.value, bundleReviewed: false })} />
               <div className="mt-1 flex items-center justify-between gap-2 text-[10px]"><span className="truncate text-muted-foreground">{row.internalSku || 'SKU 미연결'}</span><div className="flex shrink-0 gap-2"><button className="text-blue-700 hover:underline disabled:opacity-40" aria-label={row.name + ' 상세정보'} disabled={locked} onClick={() => onOpen(row.id)}>상세정보</button><button className="text-muted-foreground hover:underline disabled:opacity-40" aria-label={row.name + ' 판매가 다시 설정'} disabled={locked} onClick={() => onPrice(row)}>가격 수정</button></div></div>
               <div className="mt-1">{locked ? <span className="text-muted-foreground">{submissionText(row)} · 저장된 자료 보존</span> : rowIssues.length ? <><button className="text-[10px] text-amber-700 hover:underline" title={rowIssues.join('\n')} aria-describedby={'information-issues-' + row.id} onClick={() => onOpen(row.id)}>입력 확인 {rowIssues.length}건</button><ul id={'information-issues-' + row.id} className="sr-only">{rowIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></> : <span className="text-[10px] text-emerald-700">필수정보 입력 완료</span>}</div>
               {(row.bundleComponents?.length || /[2-9]\d*개입/.test(row.name)) ? <label className="mt-1 flex items-center gap-1 text-[10px]"><input type="checkbox" checked={row.bundleReviewed} disabled={locked} onChange={(event) => onPatch(row.id, { bundleReviewed: event.target.checked })} />세트 구성·가격·라벨 확인</label> : null}
             </td>
-            <td className={`${cellClass} text-center`}><input aria-label={row.name + ' 등록완료'} type="checkbox" checked={false} disabled={locked} onChange={() => onComplete(row)} /></td>
+            <td className={`${cellClass} text-center`}><input aria-label={row.name + ' 등록완료'} type="checkbox" checked={false} disabled={completionInFlight(row)} onChange={() => onComplete(row)} /></td>
             <td className={cellClass}><fieldset disabled={locked} className="min-w-0 space-y-1"><div className="[&_select]:w-full"><CategorySelect label="업로드한 카테고리 양식" value={row.templateId && row.sheetName ? row.templateId + ':' + row.sheetName : ''} templates={categoryTemplates} onChange={(choice) => onCategory(row.id, choice)} /></div><p className="truncate text-[10px] text-muted-foreground" title={sheetStatus.get(row.id)}>{sheetStatus.get(row.id)}</p><button className="flex items-center gap-1 text-[10px] text-blue-700 hover:underline" onClick={() => uploadInputs.current.get(row.id)?.click()}><FileSpreadsheet className="size-3" />카테고리 엑셀 업로드</button><input ref={(node) => { if (node) uploadInputs.current.set(row.id, node); else uploadInputs.current.delete(row.id) }} aria-label={row.name + ' 카테고리 엑셀 파일'} type="file" accept=".xlsx" hidden onChange={(event) => { onUpload(row.id, event.target.files); event.target.value = '' }} /></fieldset></td>
             {grid.columns.map((header) => {
               const cell = rowColumns?.columns.get(header.key)
@@ -960,6 +1082,12 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
   const fieldValue = (column: TemplateColumn, value: string) => {
     onPatch({ fields: { ...row.fields, [registrationFieldKey(row, displayedSheet, column)]: value } })
   }
+  const verifyIndividualField = (label: string, value: string) => {
+    const defaults = { ...row.defaultedFields }
+    if (value.trim()) delete defaults[label]
+    else defaults[label] = ''
+    onPatch({ fields: { ...row.fields, [label]: value }, defaultedFields: defaults })
+  }
   const labelFiles = row.label.split(',').map((name) => name.trim()).filter(Boolean).map((name) => draft.labels.find((label) => imageStem(label.name) === imageStem(name))).filter((file): file is SavedFile => !!file)
   return <section className="rounded-lg border bg-card" aria-label={row.name + ' 상품등록정보'}>
     <header className="flex flex-wrap items-center justify-between gap-3 border-b p-4"><div><h2 className="font-semibold">{row.name}</h2></div><span className="text-xs tabular-nums">공급가 {won(prices.supply)} / 판매가 {won(prices.sale)}</span></header>
@@ -974,6 +1102,7 @@ function RowEditor({ row, draft, categoryTemplates, issues, onPatch, onCategory,
       <Field label="추가이미지 URL" hint="대표이미지를 포함한 후보 목록입니다. JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다."><textarea className={`${inputClass} h-16 py-2 font-mono text-[11px]`} value={row.thumbnails.join('\n')} onChange={(event) => onPatch({ thumbnails: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean), fields: { ...row.fields, '추가이미지 파일명': '' } })} /></Field>
       <Field label="상세이미지 URL" hint="JPG·PNG 공개 URL을 한 줄에 하나씩 입력합니다. HTML은 자동 생성됩니다."><textarea className={`${inputClass} h-20 py-2 font-mono text-[11px]`} value={row.detailImages.join('\n')} onChange={(event) => onPatch({ detailImages: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean) })} /></Field>
       {preview && <iframe title="쿠팡 상세 HTML 미리보기" sandbox="" className="h-[560px] w-full rounded border bg-white" srcDoc={`<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body>${detailHtml(row.detailImages, row.name)}</body></html>`} />}
+      <div className="rounded-md border border-amber-200 bg-amber-50/40"><h3 className="px-3 py-2 text-xs font-medium">개별등록 인증·물류 확인</h3><p className="px-3 text-xs text-muted-foreground">상품에 맞는 값을 확인해 입력해주세요. 해당하지 않는 항목은 ‘해당사항없음’으로 입력합니다.</p><div className="grid gap-3 p-3 sm:grid-cols-2">{individualVerificationFields.map(label => <Field key={label} label={label}><div className="flex gap-1"><input aria-label={`개별등록 ${label}`} className={`${inputClass} min-w-0 flex-1`} value={row.fields[label] ?? ''} onChange={event => verifyIndividualField(label, event.target.value)} />{row.fields[label] && row.defaultedFields?.[label] === row.fields[label] && <button type="button" className={buttonClass} onClick={() => verifyIndividualField(label, row.fields[label])}>값 확인</button>}</div></Field>)}</div></div>
       <div className="rounded-md border"><h3 className="px-3 py-2 text-xs font-medium">{sheet ? '원본 양식 필수·조건부 정보' : '미리 채운 공통 정보'}</h3><div className="grid gap-3 border-t p-3 sm:grid-cols-2">{displayedSheet.columns.filter((column) => !automatic.has(column.label) && !isAutomaticTemplateColumn(column) && (!sheet || column.requirement === '필수' || column.requirement.includes('조건부') || !!registrationFieldValue(row, displayedSheet, column))).map((column) => <Field key={column.column} label={column.label + (column.requirement.includes('조건부') ? ' (조건부)' : '')} hint={column.guide.slice(0, 120)}><OfficialColumnInput column={column} value={registrationFieldValue(row, displayedSheet, column) ?? ''} listId={'official-' + row.id + '-' + column.column} onChange={(value) => fieldValue(column, value)} /></Field>)}</div></div>
       <fieldset disabled className="rounded-md border p-3">
         <h3 className="text-xs font-medium">수익 계산 상세</h3>

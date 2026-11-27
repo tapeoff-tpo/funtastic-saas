@@ -4,8 +4,19 @@ export type TemplateColumn = { column: number; label: string; requirement: strin
 export type TemplateSheet = { name: string; columns: TemplateColumn[] }
 export type TemplateInfo = { id: string; name: string; sheets: TemplateSheet[] }
 export type RegistrationStage = 'pricing' | 'information' | 'registered'
+export type RegistrationProductProgress = {
+  id: string
+  name: string
+  status: 'queued' | 'running' | 'login_required' | 'attention_required' | 'prepared' | 'failed' | 'cancelled'
+  step?: string
+  message?: string
+  draftName?: string
+  draftSavedAt?: string
+}
 export type RegistrationSubmission = {
-  status: 'queued' | 'running' | 'login_required' | 'failed' | 'succeeded'
+  status: 'queued' | 'running' | 'login_required' | 'attention_required' | 'prepared' | 'failed' | 'cancelled' | 'succeeded'
+  mode?: 'excel' | 'individual'
+  products?: RegistrationProductProgress[]
   jobId?: string
   message?: string
   requestedAt?: string
@@ -212,7 +223,7 @@ function seoulDate(value: string | undefined): string {
 
 /** Legacy receipts stay preserved; only a user's check adds a row to stage 3. */
 export function hasVerifiedSupplierRegistration(row: RegistrationRow) {
-  return row.submission?.status === 'succeeded' && hasSubmissionReceipt(row.submission)
+  return row.submission?.mode !== 'individual' && row.submission?.status === 'succeeded' && hasSubmissionReceipt(row.submission)
 }
 
 /** Legacy drafts stay in price setting until the user explicitly confirms them. */
@@ -244,7 +255,14 @@ export function reopenRegistration(row: RegistrationRow): RegistrationRow {
 }
 
 export function isRegistrationSubmissionActive(row: RegistrationRow) {
-  return row.submission?.status === 'queued' || row.submission?.status === 'running'
+  return ['queued', 'running', 'login_required', 'attention_required'].includes(row.submission?.status ?? '')
+}
+
+/** A saved Hub draft remains a duplicate-registration risk even if its batch was stopped. */
+export function hasPreparedSupplierDraft(row: RegistrationRow) {
+  const submission = row.submission
+  return submission?.mode === 'individual' && (submission.status === 'prepared'
+    || !!submission.products?.some(product => product.id === row.id && product.status === 'prepared'))
 }
 
 export function confirmPricing(row: RegistrationRow, rounding = 1, confirmedAt = new Date().toISOString()): RegistrationRow {
@@ -262,6 +280,7 @@ export function confirmPricing(row: RegistrationRow, rounding = 1, confirmedAt =
 export function returnToPricing(row: RegistrationRow): RegistrationRow {
   if (getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row)) throw new Error('등록완료 상품은 판매가설정으로 되돌릴 수 없습니다.')
   if (isRegistrationSubmissionActive(row)) throw new Error('상품등록이 진행 중입니다. 처리 결과를 기다려주세요.')
+  if (hasPreparedSupplierDraft(row)) throw new Error('쿠팡에 중간 저장된 상품은 판매가설정으로 되돌릴 수 없습니다.')
   return { ...row, stage: 'pricing', priceConfirmedAt: undefined, registrationCompletedAt: undefined, registeredAt: undefined, submission: undefined }
 }
 
@@ -269,6 +288,8 @@ export function returnToPricing(row: RegistrationRow): RegistrationRow {
 export function applyRegistrationSubmission(row: RegistrationRow, result: RegistrationSubmission): RegistrationRow {
   if (getRegistrationStage(row) === 'pricing') throw new Error('판매가설정을 먼저 완료해주세요.')
   if (!result.jobId?.trim()) throw new Error('상품등록 작업 번호를 확인하지 못했습니다.')
+  if (result.mode === 'individual' && result.status === 'succeeded') throw new Error('개별등록 중간 저장은 등록완료로 처리할 수 없습니다.')
+  if (row.submission?.status === 'cancelled' && row.submission.jobId === result.jobId && result.status !== 'queued') return row
   if (hasVerifiedSupplierRegistration(row)) {
     if (result.status === 'succeeded' && result.jobId === row.submission?.jobId && hasSubmissionReceipt(result)) return row
     throw new Error('기존 서플라이어허브 처리 결과는 변경할 수 없습니다.')
@@ -404,7 +425,7 @@ function agreedColumnDefault(column: TemplateColumn, row: RegistrationRow): stri
  * refreshed when the source record changes.
  */
 export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRow {
-  if (row.stage === 'registered' || ['queued', 'running', 'login_required', 'succeeded'].includes(row.submission?.status ?? '')) return row
+  if (row.stage === 'registered' || ['queued', 'running', 'login_required', 'attention_required', 'succeeded'].includes(row.submission?.status ?? '')) return row
   // A component's measurements or contents do not describe the assembled set.
   const master = row.bundleComponents ? undefined : row.productMaster
   const defaults: Record<string, string> = {
@@ -445,7 +466,7 @@ export function applyProductMasterDefaults(row: RegistrationRow): RegistrationRo
 
 /** Applies the user's agreed defaults only to editable headers in the chosen official sheet. */
 export function applyRegistrationDefaults(row: RegistrationRow, sheet: TemplateSheet): RegistrationRow {
-  if (row.stage === 'registered' || ['queued', 'running', 'login_required', 'succeeded'].includes(row.submission?.status ?? '')) return row
+  if (row.stage === 'registered' || ['queued', 'running', 'login_required', 'attention_required', 'succeeded'].includes(row.submission?.status ?? '')) return row
   const masterRow = applyProductMasterDefaults(row)
   const size = masterRow.fields[PACKAGING_SIZE_FIELD]?.normalize('NFKC').trim().toLowerCase()
   const dimensions = size?.match(/^(\d+(?:\.\d+)?)\s*(?:\*|x|×)\s*(\d+(?:\.\d+)?)\s*(?:\*|x|×)\s*(\d+(?:\.\d+)?)\s*(?:\(?\s*(mm|cm)\s*\)?)?$/)

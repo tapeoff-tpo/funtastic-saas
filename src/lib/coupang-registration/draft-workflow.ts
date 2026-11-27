@@ -1,4 +1,4 @@
-import { calculatePrice, confirmPricing, confirmRegistration, getRegistrationStage, hasVerifiedSupplierRegistration, imageStem, isRegistrationDate, isRegistrationSubmissionActive, priceIssues, type RegistrationDraft } from './model'
+import { calculatePrice, confirmPricing, confirmRegistration, getRegistrationStage, hasPreparedSupplierDraft, hasVerifiedSupplierRegistration, imageStem, isRegistrationDate, isRegistrationSubmissionActive, priceIssues, type RegistrationDraft } from './model'
 
 type DraftSaveOptions = { deleteCompletedRowIds?: readonly string[] }
 
@@ -9,14 +9,14 @@ export function prepareDraftSave(incoming: RegistrationDraft, existing?: Registr
   if (new Set(incoming.labels.map((label) => imageStem(label.name))).size !== incoming.labels.length) throw new Error('품질표시 파일명이 중복되었습니다.')
   const previous = new Map(existing?.rows.map((row) => [row.id, row]) ?? [])
   const inFlight = (row: RegistrationDraft['rows'][number]) => isRegistrationSubmissionActive(row) || row.submission?.status === 'login_required'
-  const locked = (row: RegistrationDraft['rows'][number]) => getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row) || inFlight(row)
+  const locked = (row: RegistrationDraft['rows'][number]) => getRegistrationStage(row) === 'registered' || hasVerifiedSupplierRegistration(row) || hasPreparedSupplierDraft(row) || inFlight(row)
   const deletedIds = new Set(options.deleteCompletedRowIds ?? [])
   if (deletedIds.size !== (options.deleteCompletedRowIds?.length ?? 0)) throw new Error('삭제할 상품 행이 중복되었습니다. 다시 선택해주세요.')
   if (deletedIds.size && !existing) throw new Error('저장된 등록완료 상품만 삭제할 수 있습니다.')
   for (const id of deletedIds) {
     const old = previous.get(id)
     if (!old) throw new Error('삭제할 등록완료 상품을 찾을 수 없습니다. 최신 작업을 다시 불러와주세요.')
-    if (inFlight(old) || hasVerifiedSupplierRegistration(old)) throw new Error('진행 중이거나 쿠팡 등록 결과가 있는 상품은 삭제할 수 없습니다.')
+    if (inFlight(old) || hasVerifiedSupplierRegistration(old) || hasPreparedSupplierDraft(old)) throw new Error('진행 중이거나 쿠팡 등록 결과가 있는 상품은 삭제할 수 없습니다.')
     if (getRegistrationStage(old) !== 'registered') throw new Error('등록완료 상품만 삭제할 수 있습니다.')
   }
   const rows = incoming.rows.filter((row) => !deletedIds.has(row.id)).map((row) => {
@@ -28,7 +28,8 @@ export function prepareDraftSave(incoming: RegistrationDraft, existing?: Registr
     if (completionDate && (row.stage !== 'registered' || !isRegistrationDate(completionDate))) throw new Error('등록완료 날짜를 확인해주세요.')
     if (old && hasVerifiedSupplierRegistration(old) && !completionDate && row.stage !== 'information') return old
     if (old && getRegistrationStage(old) === 'registered' && row.stage === 'pricing') throw new Error('등록완료 체크를 해제한 뒤 가격을 수정해주세요.')
-    const oldProtected = !!old && (getRegistrationStage(old) === 'registered' || hasVerifiedSupplierRegistration(old))
+    if (old && hasPreparedSupplierDraft(old) && row.stage === 'pricing') throw new Error('쿠팡에 중간 저장된 상품은 판매가설정으로 되돌릴 수 없습니다.')
+    const oldProtected = !!old && (getRegistrationStage(old) === 'registered' || hasVerifiedSupplierRegistration(old) || hasPreparedSupplierDraft(old))
     const source: RegistrationDraft['rows'][number] = oldProtected && old ? old : { ...editable, addedAt: old?.addedAt ?? row.addedAt }
     if (row.stage === 'information' || completionDate || old && hasVerifiedSupplierRegistration(old)) {
       const issues = priceIssues(row, incoming.rounding)

@@ -1,4 +1,4 @@
-importScripts('shared.js')
+importScripts('shared.js', 'individual-worker.js')
 const rules = globalThis.FuntasticSupplierRules
 const CHANNEL = 'funtastic-coupang-registration'
 const EXTENSION = 'funtastic-coupang-registration-extension'
@@ -17,6 +17,10 @@ async function report(item, status, message, extra = {}) {
   item.lastProgress = { jobId: item.job.jobId, token: item.job.token, status, message, ...extra }
   await chrome.tabs.sendMessage(item.sourceTabId, { channel: EXTENSION, type: 'PROGRESS', progress: item.lastProgress }).catch(() => {})
 }
+const individual = globalThis.FuntasticIndividualWorker?.create({ jobs, persist, report, channel: CHANNEL })
+const finished = item => item.job?.mode === 'individual'
+  ? ['prepared', 'cancelled', 'failed', 'succeeded'].includes(item.lastProgress?.status)
+  : ['failed', 'succeeded'].includes(item.lastProgress?.status)
 async function openJob(job, sender, checkOnly) {
   job = rules.validateJob(job)
   const all = await jobs()
@@ -24,10 +28,10 @@ async function openJob(job, sender, checkOnly) {
   if (item && (item.job.token !== job.token || JSON.stringify(item.job) !== JSON.stringify(job))) throw new Error('이미 시작한 등록 작업의 내용이 변경되었습니다. 새 작업으로 등록해주세요.')
   if (!item) {
     if (checkOnly) throw new Error('이 Chrome에 저장된 등록 작업이 없습니다. 처음 등록을 시작한 Chrome에서 확인해주세요.')
-    const other = Object.values(all).find(value => !['failed', 'succeeded'].includes(value.lastProgress?.status))
+    const other = Object.values(all).find(value => !finished(value))
     if (other) throw new Error('진행 중인 쿠팡 등록 작업을 먼저 확인해주세요. 중복 업로드를 방지하기 위해 한 번에 한 작업씩 진행합니다.')
     const workbookName = job.files.find(file => file.kind === 'workbook').name
-    if (Object.values(all).some(value => value.job.files.some(file => file.kind === 'workbook' && rules.clean(file.name) === rules.clean(workbookName)))) throw new Error('이 견적서 파일명은 이미 사용했습니다. 새 등록 작업의 고유 파일명을 사용해주세요.')
+    if (Object.values(all).some(value => value.job.files?.some(file => file.kind === 'workbook' && rules.clean(file.name) === rules.clean(workbookName)))) throw new Error('이 견적서 파일명은 이미 사용했습니다. 새 등록 작업의 고유 파일명을 사용해주세요.')
     item = { job, sourceTabId: sender.tab.id, phase: 'new', createdAt: new Date().toISOString() }
     all[job.jobId] = item
   }
@@ -170,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.channel !== CHANNEL) return
   if (message.type === 'PING') {
     if (!sender.tab || !rules.allowedSaas(sender.url || '')) respond({ ok: false, error: '쿠팡 상품등록 화면에서 시작해주세요.' })
-    else respond({ ok: true, version: chrome.runtime.getManifest().version, supportsCategories: true })
+    else respond({ ok: true, version: chrome.runtime.getManifest().version, supportsCategories: true, ...(individual ? { supportsIndividual: true, supportsJobInspection: true } : {}) })
     return true
   }
   if (['CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(message.type)) {
@@ -178,9 +182,30 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return true
   }
   exclusively(async () => {
+    if (message.type === 'INSPECT_JOB') {
+      if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
+      const reference = message.job
+      if (!reference || typeof reference.jobId !== 'string' || !reference.jobId.trim() || reference.jobId.length > 200 || typeof reference.token !== 'string' || reference.token.length < 16 || reference.token.length > 300) throw new Error('등록 작업 식별값을 확인해주세요.')
+      const item = (await jobs())[reference.jobId]
+      if (!item || item.job.token !== reference.token) return { ok: true, found: false }
+      return { ok: true, found: true, mode: item.job.mode === 'individual' ? 'individual' : 'excel', status: item.lastProgress?.status || 'running' }
+    }
     if (['START', 'CHECK'].includes(message.type)) {
       if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
+      if (message.job?.mode === 'individual') {
+        if (!individual) throw new Error('쿠팡 등록 확장을 최신 버전으로 업데이트해주세요.')
+        return individual.open(rules.validateIndividualJob(message.job), sender, message.type === 'CHECK')
+      }
       return openJob(message.job, sender, message.type === 'CHECK')
+    }
+    if (['ATTACH_JOB', 'RESUME_JOB', 'STOP_JOB', 'OPEN_JOB'].includes(message.type)) {
+      if (!sender.tab || !rules.allowedSaas(sender.url || '')) throw new Error('쿠팡 상품등록 화면에서 시작해주세요.')
+      if (!individual) throw new Error('쿠팡 등록 확장을 최신 버전으로 업데이트해주세요.')
+      return individual.control(message.type, message.job, sender, message.productId)
+    }
+    if (message.type === 'INDIVIDUAL_PHASE') {
+      if (!individual) throw new Error('쿠팡 등록 확장을 최신 버전으로 업데이트해주세요.')
+      return individual.fromSupplier(message, sender)
     }
     return fromSupplier(message, sender)
   }).then(respond).catch(error => respond({ ok: false, error: error.message }))
@@ -188,16 +213,18 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 })
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.status !== 'complete') return
-  exclusively(async () => { const all = await jobs(); for (const item of Object.values(all)) if (item.hubTabId === tabId && !['failed', 'succeeded'].includes(item.lastProgress?.status)) await dispatch(item).catch(() => {}); await persist(all) })
+  exclusively(async () => { const all = await jobs(); let excelDispatched = false; for (const item of Object.values(all)) { if (finished(item)) continue; if (item.job?.mode === 'individual') { if (individual?.ownsTab(item, tabId)) await individual.dispatch(item).catch(() => {}) } else if (item.hubTabId === tabId) { await dispatch(item).catch(() => {}); excelDispatched = true } } if (excelDispatched) await persist(all) })
 })
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== 'supplier-registration-check') return
   exclusively(async () => {
     const all = await jobs()
+    let excelDispatched = false
     for (const item of Object.values(all)) {
-      if (['failed', 'succeeded'].includes(item.lastProgress?.status)) continue
-      await dispatch(item).catch(() => {})
+      if (finished(item)) continue
+      if (item.job?.mode === 'individual') await individual?.dispatch(item).catch(() => {})
+      else { await dispatch(item).catch(() => {}); excelDispatched = true }
     }
-    await persist(all)
+    if (excelDispatched) await persist(all)
   })
 })

@@ -116,6 +116,7 @@ describe('workspace submission reservations', () => {
     expect(result.revision).toBe(2)
     expect(result.payload.rows[0].submission?.status).toBe('queued')
     expect(getRegistrationStage(result.payload.rows[0])).toBe('information')
+    if (!result.transfer || !('files' in result.transfer)) throw new Error('엑셀 등록 전송 파일이 없습니다.')
     expect(result.transfer.files[0].name).toBe(`Funtastic-${result.submission.jobId}.xlsx`)
     expect(mocks.load).toHaveBeenCalledWith(workspace, draftId)
     const statements = mocks.txExecute.mock.calls.map(([statement]) => query(statement))
@@ -147,6 +148,7 @@ describe('workspace submission reservations', () => {
     const second = await getSubmissions(workspace, draftId)
     expect(first.transfers).toEqual(second.transfers)
     expect(JSON.stringify(first.transfers[0])).toBe(JSON.stringify(second.transfers[0]))
+    if (!second.transfers[0] || !('files' in second.transfers[0])) throw new Error('엑셀 등록 전송 파일이 없습니다.')
     expect(second.transfers[0].files[0].data).toBe(Buffer.from('immutable-workbook').toString('base64'))
     expect(second.transfers[0]).not.toHaveProperty('receiptId')
     expect(mocks.archive).not.toHaveBeenCalled()
@@ -199,6 +201,53 @@ describe('workspace submission reservations', () => {
     mocks.load.mockResolvedValue({ id: draftId, revision: 1, payload: { ...snapshot, rows: [{ ...snapshot.rows[0], stage: 'pricing' }] } })
     await expect(submitRegistration(workspace, draftId, 1, ['row-1'])).rejects.toThrow('판매가확정')
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('rejects repeated IDs and preserves a saved individual draft after a batch is stopped', async () => {
+    const snapshot = fixture()
+    mocks.load.mockResolvedValue({ id: draftId, revision: 1, payload: snapshot })
+    await expect(submitRegistration(workspace, draftId, 1, ['row-1', 'row-1'])).rejects.toThrow('정확히 선택')
+
+    const savedProduct = { id: 'row-1', name: snapshot.rows[0].name, status: 'prepared' as const, draftName: snapshot.rows[0].name, draftSavedAt: observedAt }
+    const cancelled = { ...snapshot, rows: [{ ...snapshot.rows[0], submission: { jobId, mode: 'individual' as const, status: 'cancelled' as const, products: [savedProduct] } }] }
+    mocks.load.mockResolvedValue({ id: draftId, revision: 2, payload: cancelled })
+    mocks.execute.mockImplementation(async (statement: SQL) => query(statement).sql.startsWith('SELECT') ? [{ ...storedJob(snapshot), status: 'cancelled', evidence: { mode: 'individual', products: [savedProduct] } }] : [])
+    await expect(submitRegistration(workspace, draftId, 2, ['row-1'], 'individual')).rejects.toThrow('이미 진행 중')
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('requires evidence for each saved individual product and never downgrades a saved product on a late event', async () => {
+    const snapshot = fixture()
+    snapshot.rows.push({ ...snapshot.rows[0], id: 'row-2', name: '두 번째 상품' })
+    const savedProduct = { id: 'row-1', name: snapshot.rows[0].name, status: 'prepared' as const, draftName: snapshot.rows[0].name, draftSavedAt: observedAt }
+    const queuedProduct = { id: 'row-2', name: snapshot.rows[1].name, status: 'queued' as const }
+    const job = { ...storedJob(snapshot), status: 'running', evidence: { mode: 'individual', products: [savedProduct, queuedProduct] } }
+    const current = { ...snapshot, rows: snapshot.rows.map(row => applyRegistrationSubmission(row, { jobId, mode: 'individual', status: 'queued' })) }
+    mocks.txExecute.mockImplementation(async (statement: SQL) => query(statement).sql.startsWith('SELECT id, revision') ? [{ id: draftId, revision: 2, payload: current }] : query(statement).sql.startsWith('SELECT') ? [job] : [])
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: snapshot })
+    const event = { draftId, jobId, token, status: 'running' as const, message: '입력 중', products: [
+      { id: 'row-1', name: snapshot.rows[0].name, status: 'running' as const },
+      { id: 'row-2', name: snapshot.rows[1].name, status: 'prepared' as const },
+    ] }
+    await expect(recordSubmissionEvent(workspace, event)).rejects.toThrow('저장 시각')
+    expect(mocks.txExecute.mock.calls.some(([statement]) => query(statement).sql.startsWith('UPDATE'))).toBe(false)
+
+    const result = await recordSubmissionEvent(workspace, { ...event, products: [event.products[0], queuedProduct] })
+    expect(result).toMatchObject({ revision: 3, eventBaseRevision: 2, eventAppliedRevision: 3 })
+    const update = mocks.txExecute.mock.calls.map(([statement]) => query(statement)).find(statement => statement.sql.startsWith('UPDATE coupang_registration_submissions'))!
+    const evidence = update.params.find(param => typeof param === 'string' && param.includes('"mode":"individual"')) as string
+    expect(JSON.parse(evidence).products[0]).toEqual(savedProduct)
+  })
+
+  it('reports a terminal event as a no-op so a newer fetched draft remains detectable', async () => {
+    const snapshot = fixture()
+    const job = { ...storedJob(snapshot), status: 'succeeded' }
+    mocks.txExecute.mockImplementation(async (statement: SQL) => query(statement).sql.startsWith('SELECT id, revision') ? [{ id: draftId, revision: 2, payload: snapshot }] : [job])
+    // Another write can land after the transaction and before getSubmissions reads the draft.
+    mocks.load.mockResolvedValue({ id: draftId, revision: 3, payload: snapshot })
+    const result = await recordSubmissionEvent(workspace, completedEvent(snapshot))
+    expect(result).toMatchObject({ revision: 3, eventBaseRevision: 2, eventAppliedRevision: 2 })
+    expect(mocks.txExecute.mock.calls.some(([statement]) => query(statement).sql.startsWith('UPDATE'))).toBe(false)
   })
 
   it('requires the workspace-owned job token before accepting browser events', async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { prepareDraftSave } from '@/lib/coupang-registration/draft-workflow'
-import { applyRegistrationSubmission, blankDraft, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, getRegistrationStage, type RegistrationDraft } from '@/lib/coupang-registration/model'
+import { applyRegistrationSubmission, blankDraft, calculatePrice, confirmPricing, confirmRegistration, createRegistrationRow, getRegistrationStage, returnToPricing, type RegistrationDraft } from '@/lib/coupang-registration/model'
 
 const now = '2026-11-23T07:00:00.000Z'
 function fixture() {
@@ -68,6 +68,24 @@ describe('server-protected Coupang draft saving', () => {
     expect(omitted.rows).toEqual([row])
     expect(omitted.templates).toEqual(existing.templates)
     expect(omitted.labels).toEqual(existing.labels)
+  })
+
+  it.each(['prepared', 'cancelled'] as const)('preserves an individual Hub draft after %s while allowing explicit completion', status => {
+    const { row, draft } = fixture()
+    const information = confirmPricing(row, 1, now)
+    const savedProduct = { id: row.id, name: row.name, status: 'prepared' as const, draftName: row.name, draftSavedAt: now }
+    const protectedRow = { ...information, submission: { jobId: 'individual-job', mode: 'individual' as const, status, products: [savedProduct] } }
+    const existing = { ...draft, rows: [protectedRow] }
+    const omitted = prepareDraftSave(blankDraft(), existing)
+    expect(omitted.rows).toEqual([protectedRow])
+    expect(omitted.labels).toEqual(existing.labels)
+    expect(() => returnToPricing(protectedRow)).toThrow('중간 저장')
+    expect(() => prepareDraftSave({ ...existing, rows: [{ ...protectedRow, stage: 'pricing', submission: undefined }] }, existing)).toThrow('중간 저장')
+
+    const incoming = { ...confirmRegistration(protectedRow, '2026-11-23'), name: '변조된 상품', submission: undefined }
+    const completed = prepareDraftSave({ ...existing, rows: [incoming] }, existing)
+    expect(completed.rows[0]).toMatchObject({ stage: 'registered', name: row.name, submission: protectedRow.submission, registrationCompletedAt: '2026-11-23' })
+    expect(() => prepareDraftSave(blankDraft(), completed, { deleteCompletedRowIds: [row.id] })).toThrow('삭제할 수 없습니다')
   })
 
   it('rejects duplicate rows, templates and ambiguous label stems', () => {

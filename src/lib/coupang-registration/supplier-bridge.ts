@@ -1,16 +1,26 @@
 export type SupplierRegistrationFile = { name: string; data: string; kind: 'workbook' | 'label' }
 export type SupplierCategory = { id: string; name: string; path: string; matchedQueries: string[] }
 export type SupplierRegistrationJob = {
+  mode?: 'excel'
   jobId: string
   token: string
   files: SupplierRegistrationFile[]
   rows: { id: string; name: string }[]
 }
+export type SupplierIndividualRegistrationJob = {
+  mode: 'individual'
+  jobId: string
+  token: string
+  products: IndividualProduct[]
+}
+export type SupplierTransferJob = SupplierRegistrationJob | SupplierIndividualRegistrationJob
+export type SupplierJobReference = { jobId: string; token: string }
 export type SupplierRegistrationProgress = {
   jobId: string
   token: string
-  status: 'running' | 'login_required' | 'failed' | 'succeeded'
+  status: 'running' | 'login_required' | 'attention_required' | 'prepared' | 'cancelled' | 'failed' | 'succeeded'
   message: string
+  products?: RegistrationProductProgress[]
   receiptId?: string
   receiptUrl?: string
   completedAt?: string
@@ -33,7 +43,7 @@ function trustedMessage(event: MessageEvent) {
 
 let categoryExtensionId: string | undefined
 
-function request(type: string, job?: SupplierRegistrationJob, payload: Record<string, unknown> = {}, timeout = 5000): Promise<Record<string, unknown>> {
+function request(type: string, job?: SupplierTransferJob | SupplierJobReference, payload: Record<string, unknown> = {}, timeout = 5000): Promise<Record<string, unknown>> {
   if (typeof window === 'undefined') return Promise.reject(new Error('Chrome에서 쿠팡 등록 화면을 열어주세요.'))
   const requestId = crypto.randomUUID()
   return new Promise((resolve, reject) => {
@@ -54,9 +64,9 @@ function request(type: string, job?: SupplierRegistrationJob, payload: Record<st
   })
 }
 
-export type SupplierExtensionStatus = { connected: boolean; version?: string; supportsCategories?: boolean; error?: string }
+export type SupplierExtensionStatus = { connected: boolean; version?: string; supportsCategories?: boolean; supportsIndividual?: boolean; supportsJobInspection?: boolean; error?: string }
 
-export function pingSupplierExtension(): Promise<SupplierExtensionStatus> {
+export function pingSupplierExtension(options: { requireIndividual?: boolean } = {}): Promise<SupplierExtensionStatus> {
   if (typeof window === 'undefined') return Promise.resolve({ connected: false })
   const requestId = crypto.randomUUID()
   return new Promise((resolve) => {
@@ -76,7 +86,9 @@ export function pingSupplierExtension(): Promise<SupplierExtensionStatus> {
       if (!version) return
       if (event.data.supportsCategories === true) {
         categoryExtensionId = typeof event.data.extensionId === 'string' ? event.data.extensionId : undefined
-        finish({ connected: true, version, supportsCategories: true })
+        const status = { connected: true, version, supportsCategories: true, ...(event.data.supportsIndividual === true ? { supportsIndividual: true } : {}), ...(event.data.supportsJobInspection === true ? { supportsJobInspection: true } : {}) }
+        if (!options.requireIndividual || status.supportsIndividual) finish(status)
+        else legacy = status
       } else legacy = { connected: true, version }
     }
     window.addEventListener('message', receive)
@@ -103,26 +115,46 @@ export async function getSupplierCategoryTemplate(categoryId: string): Promise<{
   return { name: file.name, data: file.data }
 }
 
-export async function startSupplierRegistration(job: SupplierRegistrationJob): Promise<{ started: true }> {
+export async function startSupplierRegistration(job: SupplierTransferJob): Promise<{ started: true }> {
   pendingJobs.set(job.jobId, job.token)
-  await request('START', job)
+  await request('START', job, categoryExtensionId ? { extensionId: categoryExtensionId } : {})
   return { started: true }
 }
 
-export async function checkSupplierRegistration(job: SupplierRegistrationJob): Promise<{ started: true }> {
+export async function checkSupplierRegistration(job: SupplierTransferJob): Promise<{ started: true }> {
   pendingJobs.set(job.jobId, job.token)
   await request('CHECK', job)
   return { started: true }
 }
+
+async function controlSupplierRegistration(type: string, job: SupplierJobReference, productId?: string) {
+  pendingJobs.set(job.jobId, job.token)
+  await request(type, job, { ...(productId ? { productId } : {}), ...(categoryExtensionId ? { extensionId: categoryExtensionId } : {}) })
+}
+
+/** An absent job is not permission to restart it: another Chrome may own it. */
+export async function inspectSupplierRegistration(job: SupplierJobReference): Promise<{ found: false } | { found: true; mode: 'excel' | 'individual'; status: string }> {
+  const response = await request('INSPECT_JOB', job, categoryExtensionId ? { extensionId: categoryExtensionId } : {})
+  if (response.found === false) return { found: false }
+  if (response.found === true && (response.mode === 'excel' || response.mode === 'individual') && typeof response.status === 'string') return { found: true, mode: response.mode, status: response.status }
+  throw new Error('쿠팡 등록 확장을 최신 버전으로 업데이트하고 작업을 확인해주세요.')
+}
+
+export const attachSupplierRegistration = (job: SupplierJobReference) => controlSupplierRegistration('ATTACH_JOB', job)
+export const resumeSupplierRegistration = (job: SupplierJobReference) => controlSupplierRegistration('RESUME_JOB', job)
+export const stopSupplierRegistration = (job: SupplierJobReference) => controlSupplierRegistration('STOP_JOB', job)
+export const openSupplierRegistration = (job: SupplierJobReference, productId?: string) => controlSupplierRegistration('OPEN_JOB', job, productId)
 
 export function subscribeSupplierRegistration(callback: (event: SupplierRegistrationProgress) => void): () => void {
   const receive = (event: MessageEvent) => {
     if (!trustedMessage(event) || event.data.type !== 'PROGRESS') return
     const value = event.data.progress as SupplierRegistrationProgress | undefined
     if (!value || pendingJobs.get(value.jobId) !== value.token || typeof value.message !== 'string') return
-    if (!['running', 'login_required', 'failed', 'succeeded'].includes(value.status)) return
+    if (!['running', 'login_required', 'attention_required', 'prepared', 'cancelled', 'failed', 'succeeded'].includes(value.status)) return
     callback(value)
   }
   window.addEventListener('message', receive)
   return () => window.removeEventListener('message', receive)
 }
+import type { IndividualProduct } from './individual'
+import type { RegistrationProductProgress } from './model'

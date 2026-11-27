@@ -51,6 +51,19 @@ describe('workspace-authenticated Coupang submission routes', () => {
     expect(mocks.submit).not.toHaveBeenCalled()
   })
 
+  it('passes a validated individual registration and category context to the workspace submission', async () => {
+    mocks.workspace.mockResolvedValue(workspace)
+    mocks.submit.mockResolvedValue({ revision: 2, submission: { jobId, status: 'queued' } })
+    const categoryContexts = { '1234': { sourceCode: '1234', productName: '상품', categoryName: '정리함', categoryPath: '생활 > 정리함', keywords: ['수납'], queries: ['정리함'] } }
+    const response = await submit(submitRequest({ draftId, revision: 1, rowIds: ['row-1'], mode: 'individual', categoryContexts }))
+    expect(response.status).toBe(200)
+    expect(mocks.submit).toHaveBeenCalledWith(workspace, draftId, 1, ['row-1'], 'individual', categoryContexts)
+    mocks.submit.mockClear()
+    const invalid = { ...categoryContexts, '1234': { ...categoryContexts['1234'], sourceCode: '5678' } }
+    expect((await submit(submitRequest({ draftId, revision: 1, rowIds: ['row-1'], mode: 'individual', categoryContexts: invalid }))).status).toBe(400)
+    expect(mocks.submit).not.toHaveBeenCalled()
+  })
+
   it('reads job status and accepts events only under the authenticated workspace', async () => {
     mocks.workspace.mockResolvedValue(workspace)
     mocks.list.mockResolvedValue({ submissions: [] })

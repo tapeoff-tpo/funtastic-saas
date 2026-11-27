@@ -9,12 +9,12 @@
   const identity = () => typeof chrome.runtime.id === 'string' ? { extensionId: chrome.runtime.id } : {}
   window.addEventListener('message', event => {
     if (!registrationPage() || event.source !== window || event.origin !== location.origin || event.data?.source !== PAGE_SOURCE) return
-    const { type, requestId, job, queries, categoryId, extensionId } = event.data
+    const { type, requestId, job, queries, categoryId, extensionId, productId } = event.data
     if (extensionId !== undefined && extensionId !== chrome.runtime.id) return
-    if (!['PING', 'START', 'CHECK', 'CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(type) || typeof requestId !== 'string' || requestId.length > 200) return
-    if (['START', 'CHECK'].includes(type) && job && typeof job.jobId === 'string' && typeof job.token === 'string') tokens.set(job.jobId, job.token)
+    if (!['PING', 'START', 'CHECK', 'INSPECT_JOB', 'ATTACH_JOB', 'RESUME_JOB', 'STOP_JOB', 'OPEN_JOB', 'CATEGORY_SEARCH', 'CATEGORY_TEMPLATE'].includes(type) || typeof requestId !== 'string' || requestId.length > 200) return
+    if (['START', 'CHECK', 'ATTACH_JOB', 'RESUME_JOB', 'STOP_JOB', 'OPEN_JOB'].includes(type) && job && typeof job.jobId === 'string' && typeof job.token === 'string') tokens.set(job.jobId, job.token)
     try {
-      const args = type === 'CATEGORY_SEARCH' ? { queries } : type === 'CATEGORY_TEMPLATE' ? { categoryId } : { job }
+      const args = type === 'CATEGORY_SEARCH' ? { queries } : type === 'CATEGORY_TEMPLATE' ? { categoryId } : type === 'OPEN_JOB' ? { job, productId } : { job }
       chrome.runtime.sendMessage({ channel: PAGE_SOURCE, type, ...args }, response => {
         if (!registrationPage()) return
         const error = chrome.runtime.lastError?.message

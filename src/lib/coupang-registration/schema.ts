@@ -4,8 +4,16 @@ import { BUNDLE_COMPONENT_LIMIT, BUNDLE_QUANTITY_LIMIT, isRegistrationDate, MONE
 const amount = z.number().finite().min(0).max(MONEY_LIMIT).nullable()
 const text = z.string().max(32767)
 const timestamp = z.string().datetime({ offset: true }).max(50)
+export const registrationProductProgressSchema = z.object({
+  id: z.string().min(1).max(100), name: z.string().min(1).max(500),
+  status: z.enum(['queued', 'running', 'login_required', 'attention_required', 'prepared', 'failed', 'cancelled']),
+  step: z.string().max(100).optional(), message: z.string().max(2000).optional(),
+  draftName: z.string().max(500).optional(), draftSavedAt: z.string().max(100).optional(),
+})
 export const submissionSchema = z.object({
-  status: z.enum(['queued', 'running', 'login_required', 'failed', 'succeeded']),
+  status: z.enum(['queued', 'running', 'login_required', 'attention_required', 'prepared', 'failed', 'cancelled', 'succeeded']),
+  mode: z.enum(['excel', 'individual']).optional(),
+  products: z.array(registrationProductProgressSchema).max(20).optional(),
   jobId: z.string().min(1).max(200).optional(), message: z.string().max(2000).optional(),
   requestedAt: timestamp.optional(), submittedAt: timestamp.optional(), completedAt: timestamp.optional(),
   receiptId: z.string().min(1).max(500).optional(),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { checkSupplierRegistration, getSupplierCategoryTemplate, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration, type SupplierRegistrationJob } from '@/lib/coupang-registration/supplier-bridge'
+import { checkSupplierRegistration, getSupplierCategoryTemplate, inspectSupplierRegistration, pingSupplierExtension, searchSupplierCategories, startSupplierRegistration, subscribeSupplierRegistration, type SupplierRegistrationJob } from '@/lib/coupang-registration/supplier-bridge'
 
 const extension = 'funtastic-coupang-registration-extension'
 const job: SupplierRegistrationJob = { jobId: 'bridge-job', token: '0123456789abcdef', files: [{ name: 'bridge-job.xlsx', data: 'UEs=', kind: 'workbook' }], rows: [{ id: 'r1', name: '상품 옵션' }] }
@@ -16,6 +16,25 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('Supplier registration page bridge', () => {
+  it('distinguishes an absent job from an unreachable or outdated extension', async () => {
+    vi.useFakeTimers()
+    const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    const reference = { jobId: job.jobId, token: job.token }
+    const missing = inspectSupplierRegistration(reference)
+    response({ type: 'RESPONSE', requestId: post.mock.calls.at(-1)![0].requestId, ok: true, found: false })
+    expect(await missing).toEqual({ found: false })
+    const found = inspectSupplierRegistration(reference)
+    response({ type: 'RESPONSE', requestId: post.mock.calls.at(-1)![0].requestId, ok: true, found: true, mode: 'individual', status: 'running' })
+    expect(await found).toEqual({ found: true, mode: 'individual', status: 'running' })
+    const malformed = inspectSupplierRegistration(reference)
+    response({ type: 'RESPONSE', requestId: post.mock.calls.at(-1)![0].requestId, ok: true })
+    await expect(malformed).rejects.toThrow('최신 버전')
+    const unavailable = inspectSupplierRegistration(reference)
+    const rejected = expect(unavailable).rejects.toThrow('연결하지 못했습니다')
+    await vi.advanceTimersByTimeAsync(5000)
+    await rejected
+    expect(post.mock.calls.every(([message]) => message.type === 'INSPECT_JOB')).toBe(true)
+  })
   it('correlates a ping only to its own page origin and request id', async () => {
     vi.useFakeTimers()
     const post = vi.spyOn(window, 'postMessage').mockImplementation(() => {})

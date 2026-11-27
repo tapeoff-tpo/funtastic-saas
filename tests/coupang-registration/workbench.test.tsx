@@ -386,7 +386,7 @@ describe('registration pricing workbench', () => {
     expect(await screen.findByRole('button', { name: '마미백 플러스 베이지 가격설정 완료' })).toBeDisabled()
   })
 
-  it('shows each information product as an editable horizontal grid row with manual Excel download and no Hub automation', async () => {
+  it('shows editable registration rows and offers both registration modes without submitting automatically', async () => {
     const first = confirmPricing(createRegistrationRow(source, '베이지'))
     const other = confirmPricing(createRegistrationRow(second, '블랙'))
     const saved = mockSavedDraft({ ...blankDraft(), rows: [first, other] })
@@ -426,9 +426,13 @@ describe('registration pricing workbench', () => {
     expect(screen.queryByRole('button', { name: '품질표시 이미지 추가' })).not.toBeInTheDocument()
     expect(within(firstCard).getByLabelText(`${first.name} 카테고리 엑셀 파일`)).toBeEnabled()
     expect(screen.queryByRole('tablist', { name: '카테고리 시트' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /등록 확장|서플라이어허브/ })).not.toBeInTheDocument()
-    for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration, subscribeSupplierRegistration]) expect(command).not.toHaveBeenCalled()
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|submissions|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
+    expect(screen.getByRole('link', { name: '쿠팡 등록 확장 다운로드' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '쿠팡 등록 방식' })).toHaveValue('excel')
+    expect(screen.getByRole('button', { name: '엑셀 대량등록' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('combobox', { name: '쿠팡 등록 방식' }), { target: { value: 'individual' } })
+    expect(screen.getByRole('button', { name: '개별등록 준비' })).toBeDisabled()
+    for (const command of [pingSupplierExtension, searchSupplierCategories, getSupplierCategoryTemplate, startSupplierRegistration]) expect(command).not.toHaveBeenCalled()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/(export|submit|category-template)(?:\?|$)/.test(String(url)))).toBe(false)
   })
 
   it('backfills Product Management keywords into required fields and saves manual changes with packaging units', async () => {

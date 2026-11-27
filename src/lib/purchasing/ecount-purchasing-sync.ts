@@ -30,6 +30,7 @@ import {
 } from './supplier-order-reference'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { readPurchasePriceComparison, type StoredPurchasePriceComparison } from './purchase-price-comparison'
+import { inspectionSummary } from './purchase-inspection'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -141,6 +142,8 @@ export type EcountPurchaseCompletedItem = {
 
 /** A purchase-history row that has reached the China warehouse. */
 export type EcountChinaArrivedItem = EcountPurchaseCompletedItem & {
+  /** Original confirmed receipt, before outbound and inventory reconciliation. */
+  confirmedQuantity?: number
   /**
    * Quantity that is newer than the latest China-inventory snapshot and has
    * not yet been matched to China outbound. It must remain in the purchase
@@ -204,6 +207,8 @@ export type EcountPurchasingSnapshot = {
    * purchase/order identity needed by the China-arrival screen.
    */
   chinaArrived: EcountChinaArrivedItem[]
+  /** Confirmed receipts before outbound and China-stock adjustments. */
+  confirmedChinaArrivals?: EcountPurchaseCompletedItem[]
   chinaInventory: EcountChinaInventoryItem[]
   outboundCompleted: EcountOutboundPendingItem[]
   outboundPending: EcountOutboundPendingItem[]
@@ -621,6 +626,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     reflectedThrough,
   )
   const outstandingChinaArrivals = chinaInventoryReconciliation.items
+  const confirmedQuantityByRow = new Map(historyItems.map((item) => [item.sourceRowNumber, item.quantity]))
   // 구매현황 is the source of the China-arrival stage. A recent arrival can be
   // newer than the latest China-inventory snapshot, so retain just its
   // globally unmatched quantity as a pipeline marker on the same
@@ -630,6 +636,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   // the order in the UI and collide with the management-code/SKU unique key.
   const chinaArrived: EcountChinaArrivedItem[] = outstandingChinaArrivals.map((item) => ({
     ...item,
+    confirmedQuantity: confirmedQuantityByRow.get(item.sourceRowNumber),
     pendingChinaInventoryQuantity: (() => {
       const historyKey = getPurchaseHistoryBridgeKey(item)
       if (chinaInventoryReconciliation.pendingQuantityByHistoryKey.has(historyKey)) {
@@ -731,6 +738,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     activeRequests,
     purchaseCompleted,
     chinaArrived,
+    confirmedChinaArrivals: historyItems,
     chinaInventory: chinaInventoryItems,
     outboundCompleted,
     outboundPending,
@@ -1755,6 +1763,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     : null
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const now = new Date()
     const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeysInTransaction(tx, input.userId)
 
     const {
@@ -1796,14 +1805,15 @@ export async function syncEcountPurchasingSnapshot(input: {
           ? getPurchaseHistoryBridgeKey(item)
           : `${item.sourceDateNo}|${item.sourceRowNumber}`,
       }))
-    const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : [])
-      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
+    const isIncludedChinaArrival = (item: EcountPurchaseCompletedItem) =>
+      !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
         source: ECOUNT_CHINA_ARRIVED_SOURCE,
         sku: item.sku,
         purchaseManagementCode: item.purchaseManagementCode,
         supplierOrderNumber: item.supplierOrderNumber,
         fallbackDiscriminator: getPurchaseHistoryBridgeKey(item),
-      }))
+      })
+    const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : []).filter(isIncludedChinaArrival)
     const selectedOutboundPending = (refreshOutbound ? input.snapshot.outboundPending : [])
       .map((item) => removeIgnoredOutboundComponents(item, ignoredPurchasingItemKeys))
       .filter((item): item is EcountOutboundPendingItem => item !== null)
@@ -1840,12 +1850,13 @@ export async function syncEcountPurchasingSnapshot(input: {
         includeFallbackDiscriminator: true,
       }))
 
-    // A row explicitly moved into the SaaS China-inventory workflow remains
-    // user-managed after the raw Ecount snapshot refresh. Keep it in place
-    // and suppress only the same management-code + SKU snapshot row; using a
-    // weaker key here could hide a different purchase accidentally.
+    // Keep existing inspection identities and reconcile matching in-flight
+    // inspections in place so the incoming snapshot cannot duplicate them.
     const saasChinaProtectedRows = await tx
       .select({
+        id: purchaseRequestItems.id,
+        status: purchaseRequestItems.status,
+        chinaReceivedAt: purchaseRequestItems.chinaReceivedAt,
         sku: purchaseRequestItems.sku,
         purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
         rawData: purchaseRequestItems.rawData,
@@ -1856,6 +1867,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         eq(purchaseRequestItems.userId, input.userId),
         sql`(${purchaseRequestItems.rawData}->'saasChinaMode' = 'true'::jsonb OR ${purchaseRequestItems.purchaseInspection} IS NOT NULL)`,
       ))
+      .for('update')
     const saasChinaProtectedPurchaseKeys = getSaasChinaProtectedPurchaseKeys(
       saasChinaProtectedRows,
     )
@@ -1916,6 +1928,83 @@ export async function syncEcountPurchasingSnapshot(input: {
       saasChinaProtectedPurchaseKeys,
     )
 
+    let autoArrivedInspectionRows = 0
+    let inspectionArrivalMismatchRows = 0
+    if (refreshChinaArrivals) {
+      const confirmedByKey = new Map<string, EcountPurchaseCompletedItem | null>()
+      for (const receipt of input.snapshot.confirmedChinaArrivals ?? input.snapshot.chinaArrived) {
+        const key = saasChinaPurchaseKey(receipt)
+        if (key && isIncludedChinaArrival(receipt)) {
+          confirmedByKey.set(key, confirmedByKey.has(key) ? null : receipt)
+        }
+      }
+      const arrivalByKey = new Map<string, EcountChinaArrivedItem | null>()
+      for (const arrival of selectedChinaArrived) {
+        const key = saasChinaPurchaseKey(arrival)
+        if (key) arrivalByKey.set(key, arrivalByKey.has(key) ? null : arrival)
+      }
+      const inventoryDate = input.snapshot.chinaInventorySnapshotAsOfDate
+      const hasReflectedInventory = Boolean(
+        inventoryDate && input.snapshot.chinaInventory.length
+        && input.snapshot.domesticInventoryReflectedThrough >= inventoryDate,
+      )
+      for (const row of saasChinaProtectedRows) {
+        const key = saasChinaPurchaseKey(row)
+        const arrival = key ? arrivalByKey.get(key) : undefined
+        if (arrival === null) continue
+        const confirmed = key ? confirmedByKey.get(key) : undefined
+        const rawData = row.rawData ?? {}
+        const match = and(eq(purchaseRequestItems.id, row.id), eq(purchaseRequestItems.userId, input.userId))
+        if (row.status === 'inspecting' && row.purchaseInspection && confirmed) {
+          const confirmedQuantity = arrival?.confirmedQuantity ?? confirmed.quantity
+          const counted = inspectionSummary(row.purchaseInspection).receivedQuantity
+          const hasCount = row.purchaseInspection.parcels.some((parcel) => parcel.boxes.some((box) => typeof box.quantity === 'number'))
+          if (hasCount && counted !== confirmedQuantity) {
+            if (rawData.ecountInspectionMismatchQuantity !== confirmedQuantity) {
+              await tx.update(purchaseRequestItems).set({
+                rawData: { ...rawData, ecountInspectionMismatchQuantity: confirmedQuantity },
+                updatedAt: now,
+              }).where(match)
+            }
+            inspectionArrivalMismatchRows++
+            continue
+          }
+          const { ecountInspectionMismatchQuantity: _previousMismatch, ...preservedRawData } = rawData
+          await tx.update(purchaseRequestItems).set({
+            status: 'china_arrived',
+            chinaReceivedQuantity: arrival?.quantity ?? 0,
+            chinaReceivedAt: row.chinaReceivedAt ?? (confirmed.purchaseDate
+              ? new Date(`${confirmed.purchaseDate}T00:00:00.000Z`)
+              : now),
+            updatedAt: now,
+            rawData: {
+              ...preservedRawData,
+              ecountInspectionArrival: true,
+              ecountInspectionArrivalDate: confirmed.purchaseDate ?? input.snapshot.asOfDate,
+              ecountInspectionConfirmedQuantity: confirmedQuantity,
+              pendingChinaInventorySnapshot: (arrival?.pendingChinaInventoryQuantity ?? 0) > 0,
+              pendingChinaInventoryQuantity: arrival?.pendingChinaInventoryQuantity ?? 0,
+            },
+          }).where(match)
+          autoArrivedInspectionRows++
+        } else if (row.status === 'china_arrived' && rawData.ecountInspectionArrival === true) {
+          const receiptDate = rawData.ecountInspectionArrivalDate
+          const pendingQuantity = arrival?.pendingChinaInventoryQuantity
+            ?? (hasReflectedInventory && inventoryDate && typeof receiptDate === 'string' && receiptDate < inventoryDate ? 0 : null)
+          if (pendingQuantity !== null && pendingQuantity !== rawData.pendingChinaInventoryQuantity) {
+            await tx.update(purchaseRequestItems).set({
+              rawData: {
+                ...rawData,
+                pendingChinaInventorySnapshot: pendingQuantity > 0,
+                pendingChinaInventoryQuantity: pendingQuantity,
+              },
+              updatedAt: now,
+            }).where(match)
+          }
+        }
+      }
+    }
+
     const replaceableRows = await tx
       .select({
         id: purchaseRequestItems.id,
@@ -1954,7 +2043,6 @@ export async function syncEcountPurchasingSnapshot(input: {
       .from(purchaseRequestItems)
       .where(eq(purchaseRequestItems.userId, input.userId))
     let nextRowNumber = maxRowNumber
-    const now = new Date()
     const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
     const requestRows = insertableActiveRequests.map((item) => ({
@@ -2186,6 +2274,8 @@ export async function syncEcountPurchasingSnapshot(input: {
       createdPendingRequestRows: requestRows.length,
       createdPurchaseCompletedRows: purchaseCompletedRows.length,
       createdChinaArrivedRows: chinaArrivedRows.length,
+      autoArrivedInspectionRows,
+      inspectionArrivalMismatchRows,
       createdOutboundRows: outboundRows.length,
       createdOutboundCompletedRows: outboundCompletedRows.length,
       syncedChinaInventoryRows: reportKinds.has('chinaInventory') ? input.snapshot.chinaInventory.length : 0,

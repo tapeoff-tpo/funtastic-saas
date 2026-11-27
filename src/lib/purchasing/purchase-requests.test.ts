@@ -5,6 +5,7 @@ import {
   getStoredPurchaseReviewAverage,
   getPurchasePaymentFlowViewSummary,
   getLatestPurchaseReviewHistoryCandidates,
+  getPurchaseReviewHistoryStageDate,
   isPurchasePaymentFlowViewItem,
   getOutboundRequestedQuantity,
   normalizeOptionalPurchaseRequestQuantity,
@@ -182,6 +183,32 @@ describe('purchase review history', () => {
     ])
 
     expect(history.get('109733-9999')?.actualPurchaseQuantity).toBe(20)
+  })
+
+  it('uses recorded purchase dates instead of request or later outbound dates', () => {
+    const base = {
+      sku: '109733-9999', requestedQuantity: 10, actualPurchaseQuantity: 10,
+      requestDate: '2026-11-01', createdAt: new Date('2026-11-01T00:00:00Z'),
+    }
+    const outbound = {
+      ...base, status: 'completed' as const, outboundExpectedDate: '2026-11-25',
+      rawData: { purchaseDate: '2026-11-12' },
+    }
+    const latest = {
+      ...base, status: 'inspecting' as const, outboundExpectedDate: '2026-11-19', rawData: {},
+    }
+    expect(getLatestPurchaseReviewHistoryCandidates([latest, outbound]).get(base.sku)).toEqual(latest)
+    expect(getPurchaseReviewHistoryStageDate(latest)).toEqual({ label: '최근 구매일', date: '2026-11-19' })
+    expect(getPurchaseReviewHistoryStageDate({ ...latest, status: 'outbound_requested', chinaReceivedAt: new Date('2026-11-21T15:00:00Z') }))
+      .toEqual({ label: '중국 창고 도착일', date: '2026-11-22' })
+    expect(getPurchaseReviewHistoryStageDate(outbound)).toEqual({ label: '국내 입고일', date: null })
+    expect(getPurchaseReviewHistoryStageDate(outbound, '2026-11-26')).toEqual({ label: '국내 입고일', date: '2026-11-26' })
+    const requested = {
+      ...base, status: 'purchased' as const, requestDate: '2026-11-24',
+      outboundExpectedDate: '2026-11-27', rawData: {},
+    }
+    expect(getLatestPurchaseReviewHistoryCandidates([latest, requested]).get(base.sku)).toEqual(requested)
+    expect(getPurchaseReviewHistoryStageDate(requested)).toEqual({ label: '최근 발주일', date: '2026-11-24' })
   })
 
   it('uses the recommendation average saved with the historical purchase', () => {
